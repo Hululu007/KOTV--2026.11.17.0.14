@@ -2,32 +2,39 @@ package com.bobo.kotv
 
 import android.app.ActivityManager
 import android.content.Context
-import kotlin.math.max
-import kotlin.math.min
+import kotlin.math.roundToLong
 
 /**
- * 与 Dart KotvBufferBudget.fromDevice 同一组上下限：
- * 手机 24–96MiB，桌面 48–384MiB。约 15% avail 且不超过总内存 5%，再钳到该区间。
- * Exo / MPV 共用，避免两处数字漂移。
+ * 与 Dart KotvBufferBudget.fromDevice 同一条比例：
+ * 约 15% 可用内存，且不超过总内存 5%。不设固定字节上下限。
+ * 读不到总内存时，桌面按 8GiB、其它按 3GiB 估算后再取 5%。
+ * Exo 的 targetBufferBytes 用这份结果。
  */
 object KotvMemBudget {
+  private const val GIB = 1024L * 1024L * 1024L
+
   fun bytes(ctx: Context?, desktop: Boolean = false): Int {
-    val minB = if (desktop) 48L * 1024 * 1024 else 24L * 1024 * 1024
-    val maxB = if (desktop) 384L * 1024 * 1024 else 96L * 1024 * 1024
-    val fallback = if (desktop) 96 * 1024 * 1024 else 48 * 1024 * 1024
-    if (ctx == null) return fallback
-    return try {
-      val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-      val mi = ActivityManager.MemoryInfo()
-      am.getMemoryInfo(mi)
-      var budget = (mi.totalMem * 0.05).toLong()
-      if (mi.availMem > 0) {
-        val byAvail = (mi.availMem * 0.15).toLong()
-        if (byAvail in 1 until budget) budget = byAvail
+    var total = 0L
+    var avail = 0L
+    if (ctx != null) {
+      try {
+        val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val mi = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        total = mi.totalMem
+        avail = mi.availMem
+      } catch (_: Throwable) {
       }
-      max(minB, min(maxB, budget)).toInt()
-    } catch (_: Throwable) {
-      fallback
     }
+    if (total <= 0L) {
+      total = if (desktop) 8L * GIB else 3L * GIB
+    }
+    var budget = (total * 0.05).roundToLong()
+    if (avail > 0L) {
+      val byAvail = (avail * 0.15).roundToLong()
+      if (byAvail in 1 until budget) budget = byAvail
+    }
+    if (budget < 1L) budget = 1L
+    return budget.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
   }
 }

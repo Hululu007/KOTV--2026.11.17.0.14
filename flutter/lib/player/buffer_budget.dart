@@ -1,5 +1,3 @@
-import 'dart:math' show max;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -16,8 +14,8 @@ import 'kotv_platform.dart';
 ///
 /// Web / HTML5：由浏览器自己管缓冲，不走本预算。
 ///
-/// 预算按当前可用内存的比例：约 15% 可用内存，且不超过总内存的 5%，
-/// 再钳到手机 24–96MB、桌面 48–384MB（与 [KotvMemBudget] 同一组上下限）。
+/// 预算按当前可用内存的比例：约 15% 可用内存，且不超过总内存的 5%。
+/// 不设固定字节上下限。读不到总内存时，桌面按 8GiB、其它按 3GiB 估算后再取 5%。
 class KotvBufferBudget {
   KotvBufferBudget._();
 
@@ -25,13 +23,13 @@ class KotvBufferBudget {
   static const _host = MethodChannel('kotv_host');
   static int? _cached;
 
-  /// mpv 点播缓冲：仅字节预算；`demuxer-max-bytes` 是上限不是起播门槛。
+  /// mpv 缓冲：仅字节预算；`demuxer-max-bytes` 是上限不是起播门槛。点播和直播共用。
   ///
   /// 不含 `cache-on-disk`：由 [KotvMpvOpts.diskCache] / 原生 `diskCache` 单独控制，
-  /// 避免预算表把磁盘缓存开关盖掉。
+  /// 避免预算表把磁盘缓存开关盖掉。直播的 `cache-pause=no` 由调用方另写。
   static Map<String, String> mpvCacheProps(int budgetBytes) {
     final forward = mpvMiB(budgetBytes);
-    final back = mpvMiB(max(16 * 1024 * 1024, budgetBytes ~/ 8));
+    final back = mpvMiB(budgetBytes ~/ 8);
     return {
       'cache': 'yes',
       'demuxer-max-bytes': forward,
@@ -40,11 +38,6 @@ class KotvBufferBudget {
       'framedrop': 'vo',
     };
   }
-
-  /// 直播：不写 `demuxer-max-bytes` / `cache-secs`（mpv 默认即可）。
-  ///
-  /// 点播才用 [mpvCacheProps]；直播页勿再套小 demuxer 或 cache-pause 门槛。
-  static Map<String, String> mpvLiveCacheProps() => const {};
 
   /// 同步读取（未 [warm] 时用平台启发式）。
   static int bytes() => _cached ?? _fallback();
@@ -57,7 +50,7 @@ class KotvBufferBudget {
       if (kotvIsAndroid()) {
         final v = await _android.invokeMethod<dynamic>('getMemoryInfo');
         if (v is Map) raw = v;
-      } else if (kotvIsDesktop()) {
+      } else if (kotvIsDesktop() || kotvIsIOS()) {
         final v = await _host.invokeMethod<dynamic>('getMemoryInfo');
         if (v is Map) raw = v;
       }
@@ -78,16 +71,9 @@ class KotvBufferBudget {
     return _cached!;
   }
 
-  /// 手机 24–96MB，桌面 48–384MB。与安卓 KotvMemBudget 同一组上下限。
-  static int minBytes({required bool desktop}) =>
-      desktop ? 48 * 1024 * 1024 : 24 * 1024 * 1024;
-
-  static int maxBytes({required bool desktop}) =>
-      desktop ? 384 * 1024 * 1024 : 96 * 1024 * 1024;
-
-  /// 可用内存优先：约 15% avail，且不超过总内存 5%，再钳到 [minBytes]/[maxBytes]。
+  /// 有可用内存时取 min(可用 × 15%, 总内存 × 5%)；没有可用内存时用总内存的 5%。
   ///
-  /// 读不到可用内存时用总内存的 5%。总内存也没有时，按桌面 8GiB、其它 3GiB 估算后再取 5%。
+  /// 总内存也没有时，按桌面 8GiB、其它 3GiB 估算后再取 5%。
   static int fromDevice({
     required int totalBytes,
     required int availBytes,
@@ -101,23 +87,21 @@ class KotvBufferBudget {
       final byAvail = (availBytes * 0.15).round();
       if (byAvail < budget) budget = byAvail;
     }
-    final minB = minBytes(desktop: desktop);
-    final maxB = maxBytes(desktop: desktop);
-    if (budget < minB) return minB;
-    if (budget > maxB) return maxB;
+    if (budget < 1) return 1;
     return budget;
   }
 
   static int _fallback() => fromDevice(
-        totalBytes: kotvIsDesktop() ? 8 * 1024 * 1024 * 1024 : 4 * 1024 * 1024 * 1024,
+        totalBytes: 0,
         availBytes: 0,
         desktop: kotvIsDesktop(),
       );
 
-  /// mpv `demuxer-max-bytes` 风格：`96MiB`。数值就是已经钳过的预算字节。
+  /// mpv `demuxer-max-bytes` 风格：`96MiB`。不足 1MiB 写成 `1MiB`，避免 0 被当成不限制。
   static String mpvMiB(int n) {
-    final mib = (n / (1024 * 1024)).round();
-    return '${mib < 0 ? 0 : mib}MiB';
+    var mib = (n / (1024 * 1024)).round();
+    if (mib < 1) mib = 1;
+    return '${mib}MiB';
   }
 
   /// mdk [setBufferRange] 只有毫秒。把内存预算按这条流的码率换成能放下的媒体时长。

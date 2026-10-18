@@ -26,14 +26,8 @@ Future<void> kotvDisposeMpvPlayer(Player? player) async {
   );
 }
 
-/// 按缓冲预算创建 [Player]。
-///
-/// [live]=true：不套点播 KotvBufferBudget；media_kit 仅用库默认 bufferSize
-///（其内部会写 demuxer-max-bytes，应用层不再二次改写）。
-Player kotvCreateMpvPlayer({bool live = false}) {
-  if (live) {
-    return Player();
-  }
+/// 按缓冲预算创建 [Player]。点播和直播都用同一份内存比例，不用库默认的 32MB。
+Player kotvCreateMpvPlayer() {
   final budget = KotvBufferBudget.bytes();
   return Player(
     configuration: PlayerConfiguration(
@@ -314,7 +308,6 @@ class MediaKitPlayback extends KotvPlayback {
       throw StateError('MPV 不支持该 DRM，请用内置 ExoPlayer');
     }
     await _optsReady;
-    // 直播：不写 demuxer-max-bytes/cache-secs；点播才写入 KotvBufferBudget。
     await _opts.applyAfterAttach(player, live: live);
     if (clearKeyHex != null) {
       try {

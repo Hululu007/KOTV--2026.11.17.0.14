@@ -305,26 +305,24 @@ class KotvMpvOpts {
         } catch (_) {}
       }
 
-      if (live) {
-        // 直播不写 demuxer-max-bytes / cache-secs；关掉 cache-pause 避免播一段停一段。
-        try {
+      try {
+        await KotvBufferBudget.warm(force: true);
+        final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
+        for (final e in props.entries) {
+          await set(e.key, e.value);
+        }
+        if (live) {
+          // 直播不写 cache-secs；关掉 cache-pause 避免播一段停一段。
           await set('cache-pause', 'no');
-        } catch (_) {}
-      } else {
-        try {
-          await KotvBufferBudget.warm(force: true);
-          final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
-          for (final e in props.entries) {
-            await set(e.key, e.value);
-          }
+        } else {
           await set('cache-on-disk', diskCache ? 'yes' : 'no');
           // 桌面须定点 demuxer-cache-dir；安卓原生插件另写 cacheDir/mpv-cache。
           if (diskCache && !kotvIsAndroid()) {
             final dir = await kotvMpvDemuxerCacheDir();
             await set('demuxer-cache-dir', dir.path);
           }
-        } catch (_) {}
-      }
+        }
+      } catch (_) {}
       try {
         if (preferredTextLangs.trim().isNotEmpty) {
           final slang = preferredTextLangs.replaceAll(';', ',').replaceAll(RegExp(r'\s+'), '');
@@ -365,7 +363,7 @@ class KotvMpvOpts {
 
   /// 交给原生通道的属性表（P1/P2 open / setOpts）。
   ///
-  /// [live]=true：不写 demuxer-max-bytes / cache-secs。
+  /// [live]=true：仍写同一份字节上限，并关掉 cache-pause。不写 cache-secs。
   Map<String, String> propertyMap({bool live = false}) {
     final out = <String, String>{
       'hwdec': hwdecValue(),
@@ -396,12 +394,9 @@ class KotvMpvOpts {
     } else if (vulkan && kotvIsAndroid()) {
       out['gpu-api'] = 'vulkan';
     }
-    if (!live) {
-      final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
-      out.addAll(props);
-      // Android 原生另有 diskCache 写 cache-on-disk + demuxer-cache-dir；
-      // 桌面 media_kit 在 [applyAfterAttach] 写 cache-on-disk 与定点 demuxer-cache-dir。
-    }
+    out.addAll(KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes()));
+    // Android 原生另有 diskCache 写 cache-on-disk + demuxer-cache-dir；
+    // 桌面 media_kit 在 [applyAfterAttach] 写 cache-on-disk 与定点 demuxer-cache-dir。
     for (final e in parseConfLines(conf)) {
       out[e.$1] = e.$2;
     }

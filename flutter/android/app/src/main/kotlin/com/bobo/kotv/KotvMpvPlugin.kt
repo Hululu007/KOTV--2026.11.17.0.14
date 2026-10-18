@@ -37,7 +37,6 @@ import java.net.URI
 import java.net.URL
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.math.max
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
@@ -282,7 +281,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<Boolean>("diskCache")?.let { diskCache = it }
         call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
         call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
-        // 直播须在 ensurePlayer 前写入，否则会套上点播 demuxer 预算。
+        // 直播须在 ensurePlayer 前写入，磁盘缓存和 cache-pause 按这次会话来。
         call.argument<Boolean>("live")?.let { livePlayback = it }
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           renderTexture = resolveRenderTexture(it)
@@ -990,9 +989,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setOptionString("idle", "yes")
       MPVLib.setOptionString("keep-open", "yes")
       if (!livePlayback) {
-        val budget = bufferBudgetBytes()
-        val back = max(16 * 1024 * 1024, budget / 8)
-        MPVLib.setOptionString("cache", "yes")
         if (diskCache) {
           val dir = File(ctx.cacheDir, "mpv-cache").apply { mkdirs() }
           MPVLib.setOptionString("cache-on-disk", "yes")
@@ -1000,9 +996,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         } else {
           MPVLib.setOptionString("cache-on-disk", "no")
         }
-        MPVLib.setOptionString("demuxer-max-bytes", demuxerMiB(budget))
-        MPVLib.setOptionString("demuxer-max-back-bytes", demuxerMiB(back))
-        MPVLib.setOptionString("cache-pause-initial", "no")
       }
       val spdif = spdifCodecs(ctx)
       MPVLib.setOptionString("audio-spdif", spdif)
@@ -1017,7 +1010,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setOptionString("sub-scale-signs", "yes")
       MPVLib.setOptionString("secondary-sub-ass-override", "yes")
       MPVLib.setOptionString("secondary-sid", "no")
-      // 直播：不写 demuxer-max-bytes / cache-secs（mpv 默认）。
       applyConfOptions(conf)
       MPVLib.init()
       MPVLib.setOptionString("force-window", "no")
@@ -1098,9 +1090,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** 与 Dart [KotvBufferBudget] / Exo 共用 [KotvMemBudget]。 */
-  private fun bufferBudgetBytes(): Int = KotvMemBudget.bytes(appContext)
-
   /** DV 输出策略（Android mpv 专有选项）。 */
   private fun applyDolbyVisionOptions() {
     try {
@@ -1138,11 +1127,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     } catch (t: Throwable) {
       Log.w(TAG, "slang", t)
     }
-  }
-
-  private fun demuxerMiB(bytes: Int): String {
-    val mib = (bytes / (1024 * 1024)).coerceIn(16, 4096)
-    return "${mib}MiB"
   }
 
   /** 音轨列表（含 AV3A 等 FFmpeg/libarcdav3a 解码轨）。 */

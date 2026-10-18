@@ -402,7 +402,7 @@ class FvpPlayback extends KotvPlayback {
       // 单一路径钉死 min=0（勿省略 max：Dart 默认 max=-1 会把 max/drop 打回 mdk 默认）。
       // 点播默认 minMs=1000 → 欠载约每秒一帧（ADB MediaCodec timediff≈1000ms）。
       try {
-        if (!_live) await KotvBufferBudget.warm();
+        await KotvBufferBudget.warm();
       } catch (_) {}
       _applyBufferRange(c);
       await c.setVolume((_volume / 100).clamp(0, 1));
@@ -849,15 +849,28 @@ class FvpPlayback extends KotvPlayback {
   /// mdk [setBufferRange]：`minMs==0` 尽快解码；`minMs>0` 时队列空了要攒到 min 才继续出包。
   /// 默认 min=1000，欠载时大约每秒才放出一帧（ADB MediaCodec timediff≈1000ms）。
   /// 点播固定 min=0；max 用内存预算÷码率。码率未知时先用 60s，码率出来再抬 max。
-  /// 直播：短队列；桌面 drop 追沿，安卓不 drop（GOP≈1s 时 drop 会只剩关键帧）。
+  /// 直播：短队列（桌面 8s、安卓 4s）；码率已知时再取 min(这段时长, 预算÷码率)。
+  /// 桌面 drop 追沿，安卓不 drop（GOP≈1s 时 drop 会只剩关键帧）。
   /// （属性 `buffer` 与本 API 等价；开播路径只调 setBufferRange。）
   void _applyBufferRange(VideoPlayerController c) {
     if (!identical(_c, c)) return;
     try {
       if (_live) {
-        if (_liveBufferSet) return;
-        final maxMs = kotvIsDesktop() ? 8000 : 4000;
+        final latencyMs = kotvIsDesktop() ? 8000 : 4000;
         final drop = kotvIsDesktop();
+        final bps = _mediaBitsPerSec(c);
+        if (bps <= 0) {
+          if (_liveBufferSet) return;
+          c.setBufferRange(min: 0, max: latencyMs, drop: drop);
+          return;
+        }
+        if (_liveBufferSet) return;
+        var maxMs = latencyMs;
+        final byMem = KotvBufferBudget.fvpMaxBufferMs(
+          KotvBufferBudget.bytes(),
+          bitsPerSec: bps,
+        );
+        if (byMem > 0 && byMem < maxMs) maxMs = byMem;
         c.setBufferRange(min: 0, max: maxMs, drop: drop);
         _liveBufferSet = true;
         _vodBufferSet = false;

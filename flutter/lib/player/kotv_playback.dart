@@ -47,7 +47,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 最近一次播放错误文案；无错误为 null。播放中失败换线等可订阅 [addListener] 后读此字段。
   String? get lastError => null;
 
-  /// [live]=true：直播页语境，跳过点播 KotvBufferBudget 预读。
+  /// [live]=true：直播页语境。内存缓冲仍按同一比例封顶，不做点播磁盘预读。
   /// [startAt]>0：开播定位。MPV=Media/loadfile start；FVP=prepare(ms)（勿 prepare(0) 后再 seek）。
   /// [waitReady]=false：只把媒体交给引擎即返回（直播换台）；出画守卫由调用方后台跑。
   /// 默认 true：等 silent-video 守卫完成（点播详情）。

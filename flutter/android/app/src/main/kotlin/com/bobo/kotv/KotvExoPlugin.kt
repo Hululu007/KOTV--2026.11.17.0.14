@@ -119,7 +119,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var videoFit: String = "contain"
   private var videoWidth: Int = 0
   private var videoHeight: Int = 0
-  /** 直播：跳过点播 KotvBufferBudget（Exo 用默认 LoadControl）。 */
+  /** 直播：不做点播磁盘预读。内存缓冲与点播同一条比例。 */
   private var livePlayback: Boolean = false
   /** auto 下硬解失败后仅软解重建一次。 */
   private var decodeFallbackTried = false
@@ -1196,7 +1196,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     val selector = buildTrackSelector(ctx, effective)
     trackSelector = selector
-    // duration×factor + KotvMemBudget 字节顶，避免高码率连播时堆缓冲无上限。
+    // 时长倍率是用户设置。字节顶按可用内存比例，未满时长时也不再继续堆缓冲。
     val factor = bufferFactor.coerceIn(1, 10)
     val targetBytes = KotvMemBudget.bytes(ctx)
     val loadControl: LoadControl =
@@ -1208,6 +1208,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
         )
         .setTargetBufferBytes(targetBytes)
+        .setPrioritizeTimeOverSizeThresholds(false)
         .build()
     val bandwidthMeter = DefaultBandwidthMeter.Builder(ctx).build()
     val builder = ExoPlayer.Builder(ctx)

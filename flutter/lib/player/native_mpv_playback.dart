@@ -453,9 +453,7 @@ class NativeMpvPlayback extends KotvPlayback {
     // 后台仅音频抑制时不挂。
     await _syncSurfaceLayer();
     try {
-      if (!live) {
-        await KotvBufferBudget.warm();
-      }
+      await KotvBufferBudget.warm();
       final props = <String, String>{
         ..._opts.propertyMap(live: live),
         ..._extraOpenProps,

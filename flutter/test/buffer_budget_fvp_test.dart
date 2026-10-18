@@ -13,7 +13,7 @@ void main() {
     expect(KotvBufferBudget.fvpMaxBufferMs(0, bitsPerSec: 4 * 1000 * 1000), 0);
   });
 
-  test('fromDevice follows available memory and clamps to the shared ceiling', () {
+  test('fromDevice follows available memory proportion', () {
     const gb = 1024 * 1024 * 1024;
     final tight = KotvBufferBudget.fromDevice(
       totalBytes: 8 * gb,
@@ -26,38 +26,40 @@ void main() {
       availBytes: 32 * gb,
       desktop: true,
     );
-    expect(roomy, KotvBufferBudget.maxBytes(desktop: true));
+    expect(roomy, (64 * gb * 0.05).round());
     final noAvail = KotvBufferBudget.fromDevice(
       totalBytes: 8 * gb,
       availBytes: 0,
       desktop: false,
     );
-    expect(noAvail, KotvBufferBudget.maxBytes(desktop: false));
+    expect(noAvail, (8 * gb * 0.05).round());
     final tiny = KotvBufferBudget.fromDevice(
       totalBytes: 256 * 1024 * 1024,
       availBytes: 64 * 1024 * 1024,
       desktop: false,
     );
-    expect(tiny, KotvBufferBudget.minBytes(desktop: false));
+    expect(tiny, (64 * 1024 * 1024 * 0.15).round());
+    final unknown = KotvBufferBudget.fromDevice(
+      totalBytes: 0,
+      availBytes: 0,
+      desktop: false,
+    );
+    expect(unknown, (3 * gb * 0.05).round());
   });
 
   test('mpvMiB keeps the budget proportion', () {
     expect(KotvBufferBudget.mpvMiB(96 * 1024 * 1024), '96MiB');
     expect(KotvBufferBudget.mpvMiB(5 * 1024 * 1024 * 1024), '5120MiB');
+    expect(KotvBufferBudget.mpvMiB(100 * 1024), '1MiB');
   });
 
   test('mpvCacheProps uses bytes only', () {
     final props = KotvBufferBudget.mpvCacheProps(96 * 1024 * 1024);
     expect(props.containsKey('demuxer-max-bytes'), isTrue);
+    expect(props['demuxer-max-bytes'], '96MiB');
+    expect(props['demuxer-max-back-bytes'], '12MiB');
     expect(props.containsKey('cache-secs'), isFalse);
     expect(props.containsKey('demuxer-readahead-secs'), isFalse);
     expect(props['cache-pause-initial'], 'no');
-  });
-
-  test('mpvLiveCacheProps is empty (直播不写 demuxer-max-bytes/cache-secs)', () {
-    final props = KotvBufferBudget.mpvLiveCacheProps();
-    expect(props, isEmpty);
-    expect(props.containsKey('demuxer-max-bytes'), isFalse);
-    expect(props.containsKey('cache-secs'), isFalse);
   });
 }
