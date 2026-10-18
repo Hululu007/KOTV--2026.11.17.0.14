@@ -39,9 +39,8 @@ Future<void> kotvEnterSystemFullscreen(KotvDesktopFullscreenKind kind) async {
     return;
   }
   if (!kotvIsDesktop()) return;
-  // Windows：进入系统全屏只改主窗口。离开时才会把 Flutter 子窗口宽度踢一下再改回，
-  // 所以第一次全屏画面会定住，还原后再进才动。进入后的同一次踢动在 window_manager 补丁里。
-  // 另外先等应用内布局落稳再 setFullScreen，避免和画面放大挤在同一帧。
+  // Windows：先等应用内布局落稳再 setFullScreen，避免和画面放大挤在同一帧。
+  // 有边框的系统全屏不再先最大化，避免窗口被钉住后尺寸改不到、画面停在最后一帧。
   if (kotvIsWindows()) {
     try {
       if (await windowManager.isFullScreen()) return;
