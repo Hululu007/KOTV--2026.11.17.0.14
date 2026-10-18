@@ -1526,7 +1526,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         _prefPlayerVal = startPlayer;
       });
       try {
-        await kotvLaunchExternalPlayer(
+        final result = await kotvLaunchExternalPlayer(
           api: ref.read(apiProvider),
           player: startPlayer,
           url: url,
@@ -1534,6 +1534,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           title: _title,
           vod: false,
         );
+        if (mounted && serial == _playSerial && !result.opened) {
+          setState(() => _status = '未打开外部播放器');
+        }
       } catch (e) {
         if (mounted && serial == _playSerial) setState(() => _status = '$e');
       }
@@ -2554,13 +2557,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     try {
       final navCtx = rootNavigatorKey.currentContext ?? context;
       if (!navCtx.mounted) return;
-      Map<String, dynamic>? status;
-      try {
-        status = await ref.read(apiProvider).playerStatus();
-      } catch (_) {}
-      final avail = await kotvPlayerAvailability(status?['available'] as Map?);
+      final options = await kotvInstalledPlayerOptions(
+        live: true,
+        playerStatus: () => ref.read(apiProvider).playerStatus(),
+      );
       if (!navCtx.mounted || !mounted) return;
-      final options = kotvVisiblePlayerOptions(kotvLivePlayerOptions(), avail);
       final v = await pickChoice(navCtx, title: '直播播放器', current: _prefPlayerVal, options: options);
       if (v == null || !mounted) return;
       final prev = _prefPlayerVal;
@@ -2579,7 +2580,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (v.startsWith('outie#') && _playUrl.isNotEmpty) {
         try {
           await _playback.pause();
-          await kotvLaunchExternalPlayer(
+          final result = await kotvLaunchExternalPlayer(
             api: ref.read(apiProvider),
             player: v,
             url: _playUrl,
@@ -2587,9 +2588,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
             title: _title,
             vod: false,
           );
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(v)}打开')));
+          if (!mounted) return;
+          if (!result.opened) {
+            await _playback.play();
+            return;
           }
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(v)}打开')));
         } catch (e) {
           if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
         }

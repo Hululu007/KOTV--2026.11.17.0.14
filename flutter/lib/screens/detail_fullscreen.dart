@@ -131,7 +131,8 @@ class DetailFullscreenPage extends StatefulWidget {
   final Future<void> Function(String key, String value)? onPersistSetting;
   final Future<Map<String, String>> Function()? onLoadSettings;
   final Future<Map<String, dynamic>> Function()? onPlayerStatus;
-  final Future<void> Function(String playerVal)? onExternalPlayer;
+  /// 返回 false 表示选择器被关掉，外部播放器没有打开。
+  final Future<bool> Function(String playerVal)? onExternalPlayer;
   final Future<String> Function()? onToggleKeep;
   final String keepLabel;
   final VoidCallback? onParse;

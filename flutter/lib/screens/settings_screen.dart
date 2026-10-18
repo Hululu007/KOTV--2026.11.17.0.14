@@ -256,14 +256,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (v != null) await onOK(v);
   }
 
-  Future<List<(String, String)>> _visiblePlayerOptions({required bool live}) async {
-    Map<String, dynamic>? status;
-    try {
-      status = await ref.read(apiProvider).playerStatus();
-    } catch (_) {}
-    final avail = await kotvPlayerAvailability(status?['available'] as Map?);
-    final all = live ? kotvLivePlayerOptions() : kotvVodPlayerOptions();
-    return kotvVisiblePlayerOptions(all, avail);
+  Future<List<(String, String)>> _visiblePlayerOptions({required bool live}) {
+    return kotvInstalledPlayerOptions(
+      live: live,
+      playerStatus: () => ref.read(apiProvider).playerStatus(),
+    );
   }
 
   Future<void> _pick(

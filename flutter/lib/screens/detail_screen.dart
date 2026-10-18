@@ -235,6 +235,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _kept = false;
   String _status = '选择剧集开始播放';
   String _playUrl = '';
+  Map<String, String> _playHeaders = const {};
   String _decodeMode = 'auto';
   /// 设置/用户所选解码；failover 临时翻转只改 [_decodeMode]。
   String _prefDecodeMode = 'auto';
@@ -2150,6 +2151,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
       };
+      _playHeaders = rawHeaders;
       final magnet = data['magnet'] == true || playUrl.contains('/proxy/bt/');
       _magnetPlay = magnet;
       if (magnet) _startBtProgressPoll();
@@ -2224,7 +2226,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           _prefPlayerVal = startPlayer;
           _status = '外部播放器…';
         });
-        KotvExternalPlayResult? handed;
+        final KotvExternalPlayResult handed;
         try {
           handed = await kotvLaunchExternalPlayer(
             api: ref.read(apiProvider),
@@ -2240,16 +2242,20 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           return;
         }
         if (serial != _playAtSerial || !mounted) return;
-        if (handed?.endBy == 'playback_completion') {
+        if (!handed.opened) {
+          setState(() => _status = '未打开外部播放器');
+          return;
+        }
+        if (handed.endBy == 'playback_completion') {
           unawaited(_advanceToNextEpisode(fromEnd: false));
           return;
         }
-        if (handed?.endBy != 'user') {
+        if (handed.endBy != 'user') {
           setState(() => _status = '已用外部播放器打开');
           return;
         }
         openPlayer = kotvDefaultVodPlayer();
-        handoffMs = handed!.positionMs;
+        handoffMs = handed.positionMs;
       }
       final failover = KotvPlaybackFailover(
         playerVal: openPlayer,
@@ -3265,19 +3271,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             api: api,
             player: player,
             url: _playUrl,
+            headers: _playHeaders,
             title: _detail?.name ?? '',
             positionMs: _playback.position.inMilliseconds,
             vod: true,
           );
-          if (!mounted || result == null) return;
+          if (!mounted || !result.opened) return false;
           if (result.endBy == 'playback_completion') {
             await _advanceToNextEpisode(fromEnd: false);
-            return;
+            return true;
           }
           if (result.endBy == 'user' && result.positionMs > 0) {
             await _playback.seek(Duration(milliseconds: result.positionMs));
             await _playback.play();
           }
+          return true;
         },
         onToggleKeep: () async {
           final kept = await LocalCollect.toggle(_collectItemFromDetail());

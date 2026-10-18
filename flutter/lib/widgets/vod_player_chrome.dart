@@ -699,7 +699,8 @@ class VodFullscreenChrome extends StatefulWidget {
   /// 播控内调色/音效读取当前设置。
   final Future<Map<String, String>> Function()? onLoadSettings;
   final Future<Map<String, dynamic>> Function()? onPlayerStatus;
-  final Future<void> Function(String playerVal)? onExternalPlayer;
+  /// 返回 false 表示选择器被关掉，外部播放器没有打开。
+  final Future<bool> Function(String playerVal)? onExternalPlayer;
   final Future<String> Function()? onToggleKeep;
   final String keepLabel;
   final VoidCallback? onParse;
@@ -1758,7 +1759,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     try {
       status = await widget.onPlayerStatus?.call() ?? {};
     } catch (_) {}
-    final avail = await kotvPlayerAvailability(status['available'] as Map?);
     final cur = kotvClampPlayerVal('${status['current'] ?? ''}'.trim(), live: false);
     if (mounted) {
       setState(() {
@@ -1767,7 +1767,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       });
     }
 
-    final opts = kotvVisiblePlayerOptions(kotvPlayerOptions(), avail);
+    final opts = await kotvInstalledPlayerOptions(live: false, engineStatus: status);
 
     if (!mounted) return;
     final rows = <Widget>[
@@ -1808,11 +1808,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       }
       try {
         await widget.player.pause();
-        await widget.onExternalPlayer?.call(next);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(next)}打开')));
-          widget.onExit();
+        final opened = await widget.onExternalPlayer?.call(next);
+        if (!mounted) return;
+        if (opened == false) {
+          await widget.player.play();
+          return;
         }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(next)}打开')));
+        widget.onExit();
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));

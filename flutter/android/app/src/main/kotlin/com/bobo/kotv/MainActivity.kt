@@ -3,10 +3,13 @@ package com.bobo.kotv
 import android.Manifest
 import android.app.Activity
 import android.app.ActivityManager
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.content.res.Configuration
@@ -36,6 +39,13 @@ class MainActivity : FlutterActivity() {
   private var storagePermResult: MethodChannel.Result? = null
   private var readMediaPermResult: MethodChannel.Result? = null
   private var externalPlayResult: MethodChannel.Result? = null
+  /** 选择器里点过某个应用。关掉选择器时这个标记仍是假。 */
+  private var externalChosen = false
+  private val externalChosenReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      externalChosen = true
+    }
+  }
   private var batteryPromptStarted = false
   /** 正在播放时：Home/切应用自动进系统画中画（Android 12+ setAutoEnterEnabled）。 */
   private var pipAutoEnter = false
@@ -53,6 +63,20 @@ class MainActivity : FlutterActivity() {
       theme.applyStyle(R.style.KotvJarDarkAlertDialogOverlay, true)
     }
     super.onCreate(savedInstanceState)
+    ContextCompat.registerReceiver(
+      this,
+      externalChosenReceiver,
+      IntentFilter(EXTERNAL_CHOSEN),
+      ContextCompat.RECEIVER_NOT_EXPORTED,
+    )
+  }
+
+  override fun onDestroy() {
+    try {
+      unregisterReceiver(externalChosenReceiver)
+    } catch (_: Throwable) {
+    }
+    super.onDestroy()
   }
 
   private fun jarNeedsDarkAlertDialogList(): Boolean {
@@ -349,14 +373,17 @@ class MainActivity : FlutterActivity() {
       REQ_EXTERNAL_PLAYER -> {
         val pending = externalPlayResult
         externalPlayResult = null
+        val opened = resultCode == Activity.RESULT_OK || externalChosen
+        externalChosen = false
         if (pending == null) return
-        if (resultCode != Activity.RESULT_OK || data == null) {
-          pending.success(null)
+        if (!opened) {
+          pending.success(mapOf("opened" to false))
           return
         }
-        val extras = data.extras
+        val extras = data?.extras
         pending.success(
           mapOf(
+            "opened" to true,
             "endBy" to (extras?.getString("end_by") ?: ""),
             "positionMs" to (extras?.getInt("position", 0) ?: 0),
           ),
@@ -531,11 +558,13 @@ class MainActivity : FlutterActivity() {
     private const val REQ_MANAGE_STORAGE = 0xC45A
     private const val REQ_READ_MEDIA = 0xC45B
     private const val REQ_EXTERNAL_PLAYER = 0xC45C
+    private const val EXTERNAL_CHOSEN = "com.bobo.kotv.EXTERNAL_PLAYER_CHOSEN"
   }
 
   private fun externalViewIntent(url: String): Intent {
     return Intent(Intent.ACTION_VIEW).apply {
-      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      // 不带 NEW_TASK：否则 startActivityForResult 会立刻收到取消，进度交不回来。
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       setDataAndType(Uri.parse(url), "video/*")
     }
   }
@@ -587,7 +616,12 @@ class MainActivity : FlutterActivity() {
       if (act.packageName != packageName) return@mapNotNull null
       ComponentName(act.packageName, act.name)
     }
-    val chooser = Intent.createChooser(intent, null)
+    externalChosen = false
+    val callback = Intent(EXTERNAL_CHOSEN).setPackage(packageName)
+    val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+      (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+    val sender = PendingIntent.getBroadcast(this, REQ_EXTERNAL_PLAYER, callback, piFlags)
+    val chooser = Intent.createChooser(intent, null, sender.intentSender)
       .putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, self.toTypedArray())
     externalPlayResult = result
     try {
