@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -239,15 +240,58 @@ func FFmpeg() string {
 	return ""
 }
 
+func programFilesBases() []string {
+	return []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")}
+}
+
+func homeApplications() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, "Applications")
+}
+
+func macAppDirs() []string {
+	dirs := []string{"/Applications"}
+	if h := homeApplications(); h != "" {
+		dirs = append(dirs, h)
+	}
+	return dirs
+}
+
+func macAppBinary(app, bin string) []string {
+	out := make([]string, 0, 2)
+	for _, root := range macAppDirs() {
+		out = append(out, filepath.Join(root, app+".app", "Contents", "MacOS", bin))
+	}
+	return out
+}
+
+// MacApp 返回已安装的 .app 目录。非 macOS 或不存在时为空。
+func MacApp(name string) string {
+	name = strings.TrimSpace(name)
+	if runtime.GOOS != "darwin" || name == "" {
+		return ""
+	}
+	for _, root := range macAppDirs() {
+		p := filepath.Join(root, name+".app")
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
 // VLC 仅探测系统安装的外部播放器。
 func VLC() string {
 	switch runtime.GOOS {
 	case "darwin":
-		if p := firstExisting("/Applications/VLC.app/Contents/MacOS/VLC"); p != "" {
+		if p := firstExisting(macAppBinary("VLC", "VLC")...); p != "" {
 			return p
 		}
 	case "windows":
-		for _, base := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")} {
+		for _, base := range programFilesBases() {
 			if p := firstExisting(filepath.Join(base, "VideoLAN", "VLC", "vlc.exe")); p != "" {
 				return p
 			}
@@ -259,7 +303,7 @@ func VLC() string {
 	return ""
 }
 
-// MPV 返回外部 mpv 可执行文件（发行包不捆绑；回落 PATH / 系统安装）。
+// MPV 返回外部 mpv 可执行文件（发行包目录优先，再系统安装，再 PATH）。
 func MPV() string {
 	cands := underRoots(
 		filepath.Join("mpv", "mpv"),
@@ -269,6 +313,20 @@ func MPV() string {
 	)
 	if p := firstExisting(cands...); p != "" {
 		return p
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		sys := []string{"/opt/homebrew/bin/mpv", "/usr/local/bin/mpv"}
+		sys = append(sys, macAppBinary("mpv", "mpv")...)
+		if p := firstExisting(sys...); p != "" {
+			return p
+		}
+	case "windows":
+		for _, base := range programFilesBases() {
+			if p := firstExisting(filepath.Join(base, "mpv", "mpv.exe")); p != "" {
+				return p
+			}
+		}
 	}
 	if p, err := exec.LookPath("mpv"); err == nil {
 		return p

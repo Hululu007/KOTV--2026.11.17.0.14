@@ -144,3 +144,46 @@ List<(String, String)> kotvPlayerOptions() {
 List<(String, String)> kotvVodPlayerOptions() => kotvPlayerOptions();
 
 List<(String, String)> kotvLivePlayerOptions() => kotvPlayerOptions();
+
+/// 引擎 Available() 里的键。内置播放器不看本机是否装了外部程序。
+String kotvPlayerAvailKey(String playerVal) {
+  switch (playerVal.trim()) {
+    case 'innie#html':
+      return 'embed_html';
+    case 'innie#art':
+      return 'embed_art';
+    case 'innie#xg':
+      return 'embed_xg';
+    case 'innie#zw':
+      return 'embed_zw';
+    case 'innie#exo':
+      return 'embed_exo';
+    case 'innie#mpv':
+      return 'embed_mpv';
+    case 'innie#fvp':
+      return 'embed_fvp';
+    case 'outie#mpv':
+      return 'mpv';
+    case 'outie#vlc':
+      return 'vlc';
+    case 'outie#iina':
+      return 'iina';
+    default:
+      return '';
+  }
+}
+
+bool kotvPlayerAlwaysListed(String availKey) {
+  switch (availKey) {
+    case 'embed_mpv':
+    case 'embed_exo':
+    case 'embed_fvp':
+    case 'embed_html':
+    case 'embed_art':
+    case 'embed_xg':
+    case 'embed_zw':
+      return true;
+    default:
+      return false;
+  }
+}

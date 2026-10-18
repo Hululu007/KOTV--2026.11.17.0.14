@@ -3,7 +3,6 @@ package player
 import (
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -147,17 +146,7 @@ func Play(url string, histKey string) error {
 		return nil
 	}
 
-	if mode == "innie" {
-		// innie#mpv 等：旁路窗口
-		if err := playSidecar(name, url, histKey); err != nil {
-			log.Printf("内置旁路播放失败(%s): %v，尝试外部同名播放器", name, err)
-			if err2 := playExternal(name, url); err2 != nil {
-				return fmt.Errorf("内置 %s 失败: %v；外部也失败: %w", displayName(name), err, err2)
-			}
-		}
-		return nil
-	}
-	return playExternal(name, url)
+	return launchExternal(name, url, histKey)
 }
 
 func displayName(name string) string {
@@ -173,7 +162,11 @@ func displayName(name string) string {
 	}
 }
 
-func playSidecar(name, url, histKey string) error {
+func launchExternal(name, url, histKey string) error {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		name = "mpv"
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	stopLocked()
@@ -184,56 +177,36 @@ func playSidecar(name, url, histKey string) error {
 	lastPosition = -1
 	lastDuration = 0
 
-	var cmd *exec.Cmd
-	switch strings.ToLower(name) {
-	case "mpv", "":
-		bin := findPlayer("mpv")
-		if bin == "" {
-			return fmt.Errorf("未找到 MPV")
-		}
-		if resolved, err := filepath.EvalSymlinks(bin); err == nil && resolved != "" {
-			bin = resolved
-		}
-		ipcSock = mpvNewIPCPath()
-		mpvCleanupIPC(ipcSock)
-		args := []string{
-			"--force-window=yes",
-			"--keep-open=yes",
-			"--idle=no",
-			"--input-ipc-server=" + ipcSock,
-		}
-		cmd = exec.Command(bin, append(args, url)...)
-		// @executable_path/lib 依赖：工作目录放到二进制旁（mpv.app/.../MacOS）
-		cmd.Dir = filepath.Dir(bin)
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		log.Printf("启动内置 MPV: bin=%s dir=%s url=%s", bin, cmd.Dir, url)
-	case "vlc":
-		bin := findPlayer("vlc")
-		if bin == "" {
-			return fmt.Errorf("未找到 VLC")
-		}
-		cmd = exec.Command(bin, "--no-video-title-show", url)
-		ipcSock = ""
-	case "iina":
-		if runtime.GOOS != "darwin" {
-			return fmt.Errorf("IINA 仅支持 macOS")
-		}
-		if !appExists("IINA") {
-			return fmt.Errorf("未安装 IINA")
-		}
-		cmd = exec.Command("open", "-a", "IINA", url)
-		ipcSock = ""
-	default:
-		return fmt.Errorf("不支持的内置播放器: %s", name)
+	mpvBin := resolveBin(findPlayer("mpv"))
+	vlcBin := resolveBin(findPlayer("vlc"))
+	sock := ""
+	if name == "mpv" && histKey != "" && mpvBin != "" {
+		sock = mpvNewIPCPath()
+		mpvCleanupIPC(sock)
 	}
+	argv, dir, err := externalArgv(runtime.GOOS, name, url, mpvBin, vlcBin, appruntime.MacApp("VLC"), appruntime.MacApp("IINA"), sock)
+	if err != nil {
+		if sock != "" {
+			mpvCleanupIPC(sock)
+		}
+		return err
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	log.Printf("启动外部播放器: %s", strings.Join(argv, " "))
 	if err := cmd.Start(); err != nil {
+		if sock != "" {
+			mpvCleanupIPC(sock)
+		}
 		return err
 	}
 	current = cmd
-	if ipcSock != "" {
+	ipcSock = sock
+	if sock != "" {
 		progressStop = make(chan struct{})
-		go pollMPVProgress(ipcSock, progressStop)
+		go pollMPVProgress(sock, progressStop)
 	}
 	go func() {
 		_ = cmd.Wait()
@@ -246,6 +219,68 @@ func playSidecar(name, url, histKey string) error {
 		mu.Unlock()
 	}()
 	return nil
+}
+
+func resolveBin(bin string) string {
+	if bin == "" {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(bin); err == nil && resolved != "" {
+		return resolved
+	}
+	return bin
+}
+
+// externalArgv 按系统拼外置播放器参数。mpvBin、vlcBin 是可执行文件，vlcApp、iinaApp 是 .app 目录。
+// ipcSock 非空时 MPV 挂进度通道。
+func externalArgv(goos, name, url, mpvBin, vlcBin, vlcApp, iinaApp, ipcSock string) (argv []string, dir string, err error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "mpv", "":
+		if mpvBin == "" {
+			return nil, "", fmt.Errorf("未找到 MPV")
+		}
+		args := []string{mpvBin, "--force-window=yes", "--keep-open=yes", "--idle=no"}
+		if ipcSock != "" {
+			args = append(args, "--input-ipc-server="+ipcSock)
+		}
+		args = append(args, url)
+		// 工作目录放在二进制旁，.app 里的库按可执行文件相对路径加载。
+		return args, filepath.Dir(mpvBin), nil
+	case "vlc":
+		if goos == "darwin" {
+			app := appBundle(vlcBin)
+			if app == "" {
+				app = vlcApp
+			}
+			if app == "" {
+				return nil, "", fmt.Errorf("未找到 VLC")
+			}
+			return []string{"open", "-a", app, url}, "", nil
+		}
+		if vlcBin == "" {
+			return nil, "", fmt.Errorf("未找到 VLC")
+		}
+		return []string{vlcBin, url}, "", nil
+	case "iina":
+		if goos != "darwin" {
+			return nil, "", fmt.Errorf("IINA 仅支持 macOS")
+		}
+		if iinaApp == "" {
+			return nil, "", fmt.Errorf("未安装 IINA")
+		}
+		return []string{"open", "-a", iinaApp, url}, "", nil
+	default:
+		return nil, "", fmt.Errorf("未知播放器: %s", name)
+	}
+}
+
+func appBundle(bin string) string {
+	const marker = ".app/"
+	idx := strings.Index(bin, marker)
+	if idx < 0 {
+		return ""
+	}
+	return bin[:idx+len(".app")]
 }
 
 func pollMPVProgress(sock string, stop <-chan struct{}) {
@@ -320,64 +355,6 @@ func flushProgressLocked() {
 	go fn(p)
 }
 
-func playExternal(name, url string) error {
-	switch strings.ToLower(name) {
-	case "iina":
-		if runtime.GOOS != "darwin" {
-			return fmt.Errorf("IINA 仅支持 macOS")
-		}
-		if !appExists("IINA") {
-			return fmt.Errorf("未安装 IINA（/Applications/IINA.app）")
-		}
-		return exec.Command("open", "-a", "IINA", url).Start()
-	case "vlc":
-		// 系统安装的外部 VLC
-		if bin := findPlayer("vlc"); bin != "" {
-			if runtime.GOOS == "darwin" {
-				if app := vlcAppBundle(bin); app != "" {
-					return exec.Command("open", "-a", app, url).Start()
-				}
-			}
-			return exec.Command(bin, url).Start()
-		}
-		if runtime.GOOS == "darwin" && appExists("VLC") {
-			return exec.Command("open", "-a", "VLC", url).Start()
-		}
-		return fmt.Errorf("未找到外部 VLC：请先安装系统 VLC")
-	case "mpv":
-		bin := findPlayer("mpv")
-		if bin == "" {
-			return fmt.Errorf("未找到外部 MPV：请先安装 mpv")
-		}
-		if resolved, err := filepath.EvalSymlinks(bin); err == nil && resolved != "" {
-			bin = resolved
-		}
-		cmd := exec.Command(bin, url)
-		cmd.Dir = filepath.Dir(bin)
-		return cmd.Start()
-	default:
-		return fmt.Errorf("未知播放器: %s", name)
-	}
-}
-
-// vlcAppBundle 从可执行路径还原 .app 包路径，便于 open -a。
-func vlcAppBundle(bin string) string {
-	const marker = ".app/"
-	idx := strings.Index(bin, marker)
-	if idx < 0 {
-		return ""
-	}
-	return bin[:idx+len(".app")]
-}
-
-func appExists(name string) bool {
-	if runtime.GOOS != "darwin" {
-		return false
-	}
-	_, err := os.Stat("/Applications/" + name + ".app")
-	return err == nil
-}
-
 // Stop 停止旁路与内嵌播放器。
 func Stop() {
 	mu.Lock()
@@ -402,36 +379,19 @@ func stopLocked() {
 	}
 }
 
-// findPlayer 返回可执行路径；找不到返回空字符串（不再返回裸命令名冒充成功）。
+// findPlayer 返回可执行路径；找不到返回空字符串。
 func findPlayer(name string) string {
 	switch strings.ToLower(name) {
 	case "mpv", "":
-		if p := appruntime.MPV(); p != "" {
-			return p
-		}
+		return appruntime.MPV()
 	case "vlc":
-		if p := appruntime.VLC(); p != "" {
-			return p
-		}
+		return appruntime.VLC()
+	default:
+		return ""
 	}
-	if p, err := exec.LookPath(name); err == nil {
-		return p
-	}
-	if runtime.GOOS == "darwin" {
-		candidates := map[string]string{
-			"vlc": "/Applications/VLC.app/Contents/MacOS/VLC",
-			"mpv": "/opt/homebrew/bin/mpv",
-		}
-		if p, ok := candidates[strings.ToLower(name)]; ok {
-			if _, err := os.Stat(p); err == nil {
-				return p
-			}
-		}
-	}
-	return ""
 }
 
-// ExternalPlay 用外部/旁路播放器打开 URL（供 Flutter 切到 outie#* 时调用）。
+// ExternalPlay 用外部播放器打开 URL（供 Flutter 切到 outie#* 时调用）。不挂进度通道。
 func ExternalPlay(url, name string) error {
 	url = strings.TrimSpace(url)
 	name = strings.ToLower(strings.TrimSpace(name))
@@ -441,15 +401,15 @@ func ExternalPlay(url, name string) error {
 	if name == "" {
 		name = "mpv"
 	}
-	return playSidecar(name, url, "")
+	return launchExternal(name, url, "")
 }
 
 // Available 返回当前机器上可用的播放器说明（设置页展示用）。
 func Available() map[string]bool {
 	return map[string]bool{
-		"vlc":       findPlayer("vlc") != "" || appExists("VLC"),
+		"vlc":       findPlayer("vlc") != "" || appruntime.MacApp("VLC") != "",
 		"mpv":       findPlayer("mpv") != "",
-		"iina":      appExists("IINA"),
+		"iina":      appruntime.MacApp("IINA") != "",
 		"embed_fvp": true,
 		// Flutter 页内 MPV 走原生通道，库与 fvp/mdk 同目录。
 		"embed_mpv": true,
