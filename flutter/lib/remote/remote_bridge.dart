@@ -365,6 +365,8 @@ String flutterPlayerLabel(String val) {
       return '外部 VLC';
     case 'outie#iina':
       return 'IINA';
+    case 'outie#view':
+      return '外部播放器';
     default:
       return v;
   }

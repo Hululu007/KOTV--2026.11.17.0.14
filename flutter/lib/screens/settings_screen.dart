@@ -13,6 +13,7 @@ import '../api/kotv_client_store.dart';
 import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
 import '../player/kotv_playback.dart';
+import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
 import '../player/mpv_opts.dart';
 import '../player/native_mpv_playback.dart';
@@ -253,6 +254,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ),
     );
     if (v != null) await onOK(v);
+  }
+
+  Future<List<(String, String)>> _visiblePlayerOptions({required bool live}) async {
+    Map<String, dynamic>? status;
+    try {
+      status = await ref.read(apiProvider).playerStatus();
+    } catch (_) {}
+    final avail = await kotvPlayerAvailability(status?['available'] as Map?);
+    final all = live ? kotvLivePlayerOptions() : kotvVodPlayerOptions();
+    return kotvVisiblePlayerOptions(all, avail);
   }
 
   Future<void> _pick(
@@ -2483,9 +2494,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           label: '点播播放器',
                           value: playerLabel,
                           onTap: canPickPlayer
-                              ? () => _pick(
-                                  '点播播放器', 'player', kotvVodPlayerOptions(),
-                                  msg: '点播播放器已切换')
+                              ? () async {
+                                  final opts = await _visiblePlayerOptions(live: false);
+                                  if (!mounted) return;
+                                  await _pick(
+                                    '点播播放器',
+                                    'player',
+                                    opts,
+                                    msg: '点播播放器已切换',
+                                  );
+                                }
                               : () =>
                                   showAppNews(context, playerUnavailableHint),
                         ),
@@ -2493,12 +2511,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           label: '直播播放器',
                           value: livePlayerLabel,
                           onTap: canPickLivePlayer
-                              ? () => _pick(
+                              ? () async {
+                                  final opts = await _visiblePlayerOptions(live: true);
+                                  if (!mounted) return;
+                                  await _pick(
                                     '直播播放器',
                                     'playerLive',
-                                    kotvLivePlayerOptions(),
+                                    opts,
                                     msg: '直播播放器已切换',
-                                  )
+                                  );
+                                }
                               : () =>
                                   showAppNews(context, playerUnavailableHint),
                         ),

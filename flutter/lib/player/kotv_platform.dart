@@ -123,6 +123,7 @@ List<(String, String)> kotvPlayerOptions() {
       ('内置 ExoPlayer（默认）', 'innie#exo'),
       ('内置 MPV', 'innie#mpv'),
       ('内置 FVP', 'innie#fvp'),
+      ('外部播放器', 'outie#view'),
     ];
   }
   if (kotvIsIOS()) {
@@ -158,3 +159,16 @@ String kotvPlayerAvailKey(String playerVal) {
 }
 
 bool kotvPlayerAlwaysListed(String availKey) => availKey.startsWith('embed_');
+
+bool kotvIsExternalPlayer(String playerVal) => playerVal.trim().startsWith('outie#');
+
+/// 内置项始终保留。外部项只有 [available] 里对应键为真才保留。
+List<(String, String)> kotvVisiblePlayerOptions(
+  List<(String, String)> options,
+  Map<String, dynamic> available,
+) {
+  return [
+    for (final o in options)
+      if (kotvPlayerAlwaysListed(kotvPlayerAvailKey(o.$2)) || available[kotvPlayerAvailKey(o.$2)] == true) o,
+  ];
+}

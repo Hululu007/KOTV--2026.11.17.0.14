@@ -16,6 +16,7 @@ import '../player/art_playback.dart';
 import '../player/xg_playback.dart';
 import '../player/zw_playback.dart';
 import '../player/fullscreen_mode.dart';
+import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/video_eq.dart';
@@ -1513,6 +1514,31 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final renderMode = kotvNormalizePlayerRender(_renderMode);
     final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
     final startPlayer = (hasDrm && kotvIsAndroid()) ? 'innie#exo' : _prefPlayerVal;
+    if (kotvIsExternalPlayer(startPlayer)) {
+      if (!mounted || serial != _playSerial) return;
+      await _playback.pause();
+      if (!mounted || serial != _playSerial) return;
+      setState(() {
+        _playUrl = url;
+        _playDirect = directUrl;
+        _playHeaders = headers;
+        _playerVal = startPlayer;
+        _prefPlayerVal = startPlayer;
+      });
+      try {
+        await kotvLaunchExternalPlayer(
+          api: ref.read(apiProvider),
+          player: startPlayer,
+          url: url,
+          headers: headers,
+          title: _title,
+          vod: false,
+        );
+      } catch (e) {
+        if (mounted && serial == _playSerial) setState(() => _status = '$e');
+      }
+      return;
+    }
     final failover = KotvPlaybackFailover(
       playerVal: startPlayer,
       decodeMode: _prefDecodeMode,
@@ -2528,7 +2554,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     try {
       final navCtx = rootNavigatorKey.currentContext ?? context;
       if (!navCtx.mounted) return;
-      final options = kotvLivePlayerOptions();
+      Map<String, dynamic>? status;
+      try {
+        status = await ref.read(apiProvider).playerStatus();
+      } catch (_) {}
+      final avail = await kotvPlayerAvailability(status?['available'] as Map?);
+      if (!navCtx.mounted || !mounted) return;
+      final options = kotvVisiblePlayerOptions(kotvLivePlayerOptions(), avail);
       final v = await pickChoice(navCtx, title: '直播播放器', current: _prefPlayerVal, options: options);
       if (v == null || !mounted) return;
       final prev = _prefPlayerVal;
@@ -2546,8 +2578,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       } catch (_) {}
       if (v.startsWith('outie#') && _playUrl.isNotEmpty) {
         try {
-          await ref.read(apiProvider).playerExternal(url: _playUrl, player: v);
           await _playback.pause();
+          await kotvLaunchExternalPlayer(
+            api: ref.read(apiProvider),
+            player: v,
+            url: _playUrl,
+            headers: _playHeaders,
+            title: _title,
+            vod: false,
+          );
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(v)}打开')));
           }

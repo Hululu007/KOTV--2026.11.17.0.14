@@ -13,6 +13,7 @@ import '../api/kotv_engine_url.dart';
 import '../desktop/mini_player_window.dart';
 import '../models/models.dart';
 import '../player/danmaku_layer.dart';
+import '../player/external_player.dart';
 import '../player/exo_playback.dart';
 import '../player/fvp_playback.dart';
 import '../player/html_playback.dart';
@@ -2206,8 +2207,52 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       } else {
         startPlayer = _prefPlayerVal;
       }
+      var openPlayer = startPlayer;
+      var handoffMs = 0;
+      if (kotvIsExternalPlayer(startPlayer)) {
+        if (serial != _playAtSerial || !mounted) return;
+        final resumeOk = _resumeSeekMs > 0 &&
+            ep.name.trim() == _resumeSeekRemarks &&
+            (_resumeSeekFlag.isEmpty || flag.flag == _resumeSeekFlag || flag.show == _resumeSeekFlag);
+        final resumeMs = resumeOk ? _resumeSeekMs : 0;
+        final startMs = _skipOpeningEnding ? math.max(_openingSec * 1000, resumeMs) : resumeMs;
+        await _playback.pause();
+        if (serial != _playAtSerial || !mounted) return;
+        setState(() {
+          _playUrl = playUrl;
+          _playerVal = startPlayer;
+          _prefPlayerVal = startPlayer;
+          _status = '外部播放器…';
+        });
+        KotvExternalPlayResult? handed;
+        try {
+          handed = await kotvLaunchExternalPlayer(
+            api: ref.read(apiProvider),
+            player: startPlayer,
+            url: playUrl,
+            headers: rawHeaders,
+            title: '${d.name} · ${ep.name}',
+            positionMs: startMs,
+            vod: true,
+          );
+        } catch (e) {
+          if (serial == _playAtSerial && mounted) setState(() => _status = '$e');
+          return;
+        }
+        if (serial != _playAtSerial || !mounted) return;
+        if (handed?.endBy == 'playback_completion') {
+          unawaited(_advanceToNextEpisode(fromEnd: false));
+          return;
+        }
+        if (handed?.endBy != 'user') {
+          setState(() => _status = '已用外部播放器打开');
+          return;
+        }
+        openPlayer = kotvDefaultVodPlayer();
+        handoffMs = handed!.positionMs;
+      }
       final failover = KotvPlaybackFailover(
-        playerVal: startPlayer,
+        playerVal: openPlayer,
         decodeMode: _prefDecodeMode,
         lockExoForDrm: hasDrm && kotvIsAndroid(),
         enabled: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover) && !discHint,
@@ -2324,12 +2369,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           // ADB：open 返回前若 _openingSeekDone 仍为 false，进度回调会再 seek →
           // 第二次 MediaCodec flush → Render Avg≈1000ms（约 1fps）。
           // 仅 remarks/flag 与历史一致才吃续播，避免点其它集误带进度。
-          final resumeOk = _resumeSeekMs > 0 &&
+          final resumeOk = handoffMs <= 0 &&
+              _resumeSeekMs > 0 &&
               ep.name.trim() == _resumeSeekRemarks &&
               (_resumeSeekFlag.isEmpty || flag.flag == _resumeSeekFlag || flag.show == _resumeSeekFlag);
           final resumeMs = resumeOk ? _resumeSeekMs : 0;
           _clearResumeSeek();
-          final startMs = _skipOpeningEnding ? math.max(_openingSec * 1000, resumeMs) : resumeMs;
+          final startMs = handoffMs > 0
+              ? handoffMs
+              : (_skipOpeningEnding ? math.max(_openingSec * 1000, resumeMs) : resumeMs);
           // 片头已并入 startAt：必须在 open 之前置位，堵住 open 内 guard 期间的二次 seek。
           if (_skipOpeningEnding || startMs > 0) {
             _openingSeekDone = true;
@@ -3179,16 +3227,23 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             final prev = _playerVal;
             final next = kotvClampPlayerVal(v, live: false);
             if (next != prev) {
-              unawaited(() async {
-                // 先停旧后端画面，再切 _playerVal / 重播。
-                await _stopInactiveBackends(kotvEmbedBackend(next));
-                if (!mounted) return;
+              if (kotvIsExternalPlayer(next)) {
                 setState(() {
                   _playerVal = next;
                   _prefPlayerVal = next;
                 });
-                if (_epIdx >= 0) await _playAt(_epIdx);
-              }());
+              } else {
+                unawaited(() async {
+                  // 先停旧后端画面，再切 _playerVal / 重播。
+                  await _stopInactiveBackends(kotvEmbedBackend(next));
+                  if (!mounted) return;
+                  setState(() {
+                    _playerVal = next;
+                    _prefPlayerVal = next;
+                  });
+                  if (_epIdx >= 0) await _playAt(_epIdx);
+                }());
+              }
             }
           }
           // 画面/音频/字幕热更新
@@ -3205,7 +3260,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           return {for (final e in map.entries) e.key: '${e.value}'};
         },
         onPlayerStatus: api.playerStatus,
-        onExternalPlayer: (player) => api.playerExternal(url: _playUrl, player: player),
+        onExternalPlayer: (player) async {
+          final result = await kotvLaunchExternalPlayer(
+            api: api,
+            player: player,
+            url: _playUrl,
+            title: _detail?.name ?? '',
+            positionMs: _playback.position.inMilliseconds,
+            vod: true,
+          );
+          if (!mounted || result == null) return;
+          if (result.endBy == 'playback_completion') {
+            await _advanceToNextEpisode(fromEnd: false);
+            return;
+          }
+          if (result.endBy == 'user' && result.positionMs > 0) {
+            await _playback.seek(Duration(milliseconds: result.positionMs));
+            await _playback.play();
+          }
+        },
         onToggleKeep: () async {
           final kept = await LocalCollect.toggle(_collectItemFromDetail());
           if (mounted) {

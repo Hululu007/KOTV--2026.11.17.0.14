@@ -9,6 +9,7 @@ import '../player/danmaku_layer.dart';
 import '../player/disc_play.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_playback.dart';
+import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
 import '../player/tv_remote_keys.dart';
 import '../remote/remote_bridge.dart';
@@ -1757,7 +1758,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     try {
       status = await widget.onPlayerStatus?.call() ?? {};
     } catch (_) {}
-    final avail = Map<String, dynamic>.from((status['available'] as Map?) ?? const {});
+    final avail = await kotvPlayerAvailability(status['available'] as Map?);
     final cur = kotvClampPlayerVal('${status['current'] ?? ''}'.trim(), live: false);
     if (mounted) {
       setState(() {
@@ -1766,18 +1767,12 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       });
     }
 
-    final opts = kotvPlayerOptions();
-
-    bool listed(String key) {
-      if (kotvPlayerAlwaysListed(key)) return true;
-      return avail[key] == true;
-    }
+    final opts = kotvVisiblePlayerOptions(kotvPlayerOptions(), avail);
 
     if (!mounted) return;
     final rows = <Widget>[
       for (final o in opts)
-        if (listed(kotvPlayerAvailKey(o.$2)))
-          _chromeSelectRow(
+        _chromeSelectRow(
             icon: Icons.smart_display_outlined,
             label: o.$1,
             selected: cur == o.$2,
@@ -1812,8 +1807,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         return;
       }
       try {
-        await widget.onExternalPlayer?.call(next);
         await widget.player.pause();
+        await widget.onExternalPlayer?.call(next);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(next)}打开')));
           widget.onExit();

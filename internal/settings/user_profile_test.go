@@ -28,3 +28,22 @@ func TestClampPlayerDropsIINAOffMac(t *testing.T) {
 		t.Fatalf("macos: %v", vals)
 	}
 }
+
+func TestClampAndroidExternalView(t *testing.T) {
+	vals := map[string]string{
+		string(Player):     "outie#view",
+		string(PlayerLive): "outie#mpv",
+	}
+	clampPlayerKeysForPlatform(vals, "android")
+	if vals[string(Player)] != "outie#view" || vals[string(PlayerLive)] != "innie#exo" {
+		t.Fatalf("android: %v", vals)
+	}
+	vals = map[string]string{
+		string(Player):     "outie#view",
+		string(PlayerLive): "outie#view",
+	}
+	clampPlayerKeysForPlatform(vals, "windows")
+	if vals[string(Player)] != "innie#mpv" || vals[string(PlayerLive)] != "innie#mpv" {
+		t.Fatalf("windows: %v", vals)
+	}
+}

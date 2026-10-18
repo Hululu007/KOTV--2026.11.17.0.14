@@ -76,7 +76,7 @@ func clampPlayerKeysForPlatform(vals map[string]string, platform string) {
 func playerChoices(platform string) (def string, allowed []string, ok bool) {
 	switch platform {
 	case "android":
-		return "innie#exo", []string{"innie#exo", "innie#mpv", "innie#fvp"}, true
+		return "innie#exo", []string{"innie#exo", "innie#mpv", "innie#fvp", "outie#view"}, true
 	case "windows", "linux":
 		return "innie#mpv", []string{"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc"}, true
 	case "macos":

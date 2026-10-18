@@ -4,9 +4,11 @@ import android.Manifest
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.PictureInPictureParams
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.content.res.Configuration
 import android.net.TrafficStats
 import android.net.Uri
@@ -20,6 +22,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
@@ -32,6 +35,7 @@ class MainActivity : FlutterActivity() {
   private var pickConfigResult: MethodChannel.Result? = null
   private var storagePermResult: MethodChannel.Result? = null
   private var readMediaPermResult: MethodChannel.Result? = null
+  private var externalPlayResult: MethodChannel.Result? = null
   private var batteryPromptStarted = false
   /** 正在播放时：Home/切应用自动进系统画中画（Android 12+ setAutoEnterEnabled）。 */
   private var pipAutoEnter = false
@@ -186,6 +190,8 @@ class MainActivity : FlutterActivity() {
           }
         }
         // FEATURE_VULKAN_HARDWARE_VERSION ≥ 1.2
+        "hasExternalVideoApp" -> result.success(externalVideoTargets().any { it.activityInfo?.packageName != packageName })
+        "openExternalPlayer" -> openExternalPlayer(call, result)
         "isVulkanAvailable" -> {
           result.success(
             packageManager.hasSystemFeature(
@@ -339,6 +345,22 @@ class MainActivity : FlutterActivity() {
         }
         // 真实磁盘路径 → file://（绝对路径，相对 jar/js/py 相对该文件目录解析）
         pending.success(Uri.fromFile(File(path)).toString())
+      }
+      REQ_EXTERNAL_PLAYER -> {
+        val pending = externalPlayResult
+        externalPlayResult = null
+        if (pending == null) return
+        if (resultCode != Activity.RESULT_OK || data == null) {
+          pending.success(null)
+          return
+        }
+        val extras = data.extras
+        pending.success(
+          mapOf(
+            "endBy" to (extras?.getString("end_by") ?: ""),
+            "positionMs" to (extras?.getInt("position", 0) ?: 0),
+          ),
+        )
       }
       REQ_MANAGE_STORAGE -> {
         storagePermResult?.success(KotvFileChooser.canWriteSharedStorage(this))
@@ -508,5 +530,72 @@ class MainActivity : FlutterActivity() {
     private const val REQ_PICK_CONFIG = 0xC459
     private const val REQ_MANAGE_STORAGE = 0xC45A
     private const val REQ_READ_MEDIA = 0xC45B
+    private const val REQ_EXTERNAL_PLAYER = 0xC45C
+  }
+
+  private fun externalViewIntent(url: String): Intent {
+    return Intent(Intent.ACTION_VIEW).apply {
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      setDataAndType(Uri.parse(url), "video/*")
+    }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun externalVideoTargets(): List<ResolveInfo> {
+    return packageManager.queryIntentActivities(
+      externalViewIntent("http://127.0.0.1/"),
+      PackageManager.MATCH_DEFAULT_ONLY,
+    )
+  }
+
+  private fun openExternalPlayer(call: MethodCall, result: MethodChannel.Result) {
+    if (externalPlayResult != null) {
+      result.error("busy", "外部播放器已打开", null)
+      return
+    }
+    val url = call.argument<String>("url")?.trim().orEmpty()
+    if (url.isEmpty()) {
+      result.error("url", "empty url", null)
+      return
+    }
+    val intent = externalViewIntent(url)
+    val headerList = ArrayList<String>()
+    val rawHeaders = call.argument<Map<*, *>>("headers")
+    rawHeaders?.forEach { (k, v) ->
+      val key = k?.toString()?.trim().orEmpty()
+      val value = v?.toString()?.trim().orEmpty()
+      if (key.isNotEmpty() && value.isNotEmpty()) {
+        headerList.add(key)
+        headerList.add(value)
+      }
+    }
+    if (headerList.isNotEmpty()) {
+      intent.putExtra("headers", headerList.toTypedArray())
+    }
+    val title = call.argument<String>("title")?.trim().orEmpty()
+    if (title.isNotEmpty()) {
+      intent.putExtra("title", title)
+      intent.putExtra("name", title)
+    }
+    if (call.argument<Boolean>("vod") == true) {
+      intent.putExtra("return_result", true)
+      val pos = (call.argument<Number>("positionMs")?.toInt() ?: 0).coerceAtLeast(0)
+      intent.putExtra("position", pos)
+    }
+    val self = externalVideoTargets().mapNotNull { info ->
+      val act = info.activityInfo ?: return@mapNotNull null
+      if (act.packageName != packageName) return@mapNotNull null
+      ComponentName(act.packageName, act.name)
+    }
+    val chooser = Intent.createChooser(intent, null)
+      .putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, self.toTypedArray())
+    externalPlayResult = result
+    try {
+      @Suppress("DEPRECATION")
+      startActivityForResult(chooser, REQ_EXTERNAL_PLAYER)
+    } catch (t: Throwable) {
+      externalPlayResult = null
+      result.error("external", t.message ?: t.toString(), null)
+    }
   }
 }
