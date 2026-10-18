@@ -440,7 +440,7 @@ class ExoPlayback extends KotvPlayback {
     // 点播即挂（详情已先挂播控进树）；后台仅音频抑制时不挂。
     await _syncSurfaceLayer();
     try {
-      await KotvBufferBudget.warm();
+      await KotvBufferBudget.warm(force: true);
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,

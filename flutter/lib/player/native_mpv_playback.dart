@@ -453,7 +453,7 @@ class NativeMpvPlayback extends KotvPlayback {
     // 后台仅音频抑制时不挂。
     await _syncSurfaceLayer();
     try {
-      await KotvBufferBudget.warm();
+      await KotvBufferBudget.warm(force: true);
       final props = <String, String>{
         ..._opts.propertyMap(live: live),
         ..._extraOpenProps,
@@ -694,6 +694,7 @@ class NativeMpvPlayback extends KotvPlayback {
   Future<void> applyOpts(KotvMpvOpts opts) async {
     _opts = opts;
     try {
+      await KotvBufferBudget.warm(force: true);
       await _ch.invokeMethod('setOpts', {
         'decode': opts.hwdecValue(),
         'gpuNext': opts.gpuNext,

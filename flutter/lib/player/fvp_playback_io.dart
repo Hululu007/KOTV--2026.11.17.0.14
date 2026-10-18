@@ -400,7 +400,7 @@ class FvpPlayback extends KotvPlayback {
       // 单一路径钉死 min=0（勿省略 max：Dart 默认 max=-1 会把 max/drop 打回 mdk 默认）。
       // 点播默认 minMs=1000 → 欠载约每秒一帧（ADB MediaCodec timediff≈1000ms）。
       try {
-        await KotvBufferBudget.warm();
+        await KotvBufferBudget.warm(force: true);
       } catch (_) {}
       _applyBufferRange(c);
       await c.setVolume((_volume / 100).clamp(0, 1));
