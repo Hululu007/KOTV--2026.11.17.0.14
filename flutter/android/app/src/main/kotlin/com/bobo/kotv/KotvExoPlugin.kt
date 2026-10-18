@@ -145,6 +145,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var softVideoPrefer = false
   /** 点播缓冲倍率 1–10。 */
   private var bufferFactor = 1
+  /** 前向缓冲字节顶，由 Dart [KotvBufferBudget] 下发。 */
+  private var bufferBytes: Int = 0
   /** 首选字幕语言（BCP-47，逗号分隔）；空则跟系统 Locale。 */
   private var preferredTextLangs: String = ""
   /** 点播磁盘预读时长（毫秒）；仅 diskCache 开启时生效。 */
@@ -396,6 +398,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<Boolean>("softVideoPrefer")?.let { softVideoPrefer = it }
         call.argument<Number>("bufferFactor")?.toInt()?.let {
           bufferFactor = it.coerceIn(1, 10)
+        }
+        call.argument<Number>("bufferBytes")?.toLong()?.let { n ->
+          if (n > 0L) bufferBytes = n.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         }
         call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
         call.argument<Number>("diskPreloadMs")?.toLong()?.let {
@@ -1196,10 +1201,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     val selector = buildTrackSelector(ctx, effective)
     trackSelector = selector
-    // 时长倍率是用户设置。字节顶按可用内存比例，未满时长时也不再继续堆缓冲。
+    // 时长倍率是用户设置。字节顶用 open 传来的那一份，未满时长时也不再继续堆缓冲。
     val factor = bufferFactor.coerceIn(1, 10)
-    val targetBytes = KotvMemBudget.bytes(ctx)
-    val loadControl: LoadControl =
+    val loadBuilder =
       DefaultLoadControl.Builder()
         .setBufferDurationsMs(
           DefaultLoadControl.DEFAULT_MIN_BUFFER_MS * factor,
@@ -1207,9 +1211,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
           DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
         )
-        .setTargetBufferBytes(targetBytes)
         .setPrioritizeTimeOverSizeThresholds(false)
-        .build()
+    if (bufferBytes > 0) {
+      loadBuilder.setTargetBufferBytes(bufferBytes)
+    }
+    val loadControl: LoadControl = loadBuilder.build()
     val bandwidthMeter = DefaultBandwidthMeter.Builder(ctx).build()
     val builder = ExoPlayer.Builder(ctx)
       .setMediaSourceFactory(mediaSourceFactory)

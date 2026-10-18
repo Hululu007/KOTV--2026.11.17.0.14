@@ -117,7 +117,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var surfaceLayerEnabled = false
   /** default|fill|zoom|16:9|4:3 — Surface 不吃 Flutter BoxFit，用 keepaspect/panscan/override。 */
   private var aspectMode: String = "default"
-  /** ensurePlayer 时是否按直播初始化（点播会写 demuxer-max-bytes；模式变了须重建）。 */
+  /** ensurePlayer 时是否按直播初始化（磁盘缓存和 cache-pause 不同，模式变了须重建）。 */
   private var createdAsLive: Boolean? = null
   /** ensurePlayer 时写入的 tls-verify；变更须重建上下文。 */
   private var createdTlsVerify: Boolean? = null

@@ -6,7 +6,7 @@ import 'kotv_platform.dart';
 /// 各播放器共用的「前向缓冲」内存预算（字节）。
 ///
 /// 策略（Exo / MPV / 外部 VLC prefetch 一致）：
-/// 1. **默认用内存**囤前向缓冲（[KotvMemBudget] / demuxer-max-bytes），起播与卡顿恢复快、无磁盘抖动；
+/// 1. **默认用内存**囤前向缓冲（mpv `demuxer-max-bytes`、Exo `targetBufferBytes`），起播与卡顿恢复快、无磁盘抖动；
 /// 2. **磁盘缓存是可选增强**：仅点播、设置开启时生效（Exo SimpleCache / MPV cache-on-disk），
 ///    用来跨会话复用与弱网预读，不是直播主路径；
 /// 3. 播出去的数据应释放，allocated 降到预算以下后**继续补满**到上限；

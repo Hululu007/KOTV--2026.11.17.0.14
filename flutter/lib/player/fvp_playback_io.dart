@@ -84,7 +84,6 @@ class FvpPlayback extends KotvPlayback {
   int _audioOffsetMs = 0;
   bool _previewVideoOriginal = false;
   bool _previewAudioOriginal = false;
-  bool _liveBufferSet = false;
   bool _vodBufferSet = false;
 
   VideoPlayerController? get controller => _c;
@@ -285,7 +284,6 @@ class FvpPlayback extends KotvPlayback {
     );
     _opening = true;
     _live = live;
-    _liveBufferSet = false;
     _vodBufferSet = false;
     _lastError = null;
     _completed = false;
@@ -638,7 +636,6 @@ class FvpPlayback extends KotvPlayback {
     await c.seekTo(d);
     // seek/flush 后 mdk 会把 minMs 打回默认 1000；清标志再钉死 min=0。
     _vodBufferSet = false;
-    _liveBufferSet = false;
     _applyBufferRange(c);
     notifyListeners();
   }
@@ -859,20 +856,15 @@ class FvpPlayback extends KotvPlayback {
         final latencyMs = kotvIsDesktop() ? 8000 : 4000;
         final drop = kotvIsDesktop();
         final bps = _mediaBitsPerSec(c);
-        if (bps <= 0) {
-          if (_liveBufferSet) return;
-          c.setBufferRange(min: 0, max: latencyMs, drop: drop);
-          return;
-        }
-        if (_liveBufferSet) return;
         var maxMs = latencyMs;
-        final byMem = KotvBufferBudget.fvpMaxBufferMs(
-          KotvBufferBudget.bytes(),
-          bitsPerSec: bps,
-        );
-        if (byMem > 0 && byMem < maxMs) maxMs = byMem;
+        if (bps > 0) {
+          final byMem = KotvBufferBudget.fvpMaxBufferMs(
+            KotvBufferBudget.bytes(),
+            bitsPerSec: bps,
+          );
+          if (byMem > 0 && byMem < maxMs) maxMs = byMem;
+        }
         c.setBufferRange(min: 0, max: maxMs, drop: drop);
-        _liveBufferSet = true;
         _vodBufferSet = false;
         return;
       }
@@ -893,7 +885,6 @@ class FvpPlayback extends KotvPlayback {
       c.setBufferRange(min: 0, max: maxMs, drop: false);
       if (bps > 0) {
         _vodBufferSet = true;
-        _liveBufferSet = false;
       }
     } catch (_) {}
   }

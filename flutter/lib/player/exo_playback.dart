@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'buffer_budget.dart';
 import 'exo_surface.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
@@ -439,6 +440,7 @@ class ExoPlayback extends KotvPlayback {
     // 点播即挂（详情已先挂播控进树）；后台仅音频抑制时不挂。
     await _syncSurfaceLayer();
     try {
+      await KotvBufferBudget.warm();
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,
@@ -458,6 +460,7 @@ class ExoPlayback extends KotvPlayback {
         'softAudioPrefer': _softAudioPrefer,
         'softVideoPrefer': _softVideoPrefer,
         'bufferFactor': _bufferFactor,
+        'bufferBytes': KotvBufferBudget.bytes(),
         'preferredTextLangs': _preferredTextLangs,
         'diskPreloadMs': (_diskCache && !live) ? _diskPreloadMs : 0,
         'diskPreloadThreads': _diskPreloadThreads,

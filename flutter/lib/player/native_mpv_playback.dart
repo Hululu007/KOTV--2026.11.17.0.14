@@ -309,7 +309,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'audioPassThrough': _opts.audioPassThrough,
         'diskCache': _opts.diskCache,
         'render': _renderMode,
-        // 直播须在 create/ensurePlayer 时写入，避免套上点播 demuxer 预算。
+        // 直播须在 create 时写入，磁盘缓存和 cache-pause 按这次会话来。
         'live': live,
       });
       if (res is Map) {

@@ -44,7 +44,7 @@ String _trackLabel(dynamic t) {
 
 /// media_kit / libmpv（桌面 / iOS 等非 Android 原生插件路径）。
 class MediaKitPlayback extends KotvPlayback {
-  /// [live]=true：构造期 [_prepareOpts] 就跳过点播 demuxer（直播页必须传，避免先写入点播预算）。
+  /// [live]=true：构造期就关 cache-pause，并且不打开磁盘缓存。字节上限与点播相同。
   MediaKitPlayback(
     this.player, {
     VideoController? controller,
