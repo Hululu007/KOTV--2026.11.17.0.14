@@ -136,14 +136,35 @@ def _install_java_module_stubs():
     sys.modules["com.chaquo.python.Python"] = py_mod
     sys.modules["com.chaquo.python"].Python = Python
 
-    def jclass(name):
-        if name == "com.github.catvod.Proxy":
-            return Proxy
-        raise LookupError(name)
+    # 安卓解释器自带 java.jclass。这里再写 sys.modules["java"] 会盖掉它。
+    if not _host_java_present():
+        def jclass(name):
+            if name == "com.github.catvod.Proxy":
+                return Proxy
+            raise LookupError(name)
 
-    java_mod = types.ModuleType("java")
-    java_mod.jclass = jclass
-    sys.modules["java"] = java_mod
+        java_mod = types.ModuleType("java")
+        java_mod.jclass = jclass
+        sys.modules["java"] = java_mod
+
+
+def _host_java_present():
+    mod = sys.modules.get("java")
+    if mod is None:
+        try:
+            import java as mod
+        except Exception:
+            return False
+    probe = getattr(mod, "jclass", None)
+    if not callable(probe):
+        return False
+    try:
+        probe("java.lang.Object")
+    except LookupError:
+        return False
+    except Exception:
+        return True
+    return True
 
 
 _install_java_module_stubs()
