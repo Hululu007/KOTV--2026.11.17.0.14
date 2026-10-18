@@ -146,9 +146,11 @@ func New() (*App, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	a.Server.SetSyncHandler(server.NewAppSyncHandler(db, func(code string) bool {
+	syncH := server.NewAppSyncHandler(db, func(code string) bool {
 		return code != "" && code == settings.Get(settings.SyncPairCode)
-	}))
+	})
+	syncH.LoadConfig = a.loadVodURL
+	a.Server.SetSyncHandler(syncH)
 	a.Server.SetLibraryDB(db)
 
 	go a.listenEvents()

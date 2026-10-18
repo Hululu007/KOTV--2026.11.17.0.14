@@ -136,6 +136,15 @@ def _install_java_module_stubs():
     sys.modules["com.chaquo.python.Python"] = py_mod
     sys.modules["com.chaquo.python"].Python = Python
 
+    def jclass(name):
+        if name == "com.github.catvod.Proxy":
+            return Proxy
+        raise LookupError(name)
+
+    java_mod = types.ModuleType("java")
+    java_mod.jclass = jclass
+    sys.modules["java"] = java_mod
+
 
 _install_java_module_stubs()
 

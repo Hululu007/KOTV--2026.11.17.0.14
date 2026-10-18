@@ -102,9 +102,26 @@ func (a *App) ensureCastConfig(configJSON string) error {
 	if src == cur {
 		return nil
 	}
-	settings.Set(settings.VOD, src)
-	_ = settings.Save()
-	return a.LoadVodSource(src)
+	return a.loadVodURL(src, "")
+}
+
+// loadVodURL 加载点播地址。当前源由 LoadVod 成功后再写入。name 非空时记下显示名，并通知首页重拉。
+func (a *App) loadVodURL(url, name string) error {
+	if err := a.LoadVodSource(url); err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name != "" && a.DB != nil {
+		saved := strings.TrimSpace(settings.Get(settings.VOD))
+		if saved == "" {
+			saved = strings.TrimSpace(url)
+		}
+		if err := a.DB.SetConfigName(saved, database.ConfigTypeSite, name); err != nil {
+			log.Printf("config name: %v", err)
+		}
+	}
+	remote.DefaultQueue.PushRefresh("category", "", "")
+	return nil
 }
 
 type castHistoryDTO struct {
