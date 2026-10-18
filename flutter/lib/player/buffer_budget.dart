@@ -3,16 +3,14 @@ import 'package:flutter/services.dart';
 
 import 'kotv_platform.dart';
 
-/// 各播放器共用的「前向缓冲」内存预算（字节）。
+/// 各播放器共用的前向缓冲字节预算。
 ///
-/// 策略（Exo / MPV / 外部 VLC prefetch 一致）：
-/// 1. **默认用内存**囤前向缓冲（mpv `demuxer-max-bytes`、Exo `targetBufferBytes`），起播与卡顿恢复快、无磁盘抖动；
-/// 2. **磁盘缓存是可选增强**：仅点播、设置开启时生效（Exo SimpleCache / MPV cache-on-disk），
-///    用来跨会话复用与弱网预读，不是直播主路径；
-/// 3. 播出去的数据应释放，allocated 降到预算以下后**继续补满**到上限；
-/// 4. 不设 mpv `cache-secs` / `demuxer-readahead-secs` 等**固定秒数**预读目标。
-///
-/// Web / HTML5：由浏览器自己管缓冲，不走本预算。
+/// 前向到达上限就停止继续读。已经播过、超出回看保留的数据会丢掉，空出来的额度继续往前补。
+/// mpv：`demuxer-max-bytes` 是前向上限，`demuxer-max-back-bytes` 是保留的已播数据。
+/// Exo：`targetBufferBytes` 或最长缓冲时长到了就停读；回看缓冲时长为 0，播放位置之前的样本会丢掉。
+/// FVP：队列时长到了就不再推包；`drop` 为 false 时等解码把队列消化到上限以下。
+/// 磁盘缓存只在点播且设置开启时另走。不设 mpv `cache-secs` / `demuxer-readahead-secs`。
+/// Web 和外部播放器不走这份预算。
 ///
 /// 预算按当前可用内存的比例：约 15% 可用内存，且不超过总内存的 5%。
 /// 不设固定字节上下限。读不到总内存时，桌面按 8GiB、其它按 3GiB 估算后再取 5%。
