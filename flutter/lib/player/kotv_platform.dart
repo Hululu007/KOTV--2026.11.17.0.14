@@ -145,45 +145,16 @@ List<(String, String)> kotvVodPlayerOptions() => kotvPlayerOptions();
 
 List<(String, String)> kotvLivePlayerOptions() => kotvPlayerOptions();
 
-/// 引擎 Available() 里的键。内置播放器不看本机是否装了外部程序。
+/// 引擎 Available() 里的键。内置项带 embed_ 前缀，不看本机是否装了外部程序。
 String kotvPlayerAvailKey(String playerVal) {
-  switch (playerVal.trim()) {
-    case 'innie#html':
-      return 'embed_html';
-    case 'innie#art':
-      return 'embed_art';
-    case 'innie#xg':
-      return 'embed_xg';
-    case 'innie#zw':
-      return 'embed_zw';
-    case 'innie#exo':
-      return 'embed_exo';
-    case 'innie#mpv':
-      return 'embed_mpv';
-    case 'innie#fvp':
-      return 'embed_fvp';
-    case 'outie#mpv':
-      return 'mpv';
-    case 'outie#vlc':
-      return 'vlc';
-    case 'outie#iina':
-      return 'iina';
-    default:
-      return '';
-  }
+  final v = playerVal.trim();
+  final i = v.indexOf('#');
+  if (i <= 0 || i >= v.length - 1) return '';
+  final mode = v.substring(0, i);
+  final name = v.substring(i + 1);
+  if (mode == 'innie') return 'embed_$name';
+  if (mode == 'outie') return name;
+  return '';
 }
 
-bool kotvPlayerAlwaysListed(String availKey) {
-  switch (availKey) {
-    case 'embed_mpv':
-    case 'embed_exo':
-    case 'embed_fvp':
-    case 'embed_html':
-    case 'embed_art':
-    case 'embed_xg':
-    case 'embed_zw':
-      return true;
-    default:
-      return false;
-  }
-}
+bool kotvPlayerAlwaysListed(String availKey) => availKey.startsWith('embed_');

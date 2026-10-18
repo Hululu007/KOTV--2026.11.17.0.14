@@ -21,6 +21,20 @@ func TestExternalArgvDarwinApps(t *testing.T) {
 		t.Fatalf("vlc argv=%q", argv)
 	}
 
+	argv, _, err = externalArgv("darwin", "vlc", url, "", "/tmp/Foo.app/VLC.app/Contents/MacOS/VLC", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if argv[2] != "/tmp/Foo.app/VLC.app" {
+		t.Fatalf("nested app=%q", argv)
+	}
+	if vlcLaunchable("darwin", "/usr/local/bin/vlc", "") {
+		t.Fatal("bare darwin vlc binary is not launchable")
+	}
+	if !vlcLaunchable("windows", `C:/Program Files/VideoLAN/VLC/vlc.exe`, "") {
+		t.Fatal("windows vlc binary should be launchable")
+	}
+
 	argv, _, err = externalArgv("darwin", "vlc", url, "", "/usr/local/bin/vlc", "/Users/me/Applications/VLC.app", "", "")
 	if err != nil {
 		t.Fatal(err)

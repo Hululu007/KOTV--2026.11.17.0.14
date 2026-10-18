@@ -51,13 +51,19 @@ func PreferEmbed() bool {
 	if player == "" {
 		player = "innie#mpv"
 	}
-	parts := strings.SplitN(player, "#", 2)
-	mode := parts[0]
-	name := "mpv"
-	if len(parts) > 1 && parts[1] != "" {
-		name = strings.ToLower(parts[1])
-	}
+	mode, name := ParsePlayer(player)
 	return mode == "innie" && name == "mpv"
+}
+
+// ParsePlayer 拆开 mode#name。名字空着时按 mpv；模式空着时保持空。
+func ParsePlayer(raw string) (mode, name string) {
+	parts := strings.SplitN(raw, "#", 2)
+	mode = parts[0]
+	name = "mpv"
+	if len(parts) > 1 && parts[1] != "" {
+		name = parts[1]
+	}
+	return mode, strings.ToLower(name)
 }
 
 // Play 严格按设置启动对应播放器；innie#mpv 且已挂载画面时走页内嵌入。
@@ -66,16 +72,10 @@ func Play(url string, histKey string) error {
 	if player == "" {
 		player = "innie#mpv"
 	}
-	parts := strings.SplitN(player, "#", 2)
-	mode := parts[0]
-	name := "mpv"
-	if len(parts) > 1 && parts[1] != "" {
-		name = strings.ToLower(parts[1])
-	}
+	mode, name := ParsePlayer(player)
 	if mode == "" {
 		mode = "innie"
 	}
-	name = strings.ToLower(name)
 
 	log.Printf("播放器设置=%s → mode=%s name=%s url=%s", player, mode, name, url)
 
@@ -177,14 +177,8 @@ func launchExternal(name, url, histKey string) error {
 	lastPosition = -1
 	lastDuration = 0
 
-	mpvBin := resolveBin(findPlayer("mpv"))
-	vlcBin := resolveBin(findPlayer("vlc"))
-	sock := ""
-	if name == "mpv" && histKey != "" && mpvBin != "" {
-		sock = mpvNewIPCPath()
-		mpvCleanupIPC(sock)
-	}
-	argv, dir, err := externalArgv(runtime.GOOS, name, url, mpvBin, vlcBin, appruntime.MacApp("VLC"), appruntime.MacApp("IINA"), sock)
+	mpvBin, vlcBin, vlcApp, iinaApp, sock := externalBins(name, histKey)
+	argv, dir, err := externalArgv(runtime.GOOS, name, url, mpvBin, vlcBin, vlcApp, iinaApp, sock)
 	if err != nil {
 		if sock != "" {
 			mpvCleanupIPC(sock)
@@ -221,6 +215,23 @@ func launchExternal(name, url, histKey string) error {
 	return nil
 }
 
+func externalBins(name, histKey string) (mpvBin, vlcBin, vlcApp, iinaApp, sock string) {
+	switch name {
+	case "mpv":
+		mpvBin = resolveBin(appruntime.MPV())
+		if histKey != "" && mpvBin != "" {
+			sock = mpvNewIPCPath()
+			mpvCleanupIPC(sock)
+		}
+	case "vlc":
+		vlcBin = resolveBin(appruntime.VLC())
+		vlcApp = appruntime.MacApp("VLC")
+	case "iina":
+		iinaApp = appruntime.MacApp("IINA")
+	}
+	return mpvBin, vlcBin, vlcApp, iinaApp, sock
+}
+
 func resolveBin(bin string) string {
 	if bin == "" {
 		return ""
@@ -247,18 +258,15 @@ func externalArgv(goos, name, url, mpvBin, vlcBin, vlcApp, iinaApp, ipcSock stri
 		// 工作目录放在二进制旁，.app 里的库按可执行文件相对路径加载。
 		return args, filepath.Dir(mpvBin), nil
 	case "vlc":
+		if !vlcLaunchable(goos, vlcBin, vlcApp) {
+			return nil, "", fmt.Errorf("未找到 VLC")
+		}
 		if goos == "darwin" {
 			app := appBundle(vlcBin)
 			if app == "" {
 				app = vlcApp
 			}
-			if app == "" {
-				return nil, "", fmt.Errorf("未找到 VLC")
-			}
 			return []string{"open", "-a", app, url}, "", nil
-		}
-		if vlcBin == "" {
-			return nil, "", fmt.Errorf("未找到 VLC")
 		}
 		return []string{vlcBin, url}, "", nil
 	case "iina":
@@ -274,9 +282,16 @@ func externalArgv(goos, name, url, mpvBin, vlcBin, vlcApp, iinaApp, ipcSock stri
 	}
 }
 
+func vlcLaunchable(goos, bin, app string) bool {
+	if goos == "darwin" {
+		return appBundle(bin) != "" || app != ""
+	}
+	return bin != ""
+}
+
 func appBundle(bin string) string {
 	const marker = ".app/"
-	idx := strings.Index(bin, marker)
+	idx := strings.LastIndex(bin, marker)
 	if idx < 0 {
 		return ""
 	}
@@ -302,7 +317,7 @@ func pollMPVProgress(sock string, stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-ticker.C:
-			pos, dur := mpvGetTime(sock)
+			pos, dur := mpvIPCGetTime(sock)
 			if pos < 0 {
 				continue
 			}
@@ -334,10 +349,6 @@ func pollMPVProgress(sock string, stop <-chan struct{}) {
 			}
 		}
 	}
-}
-
-func mpvGetTime(sock string) (pos, dur float64) {
-	return mpvIPCGetTime(sock)
 }
 
 func flushProgressLocked() {
@@ -379,15 +390,15 @@ func stopLocked() {
 	}
 }
 
-// findPlayer 返回可执行路径；找不到返回空字符串。
-func findPlayer(name string) string {
-	switch strings.ToLower(name) {
-	case "mpv", "":
-		return appruntime.MPV()
-	case "vlc":
-		return appruntime.VLC()
-	default:
-		return ""
+// Available 返回当前机器上可用的播放器说明（设置页展示用）。
+func Available() map[string]bool {
+	return map[string]bool{
+		"vlc":       vlcLaunchable(runtime.GOOS, resolveBin(appruntime.VLC()), appruntime.MacApp("VLC")),
+		"mpv":       appruntime.MPV() != "",
+		"iina":      appruntime.MacApp("IINA") != "",
+		"embed_fvp": true,
+		// Flutter 页内 MPV 走原生通道，库与 fvp/mdk 同目录。
+		"embed_mpv": true,
 	}
 }
 
@@ -404,25 +415,9 @@ func ExternalPlay(url, name string) error {
 	return launchExternal(name, url, "")
 }
 
-// Available 返回当前机器上可用的播放器说明（设置页展示用）。
-func Available() map[string]bool {
-	return map[string]bool{
-		"vlc":       findPlayer("vlc") != "" || appruntime.MacApp("VLC") != "",
-		"mpv":       findPlayer("mpv") != "",
-		"iina":      appruntime.MacApp("IINA") != "",
-		"embed_fvp": true,
-		// Flutter 页内 MPV 走原生通道，库与 fvp/mdk 同目录。
-		"embed_mpv": true,
-	}
-}
-
 func isEd2k(u string) bool {
 	u = strings.ToLower(strings.TrimSpace(u))
 	return strings.HasPrefix(u, "ed2k:")
-}
-
-func isTorrentLike(u string) bool {
-	return thunder.Match(u) || isEd2k(u)
 }
 
 func openSystemURL(u string) error {

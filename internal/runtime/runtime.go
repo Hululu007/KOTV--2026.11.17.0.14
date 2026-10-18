@@ -136,6 +136,19 @@ func firstExisting(candidates ...string) string {
 	return ""
 }
 
+// firstPresent 只判断系统里已有的文件，不改权限。
+func firstPresent(candidates ...string) string {
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			return c
+		}
+	}
+	return ""
+}
+
 func underRoots(rel ...string) []string {
 	var out []string
 	for _, root := range Roots() {
@@ -287,12 +300,12 @@ func MacApp(name string) string {
 func VLC() string {
 	switch runtime.GOOS {
 	case "darwin":
-		if p := firstExisting(macAppBinary("VLC", "VLC")...); p != "" {
+		if p := firstPresent(macAppBinary("VLC", "VLC")...); p != "" {
 			return p
 		}
 	case "windows":
 		for _, base := range programFilesBases() {
-			if p := firstExisting(filepath.Join(base, "VideoLAN", "VLC", "vlc.exe")); p != "" {
+			if p := firstPresent(filepath.Join(base, "VideoLAN", "VLC", "vlc.exe")); p != "" {
 				return p
 			}
 		}
@@ -318,12 +331,12 @@ func MPV() string {
 	case "darwin":
 		sys := []string{"/opt/homebrew/bin/mpv", "/usr/local/bin/mpv"}
 		sys = append(sys, macAppBinary("mpv", "mpv")...)
-		if p := firstExisting(sys...); p != "" {
+		if p := firstPresent(sys...); p != "" {
 			return p
 		}
 	case "windows":
 		for _, base := range programFilesBases() {
-			if p := firstExisting(filepath.Join(base, "mpv", "mpv.exe")); p != "" {
+			if p := firstPresent(filepath.Join(base, "mpv", "mpv.exe")); p != "" {
 				return p
 			}
 		}

@@ -61,34 +61,32 @@ func OverlayClientProfile(vals map[string]string, platform string) {
 }
 
 func clampPlayerKeysForPlatform(vals map[string]string, platform string) {
-	vals[string(Player)] = strings.TrimSpace(vals[string(Player)])
-	vals[string(PlayerLive)] = strings.TrimSpace(vals[string(PlayerLive)])
+	for _, key := range []Type{Player, PlayerLive} {
+		vals[string(key)] = strings.TrimSpace(vals[string(key)])
+	}
+	def, allowed, ok := playerChoices(platform)
+	if !ok {
+		return
+	}
+	for _, key := range []Type{Player, PlayerLive} {
+		vals[string(key)] = clampListedPlayer(vals[string(key)], def, allowed...)
+	}
+}
+
+func playerChoices(platform string) (def string, allowed []string, ok bool) {
 	switch platform {
 	case "android":
-		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#exo",
-			"innie#exo", "innie#mpv", "innie#fvp")
-		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#exo",
-			"innie#exo", "innie#mpv", "innie#fvp")
+		return "innie#exo", []string{"innie#exo", "innie#mpv", "innie#fvp"}, true
 	case "windows", "linux":
-		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#mpv",
-			"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc")
-		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#mpv",
-			"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc")
+		return "innie#mpv", []string{"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc"}, true
 	case "macos":
-		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#mpv",
-			"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc", "outie#iina")
-		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#mpv",
-			"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc", "outie#iina")
+		return "innie#mpv", []string{"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc", "outie#iina"}, true
 	case "ios":
-		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#mpv",
-			"innie#mpv", "innie#fvp", "innie#html")
-		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#mpv",
-			"innie#mpv", "innie#fvp", "innie#html")
+		return "innie#mpv", []string{"innie#mpv", "innie#fvp", "innie#html"}, true
 	case "web":
-		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#html",
-			"innie#html", "innie#art", "innie#xg", "innie#zw")
-		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#html",
-			"innie#html", "innie#art", "innie#xg", "innie#zw")
+		return "innie#html", []string{"innie#html", "innie#art", "innie#xg", "innie#zw"}, true
+	default:
+		return "", nil, false
 	}
 }
 

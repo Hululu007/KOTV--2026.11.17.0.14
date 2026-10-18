@@ -2077,12 +2077,7 @@ func (a *App) APIPlayerEmbed(playURL, playerVal, histKey string) error {
 	if playerVal == "" {
 		playerVal = "innie#mpv"
 	}
-	parts := strings.SplitN(playerVal, "#", 2)
-	mode := parts[0]
-	name := "mpv"
-	if len(parts) > 1 && parts[1] != "" {
-		name = strings.ToLower(parts[1])
-	}
+	mode, name := player.ParsePlayer(playerVal)
 	if mode != "innie" || name != "mpv" {
 		return fmt.Errorf("embed 仅支持 innie#mpv")
 	}
@@ -2158,12 +2153,7 @@ func (a *App) APIPlayerExternal(playURL, playerVal string) error {
 	if playerVal == "" {
 		playerVal = "outie#mpv"
 	}
-	parts := strings.SplitN(playerVal, "#", 2)
-	mode := parts[0]
-	name := "mpv"
-	if len(parts) > 1 && parts[1] != "" {
-		name = strings.ToLower(parts[1])
-	}
+	mode, name := player.ParsePlayer(playerVal)
 	if mode == "innie" {
 		return fmt.Errorf("内置播放器请在页内播放")
 	}
