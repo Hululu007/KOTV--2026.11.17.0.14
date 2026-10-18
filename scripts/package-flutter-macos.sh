@@ -124,26 +124,17 @@ chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
 # 清理历史残留的 MacOS/kotv-engine
 rm -f "$OUT_APP/Contents/MacOS/kotv-engine" "$OUT_APP/Contents/MacOS/kotv-engine.exe" 2>/dev/null || true
 
-WRAP="$OUT_APP/Contents/MacOS/kotv-launch"
+# 主程序必须是包内的 Mach-O。运行时目录和 Vulkan ICD 由 AppDelegate 按包路径设置。
 MAIN_BIN="KO影视"
 [[ -x "$OUT_APP/Contents/MacOS/$MAIN_BIN" ]] || MAIN_BIN="kotv"
-cat > "$WRAP" <<EOF
-#!/bin/bash
-DIR="\$(cd "\$(dirname "\$0")" && pwd)"
-if [[ -z "\${KOTV_RUNTIME:-}" && -d "\$DIR/../Resources/runtime" ]]; then
-  export KOTV_RUNTIME="\$DIR/../Resources/runtime"
-fi
-# 自带 MoltenVK ICD（与 Frameworks/libMoltenVK.dylib 配套）
-ICD="\$DIR/../Resources/vulkan/icd.d/MoltenVK_icd.json"
-if [[ -f "\$ICD" ]]; then
-  export VK_ICD_FILENAMES="\$ICD\${VK_ICD_FILENAMES:+:\$VK_ICD_FILENAMES}"
-fi
-exec "\$DIR/$MAIN_BIN" "\$@"
-EOF
-chmod +x "$WRAP"
+/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $MAIN_BIN" "$OUT_APP/Contents/Info.plist" 2>/dev/null \
+  || plutil -replace CFBundleExecutable -string "$MAIN_BIN" "$OUT_APP/Contents/Info.plist"
 
-/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable kotv-launch" "$OUT_APP/Contents/Info.plist" 2>/dev/null \
-  || plutil -replace CFBundleExecutable -string kotv-launch "$OUT_APP/Contents/Info.plist"
+# 更新器在签名前放进包，避免签名之后再拷贝把密封弄坏。
+if [[ -f "$ROOT/dist/updater-mac/updater" ]]; then
+  cp -f "$ROOT/dist/updater-mac/updater" "$OUT_APP/Contents/MacOS/updater"
+  chmod +x "$OUT_APP/Contents/MacOS/updater"
+fi
 
 echo "==> verify package"
 test -x "$OUT_APP/Contents/Resources/runtime/jre/bin/java"
@@ -190,7 +181,7 @@ fi
 echo "  java ok, engine ok, libmpv ok (self-contained)"
 
 echo "==> ad-hoc sign"
-codesign --force --deep --sign - "$OUT_APP" 2>/dev/null || true
+codesign --force --deep --sign - "$OUT_APP"
 
 echo "==> make dmg"
 ditto "$OUT_APP" "$STAGE/KO影视.app"

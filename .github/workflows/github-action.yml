@@ -389,10 +389,6 @@ jobs:
           chmod +x bridge/build.sh scripts/*.sh
           ./scripts/package-flutter-macos.sh
           ver="${KOTV_VERSION#v}"
-          if [[ -f dist/updater-mac/updater && -d "dist/KO影视.app" ]]; then
-            cp -f dist/updater-mac/updater "dist/KO影视.app/Contents/MacOS/updater"
-            chmod +x "dist/KO影视.app/Contents/MacOS/updater"
-          fi
           cp -f "dist/KO影视-${ver}-aarch64.dmg" "./KO影视-${ver}-aarch64.dmg"
 
       - uses: actions/upload-artifact@v4
@@ -471,7 +467,7 @@ jobs:
           GOOS: darwin
         run: |
           chmod +x bridge/build.sh scripts/*.sh
-          # arm64 runner：Rosetta 下走完整 package 脚本（含 libmpv 校验 / kotv-launch / DMG）
+          # arm64 runner：Rosetta 下走完整 package 脚本（含 libmpv 校验和 DMG）
           if [[ "$(uname -m)" == "arm64" ]]; then
             arch -x86_64 bash -lc '
               export PATH="/usr/local/bin:$PATH"
@@ -485,10 +481,6 @@ jobs:
             ./scripts/package-flutter-macos.sh
           fi
           ver="${KOTV_VERSION#v}"
-          if [[ -f dist/updater-mac/updater && -d "dist/KO影视.app" ]]; then
-            cp -f dist/updater-mac/updater "dist/KO影视.app/Contents/MacOS/updater"
-            chmod +x "dist/KO影视.app/Contents/MacOS/updater"
-          fi
           cp -f "dist/KO影视-${ver}-x86_64.dmg" "./KO影视-${ver}-x86_64.dmg"
 
       - uses: actions/upload-artifact@v4
