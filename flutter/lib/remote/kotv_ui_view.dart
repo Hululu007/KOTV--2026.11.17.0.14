@@ -311,7 +311,6 @@ List<Widget> _raw(
           textAlign: kotvUiTextAlign('${el['align'] ?? ''}'),
           style: TextStyle(
             color: kotvUiColor(el['color']) ?? palette.fg,
-            height: 1.35,
             fontSize: font,
             fontWeight: kotvUiFontWeight(el),
           ),
@@ -418,31 +417,25 @@ List<Widget> _raw(
       final id = '${el['id'] ?? ''}';
       if (id.isEmpty) return const [];
       final ctrl = values.putIfAbsent(id, () => TextEditingController(text: '${el['value'] ?? ''}'));
-      final borderColor = kotvUiColor(el['border']) ?? palette.outline.withOpacity(0.45);
       final secret = el['password'] == true;
       if (secret) checks.putIfAbsent('obscure:$id', () => true);
+      final multi = el['multiline'] == true;
       final field = KotvTvTextField(
         controller: ctrl,
         obscureText: secret && (checks['obscure:$id'] ?? true),
-        maxLines: el['multiline'] == true ? 8 : 1,
-        minLines: el['multiline'] == true ? 3 : 1,
+        maxLines: multi ? null : 1,
+        minLines: multi ? 1 : null,
         style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font),
         cursorColor: kotvUiColor(el['color']) ?? palette.primary,
         decoration: InputDecoration(
           hintText: '${el['placeholder'] ?? ''}',
           hintStyle: TextStyle(color: palette.muted, fontSize: font),
-          filled: true,
-          fillColor: kotvUiColor(el['background']) ?? palette.input,
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10 * uiScale),
-            borderSide: BorderSide(color: borderColor),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10 * uiScale),
-            borderSide: BorderSide(color: kotvUiColor(el['color']) ?? palette.primary),
-          ),
-          isDense: true,
-          contentPadding: EdgeInsets.symmetric(horizontal: 12 * uiScale, vertical: 10 * uiScale),
+          filled: false,
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          isCollapsed: true,
+          contentPadding: EdgeInsets.zero,
         ),
       );
       return [_sized(el, field, uiScale)];
@@ -453,7 +446,7 @@ List<Widget> _raw(
       final control = Switch(
         value: checks[id] ?? false,
         activeThumbColor: Colors.white,
-        activeTrackColor: kotvUiColor(el['color']) ?? const Color(0xFF4CAF50),
+        activeTrackColor: kotvUiColor(el['color']) ?? palette.primary,
         onChanged: (v) => setLocal(() => checks[id] = v),
       );
       final caption = '${el['text'] ?? ''}';
@@ -473,16 +466,15 @@ List<Widget> _raw(
       return [
         TvFocus(
           onPressed: () => setLocal(() => checks[id] = !(checks[id] ?? false)),
-          borderRadius: 8,
+          borderRadius: 0,
           scrollIntoView: true,
           child: ExcludeFocus(
             child: CheckboxListTile(
               value: checks[id] ?? false,
-              title: Text('${el['text'] ?? ''}', style: TextStyle(color: kotvUiColor(el['color']) ?? palette.muted, fontSize: font)),
+              title: Text('${el['text'] ?? ''}', style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font)),
               onChanged: (v) => setLocal(() => checks[id] = v ?? false),
               controlAffinity: ListTileControlAffinity.leading,
               activeColor: kotvUiColor(el['color']) ?? palette.primary,
-              dense: true,
             ),
           ),
         ),
@@ -497,16 +489,15 @@ List<Widget> _raw(
           if (o is Map)
             TvFocus(
               onPressed: () => setLocal(() => radios[id] = '${o['id'] ?? ''}'),
-              borderRadius: 8,
+              borderRadius: 0,
               scrollIntoView: true,
               child: ExcludeFocus(
                 child: RadioListTile<String>(
                   value: '${o['id'] ?? ''}',
                   groupValue: radios[id],
-                  title: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: kotvUiColor(el['color']) ?? palette.muted, fontSize: font)),
+                  title: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font)),
                   onChanged: (v) => setLocal(() => radios[id] = v ?? ''),
                   activeColor: kotvUiColor(el['color']) ?? palette.primary,
-                  dense: true,
                 ),
               ),
             ),
@@ -546,6 +537,7 @@ List<Widget> _raw(
       final hint = '${el['hint'] ?? ''}'.trim();
       final mark = kotvUiColor(el['mark']);
       if (hint.isNotEmpty || mark != null) {
+        final gap = kotvUiPx(el['spacing'], uiScale) ?? 0;
         return [
           InkWell(
             onTap: () => unawaited(onButton()),
@@ -553,11 +545,11 @@ List<Widget> _raw(
               children: [
                 if (mark != null) ...[
                   Container(
-                    width: 10 * uiScale,
-                    height: 10 * uiScale,
+                    width: font,
+                    height: font,
                     decoration: BoxDecoration(color: mark, shape: BoxShape.circle),
                   ),
-                  SizedBox(width: 12 * uiScale),
+                  if (gap > 0) SizedBox(width: gap),
                 ],
                 Expanded(
                   child: Column(
@@ -572,7 +564,7 @@ List<Widget> _raw(
                         ),
                       ),
                       if (hint.isNotEmpty)
-                        Text(hint, style: TextStyle(color: palette.muted, fontSize: (font - 1).clamp(11, font), height: 1.3)),
+                        Text(hint, style: TextStyle(color: palette.muted, fontSize: font)),
                     ],
                   ),
                 ),
