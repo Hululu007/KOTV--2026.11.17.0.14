@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' show PointerDeviceKind;
 import '../util/kotv_io.dart';
 
 import 'package:flutter/material.dart';
@@ -791,7 +792,19 @@ class PostMsgHost {
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              Positioned.fill(child: SingleChildScrollView(child: column)),
+              Positioned.fill(
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(context).copyWith(
+                    dragDevices: const <PointerDeviceKind>{
+                      PointerDeviceKind.touch,
+                      PointerDeviceKind.stylus,
+                      PointerDeviceKind.trackpad,
+                      PointerDeviceKind.unknown,
+                    },
+                  ),
+                  child: SingleChildScrollView(child: column),
+                ),
+              ),
               ...layers,
             ],
           ),

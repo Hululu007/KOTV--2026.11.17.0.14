@@ -322,17 +322,12 @@ public final class DialogRelay {
         if (session.isEmpty()) return;
         long deadline = System.currentTimeMillis() + 180_000;
         while (System.currentTimeMillis() < deadline) {
-            String raw = Util.takeUiReplyRaw(session);
+            long left = deadline - System.currentTimeMillis();
+            if (left <= 0) return;
+            String raw = Util.awaitUiReplyRaw(session, left);
             String action = Util.uiReplyAction(raw).toLowerCase();
-            if (action.isEmpty() || "shown".equals(action)) {
-                try {
-                    Thread.sleep(120);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-                continue;
-            }
+            if (action.isEmpty()) return;
+            if ("shown".equals(action)) continue;
             Map<String, String> values = valuesOf(raw);
             if ("closed".equals(action) || "dismiss".equals(action) || "timeout".equals(action)
                     || "cancel".equals(action)) {

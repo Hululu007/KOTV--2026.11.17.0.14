@@ -27,6 +27,7 @@ import java.util.Base64;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -363,7 +364,7 @@ public class Util {
     /** Synchronously POST a host message (used for UI handshake). */
     public static void notifySync(String msg) {
         if (msg == null || msg.isEmpty()) return;
-        SpiderDebug.log(msg);
+        SpiderDebug.log(msg.length() > 240 ? msg.substring(0, 240) + "…(" + msg.length() + ")" : msg);
         try {
             // 池线程里若刚被 shutdownNow 中断，清掉标志再发，避免 OkHttp 直接失败且 message=null
             Thread.interrupted();
@@ -393,6 +394,30 @@ public class Util {
         synchronized (q) {
             if (q.isEmpty()) return "";
             return q.pollFirst();
+        }
+    }
+
+    /**
+     * 堵住直到这个 session 的下一帧，或超时。入队的线程会唤醒，不再空转。
+     * 超时或中断返回空串。
+     */
+    public static String awaitUiReplyRaw(String session, long timeoutMs) {
+        if (session == null || session.isEmpty()) return "";
+        ensureUiSocket();
+        long deadline = System.currentTimeMillis() + Math.max(1L, timeoutMs);
+        ArrayDeque<String> q = UI_REPLY_Q.computeIfAbsent(session, key -> new ArrayDeque<>());
+        synchronized (q) {
+            while (true) {
+                if (!q.isEmpty()) return q.pollFirst();
+                long left = deadline - System.currentTimeMillis();
+                if (left <= 0) return "";
+                try {
+                    q.wait(left);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return "";
+                }
+            }
         }
     }
 
@@ -476,24 +501,15 @@ public class Util {
     public static boolean waitUiAction(String session, String want, long timeoutMs) {
         if (session == null || session.isEmpty() || want == null || want.isEmpty()) return false;
         long deadline = System.currentTimeMillis() + Math.max(200L, timeoutMs);
-        String expect = want.trim().toLowerCase();
+        String expect = want.trim().toLowerCase(Locale.ROOT);
         while (System.currentTimeMillis() < deadline) {
-            String raw = takeUiReplyRaw(session);
+            long left = deadline - System.currentTimeMillis();
+            if (left <= 0) break;
+            String raw = awaitUiReplyRaw(session, left);
             String action = uiReplyAction(raw).toLowerCase(Locale.ROOT);
-            if (action.isEmpty()) {
-                try {
-                    Thread.sleep(40);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return false;
-                }
-                continue;
-            }
+            if (action.isEmpty()) return false;
             if (action.equals(expect)) {
                 if ("shown".equals(expect)) rememberHostFromReply(session, raw);
-                if ("closed".equals(expect) || isUiTerminalAction(action)) {
-                    // closed 后可清；shown 阶段还要给脚本读 platform，等 clearSession/dispose 再清
-                }
                 return true;
             }
             if ("shown".equals(expect)) {
@@ -503,14 +519,10 @@ public class Util {
             if ("closed".equals(expect) && isUiTerminalAction(action)) {
                 long drainUntil = System.currentTimeMillis() + 300;
                 while (System.currentTimeMillis() < drainUntil) {
-                    String more = uiReplyAction(takeUiReplyRaw(session)).toLowerCase(Locale.ROOT);
+                    long slice = drainUntil - System.currentTimeMillis();
+                    if (slice <= 0) break;
+                    String more = uiReplyAction(awaitUiReplyRaw(session, slice)).toLowerCase(Locale.ROOT);
                     if (more.isEmpty() || "closed".equals(more)) break;
-                    try {
-                        Thread.sleep(20);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
                 }
                 clearHostClientInfo(session);
                 return true;
@@ -532,6 +544,7 @@ public class Util {
         ArrayDeque<String> q = UI_REPLY_Q.computeIfAbsent(session, key -> new ArrayDeque<>());
         synchronized (q) {
             q.addFirst(raw);
+            q.notifyAll();
         }
     }
 
@@ -544,39 +557,101 @@ public class Util {
         try {
             String session = UiBridge.currentSession(kind);
             if (session.isEmpty()) return "";
-            String raw = takeUiReplyRaw(session);
-            if (raw.isEmpty()) return "";
-            String action;
-            Map<String, Object> event = null;
-            if (raw.startsWith("{")) {
-                event = Json.parseSafe(raw, Map.class);
-                if (event == null) return "";
-                action = String.valueOf(event.getOrDefault("action", "")).trim();
-            } else {
-                action = raw.trim();
-            }
-            if ("shown".equals(action)) {
-                requeueUiReply(session, raw);
-                return "";
-            }
-            if ("closed".equals(action)) return "CLOSED";
-            if ("dismiss".equals(action) || "timeout".equals(action)) return "CANCEL";
-            if ("submit".equals(action)) {
-                Object value = null;
-                if (event != null) {
-                    Object valuesObj = event.get("values");
-                    if (valuesObj instanceof Map) {
-                        value = ((Map<?, ?>) valuesObj).get("value");
-                    }
-                }
-                return value == null ? "SUBMIT:" : "SUBMIT:" + value;
-            }
-            if ("cancel".equals(action)) return "CANCEL";
-            if (!action.isEmpty()) return action.toUpperCase(Locale.ROOT);
-            return "";
+            return decodeUiReply(session, takeUiReplyRaw(session), true);
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /**
+     * 堵住直到这个 kind 的下一条业务回复。{@code shown} 留给开关握手，不拿走。
+     * 超时或中断返回空串。
+     */
+    public static String awaitUiReply(String kind, long timeoutMs) {
+        if (kind == null || kind.isEmpty()) return "";
+        long waitMs = Math.max(1L, timeoutMs);
+        try {
+            String session = UiBridge.currentSession(kind);
+            if (session.isEmpty()) {
+                sleepUi(waitMs);
+                return "";
+            }
+            return decodeUiReply(session, awaitBusinessRaw(session, waitMs), false);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static String awaitBusinessRaw(String session, long timeoutMs) {
+        ensureUiSocket();
+        long deadline = System.currentTimeMillis() + Math.max(1L, timeoutMs);
+        ArrayDeque<String> q = UI_REPLY_Q.computeIfAbsent(session, key -> new ArrayDeque<>());
+        synchronized (q) {
+            while (true) {
+                String raw = takeNonShownLocked(q);
+                if (!raw.isEmpty()) return raw;
+                long left = deadline - System.currentTimeMillis();
+                if (left <= 0) return "";
+                try {
+                    q.wait(left);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return "";
+                }
+            }
+        }
+    }
+
+    private static String takeNonShownLocked(ArrayDeque<String> q) {
+        Iterator<String> it = q.iterator();
+        while (it.hasNext()) {
+            String raw = it.next();
+            if (!"shown".equalsIgnoreCase(uiReplyAction(raw))) {
+                it.remove();
+                return raw;
+            }
+        }
+        return "";
+    }
+
+    private static void sleepUi(long timeoutMs) {
+        try {
+            Thread.sleep(Math.max(1L, timeoutMs));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static String decodeUiReply(String session, String raw, boolean requeueShown) {
+        if (raw == null || raw.isEmpty()) return "";
+        String action;
+        Map<String, Object> event = null;
+        if (raw.startsWith("{")) {
+            event = Json.parseSafe(raw, Map.class);
+            if (event == null) return "";
+            action = String.valueOf(event.getOrDefault("action", "")).trim();
+        } else {
+            action = raw.trim();
+        }
+        if ("shown".equals(action)) {
+            if (requeueShown) requeueUiReply(session, raw);
+            return "";
+        }
+        if ("closed".equals(action)) return "CLOSED";
+        if ("dismiss".equals(action) || "timeout".equals(action)) return "CANCEL";
+        if ("submit".equals(action)) {
+            Object value = null;
+            if (event != null) {
+                Object valuesObj = event.get("values");
+                if (valuesObj instanceof Map) {
+                    value = ((Map<?, ?>) valuesObj).get("value");
+                }
+            }
+            return value == null ? "SUBMIT:" : "SUBMIT:" + value;
+        }
+        if ("cancel".equals(action)) return "CANCEL";
+        if (!action.isEmpty()) return action.toUpperCase(Locale.ROOT);
+        return "";
     }
 
     private static final Object UI_SOCKET_LOCK = new Object();
@@ -654,6 +729,7 @@ public class Util {
         ArrayDeque<String> q = UI_REPLY_Q.computeIfAbsent(id, key -> new ArrayDeque<>());
         synchronized (q) {
             q.addLast(text);
+            q.notifyAll();
         }
     }
 
