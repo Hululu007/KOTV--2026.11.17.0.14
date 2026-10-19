@@ -988,6 +988,7 @@ class _UiLayerState extends State<_UiLayer> {
       out[entry.key] = entry.value.text;
     }
     for (final entry in checks.entries) {
+      if (entry.key.startsWith('obscure:')) continue;
       out[entry.key] = entry.value ? 'true' : 'false';
     }
     out.addAll(radios);

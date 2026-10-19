@@ -243,6 +243,8 @@ List<Widget> kotvUiElements(
     openExternal: openExternal,
   );
   if (built.isEmpty) return built;
+  final look = '${el['style'] ?? ''}'.toLowerCase().trim();
+  final selfPainted = look == 'pill' || look == 'card' || look == 'heading';
   return [
     _tap(
       el,
@@ -252,10 +254,11 @@ List<Widget> kotvUiElements(
         el,
         Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: look == 'pill' ? CrossAxisAlignment.start : CrossAxisAlignment.stretch,
           children: built,
         ),
         uiScale,
+        skip: selfPainted,
       ),
     ),
   ];
@@ -284,7 +287,8 @@ Widget _tap(
   );
 }
 
-Widget _paint(Map<String, dynamic> el, Widget child, double uiScale) {
+Widget _paint(Map<String, dynamic> el, Widget child, double uiScale, {bool skip = false}) {
+  if (skip) return child;
   final color = kotvUiColor(el['color']);
   final bg = kotvUiColor(el['background']);
   final border = kotvUiColor(el['border']);
@@ -364,13 +368,34 @@ List<Widget> _raw(
   final pad = 8.0 * uiScale;
   switch (type) {
     case 'text':
+      final textLook = '${el['style'] ?? ''}'.toLowerCase().trim();
+      final rawText = '${el['text'] ?? ''}';
+      if (textLook == 'pill') {
+        final bg = kotvUiColor(el['background']) ?? const Color(0xFF22C55E);
+        final fg = kotvUiColor(el['color']) ?? Colors.white;
+        return [
+          DecoratedBox(
+            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12 * uiScale, vertical: 4 * uiScale),
+              child: Text(rawText, style: TextStyle(color: fg, fontSize: font, fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ];
+      }
+      final heading = textLook == 'heading';
       return [
         Padding(
-          padding: EdgeInsets.only(bottom: pad),
+          padding: EdgeInsets.only(bottom: heading ? 0 : pad),
           child: Text(
-            '${el['text'] ?? ''}',
+            rawText,
             textAlign: _textAlign(el['align']),
-            style: TextStyle(color: kotvUiColor(el['color']) ?? palette.muted, height: 1.35, fontSize: font),
+            style: TextStyle(
+              color: kotvUiColor(el['color']) ?? (heading ? palette.fg : palette.muted),
+              height: 1.35,
+              fontSize: font,
+              fontWeight: heading ? FontWeight.w700 : FontWeight.w400,
+            ),
           ),
         ),
       ];
@@ -411,9 +436,11 @@ List<Widget> _raw(
       if (id.isEmpty) return const [];
       final ctrl = values.putIfAbsent(id, () => TextEditingController(text: '${el['value'] ?? ''}'));
       final borderColor = kotvUiColor(el['border']) ?? palette.outline.withOpacity(0.45);
+      final secret = el['password'] == true;
+      if (secret) checks.putIfAbsent('obscure:$id', () => true);
       final field = KotvTvTextField(
         controller: ctrl,
-        obscureText: el['password'] == true,
+        obscureText: secret && (checks['obscure:$id'] ?? true),
         maxLines: el['multiline'] == true ? 8 : 1,
         minLines: el['multiline'] == true ? 3 : 1,
         style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font),
@@ -532,6 +559,59 @@ List<Widget> _raw(
     case 'button':
       final btnUrl = '${el['url'] ?? ''}'.trim();
       final look = '${el['style'] ?? ''}'.toLowerCase().trim();
+      final toggleId = '${el['toggle'] ?? ''}'.trim();
+      Future<void> onButton() async {
+        if (toggleId.isNotEmpty) {
+          setLocal(() {
+            final key = 'obscure:$toggleId';
+            checks[key] = !(checks[key] ?? true);
+          });
+          return;
+        }
+        if (btnUrl.isNotEmpty) await openExternal(btnUrl);
+        await fire('${el['id'] ?? 'button'}', dismissAfter: el['dismiss'] == true);
+      }
+      if (look == 'card') {
+        final dot = kotvUiColor(el['color']) ?? palette.muted;
+        final hint = '${el['hint'] ?? ''}'.trim();
+        final radius = 12.0 * uiScale;
+        return [
+          Padding(
+            padding: EdgeInsets.only(bottom: pad),
+            child: Material(
+              color: kotvUiColor(el['background']) ?? const Color(0xFFF4F4F5),
+              borderRadius: BorderRadius.circular(radius),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(radius),
+                onTap: () => unawaited(onButton()),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 14 * uiScale, vertical: 12 * uiScale),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10 * uiScale,
+                        height: 10 * uiScale,
+                        decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+                      ),
+                      SizedBox(width: 12 * uiScale),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${el['text'] ?? ''}', style: TextStyle(color: palette.fg, fontSize: font, fontWeight: FontWeight.w600)),
+                            if (hint.isNotEmpty)
+                              Text(hint, style: TextStyle(color: palette.muted, fontSize: (font - 1).clamp(11, font), height: 1.3)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ];
+      }
       return [
         Padding(
           padding: EdgeInsets.only(bottom: look == 'text' ? 0 : pad),
@@ -544,12 +624,7 @@ List<Widget> _raw(
             background: kotvUiColor(el['background']),
             width: kotvUiPx(el['width'], uiScale),
             height: kotvUiPx(el['height'], uiScale),
-            onTap: () {
-              unawaited(() async {
-                if (btnUrl.isNotEmpty) await openExternal(btnUrl);
-                await fire('${el['id'] ?? 'button'}', dismissAfter: el['dismiss'] == true);
-              }());
-            },
+            onTap: () => unawaited(onButton()),
           ),
         ),
       ];
