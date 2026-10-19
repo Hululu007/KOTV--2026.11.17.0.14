@@ -16,8 +16,7 @@ type Events struct {
 	refreshSubs []chan refreshEvent
 	castSubs    []chan castEvent
 	openSubs    []chan openEvent
-	postMsgSubs []chan string
-	// 按 Flutter clientId 分队列；无 clientId 的消息进 untagged（广播/兼容）。
+	// 按 Flutter clientId 分队列；无 clientId 的消息进 untagged。
 	postMsgQ        map[string][]string
 	postMsgUntagged []string
 	postMsgSeen     map[string]struct{}
@@ -210,7 +209,18 @@ func (e *Events) EmitPostMsgTo(msg, clientID string) {
 			e.mu.Unlock()
 		}
 	}
-	e.emit(&e.postMsgSubs, msg)
+}
+
+// requeue 写失败时把消息放回该客户端队列，不再推给还活着的连接。
+func (e *Events) requeue(clientID, msg string) {
+	msg = strings.TrimSpace(msg)
+	clientID = strings.TrimSpace(clientID)
+	if msg == "" || clientID == "" {
+		return
+	}
+	e.mu.Lock()
+	e.appendClientLocked(clientID, msg)
+	e.mu.Unlock()
 }
 
 func (e *Events) appendClientLocked(clientID, msg string) {

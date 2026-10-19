@@ -140,7 +140,7 @@ class PostMsgHost {
           _queueFrame(frame);
         }
       } catch (_) {}
-      _sock = null;
+      if (identical(_sock, sock)) _sock = null;
       if (!_socketRun) return;
       await Future<void>.delayed(Duration(milliseconds: waitMs));
       if (waitMs < 2000) waitMs += 200;

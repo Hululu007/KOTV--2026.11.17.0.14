@@ -45,7 +45,7 @@ public class Util {
      * 线程池内丢失的场景由 NetProfiles.lastActive 兜底。
      */
     private static final ThreadLocal<String> CLIENT_ID_TL = new InheritableThreadLocal<>();
-    /** 远端鉴权用户；有则 postMsg 优先按 userId 路由到该用户设备。 */
+    /** 远端鉴权用户；有则界面消息优先按 userId 路由到该用户设备。 */
     private static final ThreadLocal<String> USER_ID_TL = new InheritableThreadLocal<>();
 
     private static final AtomicLong UI_NOTIFY_EPOCH = new AtomicLong();
@@ -345,15 +345,15 @@ public class Util {
         final String uid = userId();
         UI_MESSAGES.execute(() -> {
             if (epoch != UI_NOTIFY_EPOCH.get()) {
-                SpiderDebug.log("postMsg dropped (ui cancelled)");
+                SpiderDebug.log("界面消息已丢弃");
                 return;
             }
             try {
                 setClientId(cid);
                 setUserId(uid);
-                postHttpMsg(msg);
+                sendUi(msg);
             } catch (Exception e) {
-                SpiderDebug.log("postMsg fail: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                SpiderDebug.log("界面消息发送失败: " + e.getClass().getSimpleName() + ": " + e.getMessage());
             } finally {
                 clearScope();
             }
@@ -367,9 +367,9 @@ public class Util {
         try {
             // 池线程里若刚被 shutdownNow 中断，清掉标志再发，避免 OkHttp 直接失败且 message=null
             Thread.interrupted();
-            postHttpMsg(msg);
+            sendUi(msg);
         } catch (Exception e) {
-            SpiderDebug.log("postMsg fail: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            SpiderDebug.log("界面消息发送失败: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 
@@ -623,12 +623,21 @@ public class Util {
             }
 
             @Override
+            public void onClosed(WebSocket webSocket, int code, String reason) {
+                clearUiSocket(webSocket);
+            }
+
+            @Override
             public void onFailure(WebSocket webSocket, Throwable t, Response response) {
-                synchronized (UI_SOCKET_LOCK) {
-                    if (UI_SOCKET == webSocket) UI_SOCKET = null;
-                }
+                clearUiSocket(webSocket);
             }
         });
+    }
+
+    private static void clearUiSocket(WebSocket webSocket) {
+        synchronized (UI_SOCKET_LOCK) {
+            if (UI_SOCKET == webSocket) UI_SOCKET = null;
+        }
     }
 
     private static void enqueueUiReply(String text) {
@@ -648,7 +657,7 @@ public class Util {
         }
     }
 
-    private static void postHttpMsg(String msg) throws IOException {
+    private static void sendUi(String msg) throws IOException {
         String uid = userId();
         if (uid.startsWith("u:")) uid = uid.substring(2);
         if (uid.startsWith("c:")) uid = "";

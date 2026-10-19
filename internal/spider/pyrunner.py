@@ -213,6 +213,7 @@ class _UiLink:
         self._replies = {}
         self._started = False
         self._rest = b""
+        self._port = 0
 
     def send(self, text, port):
         data = text.encode("utf-8")
@@ -239,15 +240,22 @@ class _UiLink:
 
     def take(self, sid):
         with self._lock:
+            if self._sock is None and self._port:
+                try:
+                    self._ensure(self._port)
+                except Exception:
+                    pass
             q = self._replies.get(sid)
             if not q:
                 return ""
             return q.pop(0)
 
     def _ensure(self, port):
+        if port:
+            self._port = int(port)
         if self._sock is not None:
             return
-        port = int(port or 0) or 9978
+        port = int(self._port or 0) or 9978
         key = base64.b64encode(os.urandom(16)).decode("ascii")
         raw = socket.create_connection(("127.0.0.1", port), 5)
         raw.sendall((

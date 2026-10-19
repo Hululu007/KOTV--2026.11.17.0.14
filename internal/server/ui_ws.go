@@ -17,9 +17,14 @@ var uiUpgrader = websocket.Upgrader{
 }
 
 type uiSock struct {
-	conn *websocket.Conn
-	send chan []byte
-	done chan struct{}
+	conn     *websocket.Conn
+	send     chan []byte
+	done     chan struct{}
+	mu       sync.Mutex
+	closed   bool
+	clientID string
+	src      bool
+	onDrop   func(src bool, clientID string, msgs [][]byte)
 }
 
 func newUISock(conn *websocket.Conn) *uiSock {
@@ -31,18 +36,34 @@ func newUISock(conn *websocket.Conn) *uiSock {
 }
 
 func (c *uiSock) sendText(msg string) bool {
-	select {
-	case <-c.done:
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
 		return false
-	default:
 	}
 	select {
 	case c.send <- []byte(msg):
 		return true
-	case <-c.done:
-		return false
 	default:
 		return false
+	}
+}
+
+func (c *uiSock) abandon(failed []byte) [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed = true
+	var out [][]byte
+	if len(failed) > 0 {
+		out = append(out, failed)
+	}
+	for {
+		select {
+		case msg := <-c.send:
+			out = append(out, msg)
+		default:
+			return out
+		}
 	}
 }
 
@@ -58,21 +79,29 @@ func (c *uiSock) sendWait(msg string) bool {
 func (c *uiSock) writeLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	defer close(c.done)
-	defer c.conn.Close()
+	var dropped [][]byte
+	defer func() {
+		close(c.done)
+		_ = c.conn.Close()
+		if len(dropped) > 0 && c.onDrop != nil {
+			c.onDrop(c.src, c.clientID, dropped)
+		}
+	}()
 	for {
 		select {
 		case msg, ok := <-c.send:
 			if !ok {
 				return
 			}
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				dropped = c.abandon(msg)
 				return
 			}
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				dropped = c.abandon(nil)
 				return
 			}
 		}
@@ -154,10 +183,10 @@ func (h *uiHub) pushUI(clientID, msg string) bool {
 	if len(list) == 0 {
 		return false
 	}
-	ok := false
+	ok := true
 	for _, sock := range list {
-		if sock.sendText(msg) {
-			ok = true
+		if !sock.sendText(msg) {
+			ok = false
 		}
 	}
 	return ok
@@ -170,10 +199,10 @@ func (h *uiHub) pushSrc(msg string) bool {
 	if len(list) == 0 {
 		return false
 	}
-	ok := false
+	ok := true
 	for _, sock := range list {
-		if sock.sendText(msg) {
-			ok = true
+		if !sock.sendText(msg) {
+			ok = false
 		}
 	}
 	return ok
@@ -201,12 +230,17 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		s.ui = newUIHub()
 	}
 	sock := newUISock(conn)
+	sock.clientID = scope
+	sock.src = role == "src"
+	sock.onDrop = s.dropUIFrames
 	go sock.writeLoop()
-	if role == "src" {
+	if sock.src {
 		s.ui.addSrc(sock)
 		if s.uiReply != nil {
 			for _, raw := range s.uiReply.drainAll() {
-				sock.sendWait(raw)
+				if !sock.sendWait(raw) {
+					s.keepReply(raw)
+				}
 			}
 		}
 		sock.readLoop(func(text string) { s.acceptSrcFrame(scope, text) })
@@ -216,7 +250,9 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	}
 	s.ui.addUI(scope, sock)
 	for _, msg := range s.events.DrainPostMsg(scope) {
-		sock.sendWait(msg)
+		if !sock.sendWait(msg) {
+			s.events.requeue(scope, msg)
+		}
 	}
 	sock.readLoop(func(text string) { s.acceptUIReply(text) })
 	s.ui.removeUI(scope, sock)
@@ -265,8 +301,39 @@ func (s *Server) acceptUIReply(text string) {
 	if s.ui != nil && s.ui.pushSrc(text) {
 		return
 	}
+	s.keepReply(text)
+}
+
+func (s *Server) keepReply(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	var reply struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal([]byte(text), &reply) != nil {
+		return
+	}
+	id := strings.TrimSpace(reply.ID)
+	if id == "" {
+		return
+	}
 	if s.uiReply == nil {
 		s.uiReply = newUIReplyStore()
 	}
 	s.uiReply.put(id, text)
+}
+
+func (s *Server) dropUIFrames(src bool, clientID string, msgs [][]byte) {
+	for _, msg := range msgs {
+		text := string(msg)
+		if src {
+			s.keepReply(text)
+			continue
+		}
+		if s.events != nil {
+			s.events.requeue(clientID, text)
+		}
+	}
 }
