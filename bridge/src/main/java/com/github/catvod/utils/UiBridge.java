@@ -199,12 +199,9 @@ public final class UiBridge {
             return this;
         }
 
-        /**
-         * Openable URL / deep link. Host opens via system handler (browser or app scheme).
-         * @param style {@code text} (default) or {@code button}
-         */
+        /** 下划线只在 style 为 underline 时画。 */
         public Elements link(String text, String url) {
-            return link(text, url, "text", 0, 0, 0);
+            return link(text, url, "", 0, 0, 0);
         }
 
         public Elements link(String text, String url, String style) {
@@ -678,7 +675,7 @@ public final class UiBridge {
             return this;
         }
 
-        /** start、end、center、space-between。文字按钮默认靠右。 */
+        /** start、end、center、space-between、space-around、space-evenly。没写时从起始一侧排。right 与 end 相同。 */
         public Document actionAlign(String align) {
             this.actionAlign = align == null ? "" : align.trim();
             return this;

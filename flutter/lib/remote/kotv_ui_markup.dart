@@ -18,6 +18,9 @@ Color? kotvUiColor(Object? raw) {
   return Color(v);
 }
 
+/// 文档写了颜色就用文档的，没写才用 [fallback]。
+Color kotvUiInk(Object? raw, Color fallback) => kotvUiColor(raw) ?? fallback;
+
 /// 爬虫给出的 HTML。不执行脚本，不嵌网页。
 /// `href="action:id"` 回报该动作，其它链接交给 [onLink]。
 /// `position:absolute` / `fixed` 按 left/top/z-index 叠在正文上。

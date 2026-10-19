@@ -859,7 +859,7 @@ class PostMsgHost {
     final customPad = doc['padding'] != null;
     final pad = customPad ? kotvUiNum(doc['padding']) * s : 0.0;
     final radius = doc['radius'] != null ? kotvUiNum(doc['radius']) * s : 0.0;
-    final bg = kotvUiColor(doc['background']) ?? p.dialogBg;
+    final bg = kotvUiInk(doc['background'], p.dialogBg);
     final border = kotvUiColor(doc['border']);
 
     final content = rawH > 0 ? SizedBox(width: cardW, height: rawH * s, child: body) : body;
@@ -1005,7 +1005,7 @@ class _UiLayerState extends State<_UiLayer> {
     final id = '${doc['id']}';
     final palette = KotvPalette.of(context);
     final scale = PostMsgHost.hostUiScale(context);
-    final fg = kotvUiColor(doc['color']) ?? palette.fg;
+    final fg = kotvUiInk(doc['color'], palette.fg);
     final modal = widget.base ? false : host._overlayModal(doc);
     return host._placeWindow(
       context: context,

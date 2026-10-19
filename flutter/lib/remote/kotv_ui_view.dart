@@ -85,7 +85,7 @@ class KotvUiPress extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = color ?? palette.primary;
+    final fg = color ?? palette.fg;
     return InkWell(
       onTap: onTap,
       child: _pressBox(
@@ -258,16 +258,6 @@ FontWeight kotvUiFontWeight(Map<String, dynamic> el) {
   return FontWeight.w400;
 }
 
-Color _hexColor(String raw, Color fallback) {
-  var s = raw.trim();
-  if (s.startsWith('#')) s = s.substring(1);
-  if (s.length == 6) s = 'ff$s';
-  if (s.length != 8) return fallback;
-  final n = int.tryParse(s, radix: 16);
-  if (n == null) return fallback;
-  return Color(n);
-}
-
 String _hexText(Color color) {
   String ch(int n) => n.toRadixString(16).padLeft(2, '0');
   return '#${ch(color.red)}${ch(color.green)}${ch(color.blue)}';
@@ -310,7 +300,7 @@ List<Widget> _raw(
           rawText,
           textAlign: kotvUiTextAlign('${el['align'] ?? ''}'),
           style: TextStyle(
-            color: kotvUiColor(el['color']) ?? palette.fg,
+            color: kotvUiInk(el['color'], palette.fg),
             fontSize: font,
             fontWeight: kotvUiFontWeight(el),
           ),
@@ -328,7 +318,7 @@ List<Widget> _raw(
       ];
     case 'progress':
       return [
-        CircularProgressIndicator(color: kotvUiColor(el['color']) ?? palette.primary),
+        CircularProgressIndicator(color: kotvUiInk(el['color'], palette.primary)),
       ];
     case 'slider':
       final sliderId = '${el['id'] ?? ''}'.trim();
@@ -349,7 +339,7 @@ List<Widget> _raw(
           max: max,
           divisions: divisions,
           label: sliderCtrl.text,
-          activeColor: kotvUiColor(el['color']) ?? palette.primary,
+          activeColor: kotvUiInk(el['color'], palette.primary),
           onChanged: (v) {
             final stepped = step > 0 ? (v / step).round() * step : v;
             final clamped = stepped < min ? min : (stepped > max ? max : stepped);
@@ -362,19 +352,20 @@ List<Widget> _raw(
       final colorId = '${el['id'] ?? ''}'.trim();
       if (colorId.isEmpty) return const [];
       final colorCtrl = values.putIfAbsent(colorId, () => TextEditingController(text: '${el['value'] ?? '#ffffff'}'));
-      final picked = _hexColor(colorCtrl.text, Colors.white);
+      final picked = kotvUiInk(colorCtrl.text, Colors.white);
       final hsv = HSVColor.fromColor(picked);
       void write(HSVColor next) {
         colorCtrl.text = _hexText(next.toColor());
         setLocal(() {});
       }
+      final gap = kotvUiPx(el['spacing'], uiScale) ?? 0;
+      final swatch = kotvUiPx(el['height'], uiScale) ?? font;
+      final edge = kotvUiColor(el['border']);
       Widget band(String label, double value, double max, ValueChanged<double> onChanged) {
         return Row(
           children: [
-            SizedBox(
-              width: 36 * uiScale,
-              child: Text(label, style: TextStyle(color: palette.muted, fontSize: (font - 2).clamp(11, font))),
-            ),
+            Text(label, style: TextStyle(color: kotvUiInk(el['hintColor'], palette.muted), fontSize: font)),
+            if (gap > 0) SizedBox(width: gap),
             Expanded(
               child: Slider(
                 value: value.clamp(0, max).toDouble(),
@@ -391,15 +382,15 @@ List<Widget> _raw(
         Row(
           children: [
             Container(
-              width: 28 * uiScale,
-              height: 28 * uiScale,
+              width: swatch,
+              height: swatch,
               decoration: BoxDecoration(
                 color: picked,
                 shape: BoxShape.circle,
-                border: Border.all(color: palette.outline.withOpacity(0.45)),
+                border: edge == null ? null : Border.all(color: edge),
               ),
             ),
-            SizedBox(width: 8 * uiScale),
+            if (gap > 0) SizedBox(width: gap),
             Expanded(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -425,11 +416,11 @@ List<Widget> _raw(
         obscureText: secret && (checks['obscure:$id'] ?? true),
         maxLines: multi ? null : 1,
         minLines: multi ? 1 : null,
-        style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font),
-        cursorColor: kotvUiColor(el['color']) ?? palette.primary,
+        style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font),
+        cursorColor: kotvUiInk(el['color'], palette.primary),
         decoration: InputDecoration(
           hintText: '${el['placeholder'] ?? ''}',
-          hintStyle: TextStyle(color: palette.muted, fontSize: font),
+          hintStyle: TextStyle(color: kotvUiInk(el['hintColor'], palette.muted), fontSize: font),
           filled: false,
           border: InputBorder.none,
           enabledBorder: InputBorder.none,
@@ -446,7 +437,7 @@ List<Widget> _raw(
       final control = Switch(
         value: checks[id] ?? false,
         activeThumbColor: Colors.white,
-        activeTrackColor: kotvUiColor(el['color']) ?? palette.primary,
+        activeTrackColor: kotvUiInk(el['color'], palette.primary),
         onChanged: (v) => setLocal(() => checks[id] = v),
       );
       final caption = '${el['text'] ?? ''}';
@@ -474,11 +465,11 @@ List<Widget> _raw(
                 Checkbox(
                   value: checks[id] ?? false,
                   onChanged: (v) => setLocal(() => checks[id] = v ?? false),
-                  activeColor: kotvUiColor(el['color']) ?? palette.primary,
+                  activeColor: kotvUiInk(el['color'], palette.primary),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 Expanded(
-                  child: Text('${el['text'] ?? ''}', style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font)),
+                  child: Text('${el['text'] ?? ''}', style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font)),
                 ),
               ],
             ),
@@ -504,11 +495,11 @@ List<Widget> _raw(
                       value: '${o['id'] ?? ''}',
                       groupValue: radios[id],
                       onChanged: (v) => setLocal(() => radios[id] = v ?? ''),
-                      activeColor: kotvUiColor(el['color']) ?? palette.primary,
+                      activeColor: kotvUiInk(el['color'], palette.primary),
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     Expanded(
-                      child: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font)),
+                      child: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font)),
                     ),
                   ],
                 ),
@@ -522,13 +513,16 @@ List<Widget> _raw(
       selects.putIfAbsent(id, () => '${el['value'] ?? (options.isNotEmpty && options.first is Map ? options.first['id'] : '')}');
       final dropdown = DropdownButtonFormField<String>(
         value: selects[id]?.isEmpty == true ? null : selects[id],
-        focusColor: (kotvUiColor(el['color']) ?? palette.focus).withOpacity(0.28),
-        dropdownColor: kotvUiColor(el['background']) ?? palette.dialogBg,
-        style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font),
+        focusColor: kotvUiColor(el['color']),
+        dropdownColor: kotvUiInk(el['background'], palette.dialogBg),
+        style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font),
         items: [
           for (final o in options)
             if (o is Map)
-              DropdownMenuItem(value: '${o['id']}', child: Text('${o['label'] ?? o['id']}', style: TextStyle(fontSize: font))),
+              DropdownMenuItem(
+                value: '${o['id']}',
+                child: Text('${o['label'] ?? o['id']}', style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font)),
+              ),
         ],
         onChanged: (v) => setLocal(() => selects[id] = v ?? ''),
       );
@@ -571,7 +565,7 @@ List<Widget> _raw(
                       Text(
                         '${el['text'] ?? ''}',
                         style: TextStyle(
-                          color: kotvUiColor(el['color']) ?? palette.fg,
+                          color: kotvUiInk(el['color'], palette.fg),
                           fontSize: font,
                           fontWeight: kotvUiFontWeight(el),
                         ),
@@ -580,7 +574,7 @@ List<Widget> _raw(
                         Text(
                           hint,
                           style: TextStyle(
-                            color: kotvUiColor(el['hintColor']) ?? kotvUiColor(el['color']) ?? palette.fg,
+                            color: kotvUiInk(el['hintColor'], kotvUiInk(el['color'], palette.fg)),
                             fontSize: font,
                           ),
                         ),
@@ -612,7 +606,7 @@ List<Widget> _raw(
       return [
         KotvUiPress(
           label: labelText,
-          underline: look.isEmpty || look == 'text',
+          underline: look == 'underline',
           palette: palette,
           font: font,
           weight: kotvUiFontWeight(el),
@@ -623,14 +617,22 @@ List<Widget> _raw(
         ),
       ];
     case 'separator':
-      return [Divider(color: kotvUiColor(el['color']) ?? palette.outline.withOpacity(0.45))];
+      final thickness = kotvUiPx(el['height'], uiScale) ?? uiScale;
+      return [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final span = constraints.maxWidth.isFinite ? constraints.maxWidth : 0.0;
+            return SizedBox(width: span, height: thickness, child: ColoredBox(color: kotvUiInk(el['color'], palette.outline)));
+          },
+        ),
+      ];
     case 'html':
       final markup = '${el['html'] ?? el['text'] ?? ''}'.trim();
       if (markup.isEmpty) return const [];
       return [
         KotvUiMarkup(
           html: markup,
-          color: kotvUiColor(el['color']) ?? palette.fg,
+          color: kotvUiInk(el['color'], palette.fg),
           fontSize: font,
           scale: uiScale,
           onAction: (id) => unawaited(fire(id)),
@@ -690,7 +692,7 @@ Widget _flex(
       Text(
         '${el['text']}',
         textAlign: kotvUiTextAlign('${el['align'] ?? ''}'),
-        style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontWeight: kotvUiFontWeight(el), fontSize: font),
+        style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontWeight: kotvUiFontWeight(el), fontSize: font),
       ),
   ];
   final children = (el['children'] as List?) ?? const [];
