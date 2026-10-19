@@ -81,6 +81,7 @@ public class SpiderBridge {
         if (!isArtVm()) {
             CONTEXT = new Application();
         }
+        JavaInvoke.setLoaders(SpiderBridge::extraLoaders);
     }
 
     /** Android Native：注入真实 Application Context（宿主已编进 App CL）。 */
@@ -470,7 +471,6 @@ public class SpiderBridge {
                 return "{}";
             }
             if ("javaInvoke".equals(method)) {
-                JavaInvoke.setLoaders(SpiderBridge::extraLoaders);
                 return JavaInvoke.handle(argsObj);
             }
             // JarLoader.jsonExt / jsonExtMix：只用 recent ClassLoader，不走 getSpider。

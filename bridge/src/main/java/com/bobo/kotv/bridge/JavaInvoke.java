@@ -121,20 +121,11 @@ public final class JavaInvoke {
             }
         }
         if (found == null) {
-            for (Field field : cls.getDeclaredFields()) {
-                if (field.getName().equals(name)) {
-                    found = field;
-                    break;
-                }
-            }
-        }
-        if (found == null) {
             JsonObject miss = new JsonObject();
             miss.addProperty("ok", false);
             miss.addProperty("miss", "field");
             return miss;
         }
-        found.setAccessible(true);
         Object recv = Modifier.isStatic(found.getModifiers()) || target instanceof Class<?> ? null : target;
         return box(found.get(recv));
     }

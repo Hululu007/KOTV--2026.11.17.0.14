@@ -293,16 +293,9 @@ func currentNetConfig() [][]byte {
 }
 
 // JavaInvoke 把 Python 的一次 classpath 调用转到当前 JVM。
+// 参数保持原始 JSON，避免大整数经过 map 后变成浮点。
 func JavaInvoke(body []byte) ([]byte, error) {
-	args := map[string]interface{}{}
-	if len(bytes.TrimSpace(body)) > 0 {
-		if err := json.Unmarshal(body, &args); err != nil {
-			return nil, err
-		}
-	}
-	req := bridgeRequest{Method: "javaInvoke", Args: args}
-	fillBridgeClient(&req)
-	payload, err := json.Marshal(req)
+	payload, err := javaInvokePayload(body)
 	if err != nil {
 		return nil, err
 	}
@@ -311,6 +304,33 @@ func JavaInvoke(body []byte) ([]byte, error) {
 		return nil, err
 	}
 	return []byte(raw), nil
+}
+
+func javaInvokePayload(body []byte) ([]byte, error) {
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		body = []byte("{}")
+	}
+	if !json.Valid(body) {
+		return nil, fmt.Errorf("java 请求不是 JSON")
+	}
+	meta := bridgeRequest{Method: "javaInvoke"}
+	fillBridgeClient(&meta)
+	return json.Marshal(struct {
+		Method   string          `json:"method"`
+		Args     json.RawMessage `json:"args"`
+		ClientID string          `json:"clientId,omitempty"`
+		UserID   string          `json:"userId,omitempty"`
+		RemoteUI bool            `json:"remoteUi,omitempty"`
+		JarGen   uint64          `json:"jarGen"`
+	}{
+		Method:   meta.Method,
+		Args:     body,
+		ClientID: meta.ClientID,
+		UserID:   meta.UserID,
+		RemoteUI: meta.RemoteUI,
+		JarGen:   meta.JarGen,
+	})
 }
 
 // callJavaBridge：桌面走独立 java HTTP bridge；Android 走 Native Service HTTP。可并发。

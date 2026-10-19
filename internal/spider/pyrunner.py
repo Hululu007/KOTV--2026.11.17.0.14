@@ -444,15 +444,16 @@ def _install_desktop_java(types, proxy_cls):
             return out.get("v")
         return None
 
+    def _local_open(path, data=None, content_type=None, timeout=5):
+        req = urllib.request.Request(_base() + path, data=data)
+        if content_type:
+            req.add_header("Content-Type", content_type)
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        return opener.open(req, timeout=timeout)
+
     def _jvm_post(payload):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            _base() + "/java",
-            data=data,
-            headers={"Content-Type": "application/json; charset=utf-8"},
-        )
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(req, timeout=15) as resp:
+        with _local_open("/java", data, "application/json; charset=utf-8", 15) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
         out = json.loads(raw or "{}")
         if not out.get("ok"):
@@ -503,21 +504,12 @@ def _install_desktop_java(types, proxy_cls):
         return "http://127.0.0.1:%s" % port
 
     def _post_msg(msg):
-        data = msg.encode("utf-8")
-        req = urllib.request.Request(
-            _base() + "/postMsg",
-            data=data,
-            headers={"Content-Type": "text/plain; charset=utf-8"},
-        )
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(req, timeout=5) as resp:
+        with _local_open("/postMsg", msg.encode("utf-8"), "text/plain; charset=utf-8", 5) as resp:
             resp.read()
 
     def _take_reply(sid):
-        url = _base() + "/uiReply?id=" + urllib.parse.quote(sid)
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         try:
-            with opener.open(url, timeout=2) as resp:
+            with _local_open("/uiReply?id=" + urllib.parse.quote(sid), timeout=2) as resp:
                 return resp.read().decode("utf-8", errors="replace").strip()
         except Exception:
             return ""

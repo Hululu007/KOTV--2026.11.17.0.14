@@ -1,9 +1,11 @@
 package spider
 
 import (
+	"encoding/json"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -38,5 +40,26 @@ func TestCacheJarLocalFile(t *testing.T) {
 	}
 	if filepath.Clean(got) != filepath.Clean(jar) {
 		t.Fatalf("relative got %q want %q", got, jar)
+	}
+}
+
+func TestJavaInvokePayloadKeepsLong(t *testing.T) {
+	raw := []byte(`{"op":"call","handle":1,"name":"set","args":[{"t":"n","v":9223372036854775807}]}`)
+	payload, err := javaInvokePayload(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(payload), "9223372036854775807") {
+		t.Fatalf("long lost: %s", payload)
+	}
+	var decoded struct {
+		Method string          `json:"method"`
+		Args   json.RawMessage `json:"args"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Method != "javaInvoke" || string(decoded.Args) != string(raw) {
+		t.Fatalf("payload = %s", payload)
 	}
 }
