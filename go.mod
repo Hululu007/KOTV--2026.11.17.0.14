@@ -10,6 +10,7 @@ require (
 	github.com/buke/quickjs-go v0.7.7
 	github.com/chromedp/cdproto v0.158.0
 	github.com/chromedp/chromedp v0.21.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/huin/goupnp v1.3.0
 	github.com/koron/go-ssdp v0.9.1
@@ -64,7 +65,6 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20261014150452-c3b4e57cab2c // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/huandu/xstrings v1.6.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect

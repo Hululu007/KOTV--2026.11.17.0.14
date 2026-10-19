@@ -6,11 +6,13 @@ import com.github.catvod.crawler.SpiderDebug;
 import com.github.catvod.net.OkHttp;
 import com.github.catvod.net.OkResult;
 import cn.hutool.core.util.URLUtil;
-import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
 import okhttp3.Request;
-import okhttp3.RequestBody;
 import okhttp3.Response;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
 import org.apache.commons.lang3.StringUtils;
+import org.json.JSONObject;
 
 import java.io.IOException;
 import java.math.BigInteger;
@@ -18,6 +20,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -27,8 +30,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -323,7 +328,7 @@ public class Util {
     }
 
     /**
-     * Notify host via local proxy {@code /postMsg}; also logs.
+     * Notify host via the UI socket; also logs.
      * {@code UI:}/{@code UI_CLOSE:} are sent synchronously so waitUiAction can start after delivery.
      * Toasts stay async on the single-thread queue.
      */
@@ -377,21 +382,17 @@ public class Util {
     }
 
     /**
-     * Non-blocking take of one host UI event JSON/text for an explicit session id.
-     * Returns raw body (usually JSON {@code {"action":"...","values":{...}}}).
+     * Non-blocking take of one host UI event for an explicit session id.
+     * Returns the raw frame (JSON {@code {"id","action","values"}}).
      */
     public static String takeUiReplyRaw(String session) {
         if (session == null || session.isEmpty()) return "";
-        try {
-            String base = Proxy.getHostPort();
-            if (base == null || base.isEmpty()) return "";
-            String url = base + "/uiReply?id=" + urlEncode(session);
-            try (Response response = OkHttp.newCall(url).execute()) {
-                if (response == null || !response.isSuccessful() || response.body() == null) return "";
-                return response.body().string().trim();
-            }
-        } catch (Exception e) {
-            return "";
+        ensureUiSocket();
+        ArrayDeque<String> q = UI_REPLY_Q.get(session);
+        if (q == null) return "";
+        synchronized (q) {
+            if (q.isEmpty()) return "";
+            return q.pollFirst();
         }
     }
 
@@ -528,18 +529,9 @@ public class Util {
 
     private static void requeueUiReply(String session, String raw) {
         if (session == null || session.isEmpty() || raw == null || raw.isEmpty()) return;
-        try {
-            String base = Proxy.getHostPort();
-            if (base == null || base.isEmpty()) return;
-            RequestBody body = RequestBody.create(raw, MediaType.parse("text/plain; charset=utf-8"));
-            Request req = new Request.Builder()
-                    .url(base + "/uiReply?id=" + urlEncode(session))
-                    .post(body)
-                    .build();
-            try (Response response = OkHttp.newCall(req).execute()) {
-                // ignore
-            }
-        } catch (Exception ignored) {
+        ArrayDeque<String> q = UI_REPLY_Q.computeIfAbsent(session, key -> new ArrayDeque<>());
+        synchronized (q) {
+            q.addFirst(raw);
         }
     }
 
@@ -587,47 +579,115 @@ public class Util {
         }
     }
 
-    private static void postHttpMsg(String msg) throws IOException {
+    private static final Object UI_SOCKET_LOCK = new Object();
+    private static final ConcurrentHashMap<String, ArrayDeque<String>> UI_REPLY_Q = new ConcurrentHashMap<>();
+    private static volatile WebSocket UI_SOCKET;
+    private static volatile OkHttpClient UI_SOCKET_CLIENT;
+
+    private static OkHttpClient uiSocketClient() {
+        OkHttpClient existing = UI_SOCKET_CLIENT;
+        if (existing != null) return existing;
+        synchronized (UI_SOCKET_LOCK) {
+            if (UI_SOCKET_CLIENT == null) {
+                UI_SOCKET_CLIENT = OkHttp.client().newBuilder()
+                        .readTimeout(0, TimeUnit.MILLISECONDS)
+                        .pingInterval(30, TimeUnit.SECONDS)
+                        .build();
+            }
+            return UI_SOCKET_CLIENT;
+        }
+    }
+
+    private static void ensureUiSocket() {
+        if (UI_SOCKET != null) return;
+        synchronized (UI_SOCKET_LOCK) {
+            openUiSocketLocked();
+        }
+    }
+
+    private static void openUiSocketLocked() {
+        if (UI_SOCKET != null) return;
         String base = Proxy.getHostPort();
-        if (base == null || base.isEmpty()) return;
-        // 远端已登录：userId；本机未登录无 userId，只用 clientId（勿伪造 userId）。
+        if (base == null || !base.startsWith("http")) return;
+        String url = "ws" + base.substring("http".length()) + "/ui?role=src";
+        Request req = new Request.Builder().url(url).build();
+        UI_SOCKET = uiSocketClient().newWebSocket(req, new WebSocketListener() {
+            @Override
+            public void onMessage(WebSocket webSocket, String text) {
+                enqueueUiReply(text);
+            }
+
+            @Override
+            public void onClosing(WebSocket webSocket, int code, String reason) {
+                webSocket.close(code, null);
+            }
+
+            @Override
+            public void onFailure(WebSocket webSocket, Throwable t, Response response) {
+                synchronized (UI_SOCKET_LOCK) {
+                    if (UI_SOCKET == webSocket) UI_SOCKET = null;
+                }
+            }
+        });
+    }
+
+    private static void enqueueUiReply(String text) {
+        if (text == null) return;
+        text = text.trim();
+        if (text.isEmpty() || !text.startsWith("{")) return;
+        String id;
+        try {
+            id = new JSONObject(text).optString("id", "").trim();
+        } catch (Exception e) {
+            return;
+        }
+        if (id.isEmpty()) return;
+        ArrayDeque<String> q = UI_REPLY_Q.computeIfAbsent(id, key -> new ArrayDeque<>());
+        synchronized (q) {
+            q.addLast(text);
+        }
+    }
+
+    private static void postHttpMsg(String msg) throws IOException {
         String uid = userId();
         if (uid.startsWith("u:")) uid = uid.substring(2);
         if (uid.startsWith("c:")) uid = "";
         String cid = clientId();
-        String routeQ;
+        String userField = "";
+        String clientField = "";
+        String scopeField = "";
         if (!uid.isEmpty()) {
-            routeQ = "userId=" + urlEncode(uid);
+            userField = uid;
         } else if (!cid.isEmpty()) {
             if (cid.startsWith("c:")) {
-                routeQ = "clientId=" + urlEncode(cid.substring(2));
+                clientField = cid.substring(2);
             } else if (cid.startsWith("u:")) {
-                // 仅当 ThreadLocal 误带了 Scope 时兼容；正常本机不应走这支
-                routeQ = "userId=" + urlEncode(cid.substring(2));
+                userField = cid.substring(2);
             } else {
-                routeQ = "clientId=" + urlEncode(cid);
+                clientField = cid;
             }
         } else {
-            String scope = scopeId();
-            routeQ = scope.isEmpty() ? "" : "scopeId=" + urlEncode(scope);
+            scopeField = scopeId();
         }
-        // Long payloads (e.g. image data-URI) must use POST body; GET query length is limited.
-        if (msg.length() > 800) {
-            RequestBody body = RequestBody.create(msg, MediaType.parse("text/plain; charset=utf-8"));
-            String url = base + "/postMsg" + (routeQ.isEmpty() ? "" : "?" + routeQ);
-            Request req = new Request.Builder().url(url).post(body).build();
-            try (Response response = OkHttp.newCall(req).execute()) {
-                if (response != null && !response.isSuccessful()) {
-                    SpiderDebug.log("send msg fail：" + msg.substring(0, Math.min(40, msg.length())));
-                }
+        StringBuilder payload = new StringBuilder(msg.length() + 64);
+        payload.append("{\"msg\":").append(JSONObject.quote(msg));
+        if (!userField.isEmpty()) payload.append(",\"userId\":").append(JSONObject.quote(userField));
+        if (!clientField.isEmpty()) payload.append(",\"clientId\":").append(JSONObject.quote(clientField));
+        if (!scopeField.isEmpty()) payload.append(",\"scopeId\":").append(JSONObject.quote(scopeField));
+        payload.append('}');
+        String text = payload.toString();
+        synchronized (UI_SOCKET_LOCK) {
+            openUiSocketLocked();
+            WebSocket ws = UI_SOCKET;
+            if (ws != null && ws.send(text)) return;
+            if (ws != null) {
+                ws.cancel();
+                UI_SOCKET = null;
             }
-            return;
-        }
-        String encoded = urlEncode(msg);
-        String url = base + "/postMsg?msg=" + encoded + (routeQ.isEmpty() ? "" : "&" + routeQ);
-        try (Response response = OkHttp.newCall(url).execute()) {
-            if (response != null && !response.isSuccessful()) {
-                SpiderDebug.log("send msg fail：" + msg);
+            openUiSocketLocked();
+            ws = UI_SOCKET;
+            if (ws == null || !ws.send(text)) {
+                throw new IOException("ui socket");
             }
         }
     }

@@ -11,6 +11,7 @@ import '../player/kotv_platform.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
+import '../util/kotv_ui_socket.dart';
 import '../widgets/kotv_network_image.dart';
 import '../widgets/chrome.dart';
 import '../widgets/kotv_tv_text_field.dart';
@@ -33,8 +34,13 @@ class PostMsgHost {
   final KotvApi api;
   final GlobalKey<NavigatorState> navigatorKey;
 
-  Timer? _timer;
   Timer? _timeout;
+  Timer? _flush;
+  KotvUiSocket? _sock;
+  bool _socketRun = false;
+  Future<void>? _socketLoop;
+  final List<String> _inbox = [];
+  final List<String> _outbox = [];
 
   /// 已决定要开窗 / 正在展示（含 showDialog 尚未把路由挂上的窗口期）。
   bool _sessionActive = false;
@@ -63,11 +69,8 @@ class PostMsgHost {
   /// 关旧开新时暂存下一份文档（仅真正关窗后再开时使用）。
   Map<String, dynamic>? _pendingDoc;
 
-  /// 生命周期 uiReply 单飞队列，保证同 id shown 先于 closed 入引擎。
+  /// 生命周期回执单飞队列，保证同 id shown 先于 closed。
   Future<void> _replyChain = Future<void>.value();
-
-  /// 轮询单飞，避免 Win7 上 120ms tick 叠跑拧乱状态机。
-  bool _tickBusy = false;
 
   String _lastToast = '';
   DateTime _lastToastAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -77,16 +80,18 @@ class PostMsgHost {
 
   void start() {
     instance = this;
-    _timer?.cancel();
-    unawaited(_tick());
-    _timer = Timer.periodic(const Duration(milliseconds: 120), (_) => _tick());
+    _socketRun = true;
+    _socketLoop ??= _runSocket();
   }
 
   void stop() {
+    _socketRun = false;
     if (instance == this) instance = null;
-    _timer?.cancel();
-    _timer = null;
-    unawaited(cancelAll(reply: true));
+    final sock = _sock;
+    unawaited(cancelAll(reply: true).whenComplete(() {
+      if (identical(_sock, sock)) _sock = null;
+      unawaited(sock?.close());
+    }));
   }
 
   /// 软打断引擎侧占住的请求（与 PopScope / 超时 / dismissAfter 关窗一致）。
@@ -113,38 +118,67 @@ class PostMsgHost {
     }
   }
 
-  Future<void> _tick() async {
-    if (_tickBusy) return;
-    _tickBusy = true;
-    try {
-      final data = await api.uiPoll();
-      final msgs = (data['messages'] as List?) ?? const [];
-      // 同一批先 UI_CLOSE: 再 UI:：JAR 真正关窗时，先关干净再开。
-      final ui = <String>[];
-      final closes = <String>[];
-      final other = <String>[];
-      for (final raw in msgs) {
-        final s = '${raw ?? ''}'.trim();
-        if (s.startsWith('UI:')) {
-          ui.add(s);
-        } else if (s.startsWith('UI_CLOSE:')) {
-          closes.add(s);
-        } else if (s.isNotEmpty) {
-          other.add(s);
+  Future<void> _runSocket() async {
+    var waitMs = 200;
+    while (_socketRun) {
+      try {
+        final spec = await api.uiSocket();
+        final sock = await kotvOpenUiSocket(spec.url, spec.headers);
+        if (!_socketRun) {
+          await sock.close();
+          return;
         }
+        _sock = sock;
+        waitMs = 200;
+        final pending = List<String>.from(_outbox);
+        _outbox.clear();
+        for (final text in pending) {
+          sock.send(text);
+        }
+        await for (final frame in sock.frames) {
+          if (!_socketRun || !identical(_sock, sock)) break;
+          _queueFrame(frame);
+        }
+      } catch (_) {}
+      _sock = null;
+      if (!_socketRun) return;
+      await Future<void>.delayed(Duration(milliseconds: waitMs));
+      if (waitMs < 2000) waitMs += 200;
+    }
+  }
+
+  void _queueFrame(String frame) {
+    final text = frame.trim();
+    if (text.isEmpty) return;
+    _inbox.add(text);
+    _flush ??= Timer(const Duration(milliseconds: 16), _flushFrames);
+  }
+
+  void _flushFrames() {
+    _flush = null;
+    if (_inbox.isEmpty) return;
+    final msgs = List<String>.from(_inbox);
+    _inbox.clear();
+    final ui = <String>[];
+    final closes = <String>[];
+    final other = <String>[];
+    for (final s in msgs) {
+      if (s.startsWith('UI:')) {
+        ui.add(s);
+      } else if (s.startsWith('UI_CLOSE:')) {
+        closes.add(s);
+      } else {
+        other.add(s);
       }
-      for (final s in closes) {
-        _handle(s);
-      }
-      for (final s in ui) {
-        _handle(s);
-      }
-      for (final s in other) {
-        _handle(s);
-      }
-    } catch (_) {
-    } finally {
-      _tickBusy = false;
+    }
+    for (final s in closes) {
+      _handle(s);
+    }
+    for (final s in ui) {
+      _handle(s);
+    }
+    for (final s in other) {
+      _handle(s);
     }
   }
 
@@ -314,8 +348,23 @@ class PostMsgHost {
     final done = Completer<void>();
     _replyChain = _replyChain.catchError((_) {}).then((_) async {
       try {
-        await api.uiReply(id: id, action: action, values: values);
+        final payload = jsonEncode({
+          'id': id,
+          'action': action,
+          if (values != null && values.isNotEmpty) 'values': values,
+        });
+        final sock = _sock;
+        if (sock == null) {
+          _outbox.add(payload);
+        } else {
+          sock.send(payload);
+        }
       } catch (_) {
+        _outbox.add(jsonEncode({
+          'id': id,
+          'action': action,
+          if (values != null && values.isNotEmpty) 'values': values,
+        }));
       } finally {
         if (!done.isCompleted) done.complete();
       }

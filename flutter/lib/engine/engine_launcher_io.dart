@@ -63,7 +63,7 @@ class EngineLauncher {
   }
 
   Future<bool> ensureReady({Duration timeout = const Duration(seconds: 30)}) async {
-    // 尽早固化 clientId，后续 API / ui/poll 带同一身份。
+    // 尽早固化 clientId，后续 API / 界面套接字带同一身份。
     await kotvClientId();
     final remote = !kotvIsLocalEngineBaseUrl(baseUrl);
     // 远端引擎：只探测配置的地址，绝不要拉起/回退本机 :9978。

@@ -1,8 +1,6 @@
 package server
 
 import (
-	"io"
-	"net/http"
 	"strings"
 	"sync"
 )
@@ -27,49 +25,16 @@ func (s *uiReplyStore) put(id, value string) {
 	s.mu.Unlock()
 }
 
-func (s *uiReplyStore) take(id string) string {
-	id = strings.TrimSpace(id)
+func (s *uiReplyStore) drainAll() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	q := s.m[id]
-	if len(q) == 0 {
-		return ""
+	if len(s.m) == 0 {
+		return nil
 	}
-	v := q[0]
-	if len(q) == 1 {
-		delete(s.m, id)
-	} else {
-		s.m[id] = q[1:]
+	var out []string
+	for _, q := range s.m {
+		out = append(out, q...)
 	}
-	return v
-}
-
-func (s *Server) handleUIReply(w http.ResponseWriter, r *http.Request) {
-	if s.uiReply == nil {
-		s.uiReply = newUIReplyStore()
-	}
-	switch r.Method {
-	case http.MethodGet:
-		id := r.URL.Query().Get("id")
-		v := s.uiReply.take(id)
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte(v))
-	case http.MethodPost:
-		id := strings.TrimSpace(r.URL.Query().Get("id"))
-		if id == "" {
-			http.Error(w, "missing id", http.StatusBadRequest)
-			return
-		}
-		body, _ := io.ReadAll(io.LimitReader(r.Body, 256<<10))
-		event := strings.TrimSpace(string(body))
-		if event == "" {
-			http.Error(w, "missing event", http.StatusBadRequest)
-			return
-		}
-		s.uiReply.put(id, event)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
-	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
+	s.m = map[string][]string{}
+	return out
 }

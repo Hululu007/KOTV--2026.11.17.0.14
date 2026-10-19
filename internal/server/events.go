@@ -21,6 +21,7 @@ type Events struct {
 	postMsgQ        map[string][]string
 	postMsgUntagged []string
 	postMsgSeen     map[string]struct{}
+	deliver         func(clientID, msg string) bool
 }
 
 type settingEvent struct {
@@ -158,12 +159,19 @@ func (e *Events) EmitOpen(ev openEvent) {
 	e.emitOpen(ev)
 }
 
-// EmitPostMsg 无目标客户端时入 untagged / 广播（兼容旧 JAR）。
+// EmitPostMsg 无目标客户端时入 untagged / 广播。
 func (e *Events) EmitPostMsg(msg string) {
 	e.EmitPostMsgTo(msg, "")
 }
 
-// EmitPostMsgTo 将消息投递到指定 clientId 的队列；clientId 为空则广播给已知客户端。
+// SetDeliver 在有界面套接字时直接推送。返回 false 的目标仍进队列，等下次连上再取。
+func (e *Events) SetDeliver(fn func(clientID, msg string) bool) {
+	e.mu.Lock()
+	e.deliver = fn
+	e.mu.Unlock()
+}
+
+// EmitPostMsgTo 将消息投递到指定 clientId；clientId 为空则发给已经出现过的客户端。
 func (e *Events) EmitPostMsgTo(msg, clientID string) {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
@@ -171,20 +179,37 @@ func (e *Events) EmitPostMsgTo(msg, clientID string) {
 	}
 	clientID = strings.TrimSpace(clientID)
 	e.mu.Lock()
-	hasSubs := len(e.postMsgSubs) > 0
-	if !hasSubs {
-		if clientID != "" {
-			e.appendClientLocked(clientID, msg)
-		} else if len(e.postMsgSeen) == 0 {
-			e.postMsgUntagged = append(e.postMsgUntagged, msg)
-			e.trimUntaggedLocked()
-		} else {
-			for cid := range e.postMsgSeen {
-				e.appendClientLocked(cid, msg)
-			}
+	var targets []string
+	queuedUntagged := false
+	if clientID != "" {
+		targets = []string{clientID}
+	} else if len(e.postMsgSeen) == 0 {
+		e.postMsgUntagged = append(e.postMsgUntagged, msg)
+		e.trimUntaggedLocked()
+		queuedUntagged = true
+	} else {
+		for cid := range e.postMsgSeen {
+			targets = append(targets, cid)
 		}
 	}
+	deliver := e.deliver
 	e.mu.Unlock()
+	if !queuedUntagged {
+		var missed []string
+		for _, cid := range targets {
+			if deliver != nil && deliver(cid, msg) {
+				continue
+			}
+			missed = append(missed, cid)
+		}
+		if len(missed) > 0 {
+			e.mu.Lock()
+			for _, cid := range missed {
+				e.appendClientLocked(cid, msg)
+			}
+			e.mu.Unlock()
+		}
+	}
 	e.emit(&e.postMsgSubs, msg)
 }
 
@@ -205,7 +230,7 @@ func (e *Events) trimUntaggedLocked() {
 	}
 }
 
-// DrainPostMsg 取出并清空指定客户端缓冲（供 Flutter /api/v1/ui/poll）。
+// DrainPostMsg 取出并清空指定客户端缓冲（界面套接字连上时先推完）。
 // clientID 为空时只取 untagged（旧客户端兼容）。
 func (e *Events) DrainPostMsg(clientID string) []string {
 	e.mu.Lock()

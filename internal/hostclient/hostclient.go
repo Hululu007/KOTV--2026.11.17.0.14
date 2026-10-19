@@ -1,5 +1,5 @@
 // Package hostclient 在一次 HTTP/爬虫调用的 goroutine 上绑定前端 clientId / userId，
-// 供 JAR bridge 请求携带，并把 /postMsg 与每用户运行时路由回正确客户端。
+// 供 JAR bridge 请求携带，并把界面消息与每用户运行时路由回正确客户端。
 //
 // 脚本文件（JAR/Py/JS 下载缓存）全局共享；仅「远端租户」请求使用独立 JVM/Py/JS 引擎。
 package hostclient

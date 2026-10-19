@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/remote"
@@ -119,8 +118,6 @@ func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/live", wrap(s.handleAPIv1Live))
 	mux.HandleFunc("/api/v1/player", wrap(s.handleAPIv1Player))
 	mux.HandleFunc("/api/v1/tools", wrap(s.handleAPIv1Tools))
-	mux.HandleFunc("/api/v1/ui/poll", wrap(s.handleAPIv1UIPoll))
-	mux.HandleFunc("/api/v1/ui/reply", wrap(s.handleAPIv1UIReply))
 	mux.HandleFunc("/api/v1/cancel", wrap(s.handleAPIv1Cancel))
 	mux.HandleFunc("/api/v1/shutdown", wrap(s.handleAPIv1Shutdown))
 }
@@ -923,62 +920,6 @@ func (s *Server) handleAPIv1Tools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-// handleAPIv1UIPoll Flutter 轮询爬虫 UiBridge / Util.notify 消息。
-func (s *Server) handleAPIv1UIPoll(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-		return
-	}
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	msgs := s.events.DrainPostMsg(hostclient.ScopeID())
-	if msgs == nil {
-		msgs = []string{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": msgs})
-}
-
-// handleAPIv1UIReply Flutter 回传声明式窗口事件（等同 /uiReply）。
-func (s *Server) handleAPIv1UIReply(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-		return
-	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	if s.uiReply == nil {
-		s.uiReply = newUIReplyStore()
-	}
-	var body struct {
-		ID     string            `json:"id"`
-		Action string            `json:"action"`
-		Values map[string]string `json:"values"`
-	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 256<<10)).Decode(&body)
-	id := strings.TrimSpace(body.ID)
-	if id == "" {
-		id = strings.TrimSpace(r.URL.Query().Get("id"))
-	}
-	if id == "" || strings.TrimSpace(body.Action) == "" {
-		writeAPIError(w, http.StatusBadRequest, "missing id or action")
-		return
-	}
-	payload, err := json.Marshal(map[string]any{
-		"action": body.Action,
-		"values": body.Values,
-	})
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.uiReply.put(id, string(payload))
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // handleAPIv1Cancel 打断进行中的详情/分类等 spider 请求（网盘扫码卡住后离开详情页）。

@@ -259,7 +259,7 @@ func isEngineServedPath(path string) bool {
 		return true
 	case path == "/health" || path == "/media" || path == "/device":
 		return true
-	case path == "/action" || path == "/postMsg" || path == "/uiReply":
+	case path == "/action" || path == "/ui":
 		return true
 	case path == "/newFolder" || path == "/delFolder" || path == "/delFile":
 		return true

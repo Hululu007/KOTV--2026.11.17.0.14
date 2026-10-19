@@ -115,8 +115,7 @@ bool kotvIsEngineServedPath(String path) {
       p == '/media' ||
       p == '/device' ||
       p == '/action' ||
-      p == '/postMsg' ||
-      p == '/uiReply' ||
+      p == '/ui' ||
       p == '/newFolder' ||
       p == '/delFolder' ||
       p == '/delFile' ||

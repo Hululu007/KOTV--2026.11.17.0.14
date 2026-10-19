@@ -41,6 +41,7 @@ type Server struct {
 	http          *http.Server
 	events        *Events
 	onAction      func(Action)
+	ui            *uiHub
 	uiReply       *uiReplyStore
 	mediaProvider func() map[string]string
 	tvbusRespFn   func() string
@@ -78,8 +79,14 @@ var defaultServer *Server
 func Default() *Server { return defaultServer }
 
 func New(onAction func(Action)) *Server {
-	s := &Server{events: NewEvents(), onAction: onAction, uiReply: newUIReplyStore()}
+	s := &Server{events: NewEvents(), onAction: onAction, ui: newUIHub(), uiReply: newUIReplyStore()}
+	s.events.SetDeliver(s.ui.pushUI)
 	defaultServer = s
+	spider.SetPostMsgEmitter(func(msg, clientID string) {
+		if defaultServer != nil && defaultServer.events != nil {
+			defaultServer.events.EmitPostMsgTo(msg, clientID)
+		}
+	})
 	return s
 }
 
@@ -131,9 +138,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/cache", s.handleCache)
 	mux.HandleFunc("/action", s.handleAction)
 	mux.HandleFunc("/library", s.withAuth(s.handleLibrary))
-	mux.HandleFunc("/postMsg", s.handlePostMsg)
+	mux.HandleFunc("/ui", s.withAuth(s.handleUI))
 	mux.HandleFunc("/java", s.handleJavaInvoke)
-	mux.HandleFunc("/uiReply", s.handleUIReply)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -264,38 +270,6 @@ func (s *Server) handleJavaInvoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = w.Write(out)
-}
-
-// handlePostMsg 承接爬虫 jar Util.notify / UiBridge（GET/POST ?msg=）。
-// 目标为 ScopeID：远端 JAR 传 u:<userId>；本机未登录传 c:<clientId>。
-func (s *Server) handlePostMsg(w http.ResponseWriter, r *http.Request) {
-	msg := strings.TrimSpace(r.URL.Query().Get("msg"))
-	clientID := hostclient.ResolveScopeKey(
-		r.URL.Query().Get("userId"),
-		r.URL.Query().Get("scopeId"),
-		first(r.URL.Query().Get("clientId"), r.Header.Get("X-Kotv-Client-Id")),
-	)
-	if r.Method == http.MethodPost {
-		_ = r.ParseForm()
-		if v := strings.TrimSpace(r.Form.Get("msg")); v != "" {
-			msg = v
-		}
-		if v := hostclient.ResolveScopeKey(r.Form.Get("userId"), r.Form.Get("scopeId"), r.Form.Get("clientId")); v != "" {
-			clientID = v
-		}
-		if msg == "" {
-			// Declarative UI documents may include compact images; keep a generous bound.
-			body, _ := io.ReadAll(io.LimitReader(r.Body, 2<<20))
-			msg = strings.TrimSpace(string(body))
-		}
-	}
-	if msg == "" {
-		http.Error(w, "missing msg", http.StatusBadRequest)
-		return
-	}
-	s.events.EmitPostMsgTo(msg, clientID)
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok"))
 }
 
 func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {

@@ -91,37 +91,26 @@ func (s *jsSpider) activeClientID() string {
 	return v
 }
 
-// jsPostMsg 把 JS 脚本消息投到引擎 /postMsg；远端带 userId，本机带 scopeId/clientId。
+var postMsgEmitter func(msg, clientID string)
+
+// SetPostMsgEmitter 由引擎进程注册。JS 吐司直接进界面队列，不再回环请求本机。
+func SetPostMsgEmitter(fn func(msg, clientID string)) {
+	postMsgEmitter = fn
+}
+
+// jsPostMsg 把脚本消息交给已注册的界面投递。远端带 userId，本机带 clientId。
 func jsPostMsg(msg, clientID string) {
 	msg = strings.TrimSpace(msg)
-	if msg == "" {
+	if msg == "" || postMsgEmitter == nil {
 		return
 	}
-	base := fmt.Sprintf("http://127.0.0.1:%d", localproxy.Port())
-	q := url.Values{}
-	q.Set("msg", msg)
+	target := ""
 	if uid := hostclient.CurrentUserID(); uid != "" {
-		q.Set("userId", uid)
+		target = hostclient.ResolveScopeKey(uid, "", "")
 	} else if clientID != "" {
-		if strings.HasPrefix(clientID, "u:") || strings.HasPrefix(clientID, "c:") {
-			q.Set("scopeId", clientID)
-		} else {
-			q.Set("clientId", clientID)
-		}
+		target = hostclient.ResolveScopeKey("", "", clientID)
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/postMsg?"+q.Encode(), nil)
-		if err != nil {
-			return
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return
-		}
-		_ = resp.Body.Close()
-	}()
+	postMsgEmitter(msg, target)
 }
 
 type jsResp struct {

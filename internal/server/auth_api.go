@@ -96,7 +96,15 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		loopback := isLoopbackRequest(r)
 		tok := auth.BearerFromHeader(r.Header.Get("Authorization"))
 		plat := strings.TrimSpace(r.Header.Get("X-Kotv-Client-Platform"))
-		webClient := isWebClient(r)
+		if r.URL.Path == "/ui" {
+			if tok == "" {
+				tok = strings.TrimSpace(r.URL.Query().Get("token"))
+			}
+			if plat == "" {
+				plat = strings.TrimSpace(r.URL.Query().Get("platform"))
+			}
+		}
+		webClient := strings.EqualFold(plat, "web")
 
 		bindPlat := func() {
 			if plat != "" {

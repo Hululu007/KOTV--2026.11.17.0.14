@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../player/kotv_platform.dart';
@@ -433,19 +434,30 @@ class KotvApi {
   }) =>
       tools('assrtDownload', {'url': url, 'name': name, 'size': size});
 
-  /// 轮询爬虫 UiBridge / Util.notify 声明式弹窗消息。
-  Future<Map<String, dynamic>> uiPoll() => _get('/api/v1/ui/poll');
-
-  Future<Map<String, dynamic>> uiReply({
-    required String id,
-    required String action,
-    Map<String, String>? values,
-  }) =>
-      _post('/api/v1/ui/reply', {
-        'id': id,
-        'action': action,
-        if (values != null && values.isNotEmpty) 'values': values,
-      });
+  /// 界面套接字。浏览器不能带自定义头，身份放在查询参数里。
+  Future<({String url, Map<String, String> headers})> uiSocket() async {
+    final id = await ensureClientId();
+    final headers = await _headers();
+    final base = Uri.parse(baseUrl);
+    final query = <String, String>{
+      'role': 'ui',
+      'clientId': id,
+      'platform': kotvHostPlatform(),
+    };
+    if (kIsWeb) {
+      final token = headers['Authorization'] ?? '';
+      const prefix = 'Bearer ';
+      if (token.startsWith(prefix) && token.length > prefix.length) {
+        query['token'] = token.substring(prefix.length).trim();
+      }
+    }
+    final url = base.replace(
+      scheme: base.scheme == 'https' ? 'wss' : 'ws',
+      path: '/ui',
+      queryParameters: query,
+    ).toString();
+    return (url: url, headers: kIsWeb ? const <String, String>{} : headers);
+  }
 
   /// 站点 action（Market 下载等）：vod 带 action 字段时调用。
   Future<Map<String, dynamic>> siteAction({required String site, required String action}) =>
