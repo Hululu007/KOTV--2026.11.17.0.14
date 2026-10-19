@@ -136,16 +136,9 @@ def _install_java_module_stubs():
     sys.modules["com.chaquo.python.Python"] = py_mod
     sys.modules["com.chaquo.python"].Python = Python
 
-    # 安卓解释器自带 java.jclass。这里再写 sys.modules["java"] 会盖掉它。
+    # 安卓解释器自带 java。这里再写 sys.modules["java"] 会盖掉它。
     if not _host_java_present():
-        def jclass(name):
-            if name == "com.github.catvod.Proxy":
-                return Proxy
-            raise LookupError(name)
-
-        java_mod = types.ModuleType("java")
-        java_mod.jclass = jclass
-        sys.modules["java"] = java_mod
+        _install_desktop_java(types, Proxy)
 
 
 def _host_java_present():
@@ -165,6 +158,256 @@ def _host_java_present():
     except Exception:
         return True
     return True
+
+
+_MOD_STATIC = 0x0008
+
+
+def _install_desktop_java(types, proxy_cls):
+    """桌面 CPython 没有解释器内的 java。补上脚本打开目录时用到的那几个符号，窗口走本机 /postMsg。"""
+    import json
+    import threading
+    import urllib.parse
+    import urllib.request
+
+    class _Reflect:
+        def __init__(self, name):
+            self._name = name
+
+        def getDeclaredMethods(self):
+            if self._name == "com.fongmi.android.tv.App":
+                return [_JMethod()]
+            return []
+
+        def getDeclaredFields(self):
+            return []
+
+        def isAssignableFrom(self, other):
+            return getattr(other, "_name", "") == "android.app.Activity" and self._name == "android.app.Activity"
+
+    class _JMethod:
+        def getModifiers(self):
+            return _MOD_STATIC
+
+        def getParameterTypes(self):
+            return []
+
+        def getReturnType(self):
+            return _Reflect("android.app.Activity")
+
+        def setAccessible(self, flag):
+            return None
+
+        def invoke(self, obj, args=None):
+            return _Activity()
+
+    class _JavaClass:
+        def __init__(self, name):
+            self._name = name
+
+        def getClass(self):
+            return _Reflect(self._name)
+
+        def isStatic(self, modifiers):
+            try:
+                return bool(int(modifiers) & _MOD_STATIC)
+            except Exception:
+                return False
+
+        def makeText(self, activity, text, duration):
+            return _Toast(str(text))
+
+        def __call__(self, *args):
+            if self._name.endswith("AlertDialog$Builder") or self._name.endswith("MaterialAlertDialogBuilder"):
+                return _DialogBuilder()
+            raise TypeError(self._name)
+
+    class _Toast:
+        def __init__(self, text):
+            self.text = text
+
+        def show(self):
+            _post_msg(self.text)
+
+    class _Activity:
+        def runOnUiThread(self, runnable):
+            runnable.run()
+
+    class _Dialog:
+        def __init__(self, builder):
+            self.builder = builder
+            self.sid = "py-dir-%d" % time.time_ns()
+            self._stop = threading.Event()
+            self._thread = None
+
+        def dismiss(self):
+            self._stop.set()
+            _post_msg("UI_CLOSE:" + json.dumps({"id": self.sid}, ensure_ascii=False))
+
+        def open(self):
+            labels = list(self.builder.items or [])
+            actions = []
+            if self.builder.positive:
+                actions.append({"id": "positive", "label": self.builder.positive[0], "dismiss": True})
+            if self.builder.negative_label:
+                actions.append({"id": "negative", "label": self.builder.negative_label, "dismiss": True})
+            doc = {
+                "id": self.sid,
+                "title": self.builder.title or "",
+                "timeoutMs": 0,
+                "elements": [
+                    {"type": "button", "id": "item:%d" % i, "text": str(label), "dismiss": False}
+                    for i, label in enumerate(labels)
+                ],
+                "actions": actions,
+            }
+            _post_msg("UI:" + json.dumps(doc, ensure_ascii=False))
+            self._thread = threading.Thread(target=self._wait, daemon=True)
+            self._thread.start()
+            return self
+
+        def _wait(self):
+            while not self._stop.is_set():
+                raw = _take_reply(self.sid)
+                if not raw:
+                    time.sleep(0.05)
+                    continue
+                action = _reply_action(raw)
+                if action in ("", "shown", "closed"):
+                    if action == "closed":
+                        self._stop.set()
+                    continue
+                if action in ("dismiss", "timeout", "negative"):
+                    self._stop.set()
+                    listener = self.builder.negative
+                    if action == "negative" and listener is not None:
+                        try:
+                            listener.onClick(self, -2)
+                        except Exception:
+                            pass
+                    continue
+                if action == "positive":
+                    self._stop.set()
+                    listener = self.builder.positive[1] if self.builder.positive else None
+                    if listener is not None:
+                        try:
+                            listener.onClick(self, -1)
+                        except Exception:
+                            pass
+                    continue
+                if action.startswith("item:"):
+                    try:
+                        idx = int(action.split(":", 1)[1])
+                    except Exception:
+                        continue
+                    listener = self.builder.item_click
+                    if listener is not None:
+                        try:
+                            listener.onClick(self, idx)
+                        except Exception:
+                            pass
+
+    class _DialogBuilder:
+        def __init__(self):
+            self.title = ""
+            self.items = []
+            self.item_click = None
+            self.positive = None
+            self.negative = None
+            self.negative_label = ""
+
+        def setTitle(self, title):
+            self.title = "" if title is None else str(title)
+            return self
+
+        def setItems(self, arr, listener):
+            self.items = list(arr or [])
+            self.item_click = listener
+            return self
+
+        def setPositiveButton(self, text, listener):
+            self.positive = (str(text), listener)
+            return self
+
+        def setNegativeButton(self, text, listener):
+            self.negative_label = str(text)
+            self.negative = listener
+            return self
+
+        def show(self):
+            return _Dialog(self).open()
+
+    def jclass(name):
+        if name == "com.github.catvod.Proxy":
+            return proxy_cls
+        if name == "android.widget.Toast":
+            cls = _JavaClass(name)
+            cls.LENGTH_LONG = 1
+            cls.LENGTH_SHORT = 0
+            return cls
+        return _JavaClass(name)
+
+    def dynamic_proxy(spec):
+        class _Proxy:
+            pass
+        return _Proxy
+
+    def jarray(component):
+        def build(seq):
+            return list(seq or [])
+        return build
+
+    def _base():
+        port = proxy_cls.getPort()
+        return "http://127.0.0.1:%s" % port
+
+    def _post_msg(msg):
+        data = msg.encode("utf-8")
+        req = urllib.request.Request(
+            _base() + "/postMsg",
+            data=data,
+            headers={"Content-Type": "text/plain; charset=utf-8"},
+        )
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=5) as resp:
+            resp.read()
+
+    def _take_reply(sid):
+        url = _base() + "/uiReply?id=" + urllib.parse.quote(sid)
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open(url, timeout=2) as resp:
+                return resp.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            return ""
+
+    def _reply_action(raw):
+        raw = (raw or "").strip()
+        if not raw:
+            return ""
+        if raw.startswith("{"):
+            try:
+                data = json.loads(raw)
+            except Exception:
+                return ""
+            if isinstance(data, dict):
+                return str(data.get("action") or "").strip()
+        return raw
+
+    java_mod = types.ModuleType("java")
+    java_mod.jclass = jclass
+    java_mod.dynamic_proxy = dynamic_proxy
+    java_mod.jarray = jarray
+    lang = types.ModuleType("java.lang")
+    lang.__path__ = []
+
+    class String:
+        pass
+
+    lang.String = String
+    java_mod.lang = lang
+    sys.modules["java.lang"] = lang
+    sys.modules["java"] = java_mod
 
 
 _install_java_module_stubs()
