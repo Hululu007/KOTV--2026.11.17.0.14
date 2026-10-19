@@ -469,6 +469,10 @@ public class SpiderBridge {
                 applyLocalProxyPort(p);
                 return "{}";
             }
+            if ("javaInvoke".equals(method)) {
+                JavaInvoke.setLoaders(SpiderBridge::extraLoaders);
+                return JavaInvoke.handle(argsObj);
+            }
             // JarLoader.jsonExt / jsonExtMix：只用 recent ClassLoader，不走 getSpider。
             if ("jsonExt".equals(method)) {
                 String parseKey = argsObj.get("parseKey").getAsString();
@@ -1420,10 +1424,23 @@ public class SpiderBridge {
         }
         loaders.clear();
         jarLocks.clear();
+        JavaInvoke.reset();
         try {
             com.github.catvod.net.OkHttp.get().clear();
         } catch (Throwable ignored) {
         }
+    }
+
+    static List<ClassLoader> extraLoaders() {
+        List<ClassLoader> out = new ArrayList<>();
+        if (recentJar != null) {
+            ClassLoader loader = loaders.get(recentJar);
+            if (loader != null) out.add(loader);
+        }
+        for (ClassLoader loader : loaders.values()) {
+            if (loader != null && !out.contains(loader)) out.add(loader);
+        }
+        return out;
     }
 
     private static String jarArg(com.google.gson.JsonObject argsObj, com.google.gson.JsonObject req) {

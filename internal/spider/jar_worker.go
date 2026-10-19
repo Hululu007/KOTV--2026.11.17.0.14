@@ -292,6 +292,27 @@ func currentNetConfig() [][]byte {
 	return out
 }
 
+// JavaInvoke 把 Python 的一次 classpath 调用转到当前 JVM。
+func JavaInvoke(body []byte) ([]byte, error) {
+	args := map[string]interface{}{}
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &args); err != nil {
+			return nil, err
+		}
+	}
+	req := bridgeRequest{Method: "javaInvoke", Args: args}
+	fillBridgeClient(&req)
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := callJavaBridge(payload)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(raw), nil
+}
+
 // callJavaBridge：桌面走独立 java HTTP bridge；Android 走 Native Service HTTP。可并发。
 func callJavaBridge(payload []byte) (string, error) {
 	cid := hostclient.ScopeID()

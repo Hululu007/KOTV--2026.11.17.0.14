@@ -132,6 +132,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/action", s.handleAction)
 	mux.HandleFunc("/library", s.withAuth(s.handleLibrary))
 	mux.HandleFunc("/postMsg", s.handlePostMsg)
+	mux.HandleFunc("/java", s.handleJavaInvoke)
 	mux.HandleFunc("/uiReply", s.handleUIReply)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -245,6 +246,24 @@ func (s *Server) Stop() {
 	if s.http != nil {
 		_ = s.http.Close()
 	}
+}
+
+// handleJavaInvoke 把桌面 Python 的 classpath 调用转到 JVM。
+func (s *Server) handleJavaInvoke(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	out, err := spider.JavaInvoke(body)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		msg, _ := json.Marshal(map[string]any{"ok": false, "error": err.Error()})
+		_, _ = w.Write(msg)
+		return
+	}
+	_, _ = w.Write(out)
 }
 
 // handlePostMsg 承接爬虫 jar Util.notify / UiBridge（GET/POST ?msg=）。

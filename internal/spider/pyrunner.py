@@ -389,26 +389,104 @@ def _install_desktop_java(types, proxy_cls):
         def show(self):
             return _Dialog(self).open()
 
-    _known = {
-        "com.fongmi.android.tv.App": lambda: _JavaClass("com.fongmi.android.tv.App"),
-        "android.app.Activity": lambda: _JavaClass("android.app.Activity"),
-        "android.content.DialogInterface$OnClickListener": lambda: _JavaClass(
-            "android.content.DialogInterface$OnClickListener"
-        ),
-        "java.lang.Runnable": lambda: _JavaClass("java.lang.Runnable"),
-        "java.lang.reflect.Modifier": _ModifierClass,
-        "android.widget.Toast": _ToastClass,
-        "com.google.android.material.dialog.MaterialAlertDialogBuilder": _BuilderClass,
-        "android.app.AlertDialog$Builder": _BuilderClass,
-    }
+    class _JvmObj:
+        def __init__(self, handle, is_class=False):
+            self._handle = handle
+            self._is_class = is_class
+
+        def __call__(self, *args):
+            if not self._is_class:
+                raise TypeError("not a class")
+            return _jvm_decode(_jvm_post({"op": "new", "handle": self._handle, "args": _jvm_args(args)}))
+
+        def __getattr__(self, name):
+            if name.startswith("_"):
+                raise AttributeError(name)
+            got = _jvm_post({"op": "field", "handle": self._handle, "name": name})
+            if got.get("miss") == "field":
+                def call(*args, _name=name):
+                    return _jvm_decode(_jvm_post({
+                        "op": "call",
+                        "handle": self._handle,
+                        "name": _name,
+                        "args": _jvm_args(args),
+                    }))
+                return call
+            return _jvm_decode(got)
+
+    def _jvm_args(args):
+        out = []
+        for item in args:
+            if item is None:
+                out.append({"t": "z"})
+            elif isinstance(item, _JvmObj):
+                out.append({"t": "h", "v": item._handle})
+            elif isinstance(item, bool):
+                out.append({"t": "b", "v": item})
+            elif isinstance(item, (int, float)):
+                out.append({"t": "n", "v": item})
+            else:
+                out.append({"t": "s", "v": str(item)})
+        return out
+
+    def _jvm_decode(out):
+        kind = out.get("t")
+        if kind == "h":
+            return _JvmObj(int(out.get("v")), is_class=out.get("k") == "class")
+        if kind == "b":
+            return bool(out.get("v"))
+        if kind == "n":
+            value = out.get("v")
+            if isinstance(value, float) and value.is_integer():
+                return int(value)
+            return value
+        if kind == "s":
+            return out.get("v")
+        return None
+
+    def _jvm_post(payload):
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            _base() + "/java",
+            data=data,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        out = json.loads(raw or "{}")
+        if not out.get("ok"):
+            if out.get("miss") == "field":
+                return out
+            if out.get("miss") == "class":
+                raise LookupError(out.get("error") or payload.get("name") or "not found")
+            raise RuntimeError(out.get("error") or "java")
+        return out
+
+    def _jvm_class(name):
+        return _jvm_decode(_jvm_post({"op": "class", "name": name}))
 
     def jclass(name):
         if name == "com.github.catvod.Proxy":
             return proxy_cls
-        make = _known.get(name)
-        if make is None:
-            raise LookupError(name)
-        return make()
+        # 这几个没有 JVM 类，或者 show() 到不了界面，仍走本机窗口。
+        if name == "android.widget.Toast":
+            return _ToastClass()
+        if name in (
+            "com.google.android.material.dialog.MaterialAlertDialogBuilder",
+            "android.app.AlertDialog$Builder",
+        ):
+            return _BuilderClass()
+        if name == "java.lang.reflect.Modifier":
+            return _ModifierClass()
+        if name in (
+            "com.fongmi.android.tv.App",
+            "android.app.Activity",
+            "android.content.DialogInterface$OnClickListener",
+            "java.lang.Runnable",
+        ):
+            return _JavaClass(name)
+        return _jvm_class(name)
 
     def dynamic_proxy(spec):
         class _Proxy:
