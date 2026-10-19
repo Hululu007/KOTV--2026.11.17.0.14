@@ -77,9 +77,23 @@ jobs:
       - name: Install desktop MPV source deps
         shell: bash
         run: |
-          choco install nasm vulkan-sdk strawberryperl -y --no-progress
-          python -m pip install meson ninja
           export PATH="/c/Strawberry/perl/bin:/c/mingw-msvcrt/mingw64/bin:/c/Program Files/NASM:/c/ProgramData/chocolatey/bin:$PATH"
+          # Chocolatey 源偶发 503，且缺包时仍返回 0。按结果重试，不要只看退出码。
+          choco_ok() {
+            local i
+            for i in 1 2 3 4; do
+              if eval "$2"; then
+                return 0
+              fi
+              choco install "$1" -y --no-progress || true
+              sleep 20
+            done
+            eval "$2"
+          }
+          choco_ok nasm 'command -v nasm'
+          choco_ok vulkan-sdk 'ls -d /c/VulkanSDK/*/ >/dev/null 2>&1'
+          choco_ok strawberryperl 'command -v perl'
+          python -m pip install meson ninja
           export PATH="$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"
           gcc --version
           nasm -v
@@ -199,9 +213,23 @@ jobs:
       - name: Install desktop MPV source deps (Win7)
         shell: bash
         run: |
-          choco install nasm vulkan-sdk strawberryperl -y --no-progress
-          python -m pip install meson ninja
           export PATH="/c/Strawberry/perl/bin:/c/mingw-msvcrt/mingw64/bin:/c/Program Files/NASM:/c/ProgramData/chocolatey/bin:$PATH"
+          # Chocolatey 源偶发 503，且缺包时仍返回 0。按结果重试，不要只看退出码。
+          choco_ok() {
+            local i
+            for i in 1 2 3 4; do
+              if eval "$2"; then
+                return 0
+              fi
+              choco install "$1" -y --no-progress || true
+              sleep 20
+            done
+            eval "$2"
+          }
+          choco_ok nasm 'command -v nasm'
+          choco_ok vulkan-sdk 'ls -d /c/VulkanSDK/*/ >/dev/null 2>&1'
+          choco_ok strawberryperl 'command -v perl'
+          python -m pip install meson ninja
           export PATH="$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"
           gcc --version
           nasm -v
