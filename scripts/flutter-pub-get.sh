@@ -154,10 +154,10 @@ PY
 win7=0
 if [[ "${KOTV_WIN7:-}" == "1" ]] || flutter --version 2>&1 | grep -qE 'Dart 3\.3\.|Flutter 3\.19'; then
   win7=1
-  echo "==> Win7 / Dart 3.3: adapt pubspec before pub get (keep fvp 0.39.0)"
+  echo "==> Win7 / Dart 3.3: adapt pubspec before pub get (keep fvp 0.39.1)"
   "$ROOT/scripts/adapt-flutter-win7-sdk.sh"
   # FVP 0.39 编译需要 VideoViewType → platform_interface 6.3.0（官方 Flutter>=3.22，须放宽）。
-  _kotv_ensure_hosted_pkg fvp 0.39.0
+  _kotv_ensure_hosted_pkg fvp 0.39.1
   _kotv_ensure_hosted_pkg video_player_platform_interface 6.3.0
   _kotv_relax_win7_sdk_constraints
   # 丢掉与主线/高 SDK 冲突的 lock，让 solver 按 root sdk <3.4.0 + overrides 重解。
@@ -200,7 +200,7 @@ fi
 if ! flutter pub get "$@"; then
   if [[ "$win7" == "1" ]]; then
     echo "==> Win7 pub get failed; re-prefetch + relax and retry" >&2
-    _kotv_ensure_hosted_pkg fvp 0.39.0
+    _kotv_ensure_hosted_pkg fvp 0.39.1
     _kotv_ensure_hosted_pkg video_player_platform_interface 6.3.0
     _kotv_relax_win7_sdk_constraints
     flutter pub get "$@"
