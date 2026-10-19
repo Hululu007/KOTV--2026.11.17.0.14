@@ -180,22 +180,17 @@ func (h *uiHub) pushUI(clientID, msg string) bool {
 	h.mu.Lock()
 	list := append([]*uiSock(nil), h.ui[clientID]...)
 	h.mu.Unlock()
-	if len(list) == 0 {
-		return false
-	}
-	ok := true
-	for _, sock := range list {
-		if !sock.sendText(msg) {
-			ok = false
-		}
-	}
-	return ok
+	return pushSocks(list, msg)
 }
 
 func (h *uiHub) pushSrc(msg string) bool {
 	h.mu.Lock()
 	list := append([]*uiSock(nil), h.src...)
 	h.mu.Unlock()
+	return pushSocks(list, msg)
+}
+
+func pushSocks(list []*uiSock, msg string) bool {
 	if len(list) == 0 {
 		return false
 	}
@@ -283,19 +278,19 @@ func (s *Server) acceptSrcFrame(scope, text string) {
 	s.events.EmitPostMsgTo(msg, clientID)
 }
 
-func (s *Server) acceptUIReply(text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
+func uiReplyID(text string) string {
 	var reply struct {
 		ID string `json:"id"`
 	}
 	if json.Unmarshal([]byte(text), &reply) != nil {
-		return
+		return ""
 	}
-	id := strings.TrimSpace(reply.ID)
-	if id == "" {
+	return strings.TrimSpace(reply.ID)
+}
+
+func (s *Server) acceptUIReply(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" || uiReplyID(text) == "" {
 		return
 	}
 	if s.ui != nil && s.ui.pushSrc(text) {
@@ -306,17 +301,8 @@ func (s *Server) acceptUIReply(text string) {
 
 func (s *Server) keepReply(text string) {
 	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	var reply struct {
-		ID string `json:"id"`
-	}
-	if json.Unmarshal([]byte(text), &reply) != nil {
-		return
-	}
-	id := strings.TrimSpace(reply.ID)
-	if id == "" {
+	id := uiReplyID(text)
+	if text == "" || id == "" {
 		return
 	}
 	if s.uiReply == nil {

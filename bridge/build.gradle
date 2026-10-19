@@ -33,6 +33,8 @@ dependencies {
     implementation "com.squareup.okhttp3:okhttp:5.5.0"
     implementation "com.squareup.okhttp3:okhttp-dnsoverhttps:5.5.0"
     implementation "com.squareup.okhttp3:logging-interceptor:5.5.0"
+    // WebSocket 会调用 ByteString.base64$default。3.17 没有这个方法，界面消息发不出去。
+    implementation "com.squareup.okio:okio:3.18.1"
     implementation "org.brotli:dec:0.1.2"
     implementation "com.hierynomus:smbj:0.14.0"
     // Android AAR is unpacked explicitly below: only its classes.jar is merged.

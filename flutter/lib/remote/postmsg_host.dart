@@ -667,8 +667,6 @@ class PostMsgHost {
   bool _windowPlaced(Map<String, dynamic> doc) =>
       doc.containsKey('x') || doc.containsKey('y') || doc.containsKey('left') || doc.containsKey('top');
 
-  bool _elementPlaced(Map<String, dynamic> el) => _windowPlaced(el);
-
   bool _overlayModal(Map<String, dynamic> doc) {
     if (doc.containsKey('modal')) return doc['modal'] == true;
     return !_windowPlaced(doc);
@@ -734,7 +732,7 @@ class PostMsgHost {
     for (final raw in (doc['elements'] as List?) ?? const []) {
       if (raw is! Map) continue;
       final el = Map<String, dynamic>.from(raw);
-      if (_elementPlaced(el)) {
+      if (_windowPlaced(el)) {
         placed.add(el);
       } else {
         flow.add(el);
