@@ -633,13 +633,11 @@ class PostMsgHost {
     final ctx = navigatorKey.currentContext;
     if (ctx == null) return const SizedBox.shrink();
     final p = KotvPalette.of(ctx);
-    final title = '${doc['title'] ?? ''}';
+    final title = _windowTitle(doc, p.fg, hostUiScale(ctx));
     return _hostUiCard(
       context: ctx,
       doc: doc,
-      title: title.isEmpty
-          ? null
-          : Text(title, style: TextStyle(color: p.fg, fontSize: 22, fontWeight: FontWeight.w700)),
+      title: title,
       body: Center(child: CircularProgressIndicator(color: p.primary)),
     );
   }
@@ -676,10 +674,11 @@ class PostMsgHost {
     final title = '${doc['title'] ?? ''}';
     if (title.isEmpty) return null;
     final titleFont = kotvUiNum(doc['titleSize']);
-    final resolved = (titleFont > 0 ? titleFont : (kotvIsDesktop() ? 22.0 : 20.0)) * s;
+    final docFont = kotvUiNum(doc['fontSize']);
+    final resolved = (titleFont > 0 ? titleFont : (docFont > 0 ? docFont : 14.0)) * s;
     return Text(
       title,
-      style: TextStyle(color: fg, fontSize: resolved, fontWeight: FontWeight.w700, height: 1.2),
+      style: TextStyle(color: fg, fontSize: resolved, fontWeight: kotvUiFontWeight(doc), height: 1.2),
     );
   }
 
@@ -702,8 +701,8 @@ class PostMsgHost {
       context: context,
       actions: actionMaps,
       align: '${doc['actionAlign'] ?? ''}',
-      defaultFont: (actionFont > 0 ? actionFont : docFont) * s,
-      defaultH: (actionH > 0 ? actionH : 40) * s,
+      defaultFont: (actionFont > 0 ? actionFont : (docFont > 0 ? docFont : 14.0)) * s,
+      defaultH: actionH > 0 ? actionH * s : 0,
       defaultW: kotvUiNum(doc['actionWidth']),
       uiScale: s,
       onPressed: (a) => fire(
@@ -753,19 +752,16 @@ class PostMsgHost {
           openExternal: _openExternal,
         );
     final column = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (html.isNotEmpty)
-          SizedBox(
-            width: double.infinity,
-            child: KotvUiMarkup(
-              html: html,
-              color: fg,
-              fontSize: (docFont > 0 ? docFont : 14) * uiScale,
-              scale: uiScale,
-              onAction: (id) => unawaited(fire(id)),
-              onLink: (url) => unawaited(_openExternal(url)),
-            ),
+          KotvUiMarkup(
+            html: html,
+            color: fg,
+            fontSize: (docFont > 0 ? docFont : 14) * uiScale,
+            scale: uiScale,
+            onAction: (id) => unawaited(fire(id)),
+            onLink: (url) => unawaited(_openExternal(url)),
           ),
         for (final el in flow) ...built(el),
       ],
@@ -862,14 +858,9 @@ class PostMsgHost {
     if (rawW <= 0) cardW = cardW.clamp(280.0 * s, maxW);
     final customPad = doc['padding'] != null;
     final pad = customPad ? kotvUiNum(doc['padding']) * s : 0.0;
-    final padH = customPad ? pad : (compact ? 14.0 : 24.0) * s;
-    final padVT = customPad ? pad : (compact ? 14.0 : 22.0) * s;
-    final padVB = customPad ? pad : (compact ? 12.0 : 18.0) * s;
-    final gapTitle = (compact ? 8.0 : 12.0) * s;
-    final gapActions = (compact ? 12.0 : 16.0) * s;
-    final radius = doc['radius'] != null ? kotvUiNum(doc['radius']) * s : 18.0 * s;
+    final radius = doc['radius'] != null ? kotvUiNum(doc['radius']) * s : 0.0;
     final bg = kotvUiColor(doc['background']) ?? p.dialogBg;
-    final border = kotvUiColor(doc['border']) ?? p.outline;
+    final border = kotvUiColor(doc['border']);
 
     final content = rawH > 0 ? SizedBox(width: cardW, height: rawH * s, child: body) : body;
 
@@ -878,24 +869,18 @@ class PostMsgHost {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: bg,
-          borderRadius: BorderRadius.circular(radius),
-          border: Border.all(color: border),
+          borderRadius: radius > 0 ? BorderRadius.circular(radius) : null,
+          border: border == null ? null : Border.all(color: border),
         ),
         child: Padding(
-          padding: EdgeInsets.fromLTRB(padH, padVT, padH, padVB),
+          padding: EdgeInsets.all(pad),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (title != null) ...[
-                title,
-                SizedBox(height: gapTitle),
-              ],
+              if (title != null) title,
               content,
-              if (actions != null) ...[
-                SizedBox(height: gapActions),
-                actions,
-              ],
+              if (actions != null) actions,
             ],
           ),
         ),

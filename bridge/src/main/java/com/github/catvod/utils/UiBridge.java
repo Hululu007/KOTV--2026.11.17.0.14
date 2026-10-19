@@ -92,7 +92,7 @@ public final class UiBridge {
             return this;
         }
 
-        /** width/height/fontSize：≤0 表示该项不指定，由宿主用文档级默认或控件固有尺寸。 */
+        /** width/height/fontSize：≤0 表示该项不指定。不补外观。窗口没写宽度时，宿主只用缩放盒子。 */
         public Elements input(String id, String placeholder, boolean multiline,
                               int width, int height, int fontSize) {
             addInput(target, id, placeholder, multiline, false, "", width, height, fontSize);
@@ -669,7 +669,7 @@ public final class UiBridge {
             return this;
         }
 
-        /** look 为 text 时按文字上色，pill 时画小色块。color 如 #ff9800。 */
+        /** look、color 写到这条动作上。 */
         public Document action(String id, String label, boolean dismiss, String look, String color) {
             Map<String, Object> item = UiBridge.action(id, label, dismiss, 0, 0, 0);
             if (look != null && !look.trim().isEmpty()) item.put("style", look.trim());

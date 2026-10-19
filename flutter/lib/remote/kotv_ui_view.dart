@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
-import '../theme/layout_scale.dart';
-import '../widgets/chrome.dart';
 import '../widgets/kotv_network_image.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import 'kotv_ui_markup.dart';
@@ -38,96 +36,72 @@ MainAxisAlignment kotvUiMainAlign(String raw) {
   }
 }
 
-/// 按钮、链接、底栏共用。`text` 文字，`pill` 色块，没写 style 时底栏和按钮仍是胶囊。
+Alignment kotvUiBoxAlign(String raw) {
+  switch (kotvUiMainAlign(raw)) {
+    case MainAxisAlignment.center:
+      return Alignment.center;
+    case MainAxisAlignment.end:
+      return Alignment.centerRight;
+    default:
+      return Alignment.centerLeft;
+  }
+}
+
+TextAlign kotvUiTextAlign(String raw) {
+  switch (kotvUiMainAlign(raw)) {
+    case MainAxisAlignment.center:
+      return TextAlign.center;
+    case MainAxisAlignment.end:
+      return TextAlign.right;
+    default:
+      return TextAlign.left;
+  }
+}
+
+/// 可点的文字。盒子只来自文档上的背景、内边距和圆角。
 class KotvUiPress extends StatelessWidget {
   const KotvUiPress({
     super.key,
     required this.label,
-    required this.look,
     required this.onTap,
     required this.palette,
     required this.font,
+    this.weight = FontWeight.w400,
     this.color,
-    this.background,
     this.width,
     this.height,
-    this.selected = false,
     this.underline = false,
   });
 
   final String label;
-  final String look;
   final VoidCallback onTap;
   final KotvPalette palette;
   final double font;
+  final FontWeight weight;
   final Color? color;
-  final Color? background;
   final double? width;
   final double? height;
-  final bool selected;
   final bool underline;
 
   @override
   Widget build(BuildContext context) {
-    final kind = look.toLowerCase().trim();
-    if (kind == 'text' || underline) {
-      final Widget face = underline && kind != 'text' && kind != 'pill'
-          ? KotvFocusAction(
-              label: label,
-              color: color ?? palette.primary,
-              fontSize: font,
-              underline: true,
-              onPressed: onTap,
-            )
-          : TextButton(
-              onPressed: onTap,
-              child: Text(
-                label,
-                style: TextStyle(color: color ?? palette.primary, fontSize: font, fontWeight: FontWeight.w600),
-              ),
-            );
-      return Align(alignment: Alignment.centerLeft, child: _pressBox(face, width: width, height: height));
-    }
-    if (kind == 'pill') {
-      final fill = background ?? color ?? palette.primary;
-      final fg = background != null ? (color ?? Colors.white) : Colors.white;
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: Material(
-          color: fill,
-          borderRadius: BorderRadius.circular(999),
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(999),
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: width != null && width! > 0 ? 0 : 12, vertical: 6),
-              child: SizedBox(
-                width: width != null && width! > 0 ? width : null,
-                height: height != null && height! > 0 ? height : null,
-                child: Center(
-                  widthFactor: 1,
-                  heightFactor: 1,
-                  child: Text(label, style: TextStyle(color: fg, fontSize: font, fontWeight: FontWeight.w600)),
-                ),
-              ),
-            ),
+    final fg = color ?? palette.primary;
+    return InkWell(
+      onTap: onTap,
+      child: _pressBox(
+        Text(
+          label,
+          style: TextStyle(
+            color: fg,
+            fontSize: font,
+            fontWeight: weight,
+            decoration: underline ? TextDecoration.underline : null,
+            decorationColor: fg,
           ),
         ),
-      );
-    }
-    return Builder(
-      builder: (context) {
-        final ls = LayoutScale.layoutOf(context);
-        final inv = ls > 0 ? 1.0 / ls : 1.0;
-        return AppPill(
-          label: label,
-          selected: selected,
-          fontSize: font * inv,
-          height: (height != null && height! > 0 ? height! : 40) * inv,
-          width: width != null && width! > 0 ? width! * inv : null,
-          onTap: onTap,
-        );
-      },
+        width: width,
+        height: height,
+      ),
     );
   }
 }
@@ -144,76 +118,35 @@ Widget kotvUiActions({
 }) {
   if (actions.isEmpty) return const SizedBox.shrink();
   final palette = KotvPalette.of(context);
-  final compact = MediaQuery.sizeOf(context).width < 640 * uiScale;
-  final gap = (compact ? 8.0 : 10.0) * uiScale;
-  final plain = actions.any((a) {
-    final look = '${a['style'] ?? ''}'.toLowerCase().trim();
-    return look == 'text' || look == 'pill';
-  });
-  if (plain) {
-    return Row(
-      mainAxisAlignment: kotvUiMainAlign(align.isEmpty ? 'end' : align),
-      children: [
-        for (var i = 0; i < actions.length; i++) ...[
-          if (i > 0) SizedBox(width: gap),
-          KotvUiPress(
-            label: '${actions[i]['label'] ?? actions[i]['id'] ?? ''}',
-            look: '${actions[i]['style'] ?? 'text'}',
-            palette: palette,
-            font: kotvUiPx(actions[i]['fontSize'], uiScale) ?? defaultFont,
-            color: kotvUiColor(actions[i]['color']),
-            background: kotvUiColor(actions[i]['background']),
-            width: _actionWidth(actions[i], defaultW, uiScale),
-            height: kotvUiPx(actions[i]['height'], uiScale),
-            onTap: () => onPressed(actions[i]),
-          ),
-        ],
-      ],
-    );
-  }
   return Row(
+    mainAxisAlignment: kotvUiMainAlign(align),
     children: [
-      for (var i = 0; i < actions.length; i++) ...[
-        if (i > 0) SizedBox(width: gap),
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, cons) {
-              final ls = LayoutScale.layoutOf(context);
-              final ownW = _actionWidth(actions[i], defaultW, uiScale);
-              return KotvUiPress(
-                label: '${actions[i]['label'] ?? actions[i]['id'] ?? ''}',
-                look: '',
-                palette: palette,
-                selected: _primaryAction(actions[i], actions.length),
-                font: kotvUiPx(actions[i]['fontSize'], uiScale) ??
-                    (defaultFont > 0 ? defaultFont : (compact ? 13.0 : 15.0) * uiScale),
-                height: kotvUiPx(actions[i]['height'], uiScale) ??
-                    (defaultH > 0 ? defaultH : (compact ? 36.0 : 40.0) * uiScale),
-                width: ownW > 0 ? ownW : (cons.maxWidth.isFinite && cons.maxWidth > 0 ? cons.maxWidth : 88 * (ls > 0 ? ls : 1)),
-                onTap: () => onPressed(actions[i]),
-              );
-            },
+      for (final action in actions)
+        _paint(
+          action,
+          KotvUiPress(
+            label: '${action['label'] ?? action['id'] ?? ''}',
+            palette: palette,
+            font: kotvUiPx(action['fontSize'], uiScale) ?? defaultFont,
+            weight: kotvUiFontWeight(action),
+            color: kotvUiColor(action['color']),
+            width: _actionWidth(action, defaultW, uiScale),
+            height: kotvUiPx(action['height'], uiScale) ?? (defaultH > 0 ? defaultH : null),
+            onTap: () => onPressed(action),
           ),
+          uiScale,
         ),
-      ],
     ],
   );
 }
 
-double _actionWidth(Map<String, dynamic> action, double fallback, double uiScale) {
-  return kotvUiPx(action['width'], uiScale) ?? (fallback > 0 ? fallback * uiScale : 0);
+double? _actionWidth(Map<String, dynamic> action, double fallback, double uiScale) {
+  return kotvUiPx(action['width'], uiScale) ?? (fallback > 0 ? fallback * uiScale : null);
 }
 
 Widget _pressBox(Widget child, {double? width, double? height}) {
   if ((width == null || width <= 0) && (height == null || height <= 0)) return child;
   return SizedBox(width: width != null && width > 0 ? width : null, height: height != null && height > 0 ? height : null, child: child);
-}
-
-bool _primaryAction(Map<String, dynamic> action, int count) {
-  final id = '${action['id'] ?? ''}'.toLowerCase().trim();
-  if (id == 'submit' || id == 'ok' || id == 'confirm' || id == 'positive') return true;
-  if (id == 'cancel' || id == 'close' || id == 'dismiss' || id == 'negative') return false;
-  return count == 1;
 }
 
 List<Widget> kotvUiElements(
@@ -243,20 +176,19 @@ List<Widget> kotvUiElements(
     openExternal: openExternal,
   );
   if (built.isEmpty) return built;
+  final inner = built.length == 1
+      ? built.first
+      : Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: built,
+        );
   return [
     _tap(
       el,
       fire,
       openExternal,
-      _paint(
-        el,
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: built,
-        ),
-        uiScale,
-      ),
+      _paint(el, inner, uiScale),
     ),
   ];
 }
@@ -308,16 +240,16 @@ Widget _paint(Map<String, dynamic> el, Widget child, double uiScale) {
   }
   if (margin > 0) out = Padding(padding: EdgeInsets.all(margin), child: out);
   final type = '${el['type'] ?? ''}'.toLowerCase().trim();
-  if (type != 'row' && type != 'column') {
-    var alignment = Alignment.centerLeft;
-    if (align == 'center') alignment = Alignment.center;
-    if (align == 'right' || align == 'end') alignment = Alignment.centerRight;
-    out = Align(alignment: alignment, widthFactor: 1, heightFactor: 1, child: out);
+  final hint = '${el['hint'] ?? ''}'.trim();
+  final fills = type == 'button' && (hint.isNotEmpty || el['mark'] != null);
+  final hug = type == 'image' || type == 'progress' || type == 'link' || (type == 'button' && !fills);
+  if (hug) {
+    out = Align(alignment: kotvUiBoxAlign(align), widthFactor: 1, heightFactor: 1, child: out);
   }
   return out;
 }
 
-FontWeight _fontWeight(Map<String, dynamic> el) {
+FontWeight kotvUiFontWeight(Map<String, dynamic> el) {
   final n = kotvUiNum(el['fontWeight']);
   if (n >= 800) return FontWeight.w800;
   if (n >= 700) return FontWeight.w700;
@@ -348,21 +280,6 @@ double _fontOf(Map<String, dynamic> el, double docFont) {
   return 14.0;
 }
 
-TextAlign? _textAlign(Object? raw) {
-  switch ('${raw ?? ''}'.toLowerCase().trim()) {
-    case 'center':
-      return TextAlign.center;
-    case 'right':
-    case 'end':
-      return TextAlign.right;
-    case 'left':
-    case 'start':
-      return TextAlign.left;
-    default:
-      return null;
-  }
-}
-
 Widget _sized(Map<String, dynamic> el, Widget child, double uiScale) {
   final w = kotvUiPx(el['width'], uiScale);
   final h = kotvUiPx(el['height'], uiScale);
@@ -385,59 +302,34 @@ List<Widget> _raw(
 }) {
   final type = '${el['type'] ?? ''}'.toLowerCase().trim();
   final font = _fontOf(el, docFontSize) * uiScale;
-  final pad = 8.0 * uiScale;
   switch (type) {
     case 'text':
       final rawText = '${el['text'] ?? ''}';
-      final weight = _fontWeight(el);
-      final heavy = weight != FontWeight.w400;
-      final ownBox = el['padding'] != null || el['background'] != null || el['radius'] != null;
       return [
-        Padding(
-          padding: EdgeInsets.only(bottom: ownBox || heavy ? 0 : pad),
-          child: Text(
-            rawText,
-            textAlign: _textAlign(el['align']),
-            style: TextStyle(
-              color: kotvUiColor(el['color']) ?? (heavy ? palette.fg : palette.muted),
-              height: 1.35,
-              fontSize: font,
-              fontWeight: weight,
-            ),
+        Text(
+          rawText,
+          textAlign: kotvUiTextAlign('${el['align'] ?? ''}'),
+          style: TextStyle(
+            color: kotvUiColor(el['color']) ?? palette.fg,
+            height: 1.35,
+            fontSize: font,
+            fontWeight: kotvUiFontWeight(el),
           ),
         ),
       ];
     case 'image':
       final source = '${el['source'] ?? ''}'.trim();
       if (source.isEmpty) return const [];
-      final radius = el['radius'] == null ? 12.0 * uiScale : kotvUiNum(el['radius']) * uiScale;
       return [
-        Padding(
-          padding: EdgeInsets.symmetric(vertical: pad),
-          child: Center(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: kotvUiColor(el['background']) ?? Colors.white,
-                borderRadius: BorderRadius.circular(radius),
-              ),
-              child: Padding(
-                padding: EdgeInsets.all(pad),
-                child: _sized(
-                  el,
-                  KotvNetworkImage(source, fit: BoxFit.contain),
-                  uiScale,
-                ),
-              ),
-            ),
-          ),
+        _sized(
+          el,
+          KotvNetworkImage(source, fit: BoxFit.contain),
+          uiScale,
         ),
       ];
     case 'progress':
       return [
-        Padding(
-          padding: EdgeInsets.symmetric(vertical: 12 * uiScale),
-          child: Center(child: CircularProgressIndicator(color: kotvUiColor(el['color']) ?? palette.primary)),
-        ),
+        CircularProgressIndicator(color: kotvUiColor(el['color']) ?? palette.primary),
       ];
     case 'slider':
       final sliderId = '${el['id'] ?? ''}'.trim();
@@ -553,12 +445,7 @@ List<Widget> _raw(
           contentPadding: EdgeInsets.symmetric(horizontal: 12 * uiScale, vertical: 10 * uiScale),
         ),
       );
-      return [
-        Padding(
-          padding: EdgeInsets.only(bottom: 10 * uiScale),
-          child: _sized(el, field, uiScale),
-        ),
-      ];
+      return [_sized(el, field, uiScale)];
     case 'switch':
       final id = '${el['id'] ?? ''}';
       if (id.isEmpty) return const [];
@@ -641,15 +528,9 @@ List<Widget> _raw(
         ],
         onChanged: (v) => setLocal(() => selects[id] = v ?? ''),
       );
-      return [
-        Padding(
-          padding: EdgeInsets.only(bottom: 10 * uiScale),
-          child: _sized(el, dropdown, uiScale),
-        ),
-      ];
+      return [_sized(el, dropdown, uiScale)];
     case 'button':
       final btnUrl = '${el['url'] ?? ''}'.trim();
-      final look = '${el['style'] ?? ''}'.toLowerCase().trim();
       final toggleId = '${el['toggle'] ?? ''}'.trim();
       Future<void> onButton() async {
         if (toggleId.isNotEmpty) {
@@ -665,59 +546,51 @@ List<Widget> _raw(
       final hint = '${el['hint'] ?? ''}'.trim();
       final mark = kotvUiColor(el['mark']);
       if (hint.isNotEmpty || mark != null) {
-        final ownBox = el['background'] != null || el['padding'] != null || el['radius'] != null;
         return [
-          Padding(
-            padding: EdgeInsets.only(bottom: ownBox ? 0 : pad),
-            child: InkWell(
-              onTap: () => unawaited(onButton()),
-              child: Row(
-                children: [
-                  if (mark != null) ...[
-                    Container(
-                      width: 10 * uiScale,
-                      height: 10 * uiScale,
-                      decoration: BoxDecoration(color: mark, shape: BoxShape.circle),
-                    ),
-                    SizedBox(width: 12 * uiScale),
-                  ],
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${el['text'] ?? ''}',
-                          style: TextStyle(
-                            color: kotvUiColor(el['color']) ?? palette.fg,
-                            fontSize: font,
-                            fontWeight: _fontWeight(el),
-                          ),
-                        ),
-                        if (hint.isNotEmpty)
-                          Text(hint, style: TextStyle(color: palette.muted, fontSize: (font - 1).clamp(11, font), height: 1.3)),
-                      ],
-                    ),
+          InkWell(
+            onTap: () => unawaited(onButton()),
+            child: Row(
+              children: [
+                if (mark != null) ...[
+                  Container(
+                    width: 10 * uiScale,
+                    height: 10 * uiScale,
+                    decoration: BoxDecoration(color: mark, shape: BoxShape.circle),
                   ),
+                  SizedBox(width: 12 * uiScale),
                 ],
-              ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${el['text'] ?? ''}',
+                        style: TextStyle(
+                          color: kotvUiColor(el['color']) ?? palette.fg,
+                          fontSize: font,
+                          fontWeight: kotvUiFontWeight(el),
+                        ),
+                      ),
+                      if (hint.isNotEmpty)
+                        Text(hint, style: TextStyle(color: palette.muted, fontSize: (font - 1).clamp(11, font), height: 1.3)),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ];
       }
       return [
-        Padding(
-          padding: EdgeInsets.only(bottom: look == 'text' ? 0 : pad),
-          child: KotvUiPress(
-            label: '${el['text'] ?? ''}',
-            look: look,
-            palette: palette,
-            font: font,
-            color: kotvUiColor(el['color']),
-            background: kotvUiColor(el['background']),
-            width: kotvUiPx(el['width'], uiScale),
-            height: kotvUiPx(el['height'], uiScale),
-            onTap: () => unawaited(onButton()),
-          ),
+        KotvUiPress(
+          label: '${el['text'] ?? ''}',
+          palette: palette,
+          font: font,
+          weight: kotvUiFontWeight(el),
+          color: kotvUiColor(el['color']),
+          width: kotvUiPx(el['width'], uiScale),
+          height: kotvUiPx(el['height'], uiScale),
+          onTap: () => unawaited(onButton()),
         ),
       ];
     case 'link':
@@ -726,21 +599,16 @@ List<Widget> _raw(
       final labelText = '${el['text'] ?? ''}'.trim().isEmpty ? linkUrl : '${el['text']}'.trim();
       final look = '${el['style'] ?? ''}'.toLowerCase().trim();
       return [
-        Padding(
-          padding: EdgeInsets.only(bottom: look == 'button' || look == 'pill' ? pad : 4 * uiScale),
-          child: KotvUiPress(
-            label: labelText,
-            look: look.isEmpty ? 'link' : look,
-            underline: look.isEmpty || look == 'text',
-            palette: palette,
-            font: font,
-            color: kotvUiColor(el['color']),
-            background: kotvUiColor(el['background']),
-            width: kotvUiPx(el['width'], uiScale),
-            height: kotvUiPx(el['height'], uiScale),
-            selected: look == 'button',
-            onTap: () => unawaited(openExternal(linkUrl)),
-          ),
+        KotvUiPress(
+          label: labelText,
+          underline: look.isEmpty || look == 'text',
+          palette: palette,
+          font: font,
+          weight: kotvUiFontWeight(el),
+          color: kotvUiColor(el['color']),
+          width: kotvUiPx(el['width'], uiScale),
+          height: kotvUiPx(el['height'], uiScale),
+          onTap: () => unawaited(openExternal(linkUrl)),
         ),
       ];
     case 'separator':
@@ -810,8 +678,8 @@ Widget _flex(
     if (type == 'group' && '${el['text'] ?? ''}'.isNotEmpty)
       Text(
         '${el['text']}',
-        textAlign: _textAlign(el['align']),
-        style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontWeight: FontWeight.w600, fontSize: font),
+        textAlign: kotvUiTextAlign('${el['align'] ?? ''}'),
+        style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontWeight: kotvUiFontWeight(el), fontSize: font),
       ),
   ];
   final children = (el['children'] as List?) ?? const [];
@@ -845,7 +713,7 @@ Widget _flex(
   }
   final spaced = <Widget>[];
   for (var i = 0; i < slots.length; i++) {
-    if (i > 0 && spacing > 0 && align == MainAxisAlignment.start) {
+    if (i > 0 && spacing > 0) {
       spaced.add(horizontal ? SizedBox(width: spacing) : SizedBox(height: spacing));
     }
     spaced.add(slots[i]);

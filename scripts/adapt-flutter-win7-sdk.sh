@@ -25,6 +25,9 @@ perl -i -pe 's/video_player:\s*\^[^\n]+/video_player: 2.9.2/' "$APP"
 # 保留 0.39.1（与主线一致）。SDK 约束在 pub-cache 里放宽，见下方 / flutter-pub-get.sh。
 perl -i -pe 's/fvp:\s*[^\n]+/fvp: 0.39.1/' "$APP"
 perl -i -pe 's/media_kit_video:\s*[^\n]+/media_kit_video: 1.2.5/' "$APP"
+# 3.0.0 要 collection ^1.19.0，Flutter 3.19 的 flutter_test 把 collection 钉死在 1.18.0。
+# 3.0.0-beta.2 的 Html / Style 接口相同，collection 只要 ^1.17.0。
+perl -i -pe 's/flutter_html:\s*[^\n]+/flutter_html: 3.0.0-beta.2/' "$APP"
 
 THEME="$ROOT/flutter/lib/theme/kotv_theme.dart"
 if [[ -f "$THEME" ]]; then
@@ -87,6 +90,8 @@ dependency_overrides:
   wakelock_plus: 1.2.8
   # 1.3.x 用 onPopInvokedWithResult，Flutter 3.19 只有 onPopInvoked。
   media_kit_video: 1.2.5
+  flutter_html: 3.0.0-beta.2
+  html: 0.15.6
   url_launcher_windows: 3.1.3
   file_selector_windows: 0.9.3+3
 OVERRIDES
