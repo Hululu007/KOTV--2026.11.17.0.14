@@ -243,8 +243,6 @@ List<Widget> kotvUiElements(
     openExternal: openExternal,
   );
   if (built.isEmpty) return built;
-  final look = '${el['style'] ?? ''}'.toLowerCase().trim();
-  final selfPainted = look == 'pill' || look == 'card' || look == 'heading';
   return [
     _tap(
       el,
@@ -254,11 +252,10 @@ List<Widget> kotvUiElements(
         el,
         Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: look == 'pill' ? CrossAxisAlignment.start : CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: built,
         ),
         uiScale,
-        skip: selfPainted,
       ),
     ),
   ];
@@ -273,7 +270,7 @@ Widget _tap(
   final id = '${el['id'] ?? ''}'.trim();
   final url = '${el['url'] ?? ''}'.trim();
   final type = '${el['type'] ?? ''}'.toLowerCase().trim();
-  if (type == 'button' || type == 'link' || type == 'input' || type == 'switch' || type == 'checkbox' || type == 'radio' || type == 'select') {
+  if (type == 'button' || type == 'link' || type == 'input' || type == 'switch' || type == 'checkbox' || type == 'radio' || type == 'select' || type == 'slider' || type == 'color') {
     return child;
   }
   if (id.isEmpty && url.isEmpty) return child;
@@ -287,8 +284,7 @@ Widget _tap(
   );
 }
 
-Widget _paint(Map<String, dynamic> el, Widget child, double uiScale, {bool skip = false}) {
-  if (skip) return child;
+Widget _paint(Map<String, dynamic> el, Widget child, double uiScale) {
   final color = kotvUiColor(el['color']);
   final bg = kotvUiColor(el['background']);
   final border = kotvUiColor(el['border']);
@@ -311,14 +307,38 @@ Widget _paint(Map<String, dynamic> el, Widget child, double uiScale, {bool skip 
     );
   }
   if (margin > 0) out = Padding(padding: EdgeInsets.all(margin), child: out);
-  if (align == 'center' && '${el['type'] ?? ''}'.toLowerCase() != 'row' && '${el['type'] ?? ''}'.toLowerCase() != 'column') {
-    out = Align(alignment: Alignment.center, child: out);
-  } else if ((align == 'right' || align == 'end') && '${el['type'] ?? ''}'.toLowerCase() != 'row') {
-    out = Align(alignment: Alignment.centerRight, child: out);
-  } else if ((align == 'left' || align == 'start') && '${el['type'] ?? ''}'.toLowerCase() != 'row') {
-    out = Align(alignment: Alignment.centerLeft, child: out);
+  final type = '${el['type'] ?? ''}'.toLowerCase().trim();
+  if (type != 'row' && type != 'column') {
+    var alignment = Alignment.centerLeft;
+    if (align == 'center') alignment = Alignment.center;
+    if (align == 'right' || align == 'end') alignment = Alignment.centerRight;
+    out = Align(alignment: alignment, widthFactor: 1, heightFactor: 1, child: out);
   }
   return out;
+}
+
+FontWeight _fontWeight(Map<String, dynamic> el) {
+  final n = kotvUiNum(el['fontWeight']);
+  if (n >= 800) return FontWeight.w800;
+  if (n >= 700) return FontWeight.w700;
+  if (n >= 600) return FontWeight.w600;
+  if (n >= 500) return FontWeight.w500;
+  return FontWeight.w400;
+}
+
+Color _hexColor(String raw, Color fallback) {
+  var s = raw.trim();
+  if (s.startsWith('#')) s = s.substring(1);
+  if (s.length == 6) s = 'ff$s';
+  if (s.length != 8) return fallback;
+  final n = int.tryParse(s, radix: 16);
+  if (n == null) return fallback;
+  return Color(n);
+}
+
+String _hexText(Color color) {
+  String ch(int n) => n.toRadixString(16).padLeft(2, '0');
+  return '#${ch(color.red)}${ch(color.green)}${ch(color.blue)}';
 }
 
 double _fontOf(Map<String, dynamic> el, double docFont) {
@@ -368,33 +388,21 @@ List<Widget> _raw(
   final pad = 8.0 * uiScale;
   switch (type) {
     case 'text':
-      final textLook = '${el['style'] ?? ''}'.toLowerCase().trim();
       final rawText = '${el['text'] ?? ''}';
-      if (textLook == 'pill') {
-        final bg = kotvUiColor(el['background']) ?? const Color(0xFF22C55E);
-        final fg = kotvUiColor(el['color']) ?? Colors.white;
-        return [
-          DecoratedBox(
-            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12 * uiScale, vertical: 4 * uiScale),
-              child: Text(rawText, style: TextStyle(color: fg, fontSize: font, fontWeight: FontWeight.w600)),
-            ),
-          ),
-        ];
-      }
-      final heading = textLook == 'heading';
+      final weight = _fontWeight(el);
+      final heavy = weight != FontWeight.w400;
+      final ownBox = el['padding'] != null || el['background'] != null || el['radius'] != null;
       return [
         Padding(
-          padding: EdgeInsets.only(bottom: heading ? 0 : pad),
+          padding: EdgeInsets.only(bottom: ownBox || heavy ? 0 : pad),
           child: Text(
             rawText,
             textAlign: _textAlign(el['align']),
             style: TextStyle(
-              color: kotvUiColor(el['color']) ?? (heading ? palette.fg : palette.muted),
+              color: kotvUiColor(el['color']) ?? (heavy ? palette.fg : palette.muted),
               height: 1.35,
               fontSize: font,
-              fontWeight: heading ? FontWeight.w700 : FontWeight.w400,
+              fontWeight: weight,
             ),
           ),
         ),
@@ -429,6 +437,89 @@ List<Widget> _raw(
         Padding(
           padding: EdgeInsets.symmetric(vertical: 12 * uiScale),
           child: Center(child: CircularProgressIndicator(color: kotvUiColor(el['color']) ?? palette.primary)),
+        ),
+      ];
+    case 'slider':
+      final sliderId = '${el['id'] ?? ''}'.trim();
+      if (sliderId.isEmpty) return const [];
+      final min = kotvUiNum(el['min']);
+      var max = kotvUiNum(el['max']);
+      if (max <= min) max = min + 1;
+      final step = kotvUiNum(el['step']);
+      final sliderCtrl = values.putIfAbsent(sliderId, () => TextEditingController(text: '${el['value'] ?? min}'));
+      var current = double.tryParse(sliderCtrl.text) ?? min;
+      if (current < min) current = min;
+      if (current > max) current = max;
+      final divisions = step > 0 ? ((max - min) / step).round().clamp(1, 1000) : null;
+      return [
+        Slider(
+          value: current,
+          min: min,
+          max: max,
+          divisions: divisions,
+          label: sliderCtrl.text,
+          activeColor: kotvUiColor(el['color']) ?? palette.primary,
+          onChanged: (v) {
+            final stepped = step > 0 ? (v / step).round() * step : v;
+            final clamped = stepped < min ? min : (stepped > max ? max : stepped);
+            sliderCtrl.text = clamped == clamped.roundToDouble() ? '${clamped.round()}' : clamped.toStringAsFixed(2);
+            setLocal(() {});
+          },
+        ),
+      ];
+    case 'color':
+      final colorId = '${el['id'] ?? ''}'.trim();
+      if (colorId.isEmpty) return const [];
+      final colorCtrl = values.putIfAbsent(colorId, () => TextEditingController(text: '${el['value'] ?? '#ffffff'}'));
+      final picked = _hexColor(colorCtrl.text, Colors.white);
+      final hsv = HSVColor.fromColor(picked);
+      void write(HSVColor next) {
+        colorCtrl.text = _hexText(next.toColor());
+        setLocal(() {});
+      }
+      Widget band(String label, double value, double max, ValueChanged<double> onChanged) {
+        return Row(
+          children: [
+            SizedBox(
+              width: 36 * uiScale,
+              child: Text(label, style: TextStyle(color: palette.muted, fontSize: (font - 2).clamp(11, font))),
+            ),
+            Expanded(
+              child: Slider(
+                value: value.clamp(0, max).toDouble(),
+                min: 0,
+                max: max,
+                activeColor: picked,
+                onChanged: onChanged,
+              ),
+            ),
+          ],
+        );
+      }
+      return [
+        Row(
+          children: [
+            Container(
+              width: 28 * uiScale,
+              height: 28 * uiScale,
+              decoration: BoxDecoration(
+                color: picked,
+                shape: BoxShape.circle,
+                border: Border.all(color: palette.outline.withOpacity(0.45)),
+              ),
+            ),
+            SizedBox(width: 8 * uiScale),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  band('色相', hsv.hue, 360, (h) => write(hsv.withHue(h))),
+                  band('饱和', hsv.saturation, 1, (s) => write(hsv.withSaturation(s))),
+                  band('明度', hsv.value, 1, (v) => write(hsv.withValue(v))),
+                ],
+              ),
+            ),
+          ],
         ),
       ];
     case 'input':
@@ -571,42 +662,43 @@ List<Widget> _raw(
         if (btnUrl.isNotEmpty) await openExternal(btnUrl);
         await fire('${el['id'] ?? 'button'}', dismissAfter: el['dismiss'] == true);
       }
-      if (look == 'card') {
-        final dot = kotvUiColor(el['color']) ?? palette.muted;
-        final hint = '${el['hint'] ?? ''}'.trim();
-        final radius = 12.0 * uiScale;
+      final hint = '${el['hint'] ?? ''}'.trim();
+      final mark = kotvUiColor(el['mark']);
+      if (hint.isNotEmpty || mark != null) {
+        final ownBox = el['background'] != null || el['padding'] != null || el['radius'] != null;
         return [
           Padding(
-            padding: EdgeInsets.only(bottom: pad),
-            child: Material(
-              color: kotvUiColor(el['background']) ?? const Color(0xFFF4F4F5),
-              borderRadius: BorderRadius.circular(radius),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(radius),
-                onTap: () => unawaited(onButton()),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 14 * uiScale, vertical: 12 * uiScale),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 10 * uiScale,
-                        height: 10 * uiScale,
-                        decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
-                      ),
-                      SizedBox(width: 12 * uiScale),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('${el['text'] ?? ''}', style: TextStyle(color: palette.fg, fontSize: font, fontWeight: FontWeight.w600)),
-                            if (hint.isNotEmpty)
-                              Text(hint, style: TextStyle(color: palette.muted, fontSize: (font - 1).clamp(11, font), height: 1.3)),
-                          ],
+            padding: EdgeInsets.only(bottom: ownBox ? 0 : pad),
+            child: InkWell(
+              onTap: () => unawaited(onButton()),
+              child: Row(
+                children: [
+                  if (mark != null) ...[
+                    Container(
+                      width: 10 * uiScale,
+                      height: 10 * uiScale,
+                      decoration: BoxDecoration(color: mark, shape: BoxShape.circle),
+                    ),
+                    SizedBox(width: 12 * uiScale),
+                  ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${el['text'] ?? ''}',
+                          style: TextStyle(
+                            color: kotvUiColor(el['color']) ?? palette.fg,
+                            fontSize: font,
+                            fontWeight: _fontWeight(el),
+                          ),
                         ),
-                      ),
-                    ],
+                        if (hint.isNotEmpty)
+                          Text(hint, style: TextStyle(color: palette.muted, fontSize: (font - 1).clamp(11, font), height: 1.3)),
+                      ],
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           ),

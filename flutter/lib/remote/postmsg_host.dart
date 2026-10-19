@@ -753,16 +753,19 @@ class PostMsgHost {
           openExternal: _openExternal,
         );
     final column = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (html.isNotEmpty)
-          KotvUiMarkup(
-            html: html,
-            color: fg,
-            fontSize: (docFont > 0 ? docFont : 14) * uiScale,
-            scale: uiScale,
-            onAction: (id) => unawaited(fire(id)),
-            onLink: (url) => unawaited(_openExternal(url)),
+          SizedBox(
+            width: double.infinity,
+            child: KotvUiMarkup(
+              html: html,
+              color: fg,
+              fontSize: (docFont > 0 ? docFont : 14) * uiScale,
+              scale: uiScale,
+              onAction: (id) => unawaited(fire(id)),
+              onLink: (url) => unawaited(_openExternal(url)),
+            ),
           ),
         for (final el in flow) ...built(el),
       ],

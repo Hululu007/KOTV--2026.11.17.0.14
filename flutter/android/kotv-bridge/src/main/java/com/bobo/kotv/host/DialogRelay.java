@@ -14,6 +14,7 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 
 import com.github.catvod.crawler.SpiderDebug;
@@ -257,6 +258,13 @@ public final class DialogRelay {
             }
             return;
         }
+        if (view instanceof SeekBar) {
+            SeekBar bar = (SeekBar) view;
+            int max = android.os.Build.VERSION.SDK_INT >= 26 ? bar.getMax() : 100;
+            if (max < 1) max = 1;
+            snap.sliders.add(new SliderSnap("slider" + snap.sliders.size(), bar.getProgress(), max, bar));
+            return;
+        }
         if (view instanceof ImageView) {
             String uri = imageUri((ImageView) view);
             if (!uri.isEmpty()) snap.images.add(uri);
@@ -296,6 +304,7 @@ public final class DialogRelay {
             if (in.password) doc.password(in.id, in.hint);
             else doc.input(in.id, in.hint, false, in.value);
         }
+        for (SliderSnap s : snap.sliders) doc.slider(s.id, s.value, 0, s.max);
         if (snap.buttons.isEmpty()) {
             doc.action("dismiss", "关闭", true);
         } else {
@@ -375,6 +384,14 @@ public final class DialogRelay {
             for (InputSnap in : snap.inputs) {
                 String v = values.get(in.id);
                 if (v != null && in.view != null) in.view.setText(v);
+            }
+            for (SliderSnap s : snap.sliders) {
+                String v = values.get(s.id);
+                if (v == null || s.view == null) continue;
+                try {
+                    s.view.setProgress(Integer.parseInt(v.trim()));
+                } catch (NumberFormatException ignored) {
+                }
             }
             if (click != null && click.view != null) {
                 click.view.performClick();
@@ -507,6 +524,7 @@ public final class DialogRelay {
         final List<String> texts = new ArrayList<>();
         final List<String> images = new ArrayList<>();
         final List<InputSnap> inputs = new ArrayList<>();
+        final List<SliderSnap> sliders = new ArrayList<>();
         final List<BtnSnap> buttons = new ArrayList<>();
     }
 
@@ -522,6 +540,20 @@ public final class DialogRelay {
             this.hint = hint;
             this.value = value;
             this.password = password;
+            this.view = view;
+        }
+    }
+
+    private static final class SliderSnap {
+        final String id;
+        final int value;
+        final int max;
+        final SeekBar view;
+
+        SliderSnap(String id, int value, int max, SeekBar view) {
+            this.id = id;
+            this.value = value;
+            this.max = max;
             this.view = view;
         }
     }

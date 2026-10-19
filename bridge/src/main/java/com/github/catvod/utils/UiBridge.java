@@ -21,7 +21,7 @@ import java.util.function.Consumer;
  * Element {@code x}/{@code y} and HTML {@code position:absolute} paint boxes on top of each other.
  *
  * <p>Frozen host element types: text, image, input, checkbox, radio, select, button,
- * link, progress, separator, spacer, space, row, column, group, html, switch.
+ * link, progress, slider, color, separator, spacer, space, row, column, group, html, switch.
  * A button or row {@code url} is opened by the system (http, app scheme, or {@code package:name}).
  * Bridge: {@link #show}/{@link #close} handshake only; scripts own documents and replies.
  */
@@ -288,6 +288,26 @@ public final class UiBridge {
         public Elements progress() {
             Map<String, Object> element = new LinkedHashMap<>();
             element.put("type", "progress");
+            target.add(element);
+            return this;
+        }
+
+        public Elements slider(String id, int value, int min, int max) {
+            Map<String, Object> element = new LinkedHashMap<>();
+            element.put("type", "slider");
+            element.put("id", id == null ? "" : id);
+            element.put("value", value);
+            element.put("min", min);
+            element.put("max", max);
+            target.add(element);
+            return this;
+        }
+
+        public Elements color(String id, String value) {
+            Map<String, Object> element = new LinkedHashMap<>();
+            element.put("type", "color");
+            element.put("id", id == null ? "" : id);
+            element.put("value", value == null ? "" : value);
             target.add(element);
             return this;
         }
@@ -595,6 +615,16 @@ public final class UiBridge {
 
         public Document progress() {
             els.progress();
+            return this;
+        }
+
+        public Document slider(String id, int value, int min, int max) {
+            els.slider(id, value, min, max);
+            return this;
+        }
+
+        public Document color(String id, String value) {
+            els.color(id, value);
             return this;
         }
 
