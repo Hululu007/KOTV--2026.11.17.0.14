@@ -69,10 +69,28 @@ def _ensure_bundled_site_packages():
 _ensure_bundled_site_packages()
 
 
-def _install_java_module_stubs():
-    """桌面 CPython：为 base/spider.py 的 Proxy / Python import 提供桩。"""
-    import types
+def _import_host(name):
+    """已在 sys.modules 或能直接导入才算宿主有。失败时不要先塞空包，否则真实导入会被挡住。"""
+    if name in sys.modules:
+        return sys.modules[name]
+    try:
+        return importlib.import_module(name)
+    except Exception:
+        return None
 
+
+def _object_with(mod, leaf, method):
+    if mod is None:
+        return None
+    inner = getattr(mod, leaf, None)
+    if inner is not None and inner is not mod and callable(getattr(inner, method, None)):
+        return inner
+    if callable(getattr(mod, method, None)):
+        return mod
+    return None
+
+
+def _install_proxy_stub(types):
     def ensure_pkg(name):
         if name in sys.modules:
             return sys.modules[name]
@@ -111,6 +129,20 @@ def _install_java_module_stubs():
         setattr(proxy_mod, name, getattr(Proxy, name))
     sys.modules["com.github.catvod.Proxy"] = proxy_mod
     sys.modules["com.github.catvod"].Proxy = Proxy
+    return Proxy
+
+
+def _install_python_stub(types):
+    def ensure_pkg(name):
+        if name in sys.modules:
+            return sys.modules[name]
+        m = types.ModuleType(name)
+        m.__path__ = []
+        sys.modules[name] = m
+        parent, _, leaf = name.rpartition(".")
+        if parent:
+            setattr(ensure_pkg(parent), leaf, m)
+        return m
 
     ensure_pkg("com.chaquo.python")
 
@@ -135,10 +167,26 @@ def _install_java_module_stubs():
     py_mod.Python = Python
     sys.modules["com.chaquo.python.Python"] = py_mod
     sys.modules["com.chaquo.python"].Python = Python
+    return Python
+
+
+def _install_java_module_stubs():
+    """桌面 CPython 没有这些类时才装桩。解释器里已经能导入的保持不动。"""
+    import types
+
+    proxy_cls = _object_with(_import_host("com.github.catvod.Proxy"), "Proxy", "getPort")
+    if proxy_cls is None:
+        proxy_cls = _object_with(_import_host("com.github.catvod"), "Proxy", "getPort")
+    if proxy_cls is None:
+        proxy_cls = _install_proxy_stub(types)
+
+    if _object_with(_import_host("com.chaquo.python.Python"), "Python", "getPlatform") is None:
+        if _object_with(_import_host("com.chaquo.python"), "Python", "getPlatform") is None:
+            _install_python_stub(types)
 
     # 安卓解释器自带 java。这里再写 sys.modules["java"] 会盖掉它。
     if not _host_java_present():
-        _install_desktop_java(types, Proxy)
+        _install_desktop_java(types, proxy_cls)
 
 
 def _host_java_present():
@@ -208,19 +256,23 @@ def _install_desktop_java(types, proxy_cls):
         def getClass(self):
             return _Reflect(self._name)
 
+    class _ModifierClass:
         def isStatic(self, modifiers):
             try:
                 return bool(int(modifiers) & _MOD_STATIC)
             except Exception:
                 return False
 
-        def makeText(self, activity, text, duration):
-            return _Toast(str(text))
+    class _ToastClass:
+        LENGTH_LONG = 1
+        LENGTH_SHORT = 0
 
+        def makeText(self, activity, text, duration):
+            return _Toast("" if text is None else str(text))
+
+    class _BuilderClass:
         def __call__(self, *args):
-            if self._name.endswith("AlertDialog$Builder") or self._name.endswith("MaterialAlertDialogBuilder"):
-                return _DialogBuilder()
-            raise TypeError(self._name)
+            return _DialogBuilder()
 
     class _Toast:
         def __init__(self, text):
@@ -337,15 +389,26 @@ def _install_desktop_java(types, proxy_cls):
         def show(self):
             return _Dialog(self).open()
 
+    _known = {
+        "com.fongmi.android.tv.App": lambda: _JavaClass("com.fongmi.android.tv.App"),
+        "android.app.Activity": lambda: _JavaClass("android.app.Activity"),
+        "android.content.DialogInterface$OnClickListener": lambda: _JavaClass(
+            "android.content.DialogInterface$OnClickListener"
+        ),
+        "java.lang.Runnable": lambda: _JavaClass("java.lang.Runnable"),
+        "java.lang.reflect.Modifier": _ModifierClass,
+        "android.widget.Toast": _ToastClass,
+        "com.google.android.material.dialog.MaterialAlertDialogBuilder": _BuilderClass,
+        "android.app.AlertDialog$Builder": _BuilderClass,
+    }
+
     def jclass(name):
         if name == "com.github.catvod.Proxy":
             return proxy_cls
-        if name == "android.widget.Toast":
-            cls = _JavaClass(name)
-            cls.LENGTH_LONG = 1
-            cls.LENGTH_SHORT = 0
-            return cls
-        return _JavaClass(name)
+        make = _known.get(name)
+        if make is None:
+            raise LookupError(name)
+        return make()
 
     def dynamic_proxy(spec):
         class _Proxy:

@@ -125,13 +125,8 @@ class Spider(metaclass=ABCMeta):
         )
 
     def getProxyUrl(self, local=True):
-        # 缺省端口与 Go localproxy.DefaultPort 一致
-        port = os.environ.get("KOTV_PROXY_PORT", "9978")
-        if local:
-            host = "127.0.0.1"
-        else:
-            host = (os.environ.get("KOTV_PROXY_HOST") or "").strip() or "127.0.0.1"
-        return f"http://{host}:{port}/proxy?do=py"
+        from com.github.catvod import Proxy
+        return f"{Proxy.getUrl(local)}?do=py"
 
     def log(self, message):
         if isinstance(message, (dict, list)):
@@ -139,9 +134,8 @@ class Spider(metaclass=ABCMeta):
         print(message, file=sys.stderr, flush=True)
 
     def _cache_base(self):
-        # 缺省端口与 Go localproxy.DefaultPort 一致
-        port = os.environ.get("KOTV_PROXY_PORT", "9978")
-        return f"http://127.0.0.1:{port}/cache"
+        from com.github.catvod import Proxy
+        return f"http://127.0.0.1:{Proxy.getPort()}/cache"
 
     def getCache(self, key):
         # TV：GET /cache?do=get&key= → Prefers/LocalGet（rule 空 → cache_{key}）
