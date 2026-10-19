@@ -767,32 +767,33 @@ class PostMsgHost {
         for (final el in flow) ...built(el),
       ],
     );
-    if (placed.isEmpty) {
-      return SingleChildScrollView(child: column);
-    }
+    final layers = <Widget>[
+      for (final el in placed)
+        Positioned(
+          left: (_coord(el, 'x', 'left') ?? 0) * uiScale,
+          top: (_coord(el, 'y', 'top') ?? 0) * uiScale,
+          width: kotvUiPx(el['width'], uiScale),
+          height: kotvUiPx(el['height'], uiScale),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: built(el),
+          ),
+        ),
+    ];
     return LayoutBuilder(
       builder: (context, cons) {
-        final height = cons.maxHeight.isFinite && cons.maxHeight < double.infinity
-            ? cons.maxHeight
-            : 280.0 * uiScale;
+        final bounded = cons.maxHeight.isFinite && cons.maxHeight < double.infinity;
+        if (!bounded) {
+          return Stack(clipBehavior: Clip.none, children: [column, ...layers]);
+        }
         return SizedBox(
-          height: height,
+          height: cons.maxHeight,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
               Positioned.fill(child: SingleChildScrollView(child: column)),
-              for (final el in placed)
-                Positioned(
-                  left: (_coord(el, 'x', 'left') ?? 0) * uiScale,
-                  top: (_coord(el, 'y', 'top') ?? 0) * uiScale,
-                  width: kotvUiNum(el['width']) > 0 ? kotvUiNum(el['width']) * uiScale : null,
-                  height: kotvUiNum(el['height']) > 0 ? kotvUiNum(el['height']) * uiScale : null,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: built(el),
-                  ),
-                ),
+              ...layers,
             ],
           ),
         );
@@ -832,7 +833,7 @@ class PostMsgHost {
     );
   }
 
-  /// 换源大卡片：半透明 dialogBg + 18 圆角描边；尺寸随 [hostUiScale] 自动缩放。
+  /// 按脚本尺寸排完。超出屏幕时整张等比缩小，不单改某一边。
   Widget _hostUiCard({
     required BuildContext context,
     required Map<String, dynamic> doc,
@@ -854,10 +855,8 @@ class PostMsgHost {
     final maxH = screen.height * 0.9;
     final rawW = kotvUiNum(doc['width']);
     final rawH = kotvUiNum(doc['height']);
-    // 脚本给的 width/font 按设计稿 dp；未给时默认卡宽也按 s 缩放。
-    // 脚本写了宽度就用它，不再抬到桌面默认最小宽。
     var cardW = rawW > 0 ? rawW * s : (desktop ? 560.0 : 420.0) * s;
-    cardW = rawW > 0 ? math.min(cardW, maxW) : cardW.clamp(280.0 * s, maxW);
+    if (rawW <= 0) cardW = cardW.clamp(280.0 * s, maxW);
     final customPad = doc['padding'] != null;
     final pad = customPad ? kotvUiNum(doc['padding']) * s : 0.0;
     final padH = customPad ? pad : (compact ? 14.0 : 24.0) * s;
@@ -869,55 +868,51 @@ class PostMsgHost {
     final bg = kotvUiColor(doc['background']) ?? p.dialogBg;
     final border = kotvUiColor(doc['border']) ?? p.outline;
 
-    // 内容区：可滚动 + 最大高度封顶；短内容随内容收缩（不强制撑满）。
-    final bodyMaxH = math.max(
-      80.0,
-      maxH - padVT - padVB - (title != null ? 48 * s + gapTitle : 0) - (actions != null ? 48 * s + gapActions : 0) - 8,
-    );
-    final content = rawH > 0
-        ? SizedBox(
-            width: cardW,
-            height: math.min(rawH * s, bodyMaxH),
-            child: body,
-          )
-        : ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: cardW, maxHeight: bodyMaxH),
-            child: body,
-          );
+    final content = rawH > 0 ? SizedBox(width: cardW, height: rawH * s, child: body) : body;
 
-    final card = ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: cardW, maxHeight: maxH),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(radius),
-            border: Border.all(color: border),
-          ),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(padH, padVT, padH, padVB),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (title != null) ...[
-                  title,
-                  SizedBox(height: gapTitle),
-                ],
-                content,
-                if (actions != null) ...[
-                  SizedBox(height: gapActions),
-                  actions,
-                ],
+    final card = SizedBox(
+      width: cardW,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(radius),
+          border: Border.all(color: border),
+        ),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(padH, padVT, padH, padVB),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (title != null) ...[
+                title,
+                SizedBox(height: gapTitle),
               ],
-            ),
+              content,
+              if (actions != null) ...[
+                SizedBox(height: gapActions),
+                actions,
+              ],
+            ],
           ),
         ),
+      ),
+    );
+    final fitted = FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.center,
+      child: card,
+    );
+    if (!asDialog) {
+      return ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxH),
+        child: fitted,
       );
-    if (!asDialog) return card;
+    }
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: inset,
-      child: card,
+      child: fitted,
     );
   }
 

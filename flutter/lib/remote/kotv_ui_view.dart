@@ -12,6 +12,13 @@ import 'kotv_ui_markup.dart';
 
 double kotvUiNum(dynamic v) => (v is num) ? v.toDouble() : 0.0;
 
+/// 脚本长度 ≤0 表示不指定。
+double? kotvUiPx(dynamic v, double scale) {
+  final n = kotvUiNum(v);
+  if (!(n > 0)) return null;
+  return n * scale;
+}
+
 MainAxisAlignment kotvUiMainAlign(String raw) {
   switch (raw.toLowerCase().trim()) {
     case 'center':
@@ -153,11 +160,11 @@ Widget kotvUiActions({
             label: '${actions[i]['label'] ?? actions[i]['id'] ?? ''}',
             look: '${actions[i]['style'] ?? 'text'}',
             palette: palette,
-            font: kotvUiNum(actions[i]['fontSize']) > 0 ? kotvUiNum(actions[i]['fontSize']) * uiScale : defaultFont,
+            font: kotvUiPx(actions[i]['fontSize'], uiScale) ?? defaultFont,
             color: kotvUiColor(actions[i]['color']),
             background: kotvUiColor(actions[i]['background']),
             width: _actionWidth(actions[i], defaultW, uiScale),
-            height: kotvUiNum(actions[i]['height']) > 0 ? kotvUiNum(actions[i]['height']) * uiScale : null,
+            height: kotvUiPx(actions[i]['height'], uiScale),
             onTap: () => onPressed(actions[i]),
           ),
         ],
@@ -178,12 +185,10 @@ Widget kotvUiActions({
                 look: '',
                 palette: palette,
                 selected: _primaryAction(actions[i], actions.length),
-                font: kotvUiNum(actions[i]['fontSize']) > 0
-                    ? kotvUiNum(actions[i]['fontSize']) * uiScale
-                    : (defaultFont > 0 ? defaultFont : (compact ? 13.0 : 15.0) * uiScale),
-                height: kotvUiNum(actions[i]['height']) > 0
-                    ? kotvUiNum(actions[i]['height']) * uiScale
-                    : (defaultH > 0 ? defaultH : (compact ? 36.0 : 40.0) * uiScale),
+                font: kotvUiPx(actions[i]['fontSize'], uiScale) ??
+                    (defaultFont > 0 ? defaultFont : (compact ? 13.0 : 15.0) * uiScale),
+                height: kotvUiPx(actions[i]['height'], uiScale) ??
+                    (defaultH > 0 ? defaultH : (compact ? 36.0 : 40.0) * uiScale),
                 width: ownW > 0 ? ownW : (cons.maxWidth.isFinite && cons.maxWidth > 0 ? cons.maxWidth : 88 * (ls > 0 ? ls : 1)),
                 onTap: () => onPressed(actions[i]),
               );
@@ -196,10 +201,7 @@ Widget kotvUiActions({
 }
 
 double _actionWidth(Map<String, dynamic> action, double fallback, double uiScale) {
-  final own = kotvUiNum(action['width']);
-  if (own > 0) return own * uiScale;
-  if (fallback > 0) return fallback * uiScale;
-  return 0;
+  return kotvUiPx(action['width'], uiScale) ?? (fallback > 0 ? fallback * uiScale : 0);
 }
 
 Widget _pressBox(Widget child, {double? width, double? height}) {
@@ -338,8 +340,8 @@ TextAlign? _textAlign(Object? raw) {
 }
 
 Widget _sized(Map<String, dynamic> el, Widget child, double uiScale) {
-  final w = kotvUiNum(el['width']) > 0 ? kotvUiNum(el['width']) * uiScale : null;
-  final h = kotvUiNum(el['height']) > 0 ? kotvUiNum(el['height']) * uiScale : null;
+  final w = kotvUiPx(el['width'], uiScale);
+  final h = kotvUiPx(el['height'], uiScale);
   if (w == null && h == null) return child;
   return SizedBox(width: w, height: h, child: child);
 }
@@ -540,8 +542,8 @@ List<Widget> _raw(
             font: font,
             color: kotvUiColor(el['color']),
             background: kotvUiColor(el['background']),
-            width: kotvUiNum(el['width']) > 0 ? kotvUiNum(el['width']) * uiScale : null,
-            height: kotvUiNum(el['height']) > 0 ? kotvUiNum(el['height']) * uiScale : null,
+            width: kotvUiPx(el['width'], uiScale),
+            height: kotvUiPx(el['height'], uiScale),
             onTap: () {
               unawaited(() async {
                 if (btnUrl.isNotEmpty) await openExternal(btnUrl);
@@ -567,8 +569,8 @@ List<Widget> _raw(
             font: font,
             color: kotvUiColor(el['color']),
             background: kotvUiColor(el['background']),
-            width: kotvUiNum(el['width']) > 0 ? kotvUiNum(el['width']) * uiScale : null,
-            height: kotvUiNum(el['height']) > 0 ? kotvUiNum(el['height']) * uiScale : null,
+            width: kotvUiPx(el['width'], uiScale),
+            height: kotvUiPx(el['height'], uiScale),
             selected: look == 'button',
             onTap: () => unawaited(openExternal(linkUrl)),
           ),
@@ -633,7 +635,7 @@ Widget _flex(
   required double font,
 }) {
   final horizontal = type == 'row';
-  final spacing = kotvUiNum(el['spacing']) > 0 ? kotvUiNum(el['spacing']) * uiScale : 0.0;
+  final spacing = kotvUiPx(el['spacing'], uiScale) ?? 0;
   final align = kotvUiMainAlign('${el['align'] ?? ''}');
   final boxH = kotvUiNum(el['height']) * uiScale;
   final flex = horizontal || boxH > 0;
