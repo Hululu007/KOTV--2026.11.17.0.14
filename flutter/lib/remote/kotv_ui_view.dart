@@ -469,12 +469,18 @@ List<Widget> _raw(
           borderRadius: 0,
           scrollIntoView: true,
           child: ExcludeFocus(
-            child: CheckboxListTile(
-              value: checks[id] ?? false,
-              title: Text('${el['text'] ?? ''}', style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font)),
-              onChanged: (v) => setLocal(() => checks[id] = v ?? false),
-              controlAffinity: ListTileControlAffinity.leading,
-              activeColor: kotvUiColor(el['color']) ?? palette.primary,
+            child: Row(
+              children: [
+                Checkbox(
+                  value: checks[id] ?? false,
+                  onChanged: (v) => setLocal(() => checks[id] = v ?? false),
+                  activeColor: kotvUiColor(el['color']) ?? palette.primary,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                Expanded(
+                  child: Text('${el['text'] ?? ''}', style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font)),
+                ),
+              ],
             ),
           ),
         ),
@@ -492,12 +498,19 @@ List<Widget> _raw(
               borderRadius: 0,
               scrollIntoView: true,
               child: ExcludeFocus(
-                child: RadioListTile<String>(
-                  value: '${o['id'] ?? ''}',
-                  groupValue: radios[id],
-                  title: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font)),
-                  onChanged: (v) => setLocal(() => radios[id] = v ?? ''),
-                  activeColor: kotvUiColor(el['color']) ?? palette.primary,
+                child: Row(
+                  children: [
+                    Radio<String>(
+                      value: '${o['id'] ?? ''}',
+                      groupValue: radios[id],
+                      onChanged: (v) => setLocal(() => radios[id] = v ?? ''),
+                      activeColor: kotvUiColor(el['color']) ?? palette.primary,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    Expanded(
+                      child: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: kotvUiColor(el['color']) ?? palette.fg, fontSize: font)),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -564,7 +577,13 @@ List<Widget> _raw(
                         ),
                       ),
                       if (hint.isNotEmpty)
-                        Text(hint, style: TextStyle(color: palette.muted, fontSize: font)),
+                        Text(
+                          hint,
+                          style: TextStyle(
+                            color: kotvUiColor(el['hintColor']) ?? kotvUiColor(el['color']) ?? palette.fg,
+                            fontSize: font,
+                          ),
+                        ),
                     ],
                   ),
                 ),

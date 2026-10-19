@@ -678,7 +678,7 @@ class PostMsgHost {
     final resolved = (titleFont > 0 ? titleFont : (docFont > 0 ? docFont : 14.0)) * s;
     return Text(
       title,
-      style: TextStyle(color: fg, fontSize: resolved, fontWeight: kotvUiFontWeight(doc), height: 1.2),
+      style: TextStyle(color: fg, fontSize: resolved, fontWeight: kotvUiFontWeight(doc)),
     );
   }
 
