@@ -44,7 +44,7 @@ Go Engine（单进程，:9978）
 | `config` `home` `category` `detail` `detail/expand` | 站点配置与内容浏览 |
 | `search` `play` `sites` `repos` | 搜索 / 播放解析 / 站点列表 / 配置仓库 |
 | `live` `player` `media` | 直播 / 播放器态 / 媒体态 |
-| `remote/poll` `ui/poll` `ui/reply` | 遥控队列 / UI 长轮询 |
+| `remote/poll` `/ui` | 遥控队列 / 界面弹窗套接字 |
 | `cancel` `shutdown` | 取消当前调用 / 关引擎 |
 | `net` `tools` `settings` `bt/progress` | 代理配置 / 工具 / 设置 / 磁力进度 |
 

@@ -15,9 +15,14 @@ import java.util.function.Consumer;
 /**
  * Declarative UI protocol for spider scripts. Host only renders frozen primitives and
  * reports shown/closed — it never interprets content (image vs anything else) or action ids.
+ * An html field or html element is drawn as markup. Scripts and iframes in that markup
+ * are not run. A link whose href is {@code action:id} is reported as that action id.
+ * {@code overlay} keeps the current window and draws another one above it.
+ * Element {@code x}/{@code y} and HTML {@code position:absolute} paint boxes on top of each other.
  *
  * <p>Frozen host element types: text, image, input, checkbox, radio, select, button,
- * link, progress, separator, spacer, space, row, column, group.
+ * link, progress, separator, spacer, space, row, column, group, html, switch.
+ * A button or row {@code url} is opened by the system (http, app scheme, or {@code package:name}).
  * Bridge: {@link #show}/{@link #close} handshake only; scripts own documents and replies.
  */
 public final class UiBridge {
@@ -125,6 +130,16 @@ public final class UiBridge {
             return this;
         }
 
+        public Elements toggle(String id, String text, boolean checked) {
+            Map<String, Object> element = new LinkedHashMap<>();
+            element.put("type", "switch");
+            element.put("id", id);
+            element.put("text", text == null ? "" : text);
+            element.put("checked", checked);
+            target.add(element);
+            return this;
+        }
+
         public Elements radio(String id, String selected, Option... options) {
             return radio(id, selected, options == null ? Collections.emptyList() : Arrays.asList(options));
         }
@@ -209,6 +224,50 @@ public final class UiBridge {
             return this;
         }
 
+        public Elements html(String html) {
+            if (html == null || html.trim().isEmpty()) return this;
+            Map<String, Object> element = new LinkedHashMap<>();
+            element.put("type", "html");
+            element.put("html", html);
+            target.add(element);
+            return this;
+        }
+
+        public Elements weight(int weight) {
+            if (target.isEmpty() || weight <= 0) return this;
+            target.get(target.size() - 1).put("weight", weight);
+            return this;
+        }
+
+        /** 上一个按钮或行被点按时，交给系统打开。http、应用 scheme，或 {@code package:包名}。 */
+        public Elements url(String url) {
+            if (target.isEmpty() || url == null || url.trim().isEmpty()) return this;
+            target.get(target.size() - 1).put("url", url.trim());
+            return this;
+        }
+
+        /** 写到上一个元素上。键如 color、background、padding、margin、radius、align、border。 */
+        public Elements style(String key, Object value) {
+            if (target.isEmpty() || key == null || key.isEmpty() || value == null) return this;
+            target.get(target.size() - 1).put(key, value);
+            return this;
+        }
+
+        /** 上一个元素按坐标叠放，不再跟着文档往下排。 */
+        public Elements at(int x, int y) {
+            if (target.isEmpty()) return this;
+            Map<String, Object> last = target.get(target.size() - 1);
+            last.put("x", x);
+            last.put("y", y);
+            return this;
+        }
+
+        public Elements z(int z) {
+            if (target.isEmpty()) return this;
+            target.get(target.size() - 1).put("z", z);
+            return this;
+        }
+
         public Elements separator() {
             Map<String, Object> element = new LinkedHashMap<>();
             element.put("type", "separator");
@@ -236,6 +295,7 @@ public final class UiBridge {
         public Elements space() {
             Map<String, Object> element = new LinkedHashMap<>();
             element.put("type", "space");
+            element.put("height", 8);
             target.add(element);
             return this;
         }
@@ -284,6 +344,22 @@ public final class UiBridge {
         public int actionWidth = 0;
         public int actionHeight = 0;
         public long timeoutMs = 120_000;
+        /** 自由排版。宿主只画标记，不执行里面的脚本。 */
+        public String html = "";
+        public String background = "";
+        public String color = "";
+        public String border = "";
+        public int padding = 0;
+        public int radius = -1;
+        /** 为 true 时叠在同 kind 已有窗上面，不关掉它。 */
+        public boolean overlay;
+        public Integer x;
+        public Integer y;
+        public int z;
+        /** null 表示：没给坐标时点外面关掉这层，给了坐标则不挡下面的窗。 */
+        public Boolean modal;
+        public String actionAlign = "";
+        public final Map<String, Object> style = new LinkedHashMap<>();
         public final List<Map<String, Object>> elements = new ArrayList<>();
         public final List<Map<String, Object>> actions = new ArrayList<>();
         private final Elements els = new Elements(elements);
@@ -318,6 +394,71 @@ public final class UiBridge {
 
         public Document timeoutMs(long timeoutMs) {
             this.timeoutMs = timeoutMs;
+            return this;
+        }
+
+        public Document html(String html) {
+            this.html = html == null ? "" : html;
+            return this;
+        }
+
+        /** 在控件列表里插一块标记，和窗口级 html 可以同时有。 */
+        public Document markup(String html) {
+            els.html(html);
+            return this;
+        }
+
+        public Document background(String color) {
+            this.background = color == null ? "" : color.trim();
+            return this;
+        }
+
+        public Document color(String color) {
+            this.color = color == null ? "" : color.trim();
+            return this;
+        }
+
+        public Document border(String color) {
+            this.border = color == null ? "" : color.trim();
+            return this;
+        }
+
+        public Document padding(int padding) {
+            if (padding >= 0) this.padding = padding;
+            return this;
+        }
+
+        public Document radius(int radius) {
+            if (radius >= 0) this.radius = radius;
+            return this;
+        }
+
+        public Document overlay(boolean overlay) {
+            this.overlay = overlay;
+            return this;
+        }
+
+        public Document at(int x, int y) {
+            this.x = x;
+            this.y = y;
+            return this;
+        }
+
+        public Document z(int z) {
+            this.z = z;
+            return this;
+        }
+
+        public Document modal(boolean modal) {
+            this.modal = modal;
+            return this;
+        }
+
+        /** 窗口级样式。键如 background、color、border、padding、radius、margin、align。 */
+        public Document style(String key, Object value) {
+            if (key == null || key.isEmpty() || value == null) return this;
+            if ("id".equals(key) || "elements".equals(key) || "actions".equals(key)) return this;
+            style.put(key, value);
             return this;
         }
 
@@ -375,6 +516,11 @@ public final class UiBridge {
 
         public Document checkbox(String id, String text, boolean checked, int fontSize) {
             els.checkbox(id, text, checked, fontSize);
+            return this;
+        }
+
+        public Document toggle(String id, String text, boolean checked) {
+            els.toggle(id, text, checked);
             return this;
         }
 
@@ -501,9 +647,35 @@ public final class UiBridge {
             actions.add(UiBridge.action(id, label, dismiss, width, height, fontSize));
             return this;
         }
+
+        /** look 为 text 时按文字上色，pill 时画小色块。color 如 #ff9800。 */
+        public Document action(String id, String label, boolean dismiss, String look, String color) {
+            Map<String, Object> item = UiBridge.action(id, label, dismiss, 0, 0, 0);
+            if (look != null && !look.trim().isEmpty()) item.put("style", look.trim());
+            if (color != null && !color.trim().isEmpty()) item.put("color", color.trim());
+            actions.add(item);
+            return this;
+        }
+
+        /** start、end、center、space-between。文字按钮默认靠右。 */
+        public Document actionAlign(String align) {
+            this.actionAlign = align == null ? "" : align.trim();
+            return this;
+        }
+
+        public Document url(String url) {
+            els.url(url);
+            return this;
+        }
+
+        public Document weight(int weight) {
+            els.weight(weight);
+            return this;
+        }
     }
 
-    private static final ConcurrentHashMap<String, String> sessionByKind = new ConcurrentHashMap<>();
+    /** 同一 kind 从底到顶的 session。overlay 往上叠，普通 show 先清掉这一叠。 */
+    private static final ConcurrentHashMap<String, List<String>> sessionsByKind = new ConcurrentHashMap<>();
     private static final AtomicLong nextSession = new AtomicLong();
 
     private UiBridge() {
@@ -518,7 +690,7 @@ public final class UiBridge {
         String key = kindKey(kind);
         String session;
         try {
-            session = openSession(kind);
+            session = openSession(kind, document != null && document.overlay);
         } catch (ShowFailedException e) {
             SpiderDebug.log("UiBridge openSession: " + e.getMessage());
             Util.notify("弹窗关闭确认超时，请重试");
@@ -529,7 +701,7 @@ public final class UiBridge {
             showDocument(session, doc);
         } catch (ShowFailedException e) {
             SpiderDebug.log("UiBridge showDocument: " + e.getMessage());
-            sessionByKind.remove(key, session);
+            forget(key, session);
             closeDocument(session);
             Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
             Util.notify("弹窗未能显示，请重试");
@@ -546,12 +718,7 @@ public final class UiBridge {
         String key = kindKey(kind);
         String session = currentSession(kind);
         if (session.isEmpty()) return true;
-        sessionByKind.remove(key, session);
-        closeDocument(session);
-        boolean ok = Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
-        Util.clearHostClientInfo(session);
-        Util.clearPendingUiNotify();
-        return ok;
+        return closeFrom(key, session);
     }
 
 
@@ -577,18 +744,75 @@ public final class UiBridge {
 
     /** 脚本用的内部 kind；跨宿主边界只有不透明 session id。按 Scope 隔离。 */
     public static String currentSession(String kind) {
-        return sessionByKind.getOrDefault(kindKey(kind), "");
+        return top(kindKey(kind));
     }
 
-    private static String openSession(String kind) {
+    private static List<String> stack(String key) {
+        return sessionsByKind.computeIfAbsent(key, k -> new ArrayList<>());
+    }
+
+    private static String top(String key) {
+        List<String> stack = sessionsByKind.get(key);
+        if (stack == null) return "";
+        synchronized (stack) {
+            return stack.isEmpty() ? "" : stack.get(stack.size() - 1);
+        }
+    }
+
+    private static void forget(String key, String session) {
+        List<String> stack = sessionsByKind.get(key);
+        if (stack == null) return;
+        synchronized (stack) {
+            stack.remove(session);
+        }
+    }
+
+    /** 关掉 session 以及叠在它上面的层，从顶到底。栈空了才作废还在发出的界面消息。 */
+    private static boolean closeFrom(String key, String session) {
+        List<String> closing = new ArrayList<>();
+        List<String> stack = sessionsByKind.get(key);
+        if (stack == null) {
+            closing.add(session);
+        } else {
+            synchronized (stack) {
+                int idx = stack.indexOf(session);
+                if (idx < 0) {
+                    closing.add(session);
+                } else {
+                    closing.addAll(stack.subList(idx, stack.size()));
+                    stack.subList(idx, stack.size()).clear();
+                }
+            }
+        }
+        boolean ok = true;
+        for (int i = closing.size() - 1; i >= 0; i--) {
+            String id = closing.get(i);
+            closeDocument(id);
+            if (!Util.waitUiAction(id, "closed", Util.UI_CLOSE_WAIT_MS)) ok = false;
+            Util.clearHostClientInfo(id);
+        }
+        if (top(key).isEmpty()) Util.clearPendingUiNotify();
+        return ok;
+    }
+
+    private static String openSession(String kind, boolean overlay) {
         String key = kindKey(kind);
         String session = "ui-" + Long.toUnsignedString(nextSession.incrementAndGet(), 36)
                 + "-" + Long.toUnsignedString(System.nanoTime(), 36);
-        String previous = sessionByKind.put(key, session);
-        if (previous != null && !previous.equals(session)) {
+        List<String> stack = stack(key);
+        List<String> closing = new ArrayList<>();
+        synchronized (stack) {
+            if (!overlay) {
+                closing.addAll(stack);
+                stack.clear();
+            }
+            stack.add(session);
+        }
+        for (int i = closing.size() - 1; i >= 0; i--) {
+            String previous = closing.get(i);
             closeDocument(previous);
             if (!Util.waitUiAction(previous, "closed", Util.UI_CLOSE_WAIT_MS)) {
-                sessionByKind.remove(key, session);
+                forget(key, session);
                 throw new ShowFailedException("wait closed timeout for " + previous);
             }
             Util.clearHostClientInfo(previous);
@@ -608,6 +832,23 @@ public final class UiBridge {
         if (doc.actionWidth > 0) document.put("actionWidth", doc.actionWidth);
         if (doc.actionHeight > 0) document.put("actionHeight", doc.actionHeight);
         document.put("timeoutMs", doc.timeoutMs);
+        if (doc.html != null && !doc.html.isEmpty()) document.put("html", doc.html);
+        if (doc.background != null && !doc.background.isEmpty()) document.put("background", doc.background);
+        if (doc.color != null && !doc.color.isEmpty()) document.put("color", doc.color);
+        if (doc.border != null && !doc.border.isEmpty()) document.put("border", doc.border);
+        if (doc.padding > 0) document.put("padding", doc.padding);
+        if (doc.radius >= 0) document.put("radius", doc.radius);
+        if (doc.overlay) document.put("overlay", true);
+        if (doc.x != null) document.put("x", doc.x);
+        if (doc.y != null) document.put("y", doc.y);
+        if (doc.z != 0) document.put("z", doc.z);
+        if (doc.modal != null) document.put("modal", doc.modal);
+        if (doc.actionAlign != null && !doc.actionAlign.isEmpty()) document.put("actionAlign", doc.actionAlign);
+        for (Map.Entry<String, Object> extra : doc.style.entrySet()) {
+            String key = extra.getKey();
+            if (key == null || "id".equals(key) || "elements".equals(key) || "actions".equals(key)) continue;
+            document.put(key, extra.getValue());
+        }
         document.put("elements", doc.elements);
         document.put("actions", doc.actions);
         Util.notifySync("UI:" + Json.toJson(document));
@@ -696,13 +937,7 @@ public final class UiBridge {
     }
 
     private static Handle handleFor(String kind, String session) {
-        return () -> {
-            sessionByKind.remove(kind, session);
-            closeDocument(session);
-            Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
-            Util.clearHostClientInfo(session);
-            Util.clearPendingUiNotify();
-        };
+        return () -> closeFrom(kind, session);
     }
 
     private static String normalizeKind(String kind) {

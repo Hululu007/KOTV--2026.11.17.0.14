@@ -35,6 +35,9 @@ dependencies:
   file_selector: ^1.0.0
   # 播放中防休眠/屏保（手机+桌面）。
   wakelock_plus: 1.4.0
+  # 爬虫弹窗里的自由排版。不执行脚本。
+  flutter_html: ^3.0.0
+  html: 0.15.7
 
 dependency_overrides:
   # 2.12.1 Messages.kt 重复声明 MessagesPigeonMethodCodec，Kotlin 编不过

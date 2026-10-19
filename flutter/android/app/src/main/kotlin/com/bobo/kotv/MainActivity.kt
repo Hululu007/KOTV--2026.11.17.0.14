@@ -216,6 +216,7 @@ class MainActivity : FlutterActivity() {
         // FEATURE_VULKAN_HARDWARE_VERSION ≥ 1.2
         "hasExternalVideoApp" -> result.success(externalVideoTargets().any { it.activityInfo?.packageName != packageName })
         "openExternalPlayer" -> openExternalPlayer(call, result)
+        "openView" -> result.success(openView(call.argument<String>("url")))
         "isVulkanAvailable" -> {
           result.success(
             packageManager.hasSystemFeature(
@@ -575,6 +576,33 @@ class MainActivity : FlutterActivity() {
       externalViewIntent("http://127.0.0.1/"),
       PackageManager.MATCH_DEFAULT_ONLY,
     )
+  }
+
+  private fun openView(raw: String?): Boolean {
+    val target = raw?.trim().orEmpty()
+    if (target.isEmpty()) return false
+    return try {
+      val intent = when {
+        target.startsWith("package:") -> {
+          val pkg = target.removePrefix("package:").substringBefore('/').substringBefore('?')
+          packageManager.getLaunchIntentForPackage(pkg) ?: return false
+        }
+        target.startsWith("intent:") || target.contains("#Intent") ->
+          Intent.parseUri(target, Intent.URI_INTENT_SCHEME)
+        else -> {
+          val parsed = Uri.parse(target)
+          if (parsed.scheme.isNullOrEmpty() && target.contains('.')) {
+            packageManager.getLaunchIntentForPackage(target) ?: return false
+          } else {
+            Intent(Intent.ACTION_VIEW, parsed)
+          }
+        }
+      }
+      startActivity(intent)
+      true
+    } catch (_: Throwable) {
+      false
+    }
   }
 
   private fun openExternalPlayer(call: MethodCall, result: MethodChannel.Result) {
