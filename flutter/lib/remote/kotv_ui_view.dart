@@ -373,8 +373,8 @@ List<Widget> _raw(
         ),
       ];
     case 'image':
-      final img = kotvDecodeDataImage('${el['source'] ?? ''}');
-      if (img == null) return const [];
+      final source = '${el['source'] ?? ''}'.trim();
+      if (source.isEmpty) return const [];
       final radius = el['radius'] == null ? 12.0 * uiScale : kotvUiNum(el['radius']) * uiScale;
       return [
         Padding(
@@ -389,7 +389,7 @@ List<Widget> _raw(
                 padding: EdgeInsets.all(pad),
                 child: _sized(
                   el,
-                  KotvFrameImage(bytes: img, fit: BoxFit.contain),
+                  KotvNetworkImage(source, fit: BoxFit.contain),
                   uiScale,
                 ),
               ),
@@ -635,6 +635,8 @@ Widget _flex(
   final horizontal = type == 'row';
   final spacing = kotvUiNum(el['spacing']) > 0 ? kotvUiNum(el['spacing']) * uiScale : 0.0;
   final align = kotvUiMainAlign('${el['align'] ?? ''}');
+  final boxH = kotvUiNum(el['height']) * uiScale;
+  final flex = horizontal || boxH > 0;
   final slots = <Widget>[
     if (type == 'group' && '${el['text'] ?? ''}'.isNotEmpty)
       Text(
@@ -666,7 +668,7 @@ Widget _flex(
       children: built,
     );
     final weight = kotvUiNum(child['weight']);
-    if (horizontal && weight > 0) {
+    if (flex && weight > 0) {
       slots.add(Expanded(flex: weight.round().clamp(1, 100), child: box));
     } else {
       slots.add(box);
@@ -686,9 +688,11 @@ Widget _flex(
       children: spaced,
     );
   }
-  return Column(
-    mainAxisSize: MainAxisSize.min,
+  final column = Column(
+    mainAxisSize: boxH > 0 ? MainAxisSize.max : MainAxisSize.min,
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: spaced,
   );
+  if (boxH <= 0) return column;
+  return SizedBox(height: boxH, child: column);
 }

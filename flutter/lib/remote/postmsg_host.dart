@@ -241,7 +241,10 @@ class PostMsgHost {
     final id = '${doc['id']}'.trim();
     if (id.isEmpty) return;
     if (_closingRoute) {
+      final previous = _pendingDoc;
       _pendingDoc = doc;
+      final oldId = '${previous?['id'] ?? ''}'.trim();
+      if (oldId.isNotEmpty && oldId != id) unawaited(_reportClosed(oldId));
       return;
     }
 
@@ -395,14 +398,15 @@ class PostMsgHost {
 
   void _popDialogRoute() {
     _programmaticClose = true;
-    NavigatorState? nav;
     final dialogCtx = _dialogContext;
-    if (dialogCtx != null && dialogCtx.mounted) {
-      try {
-        nav = Navigator.of(dialogCtx, rootNavigator: true);
-      } catch (_) {}
+    if (dialogCtx == null || !dialogCtx.mounted) {
+      _dialogContext = null;
+      return;
     }
-    nav ??= navigatorKey.currentState;
+    NavigatorState? nav;
+    try {
+      nav = Navigator.of(dialogCtx, rootNavigator: true);
+    } catch (_) {}
     if (nav != null && nav.canPop()) {
       nav.pop();
       return;
@@ -640,8 +644,6 @@ class PostMsgHost {
     );
   }
 
-  double _num(dynamic v) => (v is num) ? v.toDouble() : 0.0;
-
   /// 设计稿 960×540，整窗（含弹窗）按屏等比缩放。
   /// 桌面仍用 [LayoutScale]（1280×720）。
   static double hostUiScale(BuildContext context) {
@@ -654,11 +656,11 @@ class PostMsgHost {
     return LayoutScale.layoutOf(context);
   }
 
-  int _zOf(Map<String, dynamic> doc) => _num(doc['z'] ?? doc['zIndex']).round();
+  int _zOf(Map<String, dynamic> doc) => kotvUiNum(doc['z'] ?? doc['zIndex']).round();
 
   double? _coord(Map<String, dynamic> doc, String a, String b) {
-    if (doc.containsKey(a)) return _num(doc[a]);
-    if (doc.containsKey(b)) return _num(doc[b]);
+    if (doc.containsKey(a)) return kotvUiNum(doc[a]);
+    if (doc.containsKey(b)) return kotvUiNum(doc[b]);
     return null;
   }
 
@@ -675,11 +677,8 @@ class PostMsgHost {
   Widget? _windowTitle(Map<String, dynamic> doc, Color fg, double s) {
     final title = '${doc['title'] ?? ''}';
     if (title.isEmpty) return null;
-    final titleFont = _num(doc['titleSize']);
-    final resolved = (titleFont >= 20
-            ? titleFont
-            : (kotvIsDesktop() ? 22.0 : (titleFont > 0 ? titleFont : 20.0))) *
-        s;
+    final titleFont = kotvUiNum(doc['titleSize']);
+    final resolved = (titleFont > 0 ? titleFont : (kotvIsDesktop() ? 22.0 : 20.0)) * s;
     return Text(
       title,
       style: TextStyle(color: fg, fontSize: resolved, fontWeight: FontWeight.w700, height: 1.2),
@@ -698,16 +697,16 @@ class PostMsgHost {
         if (a is Map) Map<String, dynamic>.from(a),
     ];
     if (actionMaps.isEmpty) return null;
-    final docFont = _num(doc['fontSize']);
-    final actionFont = _num(doc['actionFontSize']);
-    final actionH = _num(doc['actionHeight']);
+    final docFont = kotvUiNum(doc['fontSize']);
+    final actionFont = kotvUiNum(doc['actionFontSize']);
+    final actionH = kotvUiNum(doc['actionHeight']);
     return kotvUiActions(
       context: context,
       actions: actionMaps,
       align: '${doc['actionAlign'] ?? ''}',
       defaultFont: (actionFont > 0 ? actionFont : docFont) * s,
       defaultH: (actionH > 0 ? actionH : 40) * s,
-      defaultW: _num(doc['actionWidth']),
+      defaultW: kotvUiNum(doc['actionWidth']),
       uiScale: s,
       onPressed: (a) => fire(
         '${a['id'] ?? 'action'}',
@@ -729,7 +728,7 @@ class PostMsgHost {
     required Future<void> Function(String action, {bool dismissAfter}) fire,
   }) {
     final html = '${doc['html'] ?? ''}'.trim();
-    final docFont = _num(doc['fontSize']);
+    final docFont = kotvUiNum(doc['fontSize']);
     final flow = <Map<String, dynamic>>[];
     final placed = <Map<String, dynamic>>[];
     for (final raw in (doc['elements'] as List?) ?? const []) {
@@ -788,8 +787,8 @@ class PostMsgHost {
                 Positioned(
                   left: (_coord(el, 'x', 'left') ?? 0) * uiScale,
                   top: (_coord(el, 'y', 'top') ?? 0) * uiScale,
-                  width: _num(el['width']) > 0 ? _num(el['width']) * uiScale : null,
-                  height: _num(el['height']) > 0 ? _num(el['height']) * uiScale : null,
+                  width: kotvUiNum(el['width']) > 0 ? kotvUiNum(el['width']) * uiScale : null,
+                  height: kotvUiNum(el['height']) > 0 ? kotvUiNum(el['height']) * uiScale : null,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -855,20 +854,20 @@ class PostMsgHost {
     );
     final maxW = screen.width * 0.95;
     final maxH = screen.height * 0.9;
-    final rawW = _num(doc['width']);
-    final rawH = _num(doc['height']);
+    final rawW = kotvUiNum(doc['width']);
+    final rawH = kotvUiNum(doc['height']);
     // 脚本给的 width/font 按设计稿 dp；未给时默认卡宽也按 s 缩放。
     // 脚本写了宽度就用它，不再抬到桌面默认最小宽。
     var cardW = rawW > 0 ? rawW * s : (desktop ? 560.0 : 420.0) * s;
-    cardW = rawW > 0 ? cardW.clamp(48.0, maxW) : cardW.clamp(280.0 * s, maxW);
+    cardW = rawW > 0 ? math.min(cardW, maxW) : cardW.clamp(280.0 * s, maxW);
     final customPad = doc['padding'] != null;
-    final pad = customPad ? _num(doc['padding']) * s : 0.0;
+    final pad = customPad ? kotvUiNum(doc['padding']) * s : 0.0;
     final padH = customPad ? pad : (compact ? 14.0 : 24.0) * s;
     final padVT = customPad ? pad : (compact ? 14.0 : 22.0) * s;
     final padVB = customPad ? pad : (compact ? 12.0 : 18.0) * s;
     final gapTitle = (compact ? 8.0 : 12.0) * s;
     final gapActions = (compact ? 12.0 : 16.0) * s;
-    final radius = doc['radius'] != null ? _num(doc['radius']) * s : 18.0 * s;
+    final radius = doc['radius'] != null ? kotvUiNum(doc['radius']) * s : 18.0 * s;
     final bg = kotvUiColor(doc['background']) ?? p.dialogBg;
     final border = kotvUiColor(doc['border']) ?? p.outline;
 
@@ -880,7 +879,7 @@ class PostMsgHost {
     final content = rawH > 0
         ? SizedBox(
             width: cardW,
-            height: (rawH * s).clamp(48.0, bodyMaxH),
+            height: math.min(rawH * s, bodyMaxH),
             child: body,
           )
         : ConstrainedBox(

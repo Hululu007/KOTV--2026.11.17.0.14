@@ -292,14 +292,6 @@ public final class UiBridge {
             return this;
         }
 
-        public Elements space() {
-            Map<String, Object> element = new LinkedHashMap<>();
-            element.put("type", "space");
-            element.put("height", 8);
-            target.add(element);
-            return this;
-        }
-
         public Elements row(Consumer<Elements> block) {
             return row(0, block);
         }
@@ -350,6 +342,7 @@ public final class UiBridge {
         public String color = "";
         public String border = "";
         public int padding = 0;
+        private boolean paddingSet;
         public int radius = -1;
         /** 为 true 时叠在同 kind 已有窗上面，不关掉它。 */
         public boolean overlay;
@@ -424,7 +417,10 @@ public final class UiBridge {
         }
 
         public Document padding(int padding) {
-            if (padding >= 0) this.padding = padding;
+            if (padding >= 0) {
+                this.padding = padding;
+                this.paddingSet = true;
+            }
             return this;
         }
 
@@ -599,11 +595,6 @@ public final class UiBridge {
 
         public Document progress() {
             els.progress();
-            return this;
-        }
-
-        public Document space() {
-            els.space();
             return this;
         }
 
@@ -836,7 +827,7 @@ public final class UiBridge {
         if (doc.background != null && !doc.background.isEmpty()) document.put("background", doc.background);
         if (doc.color != null && !doc.color.isEmpty()) document.put("color", doc.color);
         if (doc.border != null && !doc.border.isEmpty()) document.put("border", doc.border);
-        if (doc.padding > 0) document.put("padding", doc.padding);
+        if (doc.paddingSet) document.put("padding", doc.padding);
         if (doc.radius >= 0) document.put("radius", doc.radius);
         if (doc.overlay) document.put("overlay", true);
         if (doc.x != null) document.put("x", doc.x);
