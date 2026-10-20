@@ -27,7 +27,6 @@ import java.util.Base64;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -361,7 +360,7 @@ public class Util {
         });
     }
 
-    /** Synchronously POST a host message (used for UI handshake). */
+    /** 经界面套接字发出。shown/closed 由对端帧唤醒，不另开通道。 */
     public static void notifySync(String msg) {
         if (msg == null || msg.isEmpty()) return;
         SpiderDebug.log(msg.length() > 240 ? msg.substring(0, 240) + "…(" + msg.length() + ")" : msg);
@@ -383,42 +382,11 @@ public class Util {
     }
 
     /**
-     * Non-blocking take of one host UI event for an explicit session id.
-     * Returns the raw frame (JSON {@code {"id","action","values"}}).
-     */
-    public static String takeUiReplyRaw(String session) {
-        if (session == null || session.isEmpty()) return "";
-        ensureUiSocket();
-        ArrayDeque<String> q = UI_REPLY_Q.get(session);
-        if (q == null) return "";
-        synchronized (q) {
-            if (q.isEmpty()) return "";
-            return q.pollFirst();
-        }
-    }
-
-    /**
-     * 堵住直到这个 session 的下一帧，或超时。入队的线程会唤醒，不再空转。
-     * 超时或中断返回空串。
+     * 堵住直到这个 session 的下一条业务帧，或超时。套接字入队的线程会唤醒。
+     * 超时或中断返回空串。{@code shown} 不在这条队列里。
      */
     public static String awaitUiReplyRaw(String session, long timeoutMs) {
-        if (session == null || session.isEmpty()) return "";
-        ensureUiSocket();
-        long deadline = System.currentTimeMillis() + Math.max(1L, timeoutMs);
-        ArrayDeque<String> q = UI_REPLY_Q.computeIfAbsent(session, key -> new ArrayDeque<>());
-        synchronized (q) {
-            while (true) {
-                if (!q.isEmpty()) return q.pollFirst();
-                long left = deadline - System.currentTimeMillis();
-                if (left <= 0) return "";
-                try {
-                    q.wait(left);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return "";
-                }
-            }
-        }
+        return awaitFrame(session, timeoutMs, false);
     }
 
     /** Parse action field from a raw uiReply body. */
@@ -505,11 +473,12 @@ public class Util {
         while (System.currentTimeMillis() < deadline) {
             long left = deadline - System.currentTimeMillis();
             if (left <= 0) break;
-            String raw = awaitUiReplyRaw(session, left);
+            String raw = awaitFrame(session, left, true);
             String action = uiReplyAction(raw).toLowerCase(Locale.ROOT);
             if (action.isEmpty()) return false;
             if (action.equals(expect)) {
                 if ("shown".equals(expect)) rememberHostFromReply(session, raw);
+                if ("closed".equals(expect)) clearHostClientInfo(session);
                 return true;
             }
             if ("shown".equals(expect)) {
@@ -517,13 +486,6 @@ public class Util {
                 continue;
             }
             if ("closed".equals(expect) && isUiTerminalAction(action)) {
-                long drainUntil = System.currentTimeMillis() + 300;
-                while (System.currentTimeMillis() < drainUntil) {
-                    long slice = drainUntil - System.currentTimeMillis();
-                    if (slice <= 0) break;
-                    String more = uiReplyAction(awaitUiReplyRaw(session, slice)).toLowerCase(Locale.ROOT);
-                    if (more.isEmpty() || "closed".equals(more)) break;
-                }
                 clearHostClientInfo(session);
                 return true;
             }
@@ -534,67 +496,21 @@ public class Util {
     private static boolean isUiTerminalAction(String action) {
         return "closed".equals(action)
                 || "dismiss".equals(action)
-                || "cancel".equals(action)
-                || "timeout".equals(action)
-                || "submit".equals(action);
+                || "timeout".equals(action);
     }
 
     /**
-     * 堵住直到这个 kind 的下一条业务回复。{@code shown} 留给开关握手，不拿走。
-     * 超时或中断返回空串。
+     * 堵住直到这个 kind 的下一条业务回复。{@code shown} 只进开关握手。
+     * 没有这个 kind 的窗口、超时或中断都返回空串。
      */
     public static String awaitUiReply(String kind, long timeoutMs) {
         if (kind == null || kind.isEmpty()) return "";
-        long waitMs = Math.max(1L, timeoutMs);
         try {
             String session = UiBridge.currentSession(kind);
-            if (session.isEmpty()) {
-                sleepUi(waitMs);
-                return "";
-            }
-            return decodeUiReply(awaitBusinessRaw(session, waitMs));
+            if (session.isEmpty()) return "";
+            return decodeUiReply(awaitUiReplyRaw(session, Math.max(1L, timeoutMs)));
         } catch (Exception e) {
             return "";
-        }
-    }
-
-    private static String awaitBusinessRaw(String session, long timeoutMs) {
-        ensureUiSocket();
-        long deadline = System.currentTimeMillis() + Math.max(1L, timeoutMs);
-        ArrayDeque<String> q = UI_REPLY_Q.computeIfAbsent(session, key -> new ArrayDeque<>());
-        synchronized (q) {
-            while (true) {
-                String raw = takeNonShownLocked(q);
-                if (!raw.isEmpty()) return raw;
-                long left = deadline - System.currentTimeMillis();
-                if (left <= 0) return "";
-                try {
-                    q.wait(left);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return "";
-                }
-            }
-        }
-    }
-
-    private static String takeNonShownLocked(ArrayDeque<String> q) {
-        Iterator<String> it = q.iterator();
-        while (it.hasNext()) {
-            String raw = it.next();
-            if (!"shown".equalsIgnoreCase(uiReplyAction(raw))) {
-                it.remove();
-                return raw;
-            }
-        }
-        return "";
-    }
-
-    private static void sleepUi(long timeoutMs) {
-        try {
-            Thread.sleep(Math.max(1L, timeoutMs));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
         }
     }
 
@@ -628,7 +544,14 @@ public class Util {
     }
 
     private static final Object UI_SOCKET_LOCK = new Object();
-    private static final ConcurrentHashMap<String, ArrayDeque<String>> UI_REPLY_Q = new ConcurrentHashMap<>();
+
+    /** 同一帧拆成两份：握手读 life，按钮回复读 biz，避免互相拿走后另一边空等。 */
+    private static final class UiFrames {
+        final ArrayDeque<String> life = new ArrayDeque<>();
+        final ArrayDeque<String> biz = new ArrayDeque<>();
+    }
+
+    private static final ConcurrentHashMap<String, UiFrames> UI_REPLY_Q = new ConcurrentHashMap<>();
     private static volatile WebSocket UI_SOCKET;
     private static volatile OkHttpClient UI_SOCKET_CLIENT;
 
@@ -699,10 +622,40 @@ public class Util {
             return;
         }
         if (id.isEmpty()) return;
-        ArrayDeque<String> q = UI_REPLY_Q.computeIfAbsent(id, key -> new ArrayDeque<>());
-        synchronized (q) {
-            q.addLast(text);
-            q.notifyAll();
+        String action = uiReplyAction(text);
+        UiFrames box = UI_REPLY_Q.computeIfAbsent(id, key -> new UiFrames());
+        synchronized (box) {
+            if (isHandshakeFrame(action)) box.life.addLast(text);
+            if (!"shown".equalsIgnoreCase(action)) box.biz.addLast(text);
+            box.notifyAll();
+        }
+    }
+
+    private static boolean isHandshakeFrame(String action) {
+        return "shown".equalsIgnoreCase(action)
+                || "closed".equalsIgnoreCase(action)
+                || "dismiss".equalsIgnoreCase(action)
+                || "timeout".equalsIgnoreCase(action);
+    }
+
+    private static String awaitFrame(String session, long timeoutMs, boolean handshake) {
+        if (session == null || session.isEmpty()) return "";
+        ensureUiSocket();
+        long deadline = System.currentTimeMillis() + Math.max(1L, timeoutMs);
+        UiFrames box = UI_REPLY_Q.computeIfAbsent(session, key -> new UiFrames());
+        synchronized (box) {
+            ArrayDeque<String> q = handshake ? box.life : box.biz;
+            while (true) {
+                if (!q.isEmpty()) return q.pollFirst();
+                long left = deadline - System.currentTimeMillis();
+                if (left <= 0) return "";
+                try {
+                    box.wait(left);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return "";
+                }
+            }
         }
     }
 
