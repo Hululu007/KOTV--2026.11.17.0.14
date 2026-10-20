@@ -5,6 +5,7 @@ import 'dart:ui' show PointerDeviceKind;
 import '../util/kotv_io.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -792,19 +793,7 @@ class PostMsgHost {
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              Positioned.fill(
-                child: ScrollConfiguration(
-                  behavior: ScrollConfiguration.of(context).copyWith(
-                    dragDevices: const <PointerDeviceKind>{
-                      PointerDeviceKind.touch,
-                      PointerDeviceKind.stylus,
-                      PointerDeviceKind.trackpad,
-                      PointerDeviceKind.unknown,
-                    },
-                  ),
-                  child: SingleChildScrollView(child: column),
-                ),
-              ),
+              Positioned.fill(child: _DialogBodyScroll(key: ObjectKey(doc), child: column)),
               ...layers,
             ],
           ),
@@ -945,6 +934,56 @@ class PostMsgHost {
     } catch (_) {}
   }
 
+}
+
+/// 弹窗里的竖向列表。
+/// 双指滚动沿用滚动视图，但滚动一开始就把「挡住点击」关掉。
+/// 只关掉触控板拖动时目录能点，但列表不能上下翻。
+class _DialogBodyScroll extends StatefulWidget {
+  const _DialogBodyScroll({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<_DialogBodyScroll> createState() => _DialogBodyScrollState();
+}
+
+class _DialogBodyScrollState extends State<_DialogBodyScroll> {
+  final GlobalKey _scrollKey = GlobalKey();
+
+  void _unlock() {
+    final root = _scrollKey.currentContext?.findRenderObject();
+    if (root == null) return;
+    void walk(RenderObject node) {
+      if (node is RenderIgnorePointer) node.ignoring = false;
+      node.visitChildren(walk);
+    }
+    walk(root);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (_) {
+        _unlock();
+        return false;
+      },
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(
+          dragDevices: const <PointerDeviceKind>{
+            PointerDeviceKind.touch,
+            PointerDeviceKind.stylus,
+            PointerDeviceKind.trackpad,
+          },
+        ),
+        child: SingleChildScrollView(
+          key: _scrollKey,
+          primary: false,
+          child: widget.child,
+        ),
+      ),
+    );
+  }
 }
 
 /// 底窗和叠层共用。叠层只关自己。

@@ -436,8 +436,14 @@ List<Widget> _raw(
       checks.putIfAbsent(id, () => el['checked'] == true);
       final control = Switch(
         value: checks[id] ?? false,
-        activeThumbColor: Colors.white,
-        activeTrackColor: kotvUiInk(el['color'], palette.primary),
+        thumbColor: MaterialStateProperty.resolveWith((states) {
+          if (states.contains(MaterialState.selected)) return Colors.white;
+          return null;
+        }),
+        trackColor: MaterialStateProperty.resolveWith((states) {
+          if (states.contains(MaterialState.selected)) return kotvUiInk(el['color'], palette.primary);
+          return null;
+        }),
         onChanged: (v) => setLocal(() => checks[id] = v),
       );
       final caption = '${el['text'] ?? ''}';
