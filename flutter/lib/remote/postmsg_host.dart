@@ -956,7 +956,7 @@ class PostMsgHost {
 }
 
 /// 弹窗里的竖向列表。
-/// 右侧只画位置，不接点击。双指和滚轮移动内容。
+/// 右侧只画位置，不接点击。手指、触控板和滚轮移动内容。
 class _DialogBodyScroll extends StatefulWidget {
   const _DialogBodyScroll({super.key, required this.child});
 
@@ -998,12 +998,30 @@ class _DialogBodyScrollState extends State<_DialogBodyScroll> {
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      onPointerPanZoomUpdate: (event) => _nudge(-event.localPanDelta.dy),
-      onPointerSignal: _wheel,
-      child: _DialogScroll(
-        key: _key,
-        child: widget.child,
+    return RawGestureDetector(
+      gestures: <Type, GestureRecognizerFactory>{
+        VerticalDragGestureRecognizer: GestureRecognizerFactoryWithHandlers<VerticalDragGestureRecognizer>(
+          () => VerticalDragGestureRecognizer(
+            supportedDevices: const <PointerDeviceKind>{
+              PointerDeviceKind.touch,
+              PointerDeviceKind.stylus,
+              PointerDeviceKind.invertedStylus,
+            },
+          ),
+          (VerticalDragGestureRecognizer instance) {
+            instance.onUpdate = (DragUpdateDetails details) {
+              _nudge(-details.delta.dy);
+            };
+          },
+        ),
+      },
+      child: Listener(
+        onPointerPanZoomUpdate: (event) => _nudge(-event.localPanDelta.dy),
+        onPointerSignal: _wheel,
+        child: _DialogScroll(
+          key: _key,
+          child: widget.child,
+        ),
       ),
     );
   }
