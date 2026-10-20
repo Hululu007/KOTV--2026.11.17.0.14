@@ -86,8 +86,8 @@ class KotvUiPress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fg = color ?? palette.fg;
-    return InkWell(
-      onTap: onTap,
+    return KotvUiRemote(
+      onPressed: onTap,
       child: _pressBox(
         Text(
           label,
@@ -104,6 +104,106 @@ class KotvUiPress extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 同一扇窗里只让第一个可操作项自动获焦，避免每次重建都把焦点抢回去。
+class KotvUiFocusGate extends StatefulWidget {
+  const KotvUiFocusGate({super.key, required this.child});
+
+  final Widget child;
+
+  static bool claim(BuildContext context) {
+    final gate = context.findAncestorStateOfType<_KotvUiFocusGateState>();
+    if (gate == null) return false;
+    return gate._claim();
+  }
+
+  @override
+  State<KotvUiFocusGate> createState() => _KotvUiFocusGateState();
+}
+
+class _KotvUiFocusGateState extends State<KotvUiFocusGate> {
+  var _taken = false;
+
+  bool _claim() {
+    if (_taken) return false;
+    _taken = true;
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// 脚本弹窗里的遥控落点。鼠标点击仍走 [onPressed]，方向键在项之间移动。
+class KotvUiRemote extends StatefulWidget {
+  const KotvUiRemote({
+    super.key,
+    required this.onPressed,
+    required this.child,
+    this.borderRadius = 8,
+  });
+
+  final VoidCallback onPressed;
+  final Widget child;
+  final double borderRadius;
+
+  static Widget wrap(Widget child, VoidCallback onPressed) {
+    return KotvUiRemote(onPressed: onPressed, child: child);
+  }
+
+  @override
+  State<KotvUiRemote> createState() => _KotvUiRemoteState();
+}
+
+class _KotvUiRemoteState extends State<KotvUiRemote> {
+  var _auto = false;
+  var _latched = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_latched) return;
+    _latched = true;
+    _auto = KotvUiFocusGate.claim(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocus(
+      autofocus: _auto,
+      onPressed: widget.onPressed,
+      borderRadius: widget.borderRadius,
+      scrollIntoView: true,
+      child: ExcludeFocus(child: widget.child),
+    );
+  }
+}
+
+/// 输入、滑条、下拉自己处理左右键，只借用同一扇窗的首次获焦。
+class KotvUiAutofocus extends StatefulWidget {
+  const KotvUiAutofocus({super.key, required this.builder});
+
+  final Widget Function(bool autofocus) builder;
+
+  @override
+  State<KotvUiAutofocus> createState() => _KotvUiAutofocusState();
+}
+
+class _KotvUiAutofocusState extends State<KotvUiAutofocus> {
+  var _auto = false;
+  var _latched = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_latched) return;
+    _latched = true;
+    _auto = KotvUiFocusGate.claim(context);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(_auto);
 }
 
 Widget kotvUiActions({
@@ -176,6 +276,8 @@ List<Widget> kotvUiElements(
     openExternal: openExternal,
   );
   if (built.isEmpty) return built;
+  final type = '${el['type'] ?? ''}'.toLowerCase().trim();
+  if (type == 'button' || type == 'link') return built;
   final inner = built.length == 1
       ? built.first
       : Column(
@@ -188,6 +290,7 @@ List<Widget> kotvUiElements(
       el,
       fire,
       openExternal,
+      uiScale,
       _paint(el, inner, uiScale),
     ),
   ];
@@ -197,6 +300,7 @@ Widget _tap(
   Map<String, dynamic> el,
   Future<void> Function(String action, {bool dismissAfter}) fire,
   Future<void> Function(String url) openExternal,
+  double uiScale,
   Widget child,
 ) {
   final id = '${el['id'] ?? ''}'.trim();
@@ -206,11 +310,13 @@ Widget _tap(
     return child;
   }
   if (id.isEmpty && url.isEmpty) return child;
-  return GestureDetector(
-    behavior: HitTestBehavior.opaque,
-    onTap: () async {
-      if (url.isNotEmpty) await openExternal(url);
-      if (id.isNotEmpty) await fire(id, dismissAfter: el['dismiss'] == true);
+  return KotvUiRemote(
+    borderRadius: el['radius'] == null ? 8 : kotvUiNum(el['radius']) * uiScale,
+    onPressed: () {
+      unawaited(() async {
+        if (url.isNotEmpty) await openExternal(url);
+        if (id.isNotEmpty) await fire(id, dismissAfter: el['dismiss'] == true);
+      }());
     },
     child: child,
   );
@@ -333,19 +439,22 @@ List<Widget> _raw(
       if (current > max) current = max;
       final divisions = step > 0 ? ((max - min) / step).round().clamp(1, 1000) : null;
       return [
-        Slider(
-          value: current,
-          min: min,
-          max: max,
-          divisions: divisions,
-          label: sliderCtrl.text,
-          activeColor: kotvUiInk(el['color'], palette.primary),
-          onChanged: (v) {
-            final stepped = step > 0 ? (v / step).round() * step : v;
-            final clamped = stepped < min ? min : (stepped > max ? max : stepped);
-            sliderCtrl.text = clamped == clamped.roundToDouble() ? '${clamped.round()}' : clamped.toStringAsFixed(2);
-            setLocal(() {});
-          },
+        KotvUiAutofocus(
+          builder: (autofocus) => Slider(
+            value: current,
+            min: min,
+            max: max,
+            divisions: divisions,
+            label: sliderCtrl.text,
+            autofocus: autofocus,
+            activeColor: kotvUiInk(el['color'], palette.primary),
+            onChanged: (v) {
+              final stepped = step > 0 ? (v / step).round() * step : v;
+              final clamped = stepped < min ? min : (stepped > max ? max : stepped);
+              sliderCtrl.text = clamped == clamped.roundToDouble() ? '${clamped.round()}' : clamped.toStringAsFixed(2);
+              setLocal(() {});
+            },
+          ),
         ),
       ];
     case 'color':
@@ -367,12 +476,15 @@ List<Widget> _raw(
             Text(label, style: TextStyle(color: kotvUiInk(el['hintColor'], palette.muted), fontSize: font)),
             if (gap > 0) SizedBox(width: gap),
             Expanded(
-              child: Slider(
-                value: value.clamp(0, max).toDouble(),
-                min: 0,
-                max: max,
-                activeColor: picked,
-                onChanged: onChanged,
+              child: KotvUiAutofocus(
+                builder: (autofocus) => Slider(
+                  value: value.clamp(0, max).toDouble(),
+                  min: 0,
+                  max: max,
+                  autofocus: autofocus,
+                  activeColor: picked,
+                  onChanged: onChanged,
+                ),
               ),
             ),
           ],
@@ -411,22 +523,25 @@ List<Widget> _raw(
       final secret = el['password'] == true;
       if (secret) checks.putIfAbsent('obscure:$id', () => true);
       final multi = el['multiline'] == true;
-      final field = KotvTvTextField(
-        controller: ctrl,
-        obscureText: secret && (checks['obscure:$id'] ?? true),
-        maxLines: multi ? null : 1,
-        minLines: multi ? 1 : null,
-        style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font),
-        cursorColor: kotvUiInk(el['color'], palette.primary),
-        decoration: InputDecoration(
-          hintText: '${el['placeholder'] ?? ''}',
-          hintStyle: TextStyle(color: kotvUiInk(el['hintColor'], palette.muted), fontSize: font),
-          filled: false,
-          border: InputBorder.none,
-          enabledBorder: InputBorder.none,
-          focusedBorder: InputBorder.none,
-          isCollapsed: true,
-          contentPadding: EdgeInsets.zero,
+      final field = KotvUiAutofocus(
+        builder: (autofocus) => KotvTvTextField(
+          controller: ctrl,
+          autofocus: autofocus,
+          obscureText: secret && (checks['obscure:$id'] ?? true),
+          maxLines: multi ? null : 1,
+          minLines: multi ? 1 : null,
+          style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font),
+          cursorColor: kotvUiInk(el['color'], palette.primary),
+          decoration: InputDecoration(
+            hintText: '${el['placeholder'] ?? ''}',
+            hintStyle: TextStyle(color: kotvUiInk(el['hintColor'], palette.muted), fontSize: font),
+            filled: false,
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            isCollapsed: true,
+            contentPadding: EdgeInsets.zero,
+          ),
         ),
       );
       return [_sized(el, field, uiScale)];
@@ -447,13 +562,19 @@ List<Widget> _raw(
         onChanged: (v) => setLocal(() => checks[id] = v),
       );
       final caption = '${el['text'] ?? ''}';
-      if (caption.isEmpty) return [control];
+      final body = caption.isEmpty
+          ? control
+          : Row(
+              children: [
+                Expanded(child: Text(caption, style: TextStyle(color: palette.fg, fontSize: font))),
+                control,
+              ],
+            );
       return [
-        Row(
-          children: [
-            Expanded(child: Text(caption, style: TextStyle(color: palette.fg, fontSize: font))),
-            control,
-          ],
+        KotvUiRemote(
+          borderRadius: 0,
+          onPressed: () => setLocal(() => checks[id] = !(checks[id] ?? false)),
+          child: body,
         ),
       ];
     case 'checkbox':
@@ -461,24 +582,21 @@ List<Widget> _raw(
       if (id.isEmpty) return const [];
       checks.putIfAbsent(id, () => el['checked'] == true);
       return [
-        TvFocus(
-          onPressed: () => setLocal(() => checks[id] = !(checks[id] ?? false)),
+        KotvUiRemote(
           borderRadius: 0,
-          scrollIntoView: true,
-          child: ExcludeFocus(
-            child: Row(
-              children: [
-                Checkbox(
-                  value: checks[id] ?? false,
-                  onChanged: (v) => setLocal(() => checks[id] = v ?? false),
-                  activeColor: kotvUiInk(el['color'], palette.primary),
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                Expanded(
-                  child: Text('${el['text'] ?? ''}', style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font)),
-                ),
-              ],
-            ),
+          onPressed: () => setLocal(() => checks[id] = !(checks[id] ?? false)),
+          child: Row(
+            children: [
+              Checkbox(
+                value: checks[id] ?? false,
+                onChanged: (v) => setLocal(() => checks[id] = v ?? false),
+                activeColor: kotvUiInk(el['color'], palette.primary),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              Expanded(
+                child: Text('${el['text'] ?? ''}', style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font)),
+              ),
+            ],
           ),
         ),
       ];
@@ -490,25 +608,22 @@ List<Widget> _raw(
       return [
         for (final o in options)
           if (o is Map)
-            TvFocus(
-              onPressed: () => setLocal(() => radios[id] = '${o['id'] ?? ''}'),
+            KotvUiRemote(
               borderRadius: 0,
-              scrollIntoView: true,
-              child: ExcludeFocus(
-                child: Row(
-                  children: [
-                    Radio<String>(
-                      value: '${o['id'] ?? ''}',
-                      groupValue: radios[id],
-                      onChanged: (v) => setLocal(() => radios[id] = v ?? ''),
-                      activeColor: kotvUiInk(el['color'], palette.primary),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    Expanded(
-                      child: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font)),
-                    ),
-                  ],
-                ),
+              onPressed: () => setLocal(() => radios[id] = '${o['id'] ?? ''}'),
+              child: Row(
+                children: [
+                  Radio<String>(
+                    value: '${o['id'] ?? ''}',
+                    groupValue: radios[id],
+                    onChanged: (v) => setLocal(() => radios[id] = v ?? ''),
+                    activeColor: kotvUiInk(el['color'], palette.primary),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  Expanded(
+                    child: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font)),
+                  ),
+                ],
               ),
             ),
       ];
@@ -517,20 +632,23 @@ List<Widget> _raw(
       if (id.isEmpty) return const [];
       final options = (el['options'] as List?) ?? const [];
       selects.putIfAbsent(id, () => '${el['value'] ?? (options.isNotEmpty && options.first is Map ? options.first['id'] : '')}');
-      final dropdown = DropdownButtonFormField<String>(
-        value: selects[id]?.isEmpty == true ? null : selects[id],
-        focusColor: kotvUiColor(el['color']),
-        dropdownColor: kotvUiInk(el['background'], palette.dialogBg),
-        style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font),
-        items: [
-          for (final o in options)
-            if (o is Map)
-              DropdownMenuItem(
-                value: '${o['id']}',
-                child: Text('${o['label'] ?? o['id']}', style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font)),
-              ),
-        ],
-        onChanged: (v) => setLocal(() => selects[id] = v ?? ''),
+      final dropdown = KotvUiAutofocus(
+        builder: (autofocus) => DropdownButtonFormField<String>(
+          value: selects[id]?.isEmpty == true ? null : selects[id],
+          autofocus: autofocus,
+          focusColor: kotvUiColor(el['color']),
+          dropdownColor: kotvUiInk(el['background'], palette.dialogBg),
+          style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font),
+          items: [
+            for (final o in options)
+              if (o is Map)
+                DropdownMenuItem(
+                  value: '${o['id']}',
+                  child: Text('${o['label'] ?? o['id']}', style: TextStyle(color: kotvUiInk(el['color'], palette.fg), fontSize: font)),
+                ),
+          ],
+          onChanged: (v) => setLocal(() => selects[id] = v ?? ''),
+        ),
       );
       return [_sized(el, dropdown, uiScale)];
     case 'button':
@@ -549,59 +667,64 @@ List<Widget> _raw(
       }
       final hint = '${el['hint'] ?? ''}'.trim();
       final mark = kotvUiColor(el['mark']);
+      final radius = el['radius'] == null ? 8.0 : kotvUiNum(el['radius']) * uiScale;
+      final Widget content;
       if (hint.isNotEmpty || mark != null) {
         final gap = kotvUiPx(el['spacing'], uiScale) ?? 0;
-        return [
-          InkWell(
-            onTap: () => unawaited(onButton()),
-            child: Row(
-              children: [
-                if (mark != null) ...[
-                  Container(
-                    width: font,
-                    height: font,
-                    decoration: BoxDecoration(color: mark, shape: BoxShape.circle),
+        content = Row(
+          children: [
+            if (mark != null) ...[
+              Container(
+                width: font,
+                height: font,
+                decoration: BoxDecoration(color: mark, shape: BoxShape.circle),
+              ),
+              if (gap > 0) SizedBox(width: gap),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${el['text'] ?? ''}',
+                    style: TextStyle(
+                      color: kotvUiInk(el['color'], palette.fg),
+                      fontSize: font,
+                      fontWeight: kotvUiFontWeight(el),
+                    ),
                   ),
-                  if (gap > 0) SizedBox(width: gap),
-                ],
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${el['text'] ?? ''}',
-                        style: TextStyle(
-                          color: kotvUiInk(el['color'], palette.fg),
-                          fontSize: font,
-                          fontWeight: kotvUiFontWeight(el),
-                        ),
+                  if (hint.isNotEmpty)
+                    Text(
+                      hint,
+                      style: TextStyle(
+                        color: kotvUiInk(el['hintColor'], kotvUiInk(el['color'], palette.fg)),
+                        fontSize: font,
                       ),
-                      if (hint.isNotEmpty)
-                        Text(
-                          hint,
-                          style: TextStyle(
-                            color: kotvUiInk(el['hintColor'], kotvUiInk(el['color'], palette.fg)),
-                            fontSize: font,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
+                    ),
+                ],
+              ),
+            ),
+          ],
+        );
+      } else {
+        content = _pressBox(
+          Text(
+            '${el['text'] ?? ''}',
+            style: TextStyle(
+              color: kotvUiColor(el['color']) ?? palette.fg,
+              fontSize: font,
+              fontWeight: kotvUiFontWeight(el),
             ),
           ),
-        ];
-      }
-      return [
-        KotvUiPress(
-          label: '${el['text'] ?? ''}',
-          palette: palette,
-          font: font,
-          weight: kotvUiFontWeight(el),
-          color: kotvUiColor(el['color']),
           width: kotvUiPx(el['width'], uiScale),
           height: kotvUiPx(el['height'], uiScale),
-          onTap: () => unawaited(onButton()),
+        );
+      }
+      return [
+        KotvUiRemote(
+          borderRadius: radius,
+          onPressed: () => unawaited(onButton()),
+          child: _paint(el, content, uiScale),
         ),
       ];
     case 'link':
@@ -609,17 +732,30 @@ List<Widget> _raw(
       if (linkUrl.isEmpty) return const [];
       final labelText = '${el['text'] ?? ''}'.trim().isEmpty ? linkUrl : '${el['text']}'.trim();
       final look = '${el['style'] ?? ''}'.toLowerCase().trim();
+      final fg = kotvUiColor(el['color']) ?? palette.fg;
+      final radius = el['radius'] == null ? 8.0 : kotvUiNum(el['radius']) * uiScale;
       return [
-        KotvUiPress(
-          label: labelText,
-          underline: look == 'underline',
-          palette: palette,
-          font: font,
-          weight: kotvUiFontWeight(el),
-          color: kotvUiColor(el['color']),
-          width: kotvUiPx(el['width'], uiScale),
-          height: kotvUiPx(el['height'], uiScale),
-          onTap: () => unawaited(openExternal(linkUrl)),
+        KotvUiRemote(
+          borderRadius: radius,
+          onPressed: () => unawaited(openExternal(linkUrl)),
+          child: _paint(
+            el,
+            _pressBox(
+              Text(
+                labelText,
+                style: TextStyle(
+                  color: fg,
+                  fontSize: font,
+                  fontWeight: kotvUiFontWeight(el),
+                  decoration: look == 'underline' ? TextDecoration.underline : null,
+                  decorationColor: fg,
+                ),
+              ),
+              width: kotvUiPx(el['width'], uiScale),
+              height: kotvUiPx(el['height'], uiScale),
+            ),
+            uiScale,
+          ),
         ),
       ];
     case 'separator':
@@ -643,6 +779,7 @@ List<Widget> _raw(
           scale: uiScale,
           onAction: (id) => unawaited(fire(id)),
           onLink: (url) => unawaited(openExternal(url)),
+          remote: KotvUiRemote.wrap,
         ),
       ];
     case 'spacer':

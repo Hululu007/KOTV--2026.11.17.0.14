@@ -32,6 +32,7 @@ class KotvUiMarkup extends StatelessWidget {
     required this.fontSize,
     required this.onAction,
     required this.onLink,
+    this.remote,
     this.scale = 1,
   });
 
@@ -40,6 +41,7 @@ class KotvUiMarkup extends StatelessWidget {
   final double fontSize;
   final void Function(String action) onAction;
   final void Function(String url) onLink;
+  final Widget Function(Widget child, VoidCallback onPressed)? remote;
   final double scale;
 
   static const _skip = {
@@ -73,6 +75,9 @@ class KotvUiMarkup extends StatelessWidget {
         ),
       },
       onLinkTap: (url, attributes, element) => _tap(url, attributes),
+      extensions: [
+        if (remote != null) _AnchorRemote(remote!, _tap),
+      ],
     );
     if (flow.placed.isEmpty) return body;
     final stack = Stack(
@@ -94,6 +99,7 @@ class KotvUiMarkup extends StatelessWidget {
               scale: scale,
               onAction: onAction,
               onLink: onLink,
+              remote: remote,
             ),
           ),
       ],
@@ -237,5 +243,51 @@ class _HtmlFlow {
     final match = RegExp(r'-?\d+(\.\d+)?').firstMatch(raw);
     if (match == null) return null;
     return double.tryParse(match.group(0)!);
+  }
+}
+
+class _AnchorRemote extends HtmlExtension {
+  _AnchorRemote(this.remote, this.onTap);
+
+  final Widget Function(Widget child, VoidCallback onPressed) remote;
+  final void Function(String? url, Map<String, String> attributes) onTap;
+
+  @override
+  Set<String> get supportedTags => const {'a'};
+
+  @override
+  bool matches(ExtensionContext context) {
+    switch (context.currentStep) {
+      case CurrentStep.preparing:
+        return super.matches(context);
+      case CurrentStep.preStyling:
+      case CurrentStep.preProcessing:
+        return false;
+      case CurrentStep.building:
+        return context.styledElement is WrapperElement;
+    }
+  }
+
+  @override
+  StyledElement prepare(ExtensionContext context, List<StyledElement> children) {
+    return WrapperElement(
+      child: context.parser.prepareFromExtension(
+        context,
+        children,
+        extensionsToIgnore: {this},
+      ),
+    );
+  }
+
+  @override
+  InlineSpan build(ExtensionContext context) {
+    final child = CssBoxWidget.withInlineSpanChildren(
+      children: context.inlineSpanChildren!,
+      style: context.style!,
+    );
+    final kids = context.styledElement?.children ?? const <StyledElement>[];
+    final href = kids.isEmpty ? '' : (kids.first.attributes['href'] ?? '').trim();
+    if (href.isEmpty) return WidgetSpan(child: child);
+    return WidgetSpan(child: remote(child, () => onTap(href, {'href': href})));
   }
 }

@@ -783,6 +783,7 @@ class PostMsgHost {
             scale: uiScale,
             onAction: (id) => unawaited(fire(id)),
             onLink: (url) => unawaited(_openExternal(url)),
+            remote: KotvUiRemote.wrap,
           ),
         for (final el in flow) ...built(el),
       ],
@@ -895,14 +896,17 @@ class PostMsgHost {
         ),
         child: Padding(
           padding: EdgeInsets.all(pad),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (title != null) title,
-              content,
-              if (actions != null) actions,
-            ],
+          child: KotvUiFocusGate(
+            key: ValueKey('${doc['id']}'),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (title != null) title,
+                content,
+                if (actions != null) actions,
+              ],
+            ),
           ),
         ),
       ),
@@ -957,6 +961,7 @@ class PostMsgHost {
 
 /// 弹窗里的竖向列表。
 /// 右侧只画位置，不接点击。手指、触控板和滚轮移动内容。
+/// 遥控和键盘在可操作项之间移动，被挡住的项滚进窗口。
 class _DialogBodyScroll extends StatefulWidget {
   const _DialogBodyScroll({super.key, required this.child});
 
@@ -970,8 +975,61 @@ class _DialogBodyScrollState extends State<_DialogBodyScroll> {
   final GlobalKey _key = GlobalKey();
   double _pending = 0;
   bool _scheduled = false;
+  bool _revealScheduled = false;
 
   _RenderDialogScroll? get _box => _key.currentContext?.findRenderObject() as _RenderDialogScroll?;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addListener(_onFocus);
+  }
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeListener(_onFocus);
+    super.dispose();
+  }
+
+  void _onFocus() {
+    if (_revealScheduled) return;
+    _revealScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _revealScheduled = false;
+      if (!mounted) return;
+      _revealFocused();
+    });
+  }
+
+  void _revealFocused() {
+    final box = _box;
+    final focusCtx = FocusManager.instance.primaryFocus?.context;
+    if (box == null || !box.attached || !box.hasSize || focusCtx == null || !focusCtx.mounted) return;
+    final target = focusCtx.findRenderObject();
+    if (target is! RenderBox || !target.attached || !target.hasSize || !_under(target, box)) return;
+    final top = target.localToGlobal(Offset.zero, ancestor: box).dy;
+    final height = target.size.height;
+    final view = box.size.height;
+    const pad = 4.0;
+    var delta = 0.0;
+    if (height >= view - pad * 2) {
+      if (top < pad) delta = top - pad;
+    } else if (top < pad) {
+      delta = top - pad;
+    } else if (top + height > view - pad) {
+      delta = top + height - (view - pad);
+    }
+    if (delta != 0) box.offset += delta;
+  }
+
+  bool _under(RenderObject node, RenderObject ancestor) {
+    RenderObject? cur = node;
+    while (cur != null) {
+      if (identical(cur, ancestor)) return true;
+      cur = cur.parent;
+    }
+    return false;
+  }
 
   void _nudge(double delta) {
     if (delta == 0 || !mounted) return;
