@@ -694,6 +694,8 @@ public final class UiBridge {
 
     /** 同一 kind 从底到顶的 session。overlay 往上叠，普通 show 先清掉这一叠。 */
     private static final ConcurrentHashMap<String, List<String>> sessionsByKind = new ConcurrentHashMap<>();
+    /** 被同 kind 的后一扇换掉的 session。旧句柄 dispose 时要关当前这一扇。 */
+    private static final ConcurrentHashMap<String, Boolean> supersededSessions = new ConcurrentHashMap<>();
     private static final AtomicLong nextSession = new AtomicLong();
 
     private UiBridge() {
@@ -795,7 +797,11 @@ public final class UiBridge {
             synchronized (stack) {
                 int idx = stack.indexOf(session);
                 if (idx < 0) {
-                    closing.add(session);
+                    if (supersededSessions.remove(session) != null && !stack.isEmpty()) {
+                        closing.addAll(stack);
+                        stack.clear();
+                    }
+                    if (closing.isEmpty()) closing.add(session);
                 } else {
                     closing.addAll(stack.subList(idx, stack.size()));
                     stack.subList(idx, stack.size()).clear();
@@ -805,6 +811,7 @@ public final class UiBridge {
         boolean ok = true;
         for (int i = closing.size() - 1; i >= 0; i--) {
             String id = closing.get(i);
+            supersededSessions.remove(id);
             closeDocument(id);
             if (!Util.waitUiAction(id, "closed", Util.UI_CLOSE_WAIT_MS)) ok = false;
             Util.clearHostClientInfo(id);
@@ -825,6 +832,9 @@ public final class UiBridge {
                 stack.clear();
             }
             stack.add(session);
+        }
+        for (String previous : closing) {
+            supersededSessions.put(previous, Boolean.TRUE);
         }
         for (int i = closing.size() - 1; i >= 0; i--) {
             String previous = closing.get(i);
