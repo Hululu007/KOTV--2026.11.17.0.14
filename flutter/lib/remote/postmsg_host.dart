@@ -1,9 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
-import 'dart:ui' show PointerDeviceKind;
-import '../util/kotv_io.dart';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +12,7 @@ import '../api/kotv_api.dart';
 import '../player/kotv_platform.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
+import '../util/kotv_io.dart';
 import '../util/kotv_ui_socket.dart';
 import 'kotv_ui_markup.dart';
 import 'kotv_ui_view.dart';
@@ -190,15 +190,33 @@ class PostMsgHost {
         other.add(s);
       }
     }
+    final closedIds = <String>{};
     for (final s in closes) {
-      _handle(s);
+      final id = _frameDocId(s);
+      if (id.isNotEmpty) closedIds.add(id);
     }
     for (final s in ui) {
+      final id = _frameDocId(s);
+      if (id.isNotEmpty && closedIds.contains(id)) continue;
+      _handle(s);
+    }
+    for (final s in closes) {
       _handle(s);
     }
     for (final s in other) {
       _handle(s);
     }
+  }
+
+  String _frameDocId(String frame) {
+    final raw = frame.trim();
+    final cut = raw.indexOf(':');
+    if (cut < 0 || cut + 1 >= raw.length) return '';
+    try {
+      final decoded = jsonDecode(raw.substring(cut + 1));
+      if (decoded is Map) return '${decoded['id'] ?? ''}'.trim();
+    } catch (_) {}
+    return '';
   }
 
   void _handle(String raw) {
@@ -754,6 +772,7 @@ class PostMsgHost {
           openExternal: _openExternal,
         );
     final column = Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (html.isNotEmpty)
@@ -937,8 +956,7 @@ class PostMsgHost {
 }
 
 /// 弹窗里的竖向列表。
-/// 双指滚动沿用滚动视图，但滚动一开始就把「挡住点击」关掉。
-/// 只关掉触控板拖动时目录能点，但列表不能上下翻。
+/// 右侧只画位置，不接点击。双指和滚轮移动内容。
 class _DialogBodyScroll extends StatefulWidget {
   const _DialogBodyScroll({super.key, required this.child});
 
@@ -949,39 +967,121 @@ class _DialogBodyScroll extends StatefulWidget {
 }
 
 class _DialogBodyScrollState extends State<_DialogBodyScroll> {
-  final GlobalKey _scrollKey = GlobalKey();
+  final GlobalKey _key = GlobalKey();
+  double _pending = 0;
+  bool _scheduled = false;
 
-  void _unlock() {
-    final root = _scrollKey.currentContext?.findRenderObject();
-    if (root == null) return;
-    void walk(RenderObject node) {
-      if (node is RenderIgnorePointer) node.ignoring = false;
-      node.visitChildren(walk);
-    }
-    walk(root);
+  _RenderDialogScroll? get _box => _key.currentContext?.findRenderObject() as _RenderDialogScroll?;
+
+  void _nudge(double delta) {
+    if (delta == 0 || !mounted) return;
+    _pending += delta;
+    if (_scheduled) return;
+    _scheduled = true;
+    WidgetsBinding.instance.scheduleFrameCallback((_) {
+      _scheduled = false;
+      final pending = _pending;
+      _pending = 0;
+      if (!mounted || pending == 0) return;
+      final box = _box;
+      if (box == null) return;
+      box.offset += pending;
+    });
+  }
+
+  void _wheel(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || event.scrollDelta.dy == 0) return;
+    GestureBinding.instance.pointerSignalResolver.register(event, (signal) {
+      if (signal is PointerScrollEvent) _nudge(signal.scrollDelta.dy);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return NotificationListener<ScrollNotification>(
-      onNotification: (_) {
-        _unlock();
-        return false;
-      },
-      child: ScrollConfiguration(
-        behavior: ScrollConfiguration.of(context).copyWith(
-          dragDevices: const <PointerDeviceKind>{
-            PointerDeviceKind.touch,
-            PointerDeviceKind.stylus,
-            PointerDeviceKind.trackpad,
-          },
-        ),
-        child: SingleChildScrollView(
-          key: _scrollKey,
-          primary: false,
-          child: widget.child,
-        ),
+    return Listener(
+      onPointerPanZoomUpdate: (event) => _nudge(-event.localPanDelta.dy),
+      onPointerSignal: _wheel,
+      child: _DialogScroll(
+        key: _key,
+        child: widget.child,
       ),
+    );
+  }
+}
+
+class _DialogScroll extends SingleChildRenderObjectWidget {
+  const _DialogScroll({super.key, required super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderDialogScroll();
+}
+
+class _RenderDialogScroll extends RenderShiftedBox {
+  _RenderDialogScroll() : super(null);
+
+  static const double _bar = 6;
+
+  double _offset = 0;
+  double maxExtent = 0;
+
+  double get offset => _offset;
+
+  set offset(double value) {
+    final next = value.clamp(0.0, maxExtent);
+    if (next == _offset) return;
+    _offset = next;
+    _place();
+    markNeedsPaint();
+  }
+
+  void _place() {
+    final child = this.child;
+    if (child == null) return;
+    (child.parentData! as BoxParentData).offset = Offset(0, -_offset);
+  }
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    if (!size.contains(position)) return false;
+    if (position.dx < size.width - 12) hitTestChildren(result, position: position);
+    result.add(BoxHitTestEntry(this, position));
+    return true;
+  }
+
+  Rect? get _thumbRect {
+    if (maxExtent <= 0 || !hasSize || size.isEmpty) return null;
+    final view = size.height;
+    final thumbH = math.max(28.0, view * view / (view + maxExtent));
+    final travel = math.max(0.0, view - thumbH);
+    final top = travel * (_offset / maxExtent);
+    return Rect.fromLTWH(size.width - _bar - 2, top, _bar, thumbH);
+  }
+
+  @override
+  void performLayout() {
+    final child = this.child;
+    if (child == null) {
+      size = constraints.smallest;
+      maxExtent = 0;
+      _offset = 0;
+      return;
+    }
+    child.layout(constraints.copyWith(minHeight: 0, maxHeight: double.infinity), parentUsesSize: true);
+    final viewH = constraints.maxHeight.isFinite ? constraints.maxHeight : child.size.height;
+    size = constraints.constrain(Size(constraints.maxWidth, viewH));
+    maxExtent = math.max(0.0, child.size.height - size.height);
+    if (_offset > maxExtent) _offset = maxExtent;
+    _place();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    context.pushClipRect(needsCompositing, offset, Offset.zero & size, super.paint);
+    final thumb = _thumbRect;
+    if (thumb == null) return;
+    context.canvas.drawRRect(
+      RRect.fromRectAndRadius(thumb.shift(offset), const Radius.circular(3)),
+      Paint()..color = const Color(0x66000000),
     );
   }
 }

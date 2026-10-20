@@ -285,6 +285,7 @@ class _UiLink:
         if accept not in head:
             raw.close()
             raise OSError("ui handshake")
+        raw.settimeout(None)
         self._sock = raw
         self._rest = rest
         if not self._started:
@@ -354,6 +355,8 @@ class _UiLink:
                         raise OSError("closed")
                     elif opcode == 0x1:
                         self._remember(data.decode("utf-8", "replace"))
+            except TimeoutError:
+                continue
             except Exception:
                 with self._lock:
                     if self._sock is sock:
