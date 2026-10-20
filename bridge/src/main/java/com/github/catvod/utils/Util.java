@@ -539,30 +539,6 @@ public class Util {
                 || "submit".equals(action);
     }
 
-    private static void requeueUiReply(String session, String raw) {
-        if (session == null || session.isEmpty() || raw == null || raw.isEmpty()) return;
-        ArrayDeque<String> q = UI_REPLY_Q.computeIfAbsent(session, key -> new ArrayDeque<>());
-        synchronized (q) {
-            q.addFirst(raw);
-            q.notifyAll();
-        }
-    }
-
-    /** Non-blocking read of a host UI event for scripts. No business side effects.
-     *  Host returns opaque action ids from the Document; bridge only maps lifecycle
-     *  ({@code shown}/{@code closed}/{@code dismiss}/{@code timeout}) and packs
-     *  {@code submit} values. Other action ids are returned uppercased as-is. */
-    public static String takeUiReply(String kind) {
-        if (kind == null || kind.isEmpty()) return "";
-        try {
-            String session = UiBridge.currentSession(kind);
-            if (session.isEmpty()) return "";
-            return decodeUiReply(session, takeUiReplyRaw(session), true);
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
     /**
      * 堵住直到这个 kind 的下一条业务回复。{@code shown} 留给开关握手，不拿走。
      * 超时或中断返回空串。
@@ -576,7 +552,7 @@ public class Util {
                 sleepUi(waitMs);
                 return "";
             }
-            return decodeUiReply(session, awaitBusinessRaw(session, waitMs), false);
+            return decodeUiReply(awaitBusinessRaw(session, waitMs));
         } catch (Exception e) {
             return "";
         }
@@ -622,7 +598,7 @@ public class Util {
         }
     }
 
-    private static String decodeUiReply(String session, String raw, boolean requeueShown) {
+    private static String decodeUiReply(String raw) {
         if (raw == null || raw.isEmpty()) return "";
         String action;
         Map<String, Object> event = null;
@@ -633,10 +609,7 @@ public class Util {
         } else {
             action = raw.trim();
         }
-        if ("shown".equals(action)) {
-            if (requeueShown) requeueUiReply(session, raw);
-            return "";
-        }
+        if ("shown".equalsIgnoreCase(action)) return "";
         if ("closed".equals(action)) return "CLOSED";
         if ("dismiss".equals(action) || "timeout".equals(action)) return "CANCEL";
         if ("submit".equals(action)) {

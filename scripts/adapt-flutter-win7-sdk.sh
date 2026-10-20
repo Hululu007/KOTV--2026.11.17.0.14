@@ -91,7 +91,8 @@ dependency_overrides:
   # 1.3.x 用 onPopInvokedWithResult，Flutter 3.19 只有 onPopInvoked。
   media_kit_video: 1.2.5
   flutter_html: 3.0.0-beta.2
-  html: 0.15.6
+  # beta.2 依赖 csslib ^0.17.2；html >=0.15.5 依赖 csslib ^1.0.0，两边解不开。
+  html: 0.15.4
   url_launcher_windows: 3.1.3
   file_selector_windows: 0.9.3+3
 OVERRIDES

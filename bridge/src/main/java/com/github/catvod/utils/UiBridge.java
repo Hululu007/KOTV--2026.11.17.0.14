@@ -702,7 +702,7 @@ public final class UiBridge {
     /**
      * 向宿主开窗：脚本提供完整 {@link Document}。
      * 宿主只渲染原语并回报 shown / closed；按钮动作与内容语义由脚本自行
-     * {@link Util#takeUiReply(String)} 消费。失败抛 {@link ShowFailedException}。
+     * {@link Util#awaitUiReply(String, long)} 消费。失败抛 {@link ShowFailedException}。
      */
     public static Handle show(String kind, Document document) {
         String key = kindKey(kind);
