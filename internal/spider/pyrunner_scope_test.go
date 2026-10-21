@@ -44,7 +44,7 @@ def check(scope, sid, uid, cid):
         raise SystemExit("scope %r got %r want %r" % (scope, got, want))
 
 check("u:user-1", "u:user-1", "user-1", "u:user-1")
-check("c:abc", "c:abc", "", "abc")
+check("c:abc", "c:abc", "", "c:abc")
 check("", "", "", "")
 check("plain", "plain", "", "plain")
 print("ok")

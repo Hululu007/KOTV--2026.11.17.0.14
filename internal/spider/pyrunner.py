@@ -499,10 +499,7 @@ def _install_desktop_java(types, proxy_cls):
             return ""
 
         def clientId(self):
-            scope = _current_ui_scope()
-            if scope.startswith("c:"):
-                return scope[2:]
-            return scope
+            return _current_ui_scope()
 
         def __getattr__(self, name):
             if name.startswith("_"):
