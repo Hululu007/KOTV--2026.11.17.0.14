@@ -10,11 +10,31 @@ import 'kotv_engine_url.dart';
 
 class KotvApi {
   KotvApi({String? baseUrl, String? clientId})
-      : baseUrl = baseUrl ?? kotvDefaultLocalEngineBaseUrl,
+      : _baseUrl = baseUrl ?? kotvDefaultLocalEngineBaseUrl,
         _clientId = clientId?.trim() ?? '';
 
-  String baseUrl;
+  String _baseUrl;
   String _clientId;
+  final List<void Function()> _baseUrlListeners = [];
+
+  String get baseUrl => _baseUrl;
+
+  /// 业务地址变了才通知。界面套接字据此离开旧引擎。
+  set baseUrl(String value) {
+    if (value == _baseUrl) return;
+    _baseUrl = value;
+    final listeners = List<void Function()>.of(_baseUrlListeners);
+    for (final fn in listeners) {
+      fn();
+    }
+  }
+
+  void Function() listenBaseUrl(void Function() onChange) {
+    _baseUrlListeners.add(onChange);
+    return () {
+      _baseUrlListeners.remove(onChange);
+    };
+  }
 
   /// 确保已加载稳定 clientId（多前端 UI 路由用）。
   Future<String> ensureClientId() async {

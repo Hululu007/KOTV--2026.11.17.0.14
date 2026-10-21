@@ -40,6 +40,9 @@ func isWebClient(r *http.Request) bool {
 		return false
 	}
 	plat := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Kotv-Client-Platform")))
+	if plat == "" && r.URL != nil && r.URL.Path == "/ui" {
+		plat = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("platform")))
+	}
 	return plat == "web"
 }
 

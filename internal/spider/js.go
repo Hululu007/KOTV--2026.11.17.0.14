@@ -98,17 +98,19 @@ func SetPostMsgEmitter(fn func(msg, clientID string)) {
 	postMsgEmitter = fn
 }
 
-// jsPostMsg 把脚本消息交给已注册的界面投递。远端带 userId，本机带 clientId。
-func jsPostMsg(msg, clientID string) {
+// jsPostMsg 把脚本消息交给已注册的界面投递。
+// scope 已是 u:/c: 会话键时原样使用。工人线程上没有用户号，不能再套一层前缀。
+func jsPostMsg(msg, scope string) {
 	msg = strings.TrimSpace(msg)
+	scope = strings.TrimSpace(scope)
 	if msg == "" || postMsgEmitter == nil {
 		return
 	}
 	target := ""
-	if uid := hostclient.CurrentUserID(); uid != "" {
+	if scope != "" {
+		target = hostclient.ResolveScopeKey("", scope, "")
+	} else if uid := hostclient.CurrentUserID(); uid != "" {
 		target = hostclient.ResolveScopeKey(uid, "", "")
-	} else if clientID != "" {
-		target = hostclient.ResolveScopeKey("", "", clientID)
 	}
 	postMsgEmitter(msg, target)
 }
@@ -515,14 +517,14 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		return c.NewInt32(int32(localproxy.Port()))
 	}))
 	g.Set("getClientId", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
-		return c.NewString(hostclient.ScopeID())
+		return c.NewString(s.activeClientID())
 	}))
 	g.Set("postMsg", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		msg := ""
 		if len(args) > 0 {
 			msg = args[0].String()
 		}
-		jsPostMsg(msg, hostclient.ScopeID())
+		jsPostMsg(msg, s.activeClientID())
 		return c.NewBool(true)
 	}))
 	g.Set("getProxy", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {

@@ -316,6 +316,19 @@ func javaInvokePayload(body []byte) ([]byte, error) {
 	}
 	meta := bridgeRequest{Method: "javaInvoke"}
 	fillBridgeClient(&meta)
+	if meta.ClientID == "" {
+		var probe struct {
+			ClientID string `json:"clientId"`
+		}
+		_ = json.Unmarshal(body, &probe)
+		if scope := strings.TrimSpace(probe.ClientID); scope != "" {
+			meta.ClientID = scope
+			if uid := hostclient.UserIDFromScope(scope); uid != "" {
+				meta.UserID = uid
+				meta.RemoteUI = true
+			}
+		}
+	}
 	return json.Marshal(struct {
 		Method   string          `json:"method"`
 		Args     json.RawMessage `json:"args"`

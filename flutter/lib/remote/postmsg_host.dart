@@ -42,6 +42,9 @@ class PostMsgHost {
   KotvUiSocket? _sock;
   bool _socketRun = false;
   Future<void>? _socketLoop;
+  void Function()? _stopBaseWatch;
+  bool _retarget = false;
+  Completer<void>? _reconnectGate;
   final List<String> _inbox = [];
   final List<String> _outbox = [];
 
@@ -89,17 +92,47 @@ class PostMsgHost {
   void start() {
     instance = this;
     _socketRun = true;
+    _stopBaseWatch ??= api.listenBaseUrl(_onBaseUrl);
     _socketLoop ??= _runSocket();
   }
 
   void stop() {
     _socketRun = false;
+    _stopBaseWatch?.call();
+    _stopBaseWatch = null;
+    _wakeReconnect();
     if (instance == this) instance = null;
     final sock = _sock;
     unawaited(cancelAll(reply: true).whenComplete(() {
       if (identical(_sock, sock)) _sock = null;
       unawaited(sock?.close());
     }));
+  }
+
+  /// 业务地址变了：断开当前界面套接字，循环用新地址重连，不等退避。
+  void _onBaseUrl() {
+    _retarget = true;
+    _wakeReconnect();
+    final sock = _sock;
+    if (sock != null) unawaited(sock.close());
+  }
+
+  void _wakeReconnect() {
+    final gate = _reconnectGate;
+    if (gate != null && !gate.isCompleted) gate.complete();
+  }
+
+  Future<void> _pauseBeforeReconnect(int waitMs) {
+    if (_retarget || waitMs <= 0) return Future<void>.value();
+    final gate = Completer<void>();
+    _reconnectGate = gate;
+    final timer = Timer(Duration(milliseconds: waitMs), () {
+      if (!gate.isCompleted) gate.complete();
+    });
+    return gate.future.whenComplete(() {
+      timer.cancel();
+      if (identical(_reconnectGate, gate)) _reconnectGate = null;
+    });
   }
 
   /// 软打断引擎侧占住的请求（与 PopScope / 超时 / dismissAfter 关窗一致）。
@@ -142,10 +175,19 @@ class PostMsgHost {
       KotvUiSocket? sock;
       try {
         final spec = await api.uiSocket();
+        if (!_socketRun) return;
+        if (_retarget) {
+          _retarget = false;
+          waitMs = 200;
+          continue;
+        }
         sock = await kotvOpenUiSocket(spec.url, spec.headers);
-        if (!_socketRun) {
+        if (!_socketRun || _retarget) {
           await sock.close();
-          return;
+          if (!_socketRun) return;
+          _retarget = false;
+          waitMs = 200;
+          continue;
         }
         _sock = sock;
         waitMs = 200;
@@ -161,7 +203,12 @@ class PostMsgHost {
       } catch (_) {}
       if (sock != null && identical(_sock, sock)) _sock = null;
       if (!_socketRun) return;
-      await Future<void>.delayed(Duration(milliseconds: waitMs));
+      if (_retarget) {
+        _retarget = false;
+        waitMs = 200;
+        continue;
+      }
+      await _pauseBeforeReconnect(waitMs);
       if (waitMs < 2000) waitMs += 200;
     }
   }

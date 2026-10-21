@@ -50,6 +50,26 @@ func TestRemoteAccessAllowed(t *testing.T) {
 	}
 }
 
+func TestWebUiQueryPlatform(t *testing.T) {
+	settings.Set(settings.RemoteAuth, "false")
+	defer settings.Set(settings.RemoteAuth, "false")
+
+	req, err := http.NewRequest(http.MethodGet, "http://192.168.1.8:9978/ui?role=ui&platform=web", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.RemoteAddr = "192.168.1.8:54321"
+	if !isWebClient(req) {
+		t.Fatal("ui query platform should count as web")
+	}
+	if !remoteAccessAllowed(req) {
+		t.Fatal("web ui socket should be allowed without remoteAuth")
+	}
+	if !authRequiredFor(req) {
+		t.Fatal("web ui still requires login")
+	}
+}
+
 func TestRequestPublicBasePrefersClientEngine(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, "http://192.168.0.113:9978/api/v1/play", nil)
 	if err != nil {

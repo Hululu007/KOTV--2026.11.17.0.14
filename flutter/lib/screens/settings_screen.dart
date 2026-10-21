@@ -1921,7 +1921,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       });
     }
     launcher.applyBaseUrl(baseUrl);
-    ref.read(apiProvider).baseUrl = launcher.baseUrl;
     KotvSettingsCache.clear();
     if (mounted) {
       await kotvClearImageMemory(ref: ref);

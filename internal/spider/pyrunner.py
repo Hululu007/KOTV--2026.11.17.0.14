@@ -1,13 +1,10 @@
 # Persistent CatVod Python spider runner for KOTV.
 import base64
-import hashlib
 import importlib.util
 import json
 import os
 import re
-import socket
 import ssl
-import struct
 import sys
 import threading
 import time
@@ -175,213 +172,16 @@ def _install_python_stub(types):
     return Python
 
 
-_WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+_ui_scope = threading.local()
 
 
-def _ws_send(sock, opcode, data):
-    header = bytearray([0x80 | (opcode & 0x0F)])
-    n = len(data)
-    if n < 126:
-        header.append(0x80 | n)
-    elif n < 65536:
-        header.append(0x80 | 126)
-        header += struct.pack("!H", n)
-    else:
-        header.append(0x80 | 127)
-        header += struct.pack("!Q", n)
-    mask = os.urandom(4)
-    header += mask
-    header += bytes(b ^ mask[i % 4] for i, b in enumerate(data))
-    sock.sendall(header)
+def _bind_ui_scope(scope):
+    _ui_scope.v = scope or ""
 
 
-def _ws_recv_exact(sock, n):
-    buf = b""
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
-        if not chunk:
-            raise OSError("closed")
-        buf += chunk
-    return buf
-
-
-class _UiLink:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._send_lock = threading.Lock()
-        self._sock = None
-        self._replies = {}
-        self._started = False
-        self._rest = b""
-        self._port = 0
-
-    def send(self, text, port):
-        data = text.encode("utf-8")
-        last = None
-        for _ in range(2):
-            sock = None
-            try:
-                with self._lock:
-                    self._ensure(port)
-                    sock = self._sock
-                self._send_frame(sock, 0x1, data)
-                return
-            except Exception as exc:
-                last = exc
-                with self._lock:
-                    if self._sock is sock:
-                        self._drop()
-        if last is not None:
-            raise last
-
-    def _send_frame(self, sock, opcode, data):
-        with self._send_lock:
-            _ws_send(sock, opcode, data)
-
-    def take(self, sid):
-        with self._lock:
-            if self._sock is None and self._port:
-                try:
-                    self._ensure(self._port)
-                except Exception:
-                    pass
-            q = self._replies.get(sid)
-            if not q:
-                return ""
-            return q.pop(0)
-
-    def _ensure(self, port):
-        if port:
-            self._port = int(port)
-        if self._sock is not None:
-            return
-        port = int(self._port or 0) or 9978
-        key = base64.b64encode(os.urandom(16)).decode("ascii")
-        raw = socket.create_connection(("127.0.0.1", port), 5)
-        raw.sendall((
-            "GET /ui?role=src HTTP/1.1\r\n"
-            "Host: 127.0.0.1:%d\r\n"
-            "Upgrade: websocket\r\n"
-            "Connection: Upgrade\r\n"
-            "Sec-WebSocket-Key: %s\r\n"
-            "Sec-WebSocket-Version: 13\r\n\r\n" % (port, key)
-        ).encode("ascii"))
-        buf = b""
-        while b"\r\n\r\n" not in buf:
-            chunk = raw.recv(4096)
-            if not chunk:
-                raw.close()
-                raise OSError("ui handshake")
-            buf += chunk
-            if len(buf) > 8192:
-                raw.close()
-                raise OSError("ui handshake")
-        head, _, rest = buf.partition(b"\r\n\r\n")
-        status = head.split(b"\r\n", 1)[0]
-        if b" 101 " not in status:
-            raw.close()
-            raise OSError("ui handshake")
-        accept = base64.b64encode(hashlib.sha1((key + _WS_GUID).encode("ascii")).digest())
-        if accept not in head:
-            raw.close()
-            raise OSError("ui handshake")
-        raw.settimeout(None)
-        self._sock = raw
-        self._rest = rest
-        if not self._started:
-            self._started = True
-            threading.Thread(target=self._read, daemon=True).start()
-
-    def _drop(self):
-        sock = self._sock
-        self._sock = None
-        if sock is not None:
-            try:
-                sock.close()
-            except Exception:
-                pass
-
-    def _read(self):
-        pending = b""
-        while True:
-            with self._lock:
-                sock = self._sock
-                extra = getattr(self, "_rest", b"")
-                self._rest = b""
-            if sock is None:
-                time.sleep(0.05)
-                continue
-            try:
-                if extra:
-                    pending += extra
-                while True:
-                    if len(pending) < 2:
-                        pending += _ws_recv_exact(sock, 2 - len(pending))
-                    b0, b1 = pending[0], pending[1]
-                    need = 2
-                    n = b1 & 0x7F
-                    masked = (b1 & 0x80) != 0
-                    if n == 126:
-                        need = 4
-                    elif n == 127:
-                        need = 10
-                    if len(pending) < need:
-                        pending += _ws_recv_exact(sock, need - len(pending))
-                    if n == 126:
-                        n = struct.unpack("!H", pending[2:4])[0]
-                        pos = 4
-                    elif n == 127:
-                        n = struct.unpack("!Q", pending[2:10])[0]
-                        pos = 10
-                    else:
-                        pos = 2
-                    if masked:
-                        if len(pending) < pos + 4:
-                            pending += _ws_recv_exact(sock, pos + 4 - len(pending))
-                        mask = pending[pos:pos + 4]
-                        pos += 4
-                    else:
-                        mask = b""
-                    if len(pending) < pos + n:
-                        pending += _ws_recv_exact(sock, pos + n - len(pending))
-                    data = pending[pos:pos + n]
-                    pending = pending[pos + n:]
-                    if mask:
-                        data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
-                    opcode = b0 & 0x0F
-                    if opcode == 0x9:
-                        self._send_frame(sock, 0xA, data)
-                    elif opcode == 0x8:
-                        raise OSError("closed")
-                    elif opcode == 0x1:
-                        self._remember(data.decode("utf-8", "replace"))
-            except TimeoutError:
-                continue
-            except Exception:
-                with self._lock:
-                    if self._sock is sock:
-                        self._drop()
-                pending = b""
-                time.sleep(0.05)
-
-    def _remember(self, text):
-        text = (text or "").strip()
-        if not text.startswith("{"):
-            return
-        try:
-            data = json.loads(text)
-        except Exception:
-            return
-        if not isinstance(data, dict):
-            return
-        sid = str(data.get("id") or "").strip()
-        if not sid:
-            return
-        with self._lock:
-            self._replies.setdefault(sid, []).append(text)
-
-
-_UI = _UiLink()
+def _current_ui_scope():
+    return getattr(_ui_scope, "v", "") or ""
 
 
 def _install_java_module_stubs():
@@ -503,12 +303,13 @@ def _install_desktop_java(types, proxy_cls):
         def __init__(self, builder):
             self.builder = builder
             self.sid = "py-dir-%d" % time.time_ns()
+            self._scope = _current_ui_scope()
             self._stop = threading.Event()
             self._thread = None
 
         def dismiss(self):
             self._stop.set()
-            _post_msg("UI_CLOSE:" + json.dumps({"id": self.sid}, ensure_ascii=False))
+            _post_msg("UI_CLOSE:" + json.dumps({"id": self.sid}, ensure_ascii=False), scope=self._scope)
 
         def open(self):
             labels = list(self.builder.items or [])
@@ -527,12 +328,14 @@ def _install_desktop_java(types, proxy_cls):
                 ],
                 "actions": actions,
             }
-            _post_msg("UI:" + json.dumps(doc, ensure_ascii=False))
+            self._scope = _current_ui_scope() or self._scope
+            _post_msg("UI:" + json.dumps(doc, ensure_ascii=False), scope=self._scope)
             self._thread = threading.Thread(target=self._wait, daemon=True)
             self._thread.start()
             return self
 
         def _wait(self):
+            _bind_ui_scope(self._scope)
             while not self._stop.is_set():
                 raw = _take_reply(self.sid)
                 if not raw:
@@ -666,6 +469,10 @@ def _install_desktop_java(types, proxy_cls):
         return opener.open(req, timeout=timeout)
 
     def _jvm_post(payload):
+        scope = _current_ui_scope()
+        if scope:
+            payload = dict(payload)
+            payload["clientId"] = scope
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         with _local_open("/java", data, "application/json; charset=utf-8", 15) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
@@ -717,11 +524,23 @@ def _install_desktop_java(types, proxy_cls):
         port = proxy_cls.getPort()
         return "http://127.0.0.1:%s" % port
 
-    def _post_msg(msg):
-        _UI.send(msg, proxy_cls.getPort())
+    def _post_msg(msg, scope=None):
+        if scope:
+            prev = _current_ui_scope()
+            _bind_ui_scope(scope)
+            try:
+                jclass("com.github.catvod.utils.Util").notify(msg)
+            finally:
+                _bind_ui_scope(prev)
+            return
+        jclass("com.github.catvod.utils.Util").notify(msg)
 
     def _take_reply(sid):
-        return _UI.take(sid)
+        try:
+            raw = jclass("com.github.catvod.utils.Util").awaitUiReplyRaw(sid, 200)
+        except Exception:
+            return ""
+        return "" if raw is None else str(raw)
 
     def _reply_action(raw):
         raw = (raw or "").strip()
@@ -1154,12 +973,16 @@ def kotv_dispatch_json(line):
     if not line:
         return json.dumps({"id": None, "ok": False, "error": "empty request"}, ensure_ascii=False)
     req = json.loads(line)
+    prev = _current_ui_scope()
+    _bind_ui_scope(str(req.get("clientId") or ""))
     try:
         result = invoke(req.get("method", ""), req.get("args") or {})
         return json.dumps({"id": req.get("id"), "ok": True, "result": result}, ensure_ascii=False)
     except Exception as exc:
         traceback.print_exc(file=sys.stderr)
         return json.dumps({"id": req.get("id"), "ok": False, "error": str(exc)}, ensure_ascii=False)
+    finally:
+        _bind_ui_scope(prev)
 
 
 def kotv_repl():
