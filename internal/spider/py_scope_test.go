@@ -13,8 +13,8 @@ func TestCurrentPyCallScope(t *testing.T) {
 		jsPyMu.Unlock()
 	})
 
-	if got := CurrentPyCallScope(); got != "" {
-		t.Fatalf("empty got %q", got)
+	if got, conflict := CurrentPyCallScope(); got != "" || conflict {
+		t.Fatalf("empty got %q conflict %v", got, conflict)
 	}
 
 	phone := &pySpider{}
@@ -24,8 +24,8 @@ func TestCurrentPyCallScope(t *testing.T) {
 	jsPyMu.Lock()
 	jsPy["pool"] = pool
 	jsPyMu.Unlock()
-	if got := CurrentPyCallScope(); got != "c:phone" {
-		t.Fatalf("local got %q", got)
+	if got, conflict := CurrentPyCallScope(); got != "c:phone" || conflict {
+		t.Fatalf("local got %q conflict %v", got, conflict)
 	}
 
 	remote := &pySpider{}
@@ -33,12 +33,12 @@ func TestCurrentPyCallScope(t *testing.T) {
 	jsPyMu.Lock()
 	jsPy["remote"] = remote
 	jsPyMu.Unlock()
-	if got := CurrentPyCallScope(); got != "" {
-		t.Fatalf("conflict got %q", got)
+	if got, conflict := CurrentPyCallScope(); got != "" || !conflict {
+		t.Fatalf("conflict got %q conflict %v", got, conflict)
 	}
 
 	phone.activeClient.Store("u:user")
-	if got := CurrentPyCallScope(); got != "u:user" {
-		t.Fatalf("same user got %q", got)
+	if got, conflict := CurrentPyCallScope(); got != "u:user" || conflict {
+		t.Fatalf("same user got %q conflict %v", got, conflict)
 	}
 }

@@ -66,9 +66,9 @@ func (s *pySpider) activeClientID() string {
 	return v
 }
 
-// CurrentPyCallScope 进行中的 Python 调用若都是同一个非空会话键则返回它。
-// 没有进行中的调用，或同时有两个不同的键，返回空。
-func CurrentPyCallScope() string {
+// CurrentPyCallScope 返回进行中 Python 调用的会话键。
+// 没有进行中的调用时键为空。同时有两个不同的键时 conflict 为真。
+func CurrentPyCallScope() (string, bool) {
 	jsPyMu.Lock()
 	spiders := make([]Spider, 0, len(jsPy))
 	for _, s := range jsPy {
@@ -83,11 +83,11 @@ func CurrentPyCallScope() string {
 				continue
 			}
 			if id != scope {
-				return ""
+				return "", true
 			}
 		}
 	}
-	return scope
+	return scope, false
 }
 
 func activePyScopes(sp Spider) []string {

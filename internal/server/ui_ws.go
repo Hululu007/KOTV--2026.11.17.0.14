@@ -26,6 +26,7 @@ type uiSock struct {
 	mu       sync.Mutex
 	closed   bool
 	clientID string
+	docScope string
 	src      bool
 	onDrop   func(src bool, clientID string, msgs [][]byte)
 }
@@ -220,9 +221,6 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 			first(r.URL.Query().Get("clientId"), r.Header.Get("X-Kotv-Client-Id")),
 		)
 	}
-	if scope == "" && role == "src" && pyCallScope != nil {
-		scope = pyCallScope()
-	}
 	conn, err := uiUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -244,7 +242,7 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		sock.readLoop(func(text string) { s.acceptSrcFrame(scope, text) })
+		sock.readLoop(func(text string) { s.acceptSrcFrame(sock, scope, text) })
 		s.ui.removeSrc(sock)
 		_ = conn.Close()
 		return
@@ -260,7 +258,7 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	_ = conn.Close()
 }
 
-func (s *Server) acceptSrcFrame(scope, text string) {
+func (s *Server) acceptSrcFrame(sock *uiSock, scope, text string) {
 	text = strings.TrimSpace(text)
 	if text == "" || s.events == nil {
 		return
@@ -282,9 +280,30 @@ func (s *Server) acceptSrcFrame(scope, text string) {
 		}
 	}
 	if clientID == "" && isUiDocument(msg) {
+		clientID = srcDocScope(sock)
+	}
+	if clientID == "" && isUiDocument(msg) {
 		return
 	}
 	s.events.EmitPostMsgTo(msg, clientID)
+}
+
+func srcDocScope(sock *uiSock) string {
+	if sock == nil {
+		return ""
+	}
+	if pyCallScope == nil {
+		return sock.docScope
+	}
+	id, conflict := pyCallScope()
+	if conflict {
+		return ""
+	}
+	if id != "" {
+		sock.docScope = id
+		return id
+	}
+	return sock.docScope
 }
 
 func isUiDocument(msg string) bool {

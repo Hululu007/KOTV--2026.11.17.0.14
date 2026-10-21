@@ -108,7 +108,7 @@ func TestSrcFrameUsesPyCallScope(t *testing.T) {
 	t.Run("remote", func(t *testing.T) {
 		phone := dial("/ui?role=ui&clientId=phone")
 		remote := dial("/ui?role=ui&userId=user")
-		pyCallScope = func() string { return "u:user" }
+		pyCallScope = func() (string, bool) { return "u:user", false }
 		src := dial("/ui?role=src")
 		send(src, `{"msg":"UI:remote-only"}`)
 		assertUiRead(t, remote, "UI:remote-only")
@@ -118,7 +118,7 @@ func TestSrcFrameUsesPyCallScope(t *testing.T) {
 	t.Run("envelope", func(t *testing.T) {
 		remote := dial("/ui?role=ui&userId=user")
 		other := dial("/ui?role=ui&userId=other")
-		pyCallScope = func() string { return "u:user" }
+		pyCallScope = func() (string, bool) { return "u:user", false }
 		src := dial("/ui?role=src")
 		send(src, `{"msg":"UI:from-envelope","userId":"other"}`)
 		assertUiRead(t, other, "UI:from-envelope")
@@ -128,8 +128,24 @@ func TestSrcFrameUsesPyCallScope(t *testing.T) {
 	t.Run("local", func(t *testing.T) {
 		phone := dial("/ui?role=ui&clientId=phone")
 		remote := dial("/ui?role=ui&userId=user")
-		pyCallScope = func() string { return "c:phone" }
+		pyCallScope = func() (string, bool) { return "c:phone", false }
 		src := dial("/ui?role=src")
+		send(src, `{"msg":"UI:local-only"}`)
+		assertUiRead(t, phone, "UI:local-only")
+		assertUiSilent(t, remote)
+	})
+
+	t.Run("reuse", func(t *testing.T) {
+		phone := dial("/ui?role=ui&clientId=phone")
+		remote := dial("/ui?role=ui&userId=user")
+		src := dial("/ui?role=src")
+		pyCallScope = func() (string, bool) { return "u:user", false }
+		send(src, `{"msg":"UI:remote-only"}`)
+		assertUiRead(t, remote, "UI:remote-only")
+		pyCallScope = func() (string, bool) { return "", false }
+		send(src, `{"msg":"UI_CLOSE:remote-only"}`)
+		assertUiRead(t, remote, "UI_CLOSE:remote-only")
+		pyCallScope = func() (string, bool) { return "c:phone", false }
 		send(src, `{"msg":"UI:local-only"}`)
 		assertUiRead(t, phone, "UI:local-only")
 		assertUiSilent(t, remote)
@@ -138,17 +154,30 @@ func TestSrcFrameUsesPyCallScope(t *testing.T) {
 	t.Run("drop", func(t *testing.T) {
 		phone := dial("/ui?role=ui&clientId=phone")
 		remote := dial("/ui?role=ui&userId=user")
-		pyCallScope = func() string { return "" }
+		pyCallScope = func() (string, bool) { return "", false }
 		src := dial("/ui?role=src")
 		send(src, `{"msg":"UI:nobody"}`)
 		assertUiSilent(t, phone)
 		assertUiSilent(t, remote)
 	})
 
+	t.Run("conflict", func(t *testing.T) {
+		phone := dial("/ui?role=ui&clientId=phone")
+		remote := dial("/ui?role=ui&userId=user")
+		src := dial("/ui?role=src")
+		pyCallScope = func() (string, bool) { return "u:user", false }
+		send(src, `{"msg":"UI:remote-only"}`)
+		assertUiRead(t, remote, "UI:remote-only")
+		pyCallScope = func() (string, bool) { return "", true }
+		send(src, `{"msg":"UI:ambiguous"}`)
+		assertUiSilent(t, remote)
+		assertUiSilent(t, phone)
+	})
+
 	t.Run("toast", func(t *testing.T) {
 		phone := dial("/ui?role=ui&clientId=phone")
 		remote := dial("/ui?role=ui&userId=user")
-		pyCallScope = func() string { return "" }
+		pyCallScope = func() (string, bool) { return "u:user", false }
 		src := dial("/ui?role=src")
 		send(src, `{"msg":"toast-all"}`)
 		assertUiRead(t, phone, "toast-all")
