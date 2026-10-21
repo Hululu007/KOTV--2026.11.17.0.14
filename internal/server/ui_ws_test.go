@@ -87,7 +87,12 @@ func TestSrcFrameUsesPyCallScope(t *testing.T) {
 	base := "ws" + strings.TrimPrefix(ts.URL, "http")
 
 	prev := pyCallScope
-	t.Cleanup(func() { pyCallScope = prev })
+	prevRecent := recentPyScope
+	t.Cleanup(func() {
+		pyCallScope = prev
+		recentPyScope = prevRecent
+	})
+	recentPyScope = func() string { return "" }
 
 	dial := func(raw string) *websocket.Conn {
 		t.Helper()
@@ -171,6 +176,34 @@ func TestSrcFrameUsesPyCallScope(t *testing.T) {
 		pyCallScope = func() (string, bool) { return "", true }
 		send(src, `{"msg":"UI:ambiguous"}`)
 		assertUiSilent(t, remote)
+		assertUiSilent(t, phone)
+	})
+
+	t.Run("after return", func(t *testing.T) {
+		phone := dial("/ui?role=ui&clientId=phone")
+		remote := dial("/ui?role=ui&userId=user")
+		pyCallScope = func() (string, bool) { return "", false }
+		recentPyScope = func() string { return "c:phone" }
+		src := dial("/ui?role=src")
+		send(src, `{"msg":"UI:late"}`)
+		assertUiRead(t, phone, "UI:late")
+		assertUiSilent(t, remote)
+	})
+
+	t.Run("close stays", func(t *testing.T) {
+		phone := dial("/ui?role=ui&clientId=phone")
+		remote := dial("/ui?role=ui&userId=user")
+		src := dial("/ui?role=src")
+		pyCallScope = func() (string, bool) { return "c:phone", false }
+		recentPyScope = func() string { return "c:phone" }
+		send(src, `{"msg":"UI:open"}`)
+		assertUiRead(t, phone, "UI:open")
+		pyCallScope = func() (string, bool) { return "", false }
+		recentPyScope = func() string { return "u:user" }
+		send(src, `{"msg":"UI_CLOSE:open"}`)
+		assertUiRead(t, phone, "UI_CLOSE:open")
+		send(src, `{"msg":"UI:next"}`)
+		assertUiRead(t, remote, "UI:next")
 		assertUiSilent(t, phone)
 	})
 
