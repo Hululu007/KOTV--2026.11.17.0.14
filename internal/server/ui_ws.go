@@ -14,7 +14,6 @@ import (
 )
 
 var pyCallScope = spider.CurrentPyCallScope
-var recentPyScope = spider.RecentPyCallScope
 
 var uiUpgrader = websocket.Upgrader{
 	CheckOrigin: func(*http.Request) bool { return true },
@@ -281,7 +280,7 @@ func (s *Server) acceptSrcFrame(sock *uiSock, scope, text string) {
 		}
 	}
 	if clientID == "" && isUiDocument(msg) {
-		clientID = srcDocScope(sock, msg)
+		clientID = srcDocScope(sock)
 	}
 	if clientID == "" && isUiDocument(msg) {
 		return
@@ -289,31 +288,20 @@ func (s *Server) acceptSrcFrame(sock *uiSock, scope, text string) {
 	s.events.EmitPostMsgTo(msg, clientID)
 }
 
-func srcDocScope(sock *uiSock, msg string) string {
+func srcDocScope(sock *uiSock) string {
 	if sock == nil {
 		return ""
 	}
-	id := ""
-	conflict := false
-	if pyCallScope != nil {
-		id, conflict = pyCallScope()
+	if pyCallScope == nil {
+		return sock.docScope
 	}
+	id, conflict := pyCallScope()
 	if conflict {
 		return ""
 	}
 	if id != "" {
 		sock.docScope = id
 		return id
-	}
-	// 关窗仍回到打开它的那次会话。新文档用刚结束的那次调用，因为脚本往往在调用返回后才连上。
-	if strings.HasPrefix(msg, "UI_CLOSE:") && sock.docScope != "" {
-		return sock.docScope
-	}
-	if recentPyScope != nil {
-		if recent := strings.TrimSpace(recentPyScope()); recent != "" {
-			sock.docScope = recent
-			return recent
-		}
 	}
 	return sock.docScope
 }

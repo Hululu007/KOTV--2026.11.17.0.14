@@ -42,29 +42,3 @@ func TestCurrentPyCallScope(t *testing.T) {
 		t.Fatalf("same user got %q conflict %v", got, conflict)
 	}
 }
-
-func TestRecentPyCallScopeKeepsLastCaller(t *testing.T) {
-	recentPyMu.Lock()
-	saved := recentPyScopeID
-	recentPyScopeID = ""
-	recentPyMu.Unlock()
-	t.Cleanup(func() {
-		recentPyMu.Lock()
-		recentPyScopeID = saved
-		recentPyMu.Unlock()
-	})
-
-	noteRecentPyScope("")
-	if got := RecentPyCallScope(); got != "" {
-		t.Fatalf("empty note kept %q", got)
-	}
-	noteRecentPyScope(" c:phone ")
-	noteRecentPyScope("")
-	if got := RecentPyCallScope(); got != "c:phone" {
-		t.Fatalf("got %q", got)
-	}
-	noteRecentPyScope("u:user")
-	if got := RecentPyCallScope(); got != "u:user" {
-		t.Fatalf("replaced got %q", got)
-	}
-}

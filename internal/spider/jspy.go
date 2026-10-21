@@ -90,29 +90,6 @@ func CurrentPyCallScope() (string, bool) {
 	return scope, false
 }
 
-var (
-	recentPyMu      sync.Mutex
-	recentPyScopeID string
-)
-
-// RecentPyCallScope 最近一次带会话键的 Python 调用。
-// 调用返回后脚本才把窗口发出去，进行中的键已经空了，窗口仍要送到这次调用的界面。
-func RecentPyCallScope() string {
-	recentPyMu.Lock()
-	defer recentPyMu.Unlock()
-	return recentPyScopeID
-}
-
-func noteRecentPyScope(id string) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return
-	}
-	recentPyMu.Lock()
-	recentPyScopeID = id
-	recentPyMu.Unlock()
-}
-
 func activePyScopes(sp Spider) []string {
 	switch s := sp.(type) {
 	case *pyPool:
@@ -393,7 +370,6 @@ func (s *pySpider) run(method string, args map[string]interface{}) (string, erro
 	}
 	cid := hostclient.ScopeID()
 	s.activeClient.Store(cid)
-	noteRecentPyScope(cid)
 	defer s.activeClient.Store("")
 
 	if goruntime.GOOS == "android" {
