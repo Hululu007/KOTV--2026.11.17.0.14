@@ -58,52 +58,9 @@ TextAlign kotvUiTextAlign(String raw) {
   }
 }
 
-/// 可点的文字。盒子只来自文档上的背景、内边距和圆角。
-class KotvUiPress extends StatelessWidget {
-  const KotvUiPress({
-    super.key,
-    required this.label,
-    required this.onTap,
-    required this.palette,
-    required this.font,
-    this.weight = FontWeight.w400,
-    this.color,
-    this.width,
-    this.height,
-    this.underline = false,
-  });
-
-  final String label;
-  final VoidCallback onTap;
-  final KotvPalette palette;
-  final double font;
-  final FontWeight weight;
-  final Color? color;
-  final double? width;
-  final double? height;
-  final bool underline;
-
-  @override
-  Widget build(BuildContext context) {
-    final fg = color ?? palette.fg;
-    return KotvUiRemote(
-      onPressed: onTap,
-      child: _pressBox(
-        Text(
-          label,
-          style: TextStyle(
-            color: fg,
-            fontSize: font,
-            fontWeight: weight,
-            decoration: underline ? TextDecoration.underline : null,
-            decorationColor: fg,
-          ),
-        ),
-        width: width,
-        height: height,
-      ),
-    );
-  }
+double _boxRadius(Map<String, dynamic> el, double uiScale) {
+  if (el['radius'] == null) return 8;
+  return kotvUiNum(el['radius']) * uiScale;
 }
 
 /// 同一扇窗里只让第一个可操作项自动获焦，避免每次重建都把焦点抢回去。
@@ -222,19 +179,26 @@ Widget kotvUiActions({
     mainAxisAlignment: kotvUiMainAlign(align),
     children: [
       for (final action in actions)
-        _paint(
-          action,
-          KotvUiPress(
-            label: '${action['label'] ?? action['id'] ?? ''}',
-            palette: palette,
-            font: kotvUiPx(action['fontSize'], uiScale) ?? defaultFont,
-            weight: kotvUiFontWeight(action),
-            color: kotvUiColor(action['color']),
-            width: _actionWidth(action, defaultW, uiScale),
-            height: kotvUiPx(action['height'], uiScale) ?? (defaultH > 0 ? defaultH : null),
-            onTap: () => onPressed(action),
+        KotvUiRemote(
+          borderRadius: _boxRadius(action, uiScale),
+          onPressed: () => onPressed(action),
+          child: _paint(
+            action,
+            _pressBox(
+              Text(
+                '${action['label'] ?? action['id'] ?? ''}',
+                textAlign: kotvUiTextAlign('${action['align'] ?? ''}'),
+                style: TextStyle(
+                  color: kotvUiColor(action['color']) ?? palette.fg,
+                  fontSize: kotvUiPx(action['fontSize'], uiScale) ?? defaultFont,
+                  fontWeight: kotvUiFontWeight(action),
+                ),
+              ),
+              width: _actionWidth(action, defaultW, uiScale),
+              height: kotvUiPx(action['height'], uiScale) ?? (defaultH > 0 ? defaultH : null),
+            ),
+            uiScale,
           ),
-          uiScale,
         ),
     ],
   );
@@ -311,7 +275,7 @@ Widget _tap(
   }
   if (id.isEmpty && url.isEmpty) return child;
   return KotvUiRemote(
-    borderRadius: el['radius'] == null ? 8 : kotvUiNum(el['radius']) * uiScale,
+    borderRadius: _boxRadius(el, uiScale),
     onPressed: () {
       unawaited(() async {
         if (url.isNotEmpty) await openExternal(url);
@@ -667,7 +631,7 @@ List<Widget> _raw(
       }
       final hint = '${el['hint'] ?? ''}'.trim();
       final mark = kotvUiColor(el['mark']);
-      final radius = el['radius'] == null ? 8.0 : kotvUiNum(el['radius']) * uiScale;
+      final radius = _boxRadius(el, uiScale);
       final Widget content;
       if (hint.isNotEmpty || mark != null) {
         final gap = kotvUiPx(el['spacing'], uiScale) ?? 0;
@@ -733,7 +697,7 @@ List<Widget> _raw(
       final labelText = '${el['text'] ?? ''}'.trim().isEmpty ? linkUrl : '${el['text']}'.trim();
       final look = '${el['style'] ?? ''}'.toLowerCase().trim();
       final fg = kotvUiColor(el['color']) ?? palette.fg;
-      final radius = el['radius'] == null ? 8.0 : kotvUiNum(el['radius']) * uiScale;
+      final radius = _boxRadius(el, uiScale);
       return [
         KotvUiRemote(
           borderRadius: radius,
