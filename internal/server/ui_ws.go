@@ -10,7 +10,10 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/spider"
 )
+
+var pyCallScope = spider.CurrentPyCallScope
 
 var uiUpgrader = websocket.Upgrader{
 	CheckOrigin: func(*http.Request) bool { return true },
@@ -217,6 +220,9 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 			first(r.URL.Query().Get("clientId"), r.Header.Get("X-Kotv-Client-Id")),
 		)
 	}
+	if scope == "" && role == "src" && pyCallScope != nil {
+		scope = pyCallScope()
+	}
 	conn, err := uiUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -275,7 +281,14 @@ func (s *Server) acceptSrcFrame(scope, text string) {
 			}
 		}
 	}
+	if clientID == "" && isUiDocument(msg) {
+		return
+	}
 	s.events.EmitPostMsgTo(msg, clientID)
+}
+
+func isUiDocument(msg string) bool {
+	return strings.HasPrefix(msg, "UI:") || strings.HasPrefix(msg, "UI_CLOSE:")
 }
 
 func uiReplyID(text string) string {

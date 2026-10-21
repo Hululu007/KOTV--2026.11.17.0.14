@@ -77,3 +77,102 @@ func TestUISocketFlushAndReply(t *testing.T) {
 		t.Fatalf("broadcast %q", broadcast)
 	}
 }
+
+func TestSrcFrameUsesPyCallScope(t *testing.T) {
+	s := New(nil)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ui", s.handleUI)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	base := "ws" + strings.TrimPrefix(ts.URL, "http")
+
+	prev := pyCallScope
+	t.Cleanup(func() { pyCallScope = prev })
+
+	dial := func(raw string) *websocket.Conn {
+		t.Helper()
+		conn, _, err := websocket.DefaultDialer.Dial(base+raw, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		return conn
+	}
+	send := func(conn *websocket.Conn, text string) {
+		t.Helper()
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(text)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("remote", func(t *testing.T) {
+		phone := dial("/ui?role=ui&clientId=phone")
+		remote := dial("/ui?role=ui&userId=user")
+		pyCallScope = func() string { return "u:user" }
+		src := dial("/ui?role=src")
+		send(src, `{"msg":"UI:remote-only"}`)
+		assertUiRead(t, remote, "UI:remote-only")
+		assertUiSilent(t, phone)
+	})
+
+	t.Run("envelope", func(t *testing.T) {
+		remote := dial("/ui?role=ui&userId=user")
+		other := dial("/ui?role=ui&userId=other")
+		pyCallScope = func() string { return "u:user" }
+		src := dial("/ui?role=src")
+		send(src, `{"msg":"UI:from-envelope","userId":"other"}`)
+		assertUiRead(t, other, "UI:from-envelope")
+		assertUiSilent(t, remote)
+	})
+
+	t.Run("local", func(t *testing.T) {
+		phone := dial("/ui?role=ui&clientId=phone")
+		remote := dial("/ui?role=ui&userId=user")
+		pyCallScope = func() string { return "c:phone" }
+		src := dial("/ui?role=src")
+		send(src, `{"msg":"UI:local-only"}`)
+		assertUiRead(t, phone, "UI:local-only")
+		assertUiSilent(t, remote)
+	})
+
+	t.Run("drop", func(t *testing.T) {
+		phone := dial("/ui?role=ui&clientId=phone")
+		remote := dial("/ui?role=ui&userId=user")
+		pyCallScope = func() string { return "" }
+		src := dial("/ui?role=src")
+		send(src, `{"msg":"UI:nobody"}`)
+		assertUiSilent(t, phone)
+		assertUiSilent(t, remote)
+	})
+
+	t.Run("toast", func(t *testing.T) {
+		phone := dial("/ui?role=ui&clientId=phone")
+		remote := dial("/ui?role=ui&userId=user")
+		pyCallScope = func() string { return "" }
+		src := dial("/ui?role=src")
+		send(src, `{"msg":"toast-all"}`)
+		assertUiRead(t, phone, "toast-all")
+		assertUiRead(t, remote, "toast-all")
+	})
+}
+
+func assertUiRead(t *testing.T, conn *websocket.Conn, want string) {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, got, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func assertUiSilent(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	_, got, err := conn.ReadMessage()
+	if err == nil {
+		t.Fatalf("unexpected %q", got)
+	}
+}

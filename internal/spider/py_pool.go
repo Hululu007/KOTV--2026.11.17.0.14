@@ -1,6 +1,7 @@
 package spider
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -95,6 +96,22 @@ func (p *pyPool) matchesClient(clientID string) bool {
 		}
 	}
 	return false
+}
+
+func (p *pyPool) activeClientIDs() []string {
+	p.mu.Lock()
+	slots := append([]*pySpider(nil), p.slots...)
+	p.mu.Unlock()
+	var out []string
+	for _, s := range slots {
+		if s == nil {
+			continue
+		}
+		if id := strings.TrimSpace(s.activeClientID()); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func (p *pyPool) interrupt() {

@@ -66,6 +66,42 @@ func (s *pySpider) activeClientID() string {
 	return v
 }
 
+// CurrentPyCallScope 进行中的 Python 调用若都是同一个非空会话键则返回它。
+// 没有进行中的调用，或同时有两个不同的键，返回空。
+func CurrentPyCallScope() string {
+	jsPyMu.Lock()
+	spiders := make([]Spider, 0, len(jsPy))
+	for _, s := range jsPy {
+		spiders = append(spiders, s)
+	}
+	jsPyMu.Unlock()
+	scope := ""
+	for _, sp := range spiders {
+		for _, id := range activePyScopes(sp) {
+			if scope == "" {
+				scope = id
+				continue
+			}
+			if id != scope {
+				return ""
+			}
+		}
+	}
+	return scope
+}
+
+func activePyScopes(sp Spider) []string {
+	switch s := sp.(type) {
+	case *pyPool:
+		return s.activeClientIDs()
+	case *pySpider:
+		if id := strings.TrimSpace(s.activeClientID()); id != "" {
+			return []string{id}
+		}
+	}
+	return nil
+}
+
 func newPySpider(key, api, ext, jar string) Spider {
 	jsPyMu.Lock()
 	ck := jsPyKey("py", api)
@@ -631,7 +667,6 @@ func (s *pySpider) androidCallPythonLocked(method string, args map[string]interf
 		"proxyHost":  pyProxyHost(),
 		"method":     method,
 		"args":       args,
-		"clientId":   hostclient.ScopeID(),
 		"slot":       s.sessionSlot,
 	}
 	body, err := json.Marshal(payload)
