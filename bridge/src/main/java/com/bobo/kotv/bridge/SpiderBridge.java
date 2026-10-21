@@ -352,27 +352,13 @@ public class SpiderBridge {
                 userId = req.get("userId").getAsString();
                 if (userId == null) userId = "";
             }
-            // clientId 可能已是 ScopeID（u:/c:）；从中拆出 userId。
-            if (userId.isEmpty() && clientId.startsWith("u:") && clientId.length() > 2) {
-                userId = clientId.substring(2);
-            }
-            if (!clientId.isEmpty()) {
-                com.github.catvod.utils.Util.setClientId(clientId);
-            }
-            if (!userId.isEmpty()) {
-                com.github.catvod.utils.Util.setUserId(userId);
-            }
             if (req.has("remoteUi") && !req.get("remoteUi").isJsonNull()) {
                 try {
                     remoteUi = req.get("remoteUi").getAsBoolean();
                 } catch (Throwable ignored) {
                 }
             }
-            if (remoteUi) {
-                com.github.catvod.utils.Util.enterRemoteUi(clientId, userId);
-            } else {
-                com.github.catvod.utils.Util.clearRemoteUi();
-            }
+            bindCallScope(clientId, userId, remoteUi);
             String method = req.get("method").getAsString();
             long callGen = Long.MAX_VALUE;
             if (req.has("jarGen") && !req.get("jarGen").isJsonNull()) {
@@ -515,11 +501,35 @@ public class SpiderBridge {
             return GSON.toJson(err);
         } finally {
             callJarGen.remove();
-            if (remoteUi) {
-                com.github.catvod.utils.Util.leaveRemoteUi();
-            }
-            com.github.catvod.utils.Util.clearScope();
+            clearCallScope(remoteUi);
         }
+    }
+
+    /** 绑定这次调用的会话。clientId 为 u:/c: 键。结束时用 clearCallScope。 */
+    public static void bindCallScope(String clientId, String userId, boolean remoteUi) {
+        if (clientId == null) clientId = "";
+        if (userId == null) userId = "";
+        if (userId.isEmpty() && clientId.startsWith("u:") && clientId.length() > 2) {
+            userId = clientId.substring(2);
+        }
+        if (!clientId.isEmpty()) {
+            com.github.catvod.utils.Util.setClientId(clientId);
+        }
+        if (!userId.isEmpty()) {
+            com.github.catvod.utils.Util.setUserId(userId);
+        }
+        if (remoteUi) {
+            com.github.catvod.utils.Util.enterRemoteUi(clientId, userId);
+        } else {
+            com.github.catvod.utils.Util.clearRemoteUi();
+        }
+    }
+
+    public static void clearCallScope(boolean remoteUi) {
+        if (remoteUi) {
+            com.github.catvod.utils.Util.leaveRemoteUi();
+        }
+        com.github.catvod.utils.Util.clearScope();
     }
 
     /** JarLoader 把空串当成加载失败（HTTP 500）；所有出口至少回 JSON。 */

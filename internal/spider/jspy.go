@@ -668,6 +668,9 @@ func (s *pySpider) androidCallPythonLocked(method string, args map[string]interf
 		"method":     method,
 		"args":       args,
 		"slot":       s.sessionSlot,
+		"clientId":   hostclient.ScopeID(),
+		"userId":     hostclient.CurrentUserID(),
+		"remoteUi":   hostclient.PublicBase() != "",
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

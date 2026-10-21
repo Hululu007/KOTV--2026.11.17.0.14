@@ -2,6 +2,7 @@ package com.bobo.kotv
 
 import android.content.Context
 import android.util.Log
+import com.bobo.kotv.bridge.SpiderBridge
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoHTTPD.Method
@@ -172,10 +173,20 @@ class SpiderService private constructor(
         "/py/call" -> {
           PyLoader.startIfNeeded(appContext)
           val obj = JSONObject(body)
-          val result = PyLoader.callPython(obj)
-          // 空结果也回包装，避免 Go 侧当成 transport 失败
-          val payload = JSONObject().put("result", result ?: "")
-          json(Status.OK, payload.toString())
+          val remoteUi = obj.optBoolean("remoteUi", false)
+          SpiderBridge.bindCallScope(
+            obj.optString("clientId", ""),
+            obj.optString("userId", ""),
+            remoteUi,
+          )
+          try {
+            val result = PyLoader.callPython(obj)
+            // 空结果也回包装，避免 Go 侧当成 transport 失败
+            val payload = JSONObject().put("result", result ?: "")
+            json(Status.OK, payload.toString())
+          } finally {
+            SpiderBridge.clearCallScope(remoteUi)
+          }
         }
 
         "/sniff" -> {
