@@ -488,9 +488,32 @@ def _install_desktop_java(types, proxy_cls):
     def _jvm_class(name):
         return _jvm_decode(_jvm_post({"op": "class", "name": name}))
 
+    class _UtilClass:
+        def scopeId(self):
+            return _current_ui_scope()
+
+        def userId(self):
+            scope = _current_ui_scope()
+            if scope.startswith("u:"):
+                return scope[2:]
+            return ""
+
+        def clientId(self):
+            scope = _current_ui_scope()
+            if scope.startswith("c:"):
+                return scope[2:]
+            return scope
+
+        def __getattr__(self, name):
+            if name.startswith("_"):
+                raise AttributeError(name)
+            return getattr(_jvm_class("com.github.catvod.utils.Util"), name)
+
     def jclass(name):
         if name == "com.github.catvod.Proxy":
             return proxy_cls
+        if name == "com.github.catvod.utils.Util":
+            return _UtilClass()
         # 这几个没有 JVM 类，或者 show() 到不了界面，仍走本机窗口。
         if name == "android.widget.Toast":
             return _ToastClass()

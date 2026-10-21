@@ -98,6 +98,14 @@ func SetPostMsgEmitter(fn func(msg, clientID string)) {
 	postMsgEmitter = fn
 }
 
+// jsExplicitScope 第二参有内容时用脚本抄下的键，否则用这次调用的键。
+func jsExplicitScope(active, passed string) string {
+	if s := strings.TrimSpace(passed); s != "" {
+		return s
+	}
+	return active
+}
+
 // jsPostMsg 把脚本消息交给已注册的界面投递。
 // scope 已是 u:/c: 会话键时原样使用。工人线程上没有用户号，不能再套一层前缀。
 func jsPostMsg(msg, scope string) {
@@ -519,12 +527,19 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 	g.Set("getClientId", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		return c.NewString(s.activeClientID())
 	}))
+	g.Set("getUserId", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
+		return c.NewString(hostclient.UserIDFromScope(s.activeClientID()))
+	}))
 	g.Set("postMsg", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		msg := ""
 		if len(args) > 0 {
 			msg = args[0].String()
 		}
-		jsPostMsg(msg, s.activeClientID())
+		scope := s.activeClientID()
+		if len(args) > 1 && args[1] != nil && !args[1].IsUndefined() && !args[1].IsNull() {
+			scope = jsExplicitScope(scope, args[1].String())
+		}
+		jsPostMsg(msg, scope)
 		return c.NewBool(true)
 	}))
 	g.Set("getProxy", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
