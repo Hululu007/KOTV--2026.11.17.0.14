@@ -77,7 +77,6 @@ func parseM3U(live *model.Live, text string) {
 			if live.EPG == "" {
 				live.EPG = extractUnquoted(line, "tvg-url=", "url-tvg=")
 			}
-			live.Catchup = model.CatchupDecide(readCatchup(line, model.Catchup{}), globalCatchup)
 		case strings.HasPrefix(line, "#EXTINF:"):
 			group := "直播"
 			if m := attrRe("group-title").FindStringSubmatch(line); len(m) > 1 && strings.TrimSpace(m[1]) != "" {
@@ -104,8 +103,9 @@ func parseM3U(live *model.Live, text string) {
 			if m := regexp.MustCompile(`(?i)http-user-agent="([^"]*)"`).FindStringSubmatch(line); len(m) > 1 && m[1] != "" {
 				currentChannel.UA = m[1]
 			}
-			cp := model.CatchupDecide(readCatchup(line, model.Catchup{}), globalCatchup)
-			currentChannel.Catchup = &cp
+			if cp := model.CatchupDecide(readCatchup(line, model.Catchup{}), globalCatchup); !cp.IsEmpty() {
+				currentChannel.Catchup = &cp
+			}
 		case !strings.HasPrefix(line, "#") && strings.Contains(line, "://"):
 			parts := strings.SplitN(line, "|", 2)
 			streamURL := strings.TrimSpace(parts[0])

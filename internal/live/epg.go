@@ -167,14 +167,7 @@ func loadHTTPJSONEPG(ch *model.LiveChannel, src string) []Epg {
 		return nil
 	}
 	zone := channelLocation(ch)
-	nameToken := ch.TvgName
-	if nameToken == "" {
-		nameToken = ch.Name
-	}
-	idToken := ch.TvgID
-	if idToken == "" {
-		idToken = nameToken
-	}
+	idToken := ch.IDToken()
 	var out []Epg
 	for _, base := range urls {
 		dayOut := make([]Epg, 0, 3)
@@ -238,20 +231,10 @@ func LoadChannelEPG(ch *model.LiveChannel) []Epg {
 	zone := channelLocation(ch)
 	for _, offset := range []int{-1, 0, 1} {
 		date := time.Now().In(zone).AddDate(0, 0, offset).Format("2006-01-02")
-		nameToken := ch.TvgName
-		if nameToken == "" {
-			nameToken = ch.Name
-		}
-		idToken := ch.TvgID
-		if idToken == "" {
-			idToken = nameToken
-		}
-		u := template
+		idToken := ch.IDToken()
+		u := ch.ExpandBraces(template, ch.Logo)
 		u = strings.ReplaceAll(u, "{date}", date)
-		u = strings.ReplaceAll(u, "{id}", idToken)
-		u = strings.ReplaceAll(u, "{name}", nameToken)
 		u = strings.ReplaceAll(u, "{epg}", epgToken)
-		u = strings.ReplaceAll(u, "{logo}", ch.Logo)
 		if !strings.HasPrefix(u, "http") {
 			continue
 		}

@@ -196,6 +196,39 @@ func TestParse_EmptyGroupNameIsZhibo(t *testing.T) {
 	}
 }
 
+func TestParseM3U_PasswordOnlyGroupName(t *testing.T) {
+	live := &model.Live{}
+	Parse(live, "#EXTM3U\n#EXTINF:-1 group-title=\"_abc\",C\nhttp://x\n")
+	g := live.Groups[0]
+	if g.Name != "直播" || g.Pass != "abc" {
+		t.Fatalf("name=%q pass=%q", g.Name, g.Pass)
+	}
+}
+
+func TestParseM3U_KeepsSourceCatchupWhenHeaderHasNone(t *testing.T) {
+	live := &model.Live{Catchup: model.Catchup{Type: "append", Source: "?s=1"}}
+	Parse(live, "#EXTM3U\n#EXTINF:-1,C\nhttp://x\n")
+	if live.Catchup.Source != "?s=1" {
+		t.Fatalf("live catchup=%q", live.Catchup.Source)
+	}
+	ch := live.Groups[0].Channels[0]
+	if ch.Catchup == nil || ch.Catchup.Source != "?s=1" {
+		t.Fatalf("channel catchup=%v", ch.Catchup)
+	}
+}
+
+func TestParseM3U_HeaderCatchupReplacesSource(t *testing.T) {
+	live := &model.Live{Catchup: model.Catchup{Source: "?old"}}
+	Parse(live, "#EXTM3U catchup-source=\"?new\"\n#EXTINF:-1,C\nhttp://x\n")
+	if live.Catchup.Source != "?new" {
+		t.Fatalf("live catchup=%q", live.Catchup.Source)
+	}
+	ch := live.Groups[0].Channels[0]
+	if ch.Catchup == nil || ch.Catchup.Source != "?new" {
+		t.Fatalf("channel catchup=%v", ch.Catchup)
+	}
+}
+
 func TestLivePlayTimeout(t *testing.T) {
 	if got := (&model.Live{}).PlayTimeout(); got != 15*time.Second {
 		t.Fatalf("default=%s", got)

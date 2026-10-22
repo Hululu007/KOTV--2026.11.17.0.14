@@ -76,8 +76,17 @@ func SplitGroupPass(raw string, livePass bool) (name, pass string) {
 	return name, parts[1]
 }
 
+func (l *Live) groupNamePass(raw string) (name, pass string) {
+	name, pass = SplitGroupPass(strings.TrimSpace(raw), l.Pass)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "直播"
+	}
+	return name, pass
+}
+
 func (l *Live) FindGroup(raw string) *LiveGroup {
-	name, pass := SplitGroupPass(raw, l.Pass)
+	name, pass := l.groupNamePass(raw)
 	for i := range l.Groups {
 		if l.Groups[i].Name == name && l.Groups[i].Pass == pass {
 			return &l.Groups[i]
@@ -89,11 +98,7 @@ func (l *Live) FindGroup(raw string) *LiveGroup {
 
 // AppendGroup 追加一组，不与已有同名组合并。分组名按「显示名_密码」切开；空名记为「直播」。
 func (l *Live) AppendGroup(raw string) *LiveGroup {
-	name, pass := SplitGroupPass(strings.TrimSpace(raw), l.Pass)
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "直播"
-	}
+	name, pass := l.groupNamePass(raw)
 	l.Groups = append(l.Groups, LiveGroup{Name: name, Pass: pass})
 	return &l.Groups[len(l.Groups)-1]
 }
@@ -298,23 +303,43 @@ func (c *LiveChannel) ApplyLive(live *Live) {
 	if c.EPG == "" && live.EPG != "" {
 		c.EPG = live.EPG
 	}
-	// live.logo 模板（含 {id}/{name}）展开到频道 logo。
-	logoTemplate := live.Logo
-	if containsBrace(logoTemplate) && !hasHTTPPrefix(c.Logo) {
-		nameToken := c.TvgName
-		if nameToken == "" {
-			nameToken = c.Name
-		}
-		idToken := c.TvgID
-		if idToken == "" {
-			idToken = nameToken
-		}
-		c.Logo = strings.NewReplacer(
-			"{id}", idToken,
-			"{name}", nameToken,
-			"{logo}", c.Logo,
-		).Replace(logoTemplate)
+	if containsBrace(live.Logo) && !hasHTTPPrefix(c.Logo) {
+		c.Logo = c.ExpandBraces(live.Logo, c.Logo)
 	}
+}
+
+// NameToken 节目单和台标里的 {name}：tvg-name，空则用频道名。
+func (c *LiveChannel) NameToken() string {
+	if c == nil {
+		return ""
+	}
+	if c.TvgName != "" {
+		return c.TvgName
+	}
+	return c.Name
+}
+
+// IDToken 节目单和台标里的 {id}：tvg-id，空则用 NameToken。
+func (c *LiveChannel) IDToken() string {
+	if c == nil {
+		return ""
+	}
+	if c.TvgID != "" {
+		return c.TvgID
+	}
+	return c.NameToken()
+}
+
+// ExpandBraces 替换 {id}、{name}、{logo}。
+func (c *LiveChannel) ExpandBraces(template, logo string) string {
+	if c == nil {
+		return template
+	}
+	return strings.NewReplacer(
+		"{id}", c.IDToken(),
+		"{name}", c.NameToken(),
+		"{logo}", logo,
+	).Replace(template)
 }
 
 // ResolvedLogo 返回可加载的 logo URL（已展开模板）。
@@ -328,19 +353,7 @@ func (c *LiveChannel) ResolvedLogo() string {
 	if c.Live == nil || !containsBrace(c.Live.Logo) {
 		return c.Logo
 	}
-	nameToken := c.TvgName
-	if nameToken == "" {
-		nameToken = c.Name
-	}
-	idToken := c.TvgID
-	if idToken == "" {
-		idToken = nameToken
-	}
-	return strings.NewReplacer(
-		"{id}", idToken,
-		"{name}", nameToken,
-		"{logo}", c.Logo,
-	).Replace(c.Live.Logo)
+	return c.ExpandBraces(c.Live.Logo, c.Logo)
 }
 
 // CatchupPLTV() PLTV 回看规则。
