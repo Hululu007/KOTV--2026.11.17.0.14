@@ -151,8 +151,8 @@ func TestPreparePlaybackURLRemoteExpandsQuarkProxy(t *testing.T) {
 	if !strings.Contains(got, "/proxy/play?id=") {
 		t.Fatalf("headers should use /proxy/play, got %q", got)
 	}
-	if direct != cdn {
-		t.Fatalf("direct=%q", direct)
+	if direct != "" {
+		t.Fatalf("direct=%q want empty", direct)
 	}
 	upstream, stored := playproxy.Resolve(got)
 	if upstream != cdn {
@@ -240,8 +240,8 @@ func TestPreparePlaybackDirectKeepsPublicURL(t *testing.T) {
 	if !strings.Contains(play, "/proxy/play?id=") {
 		t.Fatalf("play=%q", play)
 	}
-	if direct != raw {
-		t.Fatalf("direct=%q", direct)
+	if direct != "" {
+		t.Fatalf("direct=%q want empty", direct)
 	}
 	if headers["Cookie"] != "a=b" {
 		t.Fatalf("headers=%v", headers)
@@ -342,7 +342,7 @@ func TestPreparePlaybackListedSkipsM3U8Resolve(t *testing.T) {
 	}
 }
 
-// 直播不去广告。无请求头时即使用户开着去广告也返回原地址。有请求头时登记透传并留下原地址，且不过滤。
+// 直播不去广告。无请求头时即使用户开着去广告也返回原地址。有请求头时只登记透传，且不过滤。
 func TestPrepareLivePlaybackHeadersUseProxy(t *testing.T) {
 	withAdFilter(t, true)
 	a := &App{}
@@ -356,8 +356,8 @@ func TestPrepareLivePlaybackHeadersUseProxy(t *testing.T) {
 	if !strings.Contains(play, "/proxy/play?id=") {
 		t.Fatalf("play=%q", play)
 	}
-	if direct != raw {
-		t.Fatalf("direct=%q want %q", direct, raw)
+	if direct != "" {
+		t.Fatalf("direct=%q want empty", direct)
 	}
 	if got["Cookie"] != "a=b" || got["User-Agent"] != "okhttp/5.5.0" {
 		t.Fatalf("headers=%v", got)

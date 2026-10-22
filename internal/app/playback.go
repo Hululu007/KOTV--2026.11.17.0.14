@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"net"
 	"net/url"
 	"path"
 	"path/filepath"
@@ -63,14 +62,14 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	return play
 }
 
-// PreparePlayback 返回透传地址、播放器能自己打开的原地址，以及请求头。
-// 点播在去广告打开且是 m3u8 时，只给 /proxy/play，过滤发生在这条透传里。
-// 其它时候原地址留给带得了请求头的播放器；带不了的用 /proxy/play。
+// PreparePlayback 返回透传地址、可直开的原地址，以及请求头。
+// 点播在去广告打开且是 m3u8 时，或接口带了请求头时，只给 /proxy/play。
+// 没有请求头且不去广告时，原地址就是播放地址。
 func (a *App) PreparePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
 	return a.preparePlayback(raw, headers, prepareVOD)
 }
 
-// PrepareLivePlayback 直播开播、回看。不走去广告。有请求头时登记透传，同时把原地址留给带得了头的播放器。
+// PrepareLivePlayback 直播开播、回看。不走去广告。有请求头时只登记透传。
 func (a *App) PrepareLivePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
 	return a.preparePlayback(raw, headers, prepareLive)
 }
@@ -115,11 +114,7 @@ func (a *App) preparePlayback(raw string, headers map[string]string, mode prepar
 				return "", "", headers
 			}
 		} else if filter || headed {
-			before := raw
 			raw = playproxy.RegisterAlways(raw, headers, filter)
-			if !filter {
-				direct = directPlayable(before)
-			}
 		}
 	}
 	return playproxy.PublicizeURL(raw, headers), direct, headers
@@ -136,31 +131,6 @@ func hasPlaybackHeaders(headers map[string]string) bool {
 		}
 	}
 	return false
-}
-
-// directPlayable 播放器自己打得开的 http(s)。回环和本机代理留空。
-func directPlayable(raw string) string {
-	raw = strings.TrimSpace(raw)
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	switch strings.ToLower(u.Scheme) {
-	case "http", "https":
-	default:
-		return ""
-	}
-	host := strings.ToLower(u.Hostname())
-	if host == "localhost" || host == "::1" || host == "127.0.0.1" {
-		return ""
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return ""
-	}
-	if u.Path == "/proxy" || strings.HasPrefix(u.Path, "/proxy/") {
-		return ""
-	}
-	return raw
 }
 
 // exposeLocalFile 远端前端播放时，把本机文件改成 /file/ 地址。本机请求保持原路径。content: 不改。
