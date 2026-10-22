@@ -14,7 +14,7 @@ String kotvHostPlatform() {
   return 'unknown';
 }
 
-/// 浏览器所在系统。原生客户端用 {@link kotvHostPlatform}，这里为空。
+/// 浏览器所在系统。原生客户端为空，平台用 kotvHostPlatform。
 String kotvHostOs() => kIsWeb ? kotvWebOperatingSystem() : '';
 
 bool kotvIsDesktop() {

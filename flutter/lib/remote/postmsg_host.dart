@@ -523,7 +523,7 @@ class PostMsgHost {
     return done.future;
   }
 
-  /// 客户端宿主信息（不是引擎机器）：脚本用 platform 决定 deep link / 按钮。
+  /// 客户端宿主信息（不是引擎机器）。脚本用 platform 取打开地址。网页另带 os，platform 仍是 web。
   Map<String, String> _hostClientValues([Map<String, String>? extra]) {
     final out = <String, String>{
       'platform': kotvHostPlatform(),
