@@ -32,7 +32,7 @@ func TestRawSpliceKeepsUpstreamBytes(t *testing.T) {
 	}))
 	defer up.Close()
 
-	proxyURL := playproxy.Register(up.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"})
+	proxyURL := playproxy.RegisterAlways(up.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"}, false)
 	body, res := doSplice(t, proxyURL, "bytes=0-99")
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", res.StatusCode)
@@ -78,7 +78,7 @@ func TestRawSpliceFollowsLoopbackRedirect(t *testing.T) {
 	}))
 	defer bounce.Close()
 
-	proxyURL := playproxy.Register(bounce.URL+"/start", map[string]string{"Cookie": "qk=1"})
+	proxyURL := playproxy.RegisterAlways(bounce.URL+"/start", map[string]string{"Cookie": "qk=1"}, false)
 	body, res := doSplice(t, proxyURL, "")
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d body=%q", res.StatusCode, body)
@@ -98,7 +98,7 @@ func TestRawSpliceRewritesLoopbackPlaylist(t *testing.T) {
 	}))
 	defer up.Close()
 
-	proxyURL := playproxy.Register(up.URL+"/video", map[string]string{"Cookie": "qk=1"})
+	proxyURL := playproxy.RegisterAlways(up.URL+"/video", map[string]string{"Cookie": "qk=1"}, false)
 	u, err := url.Parse(proxyURL)
 	if err != nil {
 		t.Fatal(err)
@@ -120,8 +120,8 @@ func TestRawSpliceRewritesLoopbackPlaylist(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d body=%s", res.StatusCode, text)
 	}
-	if text != "#EXTM3U\n#EXTINF:1,\nseg.ts\n" {
-		t.Fatalf("playlist should pass through, got %q", text)
+	if text == "#EXTM3U\n#EXTINF:1,\nseg.ts\n" || !strings.Contains(text, "/proxy/play?") || !strings.Contains(text, "seg.ts") {
+		t.Fatalf("loopback playlist should proxy its segments, got %q", text)
 	}
 }
 
@@ -137,10 +137,10 @@ func TestRawSpliceForwardsPlayerAcceptEncoding(t *testing.T) {
 	}))
 	defer up.Close()
 
-	proxyURL := playproxy.Register(up.URL+"/movie.mp4", map[string]string{
+	proxyURL := playproxy.RegisterAlways(up.URL+"/movie.mp4", map[string]string{
 		"Cookie":          "qk=1",
 		"Accept-Encoding": "gzip",
-	})
+	}, false)
 	u, err := url.Parse(proxyURL)
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func secondRangeWhileFirstHeld(t *testing.T, connection string) {
 	}))
 	defer up.Close()
 
-	proxyURL := playproxy.Register(up.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"})
+	proxyURL := playproxy.RegisterAlways(up.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"}, false)
 	u, err := url.Parse(proxyURL)
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func secondRangeWhileFirstHeld(t *testing.T, connection string) {
 
 func TestRawSpliceDialError(t *testing.T) {
 	t.Parallel()
-	proxyURL := playproxy.Register("http://127.0.0.1:1/movie.mp4", map[string]string{"Cookie": "qk=1"})
+	proxyURL := playproxy.RegisterAlways("http://127.0.0.1:1/movie.mp4", map[string]string{"Cookie": "qk=1"}, false)
 	body, res := doSplice(t, proxyURL, "")
 	if res.StatusCode != http.StatusBadGateway {
 		t.Fatalf("status=%d body=%q", res.StatusCode, body)

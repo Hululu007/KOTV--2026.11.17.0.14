@@ -62,32 +62,24 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	return play
 }
 
-// PreparePlayback 返回透传地址、可直开的原地址，以及请求头。
-// 点播在去广告打开且是 m3u8 时，或接口带了请求头时，只给 /proxy/play。
-// 没有请求头且不去广告时，原地址就是播放地址。
+// PreparePlayback 点播。去广告打开且地址含 m3u8 时走透传并过滤节目单。
+// 其余地址原样返回，请求头交给播放器。远端非引擎回环仍由 PublicizeURL 代拉。
 func (a *App) PreparePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
-	return a.preparePlayback(raw, headers, prepareVOD)
+	return a.preparePlayback(raw, headers, true)
 }
 
-// PrepareLivePlayback 直播开播、回看。不走去广告。有请求头时只登记透传。
+// PrepareLivePlayback 直播开播、回看。不走去广告，也不因请求头改走透传。
+// 请求头随播放地址交给播放器。远端非引擎回环仍由 PublicizeURL 代拉。
 func (a *App) PrepareLivePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
-	return a.preparePlayback(raw, headers, prepareLive)
+	return a.preparePlayback(raw, headers, false)
 }
 
-// PreparePlaybackListed 直播列表批量用。有请求头的线路返回空串，由开播接口再登记，列表本身不拉流。
+// PreparePlaybackListed 直播列表批量用。与开播同一规则，不拉流。
 func (a *App) PreparePlaybackListed(raw string, headers map[string]string) (string, string, map[string]string) {
-	return a.preparePlayback(raw, headers, prepareList)
+	return a.PrepareLivePlayback(raw, headers)
 }
 
-type prepareMode int
-
-const (
-	prepareVOD prepareMode = iota
-	prepareLive
-	prepareList
-)
-
-func (a *App) preparePlayback(raw string, headers map[string]string, mode prepareMode) (string, string, map[string]string) {
+func (a *App) preparePlayback(raw string, headers map[string]string, vod bool) (string, string, map[string]string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || IsEphemeralPlayURL(raw) {
 		return raw, "", headers
@@ -102,35 +94,19 @@ func (a *App) preparePlayback(raw string, headers map[string]string, mode prepar
 			headers = hdrs
 		}
 	}
-	direct := ""
 	if !thunder.Match(raw) {
 		if localproxy.IsSpiderProxyURL(raw) {
 			return playproxy.PublicizeURL(raw, headers), "", headers
 		}
-		headed := hasPlaybackHeaders(headers)
-		filter := mode == prepareVOD && vodAdFilter(raw)
-		if mode == prepareList {
-			if headed {
-				return "", "", headers
-			}
-		} else if filter || headed {
-			raw = playproxy.RegisterAlways(raw, headers, filter)
+		if vod && vodAdFilter(raw) {
+			raw = playproxy.RegisterAlways(raw, headers, true)
 		}
 	}
-	return playproxy.PublicizeURL(raw, headers), direct, headers
+	return playproxy.PublicizeURL(raw, headers), "", headers
 }
 
 func vodAdFilter(raw string) bool {
 	return settings.IsAdFilterEnabled() && strings.Contains(strings.ToLower(raw), "m3u8")
-}
-
-func hasPlaybackHeaders(headers map[string]string) bool {
-	for k, v := range headers {
-		if strings.TrimSpace(k) != "" && strings.TrimSpace(v) != "" {
-			return true
-		}
-	}
-	return false
 }
 
 // exposeLocalFile 远端前端播放时，把本机文件改成 /file/ 地址。本机请求保持原路径。content: 不改。

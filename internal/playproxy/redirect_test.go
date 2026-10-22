@@ -44,10 +44,10 @@ func TestHandleKeepsCookieAcrossRedirect(t *testing.T) {
 	}))
 	defer bounce.Close()
 
-	proxyURL := playproxy.Register(bounce.URL+"/start", map[string]string{
+	proxyURL := playproxy.RegisterAlways(bounce.URL+"/start", map[string]string{
 		"Cookie":     "qk=1",
 		"User-Agent": "QuarkTest",
-	})
+	}, false)
 	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
 	rr := httptest.NewRecorder()
 	playproxy.Handle(rr, req)
@@ -139,7 +139,7 @@ func TestHandleTwoRanges(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	proxyURL := playproxy.Register(srv.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"})
+	proxyURL := playproxy.RegisterAlways(srv.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"}, false)
 	for _, rg := range []string{"bytes=0-3", "bytes=4-7"} {
 		req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
 		req.Header.Set("Range", rg)
@@ -175,7 +175,7 @@ func TestHandlePassthroughKeepsStatusHeadersAndBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	proxyURL := playproxy.Register(srv.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"})
+	proxyURL := playproxy.RegisterAlways(srv.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"}, false)
 	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
 	req.Header.Set("Range", "bytes=0-")
 	rr := httptest.NewRecorder()
@@ -214,7 +214,7 @@ func TestHandleForwardsGzipBodyWithoutRequestingIt(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	proxyURL := playproxy.Register(srv.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"})
+	proxyURL := playproxy.RegisterAlways(srv.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"}, false)
 	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
 	rr := httptest.NewRecorder()
 	playproxy.Handle(rr, req)
@@ -248,11 +248,11 @@ func TestFetchUsesPlayerEncodingAndIfRange(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	proxyURL := playproxy.Register(srv.URL+"/movie.mp4", map[string]string{
+	proxyURL := playproxy.RegisterAlways(srv.URL+"/movie.mp4", map[string]string{
 		"Cookie":          "qk=1",
 		"Accept-Encoding": "gzip",
 		"User-Agent":      "QuarkTest",
-	})
+	}, false)
 	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
 	req.Header.Set("Accept-Encoding", "identity")
 	req.Header.Set("If-Range", `"etag"`)
@@ -282,15 +282,22 @@ func TestFetchUsesPlayerEncodingAndIfRange(t *testing.T) {
 
 func TestHandleLeavesCDNPlaylistBytes(t *testing.T) {
 	t.Parallel()
-	raw := "#EXTM3U\nhttps://cdn.example/a.ts\n"
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var srv *httptest.Server
+	var gotCookie, gotPath string
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/a.ts" {
+			gotCookie = r.Header.Get("Cookie")
+			gotPath = r.URL.Path
+			_, _ = w.Write([]byte("seg"))
+			return
+		}
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Set("X-Play-State", "open")
-		_, _ = w.Write([]byte(raw))
+		_, _ = w.Write([]byte("#EXTM3U\n" + srv.URL + "/a.ts\n"))
 	}))
 	defer srv.Close()
 
-	proxyURL := playproxy.Register(srv.URL+"/v.m3u8", map[string]string{"Cookie": "qk=1"})
+	proxyURL := playproxy.RegisterAlways(srv.URL+"/v.m3u8", map[string]string{"Cookie": "qk=1"}, false)
 	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
 	rr := httptest.NewRecorder()
 	playproxy.Handle(rr, req)
@@ -300,14 +307,37 @@ func TestHandleLeavesCDNPlaylistBytes(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("status=%d", res.StatusCode)
 	}
-	if string(body) != raw {
-		t.Fatalf("body=%q", body)
+	text := string(body)
+	if !strings.Contains(text, "/proxy/play?") || !strings.Contains(text, "u=") {
+		t.Fatalf("playlist child should use the same proxy, body=%q", text)
+	}
+	if strings.Contains(text, srv.URL+"/a.ts\n") {
+		t.Fatalf("raw segment url left in playlist: %q", text)
 	}
 	if res.Header.Get("X-Play-State") != "open" {
 		t.Fatalf("state=%q", res.Header.Get("X-Play-State"))
 	}
 	if res.Header.Get("Accept-Ranges") != "" {
 		t.Fatalf("invented Accept-Ranges=%q", res.Header.Get("Accept-Ranges"))
+	}
+	child := ""
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "/proxy/play?") {
+			child = line
+			break
+		}
+	}
+	req = httptest.NewRequest(http.MethodGet, child, nil)
+	rr = httptest.NewRecorder()
+	playproxy.Handle(rr, req)
+	res = rr.Result()
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("child status=%d", res.StatusCode)
+	}
+	if gotCookie != "qk=1" || gotPath != "/a.ts" {
+		t.Fatalf("cookie=%q path=%q", gotCookie, gotPath)
 	}
 }
 
@@ -323,7 +353,7 @@ func TestHandleRewritesPlaylistWithoutM3U8InURL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	proxyURL := playproxy.Register(srv.URL+"/video", map[string]string{"Cookie": "qk=1"})
+	proxyURL := playproxy.RegisterAlways(srv.URL+"/video", map[string]string{"Cookie": "qk=1"}, false)
 	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
 	rr := httptest.NewRecorder()
 	playproxy.Handle(rr, req)
@@ -334,9 +364,11 @@ func TestHandleRewritesPlaylistWithoutM3U8InURL(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", res.StatusCode, text)
 	}
-	const want = "#EXTM3U\n#EXTINF:1,\nseg.ts\n#EXT-X-KEY:METHOD=AES-128,URI=\"key\"\n"
-	if text != want {
-		t.Fatalf("playlist should pass through, got %q", text)
+	if strings.Contains(text, "\nseg.ts\n") || strings.Contains(text, `URI="key"`) {
+		t.Fatalf("relative child left in playlist: %q", text)
+	}
+	if !strings.Contains(text, "http://192.168.1.8:9978/proxy/play?") || !strings.Contains(text, "seg.ts") || !strings.Contains(text, "key") {
+		t.Fatalf("children should stay on the proxy, got %q", text)
 	}
 }
 
@@ -369,7 +401,7 @@ func TestHandleAbsolutizesRedirectedPlaylist(t *testing.T) {
 	if gotCookie != "qk=1" {
 		t.Fatalf("cookie=%q", gotCookie)
 	}
-	if !strings.Contains(text, dst.URL+"/seg.ts") {
+	if !strings.Contains(text, "/proxy/play?") || !strings.Contains(text, url.QueryEscape(dst.URL+"/seg.ts")) {
 		t.Fatalf("body=%s", text)
 	}
 	if res.Header.Get("X-Upstream") != "1" {
@@ -399,7 +431,11 @@ func TestHandleSkipsFilterWhenUnset(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("status=%d", res.StatusCode)
 	}
-	if string(body) != raw {
-		t.Fatalf("body=%q", body)
+	text := string(body)
+	if text == raw || strings.Contains(text, "\n/seg.ts\n") {
+		t.Fatalf("relative segment must not stay, body=%q", text)
+	}
+	if !strings.Contains(text, "/proxy/play?") || !strings.Contains(text, "seg.ts") {
+		t.Fatalf("body=%q", text)
 	}
 }

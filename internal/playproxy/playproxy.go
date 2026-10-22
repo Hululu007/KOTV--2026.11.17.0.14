@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,15 +48,7 @@ func RxBytes() uint64 { return rxBytes.Load() }
 // SetPortFunc 注入本地服务端口读取函数。
 func SetPortFunc(fn func() int) { portFn = fn }
 
-// Register 注册一次带 header 的播放，返回本地代理 URL；无 header 时原样返回。
-func Register(rawURL string, headers map[string]string) string {
-	if rawURL == "" || len(headers) == 0 {
-		return rawURL
-	}
-	return register(rawURL, headers, false)
-}
-
-// RegisterAlways 无论有没有请求头都登记 /proxy/play。filter 为真时，这条透传才过滤节目单。
+// RegisterAlways 登记 /proxy/play。filter 为真时，这条透传才过滤节目单。
 func RegisterAlways(rawURL string, headers map[string]string, filter bool) string {
 	if strings.TrimSpace(rawURL) == "" {
 		return ""
@@ -346,12 +339,21 @@ func playID(proxyOrRaw string) string {
 }
 
 // Handle 代理拉流并转发 Range，注入登记的请求头。
+// 节目单里的切片用同一 id，另带 u 指向绝对地址，请求头仍用这条登记。
 func Handle(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	e, ok := lookup(id)
 	if !ok || e.URL == "" {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
+	}
+	if target := strings.TrimSpace(r.URL.Query().Get("u")); target != "" {
+		abs, ok := allowedChild(e.URL, target)
+		if !ok {
+			http.Error(w, "bad url", http.StatusBadRequest)
+			return
+		}
+		e.URL = abs
 	}
 	rangeHdr := strings.TrimSpace(r.Header.Get("Range"))
 	serveEntry(w, r, e, rangeHdr, id)
@@ -387,18 +389,24 @@ func beginSplice(key string) *spliceHold {
 	return slot
 }
 
-// killSpliceByKey 半裁登记表时结束对应活跃 splice。
+// killSpliceByKey 半裁登记表时结束对应活跃 splice。子请求的键是 id|地址。
 func killSpliceByKey(key string) {
 	if key == "" {
 		return
 	}
+	prefix := key + "|"
 	spliceMu.Lock()
-	h := spliceLive[key]
-	if h != nil {
-		delete(spliceLive, key)
+	holds := make([]*spliceHold, 0, 1)
+	for k, h := range spliceLive {
+		if k == key || strings.HasPrefix(k, prefix) {
+			delete(spliceLive, k)
+			if h != nil {
+				holds = append(holds, h)
+			}
+		}
 	}
 	spliceMu.Unlock()
-	if h != nil {
+	for _, h := range holds {
 		h.kill()
 	}
 }
@@ -463,10 +471,6 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, playI
 		return
 	}
 	defer resp.Body.Close()
-	if !e.Filter {
-		writePassthrough(w, resp, resp.Body)
-		return
-	}
 	prefix := make([]byte, len("#EXTM3U"))
 	n, _ := io.ReadFull(resp.Body, prefix)
 	head := prefix[:n]
@@ -484,8 +488,108 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, playI
 	if resp.Request != nil && resp.Request.URL != nil && resp.Request.URL.String() != "" {
 		final = resp.Request.URL.String()
 	}
-	filtered := m3u8.FilterPlaylist(string(raw), final, e.Headers)
-	writePlaylist(w, resp, []byte(filtered))
+	body := string(raw)
+	if e.Filter {
+		body = m3u8.FilterPlaylist(body, final, e.Headers)
+	}
+	body = rewritePlaylist(body, final, playID, hasHeaders(e.Headers))
+	writePlaylist(w, resp, []byte(body))
+}
+
+func hasHeaders(headers map[string]string) bool {
+	for k, v := range headers {
+		if strings.TrimSpace(k) != "" && strings.TrimSpace(v) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// playlistURIRe 匹配标签行里的 URI="…"。
+var playlistURIRe = regexp.MustCompile(`(?i)\bURI="([^"]+)"`)
+
+// rewritePlaylist 把节目单里的地址补成绝对地址。
+// 需要带上登记的请求头，或切片本身在回环上时，改写成同一条透传。
+func rewritePlaylist(content, base, id string, inject bool) string {
+	if !strings.HasPrefix(strings.TrimSpace(content), "#EXTM3U") {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		lines[i] = playlistRef(base, trim, id, inject)
+	}
+	text := strings.Join(lines, "\n")
+	if !strings.Contains(strings.ToUpper(text), "URI=") {
+		return text
+	}
+	return playlistURIRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := playlistURIRe.FindStringSubmatch(m)
+		if len(sub) < 2 || sub[1] == "" || strings.HasPrefix(sub[1], "data:") {
+			return m
+		}
+		return `URI="` + playlistRef(base, sub[1], id, inject) + `"`
+	})
+}
+
+func playlistRef(base, ref, id string, inject bool) string {
+	abs := resolveRef(base, ref)
+	if strings.Contains(abs, "/proxy/play?") {
+		return abs
+	}
+	if id == "" || !mustProxyChild(abs, inject) {
+		return abs
+	}
+	return proxyChild(id, abs)
+}
+
+func mustProxyChild(abs string, inject bool) bool {
+	if !strings.HasPrefix(abs, "http://") && !strings.HasPrefix(abs, "https://") {
+		return false
+	}
+	if inject {
+		return true
+	}
+	u, err := url.Parse(abs)
+	if err != nil {
+		return false
+	}
+	return isLoopbackHost(u.Hostname())
+}
+
+func proxyChild(id, abs string) string {
+	u, err := url.Parse(LocalHTTPBase() + "/proxy/play")
+	if err != nil {
+		return abs
+	}
+	q := u.Query()
+	q.Set("id", id)
+	q.Set("u", abs)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// allowedChild 只允许 http(s)。公网登记不能再被节目单指去回环或内网。
+func allowedChild(parent, target string) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(target))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", false
+	}
+	if isLoopbackHost(u.Hostname()) || isPrivateIP(u.Hostname()) {
+		p, err := url.Parse(parent)
+		if err != nil || p.Host == "" || (!isLoopbackHost(p.Hostname()) && !isPrivateIP(p.Hostname())) {
+			return "", false
+		}
+	}
+	return u.String(), true
+}
+
+func isPrivateIP(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified())
 }
 
 func writePlaylist(w http.ResponseWriter, resp *http.Response, body []byte) {
@@ -587,6 +691,8 @@ func tryRawSplice(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, pla
 	key := playID
 	if key == "" {
 		key = e.URL
+	} else {
+		key = playID + "|" + e.URL
 	}
 	slot := beginSplice(key)
 	defer slot.release()
@@ -601,7 +707,7 @@ func tryRawSplice(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, pla
 		http.Error(w, "连接本机播放端口失败", http.StatusBadGateway)
 		return true
 	}
-	if e.Filter && bytes.Equal(peek, []byte("#EXTM3U")) {
+	if bytes.Equal(peek, []byte("#EXTM3U")) {
 		return false
 	}
 	spliceToClient(w, slot, br, head, peek)

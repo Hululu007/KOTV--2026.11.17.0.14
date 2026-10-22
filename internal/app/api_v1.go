@@ -1774,7 +1774,7 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 				ch.URLIndex = i
 				u, h := live.ResolvePlayURL(ch)
 				lineHeaders = append(lineHeaders, h)
-				// 二次解析，或要透传的线路，下发空串。客户端只看空不空，再走 livePlay。
+				// 二次解析、专用源、磁力不下发直链。客户端见空串再走 livePlay。
 				if live.NeedsEnginePlay(ch, u) {
 					playURLs = append(playURLs, "")
 					directURLs = append(directURLs, "")

@@ -148,18 +148,17 @@ func TestPreparePlaybackURLRemoteExpandsQuarkProxy(t *testing.T) {
 		base64.StdEncoding.EncodeToString([]byte(cdn)) +
 		"&header=" + base64.StdEncoding.EncodeToString([]byte(hdrJSON))
 	got, direct, headers := a.PreparePlayback(raw, nil)
-	if !strings.Contains(got, "/proxy/play?id=") {
-		t.Fatalf("headers should use /proxy/play, got %q", got)
+	if got != cdn {
+		t.Fatalf("public media should stay the original url, got %q", got)
+	}
+	if strings.Contains(got, "/proxy/play?") {
+		t.Fatalf("public media must not be proxied, got %q", got)
 	}
 	if direct != "" {
 		t.Fatalf("direct=%q want empty", direct)
 	}
-	upstream, stored := playproxy.Resolve(got)
-	if upstream != cdn {
-		t.Fatalf("upstream=%q", upstream)
-	}
-	if headers["Cookie"] != "qk=1" || stored["Cookie"] != "qk=1" || headers["User-Agent"] != "Quark" {
-		t.Fatalf("headers=%v stored=%v", headers, stored)
+	if headers["Cookie"] != "qk=1" || headers["User-Agent"] != "Quark" {
+		t.Fatalf("headers=%v", headers)
 	}
 }
 
@@ -237,8 +236,8 @@ func TestPreparePlaybackDirectKeepsPublicURL(t *testing.T) {
 	a := &App{}
 	raw := "https://cdn.example/a.mp4"
 	play, direct, headers := a.PreparePlayback(raw, map[string]string{"Cookie": "a=b"})
-	if !strings.Contains(play, "/proxy/play?id=") {
-		t.Fatalf("play=%q", play)
+	if play != raw {
+		t.Fatalf("play=%q want %q", play, raw)
 	}
 	if direct != "" {
 		t.Fatalf("direct=%q want empty", direct)
@@ -251,20 +250,19 @@ func TestPreparePlaybackDirectKeepsPublicURL(t *testing.T) {
 func TestPreparePlaybackDirectSkipsLoopback(t *testing.T) {
 	a := &App{}
 	raw := "http://127.0.0.1:5266/a.mp4"
-	play, direct, _ := a.PreparePlayback(raw, map[string]string{"Cookie": "a=b"})
-	if !strings.Contains(play, "/proxy/play?id=") {
-		t.Fatalf("headers should pass through, got %q", play)
+	play, direct, headers := a.PreparePlayback(raw, map[string]string{"Cookie": "a=b"})
+	if play != raw {
+		t.Fatalf("local loopback should stay %q, got %q", raw, play)
 	}
 	if direct != "" {
 		t.Fatalf("direct=%q", direct)
 	}
-	upstream, stored := playproxy.Resolve(play)
-	if upstream != raw || stored["Cookie"] != "a=b" {
-		t.Fatalf("upstream=%q headers=%v", upstream, stored)
+	if headers["Cookie"] != "a=b" {
+		t.Fatalf("headers=%v", headers)
 	}
 }
 
-// 直播 Load/livePlay 与点播共用 PreparePlayback：无头则 url=原址、direct 空。
+// 点播无请求头、不去广告时 url 就是原地址。
 func TestPreparePlaybackLivePlainURL(t *testing.T) {
 	withAdFilter(t, false)
 	a := &App{}
@@ -308,7 +306,7 @@ func TestPreparePlaybackAdFilterUsesRoute(t *testing.T) {
 	}
 }
 
-// 列表不拉流。直播不去广告，无请求头时原样下发；有请求头时下发空串，开播再透传。
+// 列表不拉流。直播不去广告，有请求头也下发原地址，由播放器自己带上。
 func TestPreparePlaybackListedSkipsM3U8Resolve(t *testing.T) {
 	withAdFilter(t, false)
 	a := &App{}
@@ -325,9 +323,12 @@ func TestPreparePlaybackListedSkipsM3U8Resolve(t *testing.T) {
 		t.Fatalf("direct=%q want empty", direct)
 	}
 
-	play, direct, _ = a.PreparePlaybackListed(raw, map[string]string{"Cookie": "a=b", "User-Agent": "okhttp/5.5.0"})
-	if play != "" || direct != "" {
-		t.Fatalf("headed list play=%q direct=%q want empty", play, direct)
+	play, direct, got := a.PreparePlaybackListed(raw, map[string]string{"Cookie": "a=b", "User-Agent": "okhttp/5.5.0"})
+	if play != raw || direct != "" {
+		t.Fatalf("headed list play=%q direct=%q", play, direct)
+	}
+	if got["Cookie"] != "a=b" || got["User-Agent"] != "okhttp/5.5.0" {
+		t.Fatalf("headers=%v", got)
 	}
 
 	withAdFilter(t, true)
@@ -342,7 +343,7 @@ func TestPreparePlaybackListedSkipsM3U8Resolve(t *testing.T) {
 	}
 }
 
-// 直播不去广告。无请求头时即使用户开着去广告也返回原地址。有请求头时只登记透传，且不过滤。
+// 直播不去广告。有请求头也返回原地址，头留给播放器，不登记透传。
 func TestPrepareLivePlaybackHeadersUseProxy(t *testing.T) {
 	withAdFilter(t, true)
 	a := &App{}
@@ -353,20 +354,13 @@ func TestPrepareLivePlaybackHeadersUseProxy(t *testing.T) {
 	}
 	headers := map[string]string{"Cookie": "a=b", "User-Agent": "okhttp/5.5.0"}
 	play, direct, got := a.PrepareLivePlayback(raw, headers)
-	if !strings.Contains(play, "/proxy/play?id=") {
-		t.Fatalf("play=%q", play)
+	if play != raw || direct != "" {
+		t.Fatalf("play=%q direct=%q", play, direct)
 	}
-	if direct != "" {
-		t.Fatalf("direct=%q want empty", direct)
+	if strings.Contains(play, "/proxy/play") {
+		t.Fatalf("live must not proxy, play=%q", play)
 	}
 	if got["Cookie"] != "a=b" || got["User-Agent"] != "okhttp/5.5.0" {
 		t.Fatalf("headers=%v", got)
-	}
-	if playproxy.RegisteredFilter(play) {
-		t.Fatal("live registration must not filter")
-	}
-	upstream, stored := playproxy.Resolve(play)
-	if upstream != raw || stored["Cookie"] != "a=b" {
-		t.Fatalf("upstream=%q headers=%v", upstream, stored)
 	}
 }
