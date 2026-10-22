@@ -36,22 +36,30 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 		return rawURL, "", nil
 	}
 
-	content, err := fetch(rawURL, headers)
+	content, final, err := fetch(rawURL, headers)
 	if err != nil {
 		return rawURL, "", nil // 失败时回退原地址
 	}
-
-	base := rawURL
+	if final == "" {
+		final = rawURL
+	}
+	// 再拉取时用入口或变体地址，相对路径按这一次响应的最终地址补全。
+	refetch := rawURL
+	base := final
 	if IsMasterPlaylist(content) {
 		variant := firstVariantURL(content, base)
 		if variant == "" {
 			return rawURL, "", nil
 		}
-		content, err = fetch(variant, headers)
+		content, final, err = fetch(variant, headers)
 		if err != nil {
 			return rawURL, "", nil
 		}
-		base = variant
+		if final == "" {
+			final = variant
+		}
+		base = final
+		refetch = variant
 	}
 
 	// 没有 #EXT-X-ENDLIST 的列表还会继续追加切片。不能把这一次的正文存成静态文件。
@@ -59,7 +67,7 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 		if !hasPlaybackHeaders(headers) {
 			return base, "", nil
 		}
-		id := RegisterRolling(base, headers)
+		id := RegisterRolling(refetch, headers)
 		rolling := fmt.Sprintf("%s%s?id=%s", playbackProxyBase(localPort), RollingPlaylistPath, id)
 		return rolling, rawURL, nil
 	}
@@ -91,7 +99,7 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 	}
 
 	id := DefaultCache.Put(filtered)
-	return fmt.Sprintf("%s/proxy/cached_m3u8?id=%s", playbackProxyBase(localPort), id), "", nil
+	return fmt.Sprintf("%s/proxy/cached_m3u8?id=%s", playbackProxyBase(localPort), id), rawURL, nil
 }
 
 func playbackProxyBase(localPort int) string {
@@ -132,10 +140,10 @@ func loadFilterConfig() FilterConfig {
 	return cfg.normalized()
 }
 
-func fetch(u string, headers map[string]string) (string, error) {
+func fetch(u string, headers map[string]string) (body, final string, err error) {
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -145,14 +153,18 @@ func fetch(u string, headers map[string]string) (string, error) {
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return string(b), nil
+	final = u
+	if resp.Request != nil && resp.Request.URL != nil {
+		final = resp.Request.URL.String()
+	}
+	return string(b), final, nil
 }
 
 // sampleChunkLastModifieds 对每个 DISCONTINUITY 段抽一个媒体 URI 做 HEAD，取 Last-Modified。

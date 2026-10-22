@@ -144,10 +144,46 @@ func TestResolveForPlayback_VodWithEndListCached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if direct != "" {
-		t.Fatalf("filtered playlist should stay the only url, got direct %s", direct)
+	if direct != srv.URL+"/vod.m3u8" {
+		t.Fatalf("direct=%s", direct)
 	}
 	if !strings.Contains(got, "/proxy/cached_m3u8?id=") {
 		t.Fatalf("vod playlist should be cached, got %s", got)
+	}
+}
+
+func TestResolveForPlayback_RedirectKeepsEntryAndFinalSegments(t *testing.T) {
+	const body = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.000,\n/seg.ts\n#EXTINF:4.000,\n/seg2.ts\n#EXT-X-ENDLIST\n"
+	dst := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer dst.Close()
+	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, dst.URL+"/timeshift.m3u8", http.StatusFound)
+	}))
+	defer src.Close()
+
+	entry := src.URL + "/live.m3u8"
+	got, direct, err := ResolveForPlayback(entry, nil, 9978)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if direct != entry {
+		t.Fatalf("direct=%s", direct)
+	}
+	if !strings.Contains(got, "/proxy/cached_m3u8?id=") {
+		t.Fatalf("got=%s", got)
+	}
+	id := got[strings.LastIndex(got, "id=")+3:]
+	cached, ok := DefaultCache.Get(id)
+	if !ok {
+		t.Fatal("missing cache")
+	}
+	if !strings.Contains(cached, dst.URL+"/seg.ts") || !strings.Contains(cached, dst.URL+"/seg2.ts") {
+		t.Fatalf("cached=\n%s", cached)
+	}
+	if strings.Contains(cached, src.URL+"/seg.ts") {
+		t.Fatalf("segment stayed on the entry host:\n%s", cached)
 	}
 }

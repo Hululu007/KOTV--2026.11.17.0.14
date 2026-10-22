@@ -76,12 +76,15 @@ func ServeRolling(id string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	content, err := fetch(e.URL, e.Headers)
+	content, final, err := fetch(e.URL, e.Headers)
 	if err != nil || content == "" {
 		return "", false
 	}
-	content = absolutizeURIs(content, e.URL)
-	content = absolutizeTagURIs(content, e.URL)
+	if final == "" {
+		final = e.URL
+	}
+	content = absolutizeURIs(content, final)
+	content = absolutizeTagURIs(content, final)
 	content = proxyMediaURIs(content, e.Headers)
 	return content, true
 }

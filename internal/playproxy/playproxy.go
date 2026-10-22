@@ -454,7 +454,11 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, playI
 		raw := make([]byte, 0, n+len(rest))
 		raw = append(raw, head...)
 		raw = append(raw, rest...)
-		if out, ok := rewritePlaylist(string(raw), e.URL, e.Headers); ok {
+		base := e.URL
+		if resp.Request != nil && resp.Request.URL != nil && resp.Request.URL.String() != "" {
+			base = resp.Request.URL.String()
+		}
+		if out, ok := rewritePlaylist(string(raw), base, e.Headers); ok {
 			writeRewrittenPlaylist(w, resp, []byte(out))
 			return
 		}
@@ -544,7 +548,7 @@ func rewritePlaylist(content, base string, headers map[string]string) (string, b
 		}
 		abs := resolveRef(base, trim)
 		next := proxyIfRemote(abs, headers)
-		if next != abs {
+		if next != trim {
 			lines[i] = next
 			changed = true
 		}
@@ -562,7 +566,7 @@ func rewritePlaylist(content, base string, headers map[string]string) (string, b
 			}
 			abs := resolveRef(base, raw)
 			next := proxyIfRemote(abs, headers)
-			if next == abs {
+			if next == raw {
 				return m
 			}
 			changed = true

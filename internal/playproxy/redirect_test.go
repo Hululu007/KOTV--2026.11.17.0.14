@@ -348,3 +348,46 @@ func TestHandleRewritesPlaylistWithoutM3U8InURL(t *testing.T) {
 		t.Fatalf("key uri not rewritten: %s", text)
 	}
 }
+
+func TestHandleAbsolutizesRedirectedPlaylist(t *testing.T) {
+	dst := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:1,\n/seg.ts\n"))
+	}))
+	defer dst.Close()
+	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, dst.URL+"/timeshift.m3u8", http.StatusFound)
+	}))
+	defer src.Close()
+
+	proxyURL := playproxy.Register(src.URL+"/entry", map[string]string{"Cookie": "qk=1"})
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	rr := httptest.NewRecorder()
+	playproxy.Handle(rr, req)
+	res := rr.Result()
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	text := string(body)
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", res.StatusCode, text)
+	}
+	if strings.Contains(text, "/seg.ts") || strings.Contains(text, src.URL) {
+		t.Fatalf("relative segment was not rewritten: %s", text)
+	}
+	var media string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		media = line
+		break
+	}
+	upstream, headers := playproxy.Resolve(media)
+	if upstream != dst.URL+"/seg.ts" {
+		t.Fatalf("segment upstream=%q", upstream)
+	}
+	if headers["Cookie"] != "qk=1" {
+		t.Fatalf("segment headers=%v", headers)
+	}
+}
