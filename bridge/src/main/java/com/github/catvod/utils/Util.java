@@ -407,6 +407,8 @@ public class Util {
      */
     private static final java.util.concurrent.ConcurrentHashMap<String, String> hostPlatformBySession =
             new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<String, String> hostOsBySession =
+            new java.util.concurrent.ConcurrentHashMap<>();
     private static final java.util.concurrent.ConcurrentHashMap<String, Boolean> hostDesktopBySession =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -415,6 +417,12 @@ public class Util {
         if (session == null || session.isEmpty()) return "";
         String p = hostPlatformBySession.get(session);
         return p == null ? "" : p;
+    }
+
+    public static String hostOs(String session) {
+        if (session == null || session.isEmpty()) return "";
+        String os = hostOsBySession.get(session);
+        return os == null ? "" : os;
     }
 
     public static boolean hostDesktop(String session) {
@@ -453,11 +461,19 @@ public class Util {
             String d = String.valueOf(desktop).trim().toLowerCase(Locale.ROOT);
             hostDesktopBySession.put(session, "true".equals(d) || "1".equals(d) || "yes".equals(d));
         }
+        Object os = values.get("os");
+        if (os != null) {
+            String value = String.valueOf(os).trim().toLowerCase(Locale.ROOT);
+            if (!value.isEmpty() && !"null".equals(value) && !"unknown".equals(value)) {
+                hostOsBySession.put(session, value);
+            }
+        }
     }
 
     static void clearHostClientInfo(String session) {
         if (session == null || session.isEmpty()) return;
         hostPlatformBySession.remove(session);
+        hostOsBySession.remove(session);
         hostDesktopBySession.remove(session);
     }
 

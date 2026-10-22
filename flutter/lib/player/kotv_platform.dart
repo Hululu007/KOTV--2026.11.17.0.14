@@ -1,4 +1,5 @@
 import '../util/kotv_io.dart';
+import 'kotv_web_os_stub.dart' if (dart.library.html) 'kotv_web_os_html.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -12,6 +13,9 @@ String kotvHostPlatform() {
   if (Platform.isLinux) return 'linux';
   return 'unknown';
 }
+
+/// 浏览器所在系统。原生客户端用 {@link kotvHostPlatform}，这里为空。
+String kotvHostOs() => kIsWeb ? kotvWebOperatingSystem() : '';
 
 bool kotvIsDesktop() {
   if (kIsWeb) return false;

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -528,6 +529,8 @@ class PostMsgHost {
       'platform': kotvHostPlatform(),
       'desktop': kotvIsDesktop() ? 'true' : 'false',
     };
+    final os = kotvHostOs();
+    if (os.isNotEmpty) out['os'] = os;
     if (extra != null && extra.isNotEmpty) out.addAll(extra);
     return out;
   }
@@ -816,7 +819,7 @@ class PostMsgHost {
           selects: selects,
           setLocal: setLocal,
           fire: fire,
-          openExternal: _openExternal,
+          openExternal: _openElement,
         );
     final column = Column(
       mainAxisSize: MainAxisSize.min,
@@ -976,68 +979,56 @@ class PostMsgHost {
     );
   }
 
-  Future<void> _openExternal(String raw) async {
+  Future<void> _openElement(Map<String, dynamic> el) async {
+    final url = '${el['url'] ?? ''}'.trim();
+    if (url.isEmpty) return;
+    if (await _openExternal(url) || kIsWeb) return;
+    final fail = '${el['fail'] ?? ''}'.trim();
+    if (fail.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = navigatorKey.currentContext;
+      if (ctx == null) return;
+      ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(
+        SnackBar(content: Text(fail), duration: const Duration(seconds: 3)),
+      );
+    });
+  }
+
+  Future<bool> _openExternal(String raw) async {
     final s = raw.trim();
-    if (s.isEmpty) return;
-    if (Platform.isAndroid) {
+    if (s.isEmpty) return false;
+    if (!kIsWeb && Platform.isAndroid) {
       try {
         final ok = await const MethodChannel('kotv_android').invokeMethod<bool>('openView', {'url': s});
-        if (ok == true) return;
+        if (ok == true) return true;
       } catch (_) {}
     }
     final uri = Uri.tryParse(s.contains(':') ? s : 'package:$s');
-    if (uri == null || !uri.hasScheme) return;
-    if (Platform.isAndroid && (uri.scheme == 'package' || uri.scheme == 'intent')) {
-      _hintScanLogin();
-      return;
+    if (uri == null || !uri.hasScheme) return false;
+    if (!kIsWeb && Platform.isAndroid && (uri.scheme == 'package' || uri.scheme == 'intent')) return false;
+    if (kIsWeb) {
+      if (uri.scheme.toLowerCase() == 'javascript') return false;
+      try {
+        return await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (_) {
+        return false;
+      }
     }
     try {
       final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (ok) return;
+      if (ok) return true;
     } catch (_) {}
-    var opened = false;
     try {
       if (Platform.isMacOS) {
-        opened = (await Process.run('open', [s])).exitCode == 0;
+        return (await Process.run('open', [s])).exitCode == 0;
       } else if (Platform.isWindows) {
         // 勿用 `cmd /c start URL`：查询串里的 & 会被 cmd 当成命令分隔符截断。
-        opened = (await Process.run('rundll32', ['url.dll,FileProtocolHandler', s])).exitCode == 0;
+        return (await Process.run('rundll32', ['url.dll,FileProtocolHandler', s])).exitCode == 0;
       } else if (Platform.isLinux) {
-        opened = (await Process.run('xdg-open', [s])).exitCode == 0;
+        return (await Process.run('xdg-open', [s])).exitCode == 0;
       }
     } catch (_) {}
-    if (!opened && _clientLaunch(uri)) _hintScanLogin();
-  }
-
-  bool _clientLaunch(Uri uri) {
-    switch (uri.scheme.toLowerCase()) {
-      case 'intent':
-      case 'package':
-      case 'qkclouddrive':
-      case 'ucclouddrive':
-      case 'smartdrive':
-      case 'quark':
-      case 'ucbrowser':
-        return true;
-      case 'http':
-      case 'https':
-        final host = uri.host.toLowerCase();
-        return host == 'su.quark.cn' ||
-            host == 'su.uc.cn' ||
-            host == 'www.aliyundrive.com' ||
-            host == 'www.alipan.com' ||
-            host.endsWith('.aliyundrive.com');
-      default:
-        return false;
-    }
-  }
-
-  void _hintScanLogin() {
-    final ctx = navigatorKey.currentContext;
-    if (ctx == null) return;
-    ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(
-      const SnackBar(content: Text('未安装对应客户端，请改用扫码登录'), duration: Duration(seconds: 3)),
-    );
+    return false;
   }
 
 }

@@ -22,7 +22,7 @@ import java.util.function.Consumer;
  *
  * <p>Frozen host element types: text, image, input, checkbox, radio, select, button,
  * link, progress, slider, color, separator, spacer, space, row, column, group, html, switch.
- * A button or row {@code url} is opened by the system (http, app scheme, or {@code package:name}).
+ * A button or row {@code url} is opened by the system. If that open fails, the element's {@code fail} text is shown.
  * Bridge: {@link #show}/{@link #close} handshake only; scripts own documents and replies.
  */
 public final class UiBridge {
@@ -748,6 +748,10 @@ public final class UiBridge {
      */
     public static String hostPlatform(String kind) {
         return Util.hostPlatform(currentSession(kind));
+    }
+
+    public static String hostOs(String kind) {
+        return Util.hostOs(currentSession(kind));
     }
 
     public static boolean hostDesktop(String kind) {

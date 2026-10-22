@@ -224,7 +224,7 @@ List<Widget> kotvUiElements(
   required Map<String, String> selects,
   required void Function(VoidCallback) setLocal,
   required Future<void> Function(String action, {bool dismissAfter}) fire,
-  required Future<void> Function(String url) openExternal,
+  required Future<void> Function(Map<String, dynamic> el) openExternal,
 }) {
   final built = _raw(
     el,
@@ -263,7 +263,7 @@ List<Widget> kotvUiElements(
 Widget _tap(
   Map<String, dynamic> el,
   Future<void> Function(String action, {bool dismissAfter}) fire,
-  Future<void> Function(String url) openExternal,
+  Future<void> Function(Map<String, dynamic> el) openExternal,
   double uiScale,
   Widget child,
 ) {
@@ -278,7 +278,7 @@ Widget _tap(
     borderRadius: _boxRadius(el, uiScale),
     onPressed: () {
       unawaited(() async {
-        if (url.isNotEmpty) await openExternal(url);
+        if (url.isNotEmpty) await openExternal(el);
         if (id.isNotEmpty) await fire(id, dismissAfter: el['dismiss'] == true);
       }());
     },
@@ -358,7 +358,7 @@ List<Widget> _raw(
   required Map<String, String> selects,
   required void Function(VoidCallback) setLocal,
   required Future<void> Function(String action, {bool dismissAfter}) fire,
-  required Future<void> Function(String url) openExternal,
+  required Future<void> Function(Map<String, dynamic> el) openExternal,
 }) {
   final type = '${el['type'] ?? ''}'.toLowerCase().trim();
   final font = _fontOf(el, docFontSize) * uiScale;
@@ -626,7 +626,7 @@ List<Widget> _raw(
           });
           return;
         }
-        if (btnUrl.isNotEmpty) await openExternal(btnUrl);
+        if (btnUrl.isNotEmpty) await openExternal(el);
         await fire('${el['id'] ?? 'button'}', dismissAfter: el['dismiss'] == true);
       }
       final hint = '${el['hint'] ?? ''}'.trim();
@@ -701,7 +701,7 @@ List<Widget> _raw(
       return [
         KotvUiRemote(
           borderRadius: radius,
-          onPressed: () => unawaited(openExternal(linkUrl)),
+          onPressed: () => unawaited(openExternal(el)),
           child: _paint(
             el,
             _pressBox(
@@ -742,7 +742,7 @@ List<Widget> _raw(
           fontSize: font,
           scale: uiScale,
           onAction: (id) => unawaited(fire(id)),
-          onLink: (url) => unawaited(openExternal(url)),
+          onLink: (url) => unawaited(openExternal(<String, dynamic>{'url': url})),
           remote: KotvUiRemote.wrap,
         ),
       ];
@@ -786,7 +786,7 @@ Widget _flex(
   required Map<String, String> selects,
   required void Function(VoidCallback) setLocal,
   required Future<void> Function(String action, {bool dismissAfter}) fire,
-  required Future<void> Function(String url) openExternal,
+  required Future<void> Function(Map<String, dynamic> el) openExternal,
   required double font,
 }) {
   final horizontal = type == 'row';
