@@ -26,7 +26,9 @@ type Live struct {
 	// Pass 为 true 时分组名里的 `_密码` 只截掉不设密码（全部可见）。
 	Pass bool `json:"pass"`
 	// TimeZone IANA 时区名（如 Asia/Shanghai）；空则用本机时区。
-	TimeZone   string          `json:"timeZone"`
+	TimeZone string `json:"timeZone"`
+	// Timeout 起播超时（秒）。未配置时 15 秒；配置了则至少 1 秒。
+	Timeout    FlexInt         `json:"timeout"`
 	PlayerType FlexInt         `json:"playerType"`
 	Header     FlexHeader      `json:"header"`
 	Catchup    Catchup         `json:"catchup"`
@@ -50,6 +52,19 @@ func (l *Live) Location() *time.Location {
 	return loc
 }
 
+// PlayTimeout 起播超时。未写 timeout 时 15 秒；写了则至少 1 秒。
+func (l *Live) PlayTimeout() time.Duration {
+	const fallback = 15 * time.Second
+	if l == nil || !l.Timeout.Valid {
+		return fallback
+	}
+	sec := l.Timeout.Value
+	if sec < 1 {
+		sec = 1
+	}
+	return time.Duration(sec) * time.Second
+}
+
 // SplitGroupPass 解析分组名「显示名_密码」：按第一个 _ 切分，前段为显示名。
 // livePass=true 时不设密码；后段为空也不设密码。
 func SplitGroupPass(raw string, livePass bool) (name, pass string) {
@@ -67,6 +82,17 @@ func (l *Live) FindGroup(raw string) *LiveGroup {
 		if l.Groups[i].Name == name && l.Groups[i].Pass == pass {
 			return &l.Groups[i]
 		}
+	}
+	l.Groups = append(l.Groups, LiveGroup{Name: name, Pass: pass})
+	return &l.Groups[len(l.Groups)-1]
+}
+
+// AppendGroup 追加一组，不与已有同名组合并。分组名按「显示名_密码」切开；空名记为「直播」。
+func (l *Live) AppendGroup(raw string) *LiveGroup {
+	name, pass := SplitGroupPass(strings.TrimSpace(raw), l.Pass)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "直播"
 	}
 	l.Groups = append(l.Groups, LiveGroup{Name: name, Pass: pass})
 	return &l.Groups[len(l.Groups)-1]
@@ -174,13 +200,14 @@ func (c *LiveChannel) UnmarshalJSON(b []byte) error {
 	if len(r.Header) > 0 {
 		c.Header = map[string]string(r.Header)
 	}
-	c.Format = normalizeLiveFormat(r.Format)
+	c.Format = NormalizeManifest(r.Format)
 	c.Drm = r.Drm
 	c.Catchup = r.Catchup
 	return nil
 }
 
-func normalizeLiveFormat(f string) string {
+// NormalizeManifest 把 mpd/hls 等简写换成播放器识别的 MIME。
+func NormalizeManifest(f string) string {
 	f = strings.ToLower(strings.TrimSpace(f))
 	switch f {
 	case "mpd", "dash":
@@ -201,10 +228,10 @@ func (c *LiveChannel) CurrentURL() string {
 		idx = 0
 	}
 	raw := c.URLs[idx]
-	if i := indexByte(raw, '$'); i >= 0 {
-		return trimSpace(raw[:i])
+	if i := strings.IndexByte(raw, '$'); i >= 0 {
+		return strings.TrimSpace(raw[:i])
 	}
-	return trimSpace(raw)
+	return strings.TrimSpace(raw)
 }
 
 func (c *LiveChannel) HasMultipleLines() bool { return len(c.URLs) > 1 }
@@ -233,8 +260,8 @@ func (c *LiveChannel) LineLabel() string {
 		return ""
 	}
 	raw := c.URLs[c.URLIndex]
-	if i := indexByte(raw, '$'); i >= 0 && i+1 < len(raw) {
-		name := trimSpace(raw[i+1:])
+	if i := strings.IndexByte(raw, '$'); i >= 0 && i+1 < len(raw) {
+		name := strings.TrimSpace(raw[i+1:])
 		if name != "" {
 			return name
 		}
@@ -423,25 +450,6 @@ func CatchupDecide(item, fallback Catchup) Catchup {
 		return item
 	}
 	return fallback
-}
-
-func indexByte(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
-}
-
-func trimSpace(s string) string {
-	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') {
-		s = s[1:]
-	}
-	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
-		s = s[:len(s)-1]
-	}
-	return s
 }
 
 func containsBrace(s string) bool {

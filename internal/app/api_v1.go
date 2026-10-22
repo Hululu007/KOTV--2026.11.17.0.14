@@ -1825,10 +1825,11 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 		name = loaded.URL
 	}
 	out := map[string]any{
-		"ok":     true,
-		"name":   name,
-		"url":    loaded.URL,
-		"groups": groups,
+		"ok":      true,
+		"name":    name,
+		"url":     loaded.URL,
+		"timeout": int(loaded.PlayTimeout() / time.Second),
+		"groups":  groups,
 	}
 	a.liveLoadMu.Lock()
 	a.liveLoadCachedKey = cacheKey
@@ -1933,18 +1934,13 @@ func (a *App) APILiveUnlock(group int, password string) error {
 	if password == "" {
 		return fmt.Errorf("请输入密码")
 	}
-	if group >= 0 && group < len(cur.Groups) {
-		if cur.Groups[group].Pass == password {
-			return nil
-		}
-		return fmt.Errorf("分组密码不正确")
+	if group < 0 || group >= len(cur.Groups) {
+		return fmt.Errorf("分组无效")
 	}
-	for i := range cur.Groups {
-		if cur.Groups[i].Pass == password {
-			return nil
-		}
+	if cur.Groups[group].Pass == password {
+		return nil
 	}
-	return fmt.Errorf("未找到匹配的分组密码")
+	return fmt.Errorf("分组密码不正确")
 }
 
 func (a *App) APILiveEPG(group, channel int) (map[string]any, error) {

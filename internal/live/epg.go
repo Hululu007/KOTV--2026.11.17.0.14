@@ -180,8 +180,7 @@ func loadHTTPJSONEPG(ch *model.LiveChannel, src string) []Epg {
 		dayOut := make([]Epg, 0, 3)
 		for _, offset := range []int{-1, 0, 1} {
 			date := time.Now().In(zone).AddDate(0, 0, offset).Format("2006-01-02")
-			u := strings.ReplaceAll(base, "{date}", date)
-			text, err := util.HTTPGet(u, nil)
+			text, err := util.HTTPGet(base, nil)
 			if err != nil || text == "" {
 				continue
 			}
@@ -715,7 +714,7 @@ func xmlTVFmtToGo(f string) string {
 	var b strings.Builder
 	b.Grow(len(f) + 8)
 	for i := 0; i < len(f); {
- // 优先匹配长 token，避免 MM/mm、ss/SS 互相干扰。
+		// 优先匹配长 token，避免 MM/mm、ss/SS 互相干扰。
 		switch {
 		case strings.HasPrefix(f[i:], "yyyy"):
 			b.WriteString("2006")
@@ -736,7 +735,7 @@ func xmlTVFmtToGo(f string) string {
 			b.WriteString("04")
 			i += 2
 		case strings.HasPrefix(f[i:], "ss"), strings.HasPrefix(f[i:], "SS"):
- // ss=秒；SS 在正规 Java 图案是小数秒，但 IPTV playseek 几乎都当秒用。
+			// ss=秒；SS 在正规 Java 图案是小数秒，但 IPTV playseek 几乎都当秒用。
 			b.WriteString("05")
 			i += 2
 		case strings.HasPrefix(f[i:], "SSS"):
@@ -753,7 +752,7 @@ func xmlTVFmtToGo(f string) string {
 func appendCatchup(url, suffix, replace string) string {
 	output := url
 	if parts := strings.SplitN(replace, ",", 2); len(parts) == 2 {
- // 使用 String.replaceAll（正则）； 用字面替换。优先正则，失败再字面。
+		// 替换串按正则换；编译失败就按字面换一次。
 		if re, err := regexp.Compile(parts[0]); err == nil {
 			output = re.ReplaceAllString(output, parts[1])
 		} else {

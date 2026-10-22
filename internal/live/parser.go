@@ -36,101 +36,12 @@ func isM3U(text string) bool {
 	return m3uHeaderRe.MatchString(text)
 }
 
-// jsonChannel 直播 JSON 列表里的频道字段（与 Group/Channel 的序列化名一致）。
-type jsonChannel struct {
-	Name    string            `json:"name"`
-	Logo    string            `json:"logo"`
-	Number  model.FlexString  `json:"number"`
-	EPG     string            `json:"epg"`
-	UA      string            `json:"ua"`
-	Click   string            `json:"click"`
-	Format  string            `json:"format"`
-	Origin  string            `json:"origin"`
-	Referer string            `json:"referer"`
-	TvgID   string            `json:"tvgId"`
-	TvgName string            `json:"tvgName"`
-	Parse   model.FlexInt     `json:"parse"`
-	Header  model.FlexHeader  `json:"header"`
-	Catchup *model.Catchup    `json:"catchup"`
-	Drm     *model.Drm        `json:"drm"`
-	URL     []string          `json:"url"`
-	URLs    []string          `json:"urls"`
-}
-
-type jsonGroup struct {
-	Name    string        `json:"name"`
-	Pass    string        `json:"pass"`
-	Channel []jsonChannel `json:"channel"`
-}
-
 func parseJSON(live *model.Live, text string) {
-	var dtos []jsonGroup
-	if err := json.Unmarshal([]byte(text), &dtos); err != nil {
+	var groups []model.LiveGroup
+	if err := json.Unmarshal([]byte(text), &groups); err != nil {
 		return
 	}
-	for _, dto := range dtos {
-		g := live.FindGroup(dto.Name)
-		if g.Pass == "" && dto.Pass != "" {
-			g.Pass = dto.Pass
-		}
-		for _, ch := range dto.Channel {
-			c := g.FindChannel(ch.Name)
-			if ch.Logo != "" {
-				c.Logo = ch.Logo
-			}
-			if n := strings.TrimSpace(ch.Number.String()); n != "" {
-				c.Number = n
-			}
-			if ch.EPG != "" {
-				c.EPG = ch.EPG
-			}
-			if ch.UA != "" {
-				c.UA = ch.UA
-			}
-			if ch.Click != "" {
-				c.Click = ch.Click
-			}
-			if ch.Format != "" {
-				c.Format = normalizeManifest(ch.Format)
-			}
-			if ch.Origin != "" {
-				c.Origin = ch.Origin
-			}
-			if ch.Referer != "" {
-				c.Referer = ch.Referer
-			}
-			if ch.TvgID != "" {
-				c.TvgID = ch.TvgID
-			}
-			if ch.TvgName != "" {
-				c.TvgName = ch.TvgName
-			}
-			if ch.Parse.Valid {
-				c.Parse = ch.Parse.Value
-			}
-			if len(ch.Header) > 0 {
-				if c.Header == nil {
-					c.Header = make(map[string]string, len(ch.Header))
-				}
-				for k, v := range ch.Header {
-					c.Header[k] = v
-				}
-			}
-			if ch.Catchup != nil && !ch.Catchup.IsEmpty() {
-				cp := *ch.Catchup
-				c.Catchup = &cp
-			}
-			if ch.Drm != nil && ch.Drm.Key != "" {
-				d := *ch.Drm
-				c.Drm = &d
-			}
-			urls := ch.URL
-			if len(urls) == 0 {
-				urls = ch.URLs
-			}
-			c.URLs = append(c.URLs, urls...)
-		}
-	}
+	live.Groups = append(live.Groups, groups...)
 }
 
 func parseM3U(live *model.Live, text string) {
@@ -168,9 +79,9 @@ func parseM3U(live *model.Live, text string) {
 			}
 			live.Catchup = model.CatchupDecide(readCatchup(line, model.Catchup{}), globalCatchup)
 		case strings.HasPrefix(line, "#EXTINF:"):
-			group := "默认"
-			if m := attrRe("group-title").FindStringSubmatch(line); len(m) > 1 {
-				group = m[1]
+			group := "直播"
+			if m := attrRe("group-title").FindStringSubmatch(line); len(m) > 1 && strings.TrimSpace(m[1]) != "" {
+				group = strings.TrimSpace(m[1])
 			}
 			name := line
 			if i := strings.LastIndex(line, ","); i >= 0 {
@@ -201,7 +112,7 @@ func parseM3U(live *model.Live, text string) {
 			channel := currentChannel
 			if channel == nil {
 				if currentGroup == nil {
-					currentGroup = live.FindGroup("默认")
+					currentGroup = live.FindGroup("直播")
 				}
 				channel = currentGroup.FindChannel("未命名")
 				currentChannel = channel
@@ -242,13 +153,13 @@ func parseTXT(live *model.Live, text string) {
 		if strings.Contains(line, "#genre#") {
 			setting.clear()
 			name := strings.TrimSpace(strings.SplitN(line, ",", 2)[0])
-			currentGroup = live.FindGroup(name)
+			currentGroup = live.AppendGroup(name)
 			continue
 		}
 		split := strings.SplitN(line, ",", 2)
 		if len(split) == 2 && strings.Contains(split[1], "://") {
 			if currentGroup == nil {
-				currentGroup = live.FindGroup("默认")
+				currentGroup = live.AppendGroup("")
 			}
 			channel := currentGroup.FindChannel(strings.TrimSpace(split[0]))
 			for _, urlPart := range strings.Split(split[1], "#") {
@@ -364,7 +275,7 @@ func (s *lineSetting) apply(line string) {
 			s.parseSet = true
 		}
 	case strings.HasPrefix(lower, "format="):
-		s.format = normalizeManifest(strings.TrimSpace(line[len("format="):]))
+		s.format = model.NormalizeManifest(strings.TrimSpace(line[len("format="):]))
 	case strings.HasPrefix(lower, "forcekey="):
 		s.forceKey = strings.EqualFold(strings.TrimSpace(line[len("forceKey="):]), "true")
 	case strings.HasPrefix(line, "#EXTVLCOPT:http-user-agent="):
@@ -406,7 +317,7 @@ func (s *lineSetting) applyKodiProp(line string) {
 			s.setDrmKey(strings.TrimSpace(parts[1]))
 		}
 	case strings.Contains(lower, "manifest_type="):
-		s.format = normalizeManifest(strings.TrimSpace(afterEq(body, "manifest_type=")))
+		s.format = model.NormalizeManifest(strings.TrimSpace(afterEq(body, "manifest_type=")))
 	case strings.Contains(lower, "stream_headers=") || strings.Contains(lower, "common_headers="):
 		raw := body
 		if i := strings.Index(lower, "headers="); i >= 0 {
@@ -538,16 +449,4 @@ func afterEq(s, key string) string {
 		return ""
 	}
 	return s[i+len(key):]
-}
-
-func normalizeManifest(f string) string {
-	f = strings.ToLower(strings.TrimSpace(f))
-	switch f {
-	case "mpd", "dash":
-		return "application/dash+xml"
-	case "hls", "m3u8":
-		return "application/x-mpegURL"
-	default:
-		return f
-	}
 }

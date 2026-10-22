@@ -1,7 +1,9 @@
 package live
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/bobo/KOTV/internal/model"
 )
@@ -141,5 +143,74 @@ func TestParseJSON_ParseZero(t *testing.T) {
 	Parse(live, text)
 	if live.Groups[0].Channels[0].Parse != 0 {
 		t.Fatalf("Parse=%d", live.Groups[0].Channels[0].Parse)
+	}
+}
+
+func TestParseJSON_GroupNameKeepsUnderscoreAndDoesNotMerge(t *testing.T) {
+	live := &model.Live{}
+	text := `[{"name":"CCTV_HD","channel":[{"name":"A","urls":["http://a"]}]},{"name":"CCTV_HD","pass":"p","channel":[{"name":"B","urls":["http://b"]}]}]`
+	Parse(live, text)
+	if len(live.Groups) != 2 {
+		t.Fatalf("groups=%d", len(live.Groups))
+	}
+	if live.Groups[0].Name != "CCTV_HD" || live.Groups[0].Pass != "" {
+		t.Fatalf("g0=%+v", live.Groups[0])
+	}
+	if live.Groups[1].Name != "CCTV_HD" || live.Groups[1].Pass != "p" {
+		t.Fatalf("g1=%+v", live.Groups[1])
+	}
+	if live.Groups[0].Channels[0].Name != "A" || live.Groups[1].Channels[0].Name != "B" {
+		t.Fatalf("channels=%s %s", live.Groups[0].Channels[0].Name, live.Groups[1].Channels[0].Name)
+	}
+}
+
+func TestParseTXT_RepeatedGenreStartsNewGroup(t *testing.T) {
+	live := &model.Live{}
+	Parse(live, "央视,#genre#\nA,http://a\n央视,#genre#\nB,http://b\n")
+	if len(live.Groups) != 2 {
+		t.Fatalf("groups=%d", len(live.Groups))
+	}
+	if live.Groups[0].Name != "央视" || live.Groups[1].Name != "央视" {
+		t.Fatalf("names=%q %q", live.Groups[0].Name, live.Groups[1].Name)
+	}
+	if live.Groups[0].Channels[0].Number != "001" || live.Groups[1].Channels[0].Number != "002" {
+		t.Fatalf("numbers=%q %q", live.Groups[0].Channels[0].Number, live.Groups[1].Channels[0].Number)
+	}
+}
+
+func TestParse_EmptyGroupNameIsZhibo(t *testing.T) {
+	txt := &model.Live{}
+	Parse(txt, "CCTV1,http://x/1.m3u8\n")
+	if len(txt.Groups) != 1 || txt.Groups[0].Name != "直播" {
+		t.Fatalf("txt group=%+v", txt.Groups)
+	}
+	m3u := &model.Live{}
+	Parse(m3u, "#EXTM3U\n#EXTINF:-1,C\nhttp://x\n")
+	if len(m3u.Groups) != 1 || m3u.Groups[0].Name != "直播" {
+		t.Fatalf("m3u group=%+v", m3u.Groups)
+	}
+	blank := &model.Live{}
+	Parse(blank, "#EXTM3U\n#EXTINF:-1 group-title=\"\",C\nhttp://x\n")
+	if len(blank.Groups) != 1 || blank.Groups[0].Name != "直播" {
+		t.Fatalf("blank title=%+v", blank.Groups)
+	}
+}
+
+func TestLivePlayTimeout(t *testing.T) {
+	if got := (&model.Live{}).PlayTimeout(); got != 15*time.Second {
+		t.Fatalf("default=%s", got)
+	}
+	var live model.Live
+	if err := json.Unmarshal([]byte(`{"timeout":0}`), &live); err != nil {
+		t.Fatal(err)
+	}
+	if got := live.PlayTimeout(); got != time.Second {
+		t.Fatalf("floor=%s", got)
+	}
+	if err := json.Unmarshal([]byte(`{"timeout":8}`), &live); err != nil {
+		t.Fatal(err)
+	}
+	if got := live.PlayTimeout(); got != 8*time.Second {
+		t.Fatalf("set=%s", got)
 	}
 }

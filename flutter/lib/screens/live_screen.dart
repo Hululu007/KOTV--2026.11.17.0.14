@@ -336,6 +336,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   String _prefPlayerFailover = 'auto';
   /// 播失败自动切下一线路（默认开）。
   bool _liveAutoChange = true;
+  /// 起播超时（秒）。源未写时 15。
+  int _livePlayTimeoutSec = 15;
   bool _liveAcross = true;
   bool _liveInvert = false;
   String _liveScale = 'default';
@@ -889,6 +891,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   bool get _hasInjectedFavGroup =>
       _groups.isNotEmpty && _groups.first['_kotvFav'] == true;
 
+  /// 界面分组下标 → 引擎分组下标。注入的收藏组没有引擎下标。
+  int? _engineGroupIndex(int uiGroup) {
+    if (uiGroup < 0 || uiGroup >= _groups.length) return null;
+    if (_groups[uiGroup]['_kotvFav'] == true) return null;
+    final eng = _hasInjectedFavGroup ? uiGroup - 1 : uiGroup;
+    if (eng < 0) return null;
+    return eng;
+  }
+
   /// UI 分组/频道 → 引擎真实下标（收藏组映射回源内位置）。
   ({int group, int channel})? _engineChannelRef(int uiGroup, int uiChannel) {
     if (uiGroup < 0 || uiGroup >= _groups.length) return null;
@@ -896,8 +907,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final chs = ((g['channels'] as List?) ?? []).whereType<Map>().toList();
     if (uiChannel < 0 || uiChannel >= chs.length) return null;
     if (g['_kotvFav'] != true) {
-      final engGroup = _hasInjectedFavGroup ? uiGroup - 1 : uiGroup;
-      if (engGroup < 0) return null;
+      final engGroup = _engineGroupIndex(uiGroup);
+      if (engGroup == null) return null;
       return (group: engGroup, channel: uiChannel);
     }
     final ch = chs[uiChannel];
@@ -915,8 +926,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final list = ((_groups[i]['channels'] as List?) ?? []).whereType<Map>().toList();
       for (var j = 0; j < list.length; j++) {
         if ('${list[j]['name'] ?? ''}'.trim() == name) {
-          final engGroup = _hasInjectedFavGroup ? i - 1 : i;
-          if (engGroup < 0) continue;
+          final engGroup = _engineGroupIndex(i);
+          if (engGroup == null) continue;
           return (group: engGroup, channel: j);
         }
       }
@@ -1069,6 +1080,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     );
   }
 
+  void _rememberLiveTimeout(Map<String, dynamic> data) {
+    final n = int.tryParse('${data['timeout'] ?? ''}');
+    _livePlayTimeoutSec = (n == null || n < 1) ? 15 : n;
+  }
+
   List<Map<String, dynamic>> _parseLiveGroups(Map<String, dynamic> data) {
     return ((data['groups'] as List?) ?? []).whereType<Map>().map((e) {
       final g = Map<String, dynamic>.from(e);
@@ -1112,6 +1128,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (!mounted) return;
       final groups = _parseLiveGroups(data);
       final title = '${data['name'] ?? '直播'}';
+      _rememberLiveTimeout(data);
       await _loadFavNames();
       _applyLoadedGroups(groups, title: title);
       _applyFavoriteGroup();
@@ -1242,7 +1259,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       return false;
     }
     try {
-      await ref.read(apiProvider).liveUnlock(group: groupIdx, password: ctrl.text.trim());
+      final eng = _engineGroupIndex(groupIdx);
+      if (eng == null) {
+        ctrl.dispose();
+        return false;
+      }
+      await ref.read(apiProvider).liveUnlock(group: eng, password: ctrl.text.trim());
       setState(() => _unlocked.add(groupIdx));
       ctrl.dispose();
       return true;
@@ -1705,40 +1727,63 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }) async {
     bool stale() => !mounted || serial != _playSerial;
     try {
-      await pb.awaitReadyAfterOpen();
+      await pb.awaitReadyAfterOpen().timeout(Duration(seconds: _livePlayTimeoutSec));
+    } on TimeoutException {
+      if (stale() || _liveHasPicture(pb)) return;
+      await _onLiveNotReady(serial);
     } on KotvSilentVideoException {
-      if (stale() || !failover.enabled) return;
-      final step = failover.nextStep();
-      if (step == null) return;
-      try {
-        await pb.release();
-      } catch (_) {
-        try {
-          await pb.stop();
-        } catch (_) {}
-      }
       if (stale()) return;
-      setState(() {
-        _playerVal = step.playerVal;
-        _decodeMode = step.decodeMode;
-        _prefPlayerVal = step.playerVal;
-        _prefDecodeMode = step.decodeMode;
-        _status = step.status;
-      });
-      try {
-        await _openLiveUrl(
-          url,
-          serial: serial,
-          directUrl: directUrl,
-          headers: headers,
-          drm: drm,
-          format: format,
-          live: live,
-          startAt: startAt,
-          externalSubs: externalSubs,
-        );
-      } catch (_) {}
+      if (failover.enabled) {
+        final step = failover.nextStep();
+        if (step != null) {
+          try {
+            await pb.release();
+          } catch (_) {
+            try {
+              await pb.stop();
+            } catch (_) {}
+          }
+          if (stale()) return;
+          setState(() {
+            _playerVal = step.playerVal;
+            _decodeMode = step.decodeMode;
+            _prefPlayerVal = step.playerVal;
+            _prefDecodeMode = step.decodeMode;
+            _status = step.status;
+          });
+          try {
+            await _openLiveUrl(
+              url,
+              serial: serial,
+              directUrl: directUrl,
+              headers: headers,
+              drm: drm,
+              format: format,
+              live: live,
+              startAt: startAt,
+              externalSubs: externalSubs,
+            );
+          } catch (_) {}
+          return;
+        }
+      }
+      await _onLiveNotReady(serial);
     } catch (_) {}
+  }
+
+  bool _liveHasPicture(KotvPlayback pb) =>
+      (pb.width > 0 && pb.height > 0) || pb.isAudioOnlyContent;
+
+  /// 限时内没有出画：换线开着且还有下一条就切，否则标播放超时。
+  Future<void> _onLiveNotReady(int serial) async {
+    if (!mounted || serial != _playSerial) return;
+    if (_liveAutoChange && _lines > 1 && _line >= 0 && _line < _lines - 1) {
+      await _tryFailSwitchOnPlaybackError();
+      return;
+    }
+    if (mounted && serial == _playSerial) {
+      setState(() => _status = '播放超时');
+    }
   }
 
   /// 起播途中已作废：实例仍归本页（换台）交给新一次起播；

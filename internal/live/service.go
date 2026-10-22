@@ -188,7 +188,7 @@ func (s *Service) Load(live model.Live, force ...bool) (*model.Live, error) {
 	return &live, nil
 }
 
-// mergeConfigLives 用直播配置里的 lives 替换「自定义 / 同源」条目并置顶。
+// mergeConfigLives 用直播配置里的 lives 替换同源条目并置顶。
 func (s *Service) mergeConfigLives(lives []model.Live, configURL string) {
 	configURL = strings.TrimSpace(configURL)
 	s.mu.Lock()
@@ -197,9 +197,6 @@ func (s *Service) mergeConfigLives(lives []model.Live, configURL string) {
 	for _, src := range s.sources {
 		u := strings.TrimSpace(src.URL)
 		if configURL != "" && u == configURL {
-			continue
-		}
-		if src.Name == "自定义" && u == configURL {
 			continue
 		}
 		kept = append(kept, src)
