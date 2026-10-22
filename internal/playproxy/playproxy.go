@@ -722,6 +722,7 @@ func canRawSplice(raw string) bool {
 	return NeedsLocalRelay(raw)
 }
 
+// clientSpliceUA 登记里已有 UA 时返回空，调用方改用登记值。
 func clientSpliceUA(r *http.Request, headers map[string]string) string {
 	if r == nil {
 		return ""
@@ -1085,7 +1086,7 @@ func applyUpstreamHeaders(req *http.Request, headers map[string]string) {
 	}
 }
 
-// skipUpstreamHeader 这些头由播放器这次请求决定，不用登记值盖掉。
+// skipUpstreamHeader 这些头单独写。Host 用上游地址，UA、Range、If-Range 在后面按登记和这次请求补。
 func skipUpstreamHeader(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "host", "content-length", "content-type", "connection", "transfer-encoding", "accept-encoding", "range", "if-range", "user-agent":
@@ -1095,8 +1096,9 @@ func skipUpstreamHeader(name string) bool {
 	}
 }
 
-// applyPlaybackHeaders 把播放器这次请求里的 Range、UA、If-Range、Accept-Encoding、Connection 写到上游。
-// 播放器没带的就不写。登记头只在播放器没带 UA / Range / If-Range 时补上。
+// applyPlaybackHeaders 把这次播放请求补到上游。
+// 登记里有 UA 就用登记的；没有才用播放器这次的，再没有且目标不是回环时用设置里的播放 UA。
+// Range、If-Range 这次请求有就用这次的，没有再用登记的。Accept-Encoding 只在播放器带了时写上。
 func applyPlaybackHeaders(req *http.Request, r *http.Request, registered map[string]string, rangeHdr string) {
 	if rangeHdr == "" {
 		rangeHdr = headerValue(registered, "range")
