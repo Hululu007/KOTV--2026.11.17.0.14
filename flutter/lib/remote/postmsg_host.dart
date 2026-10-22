@@ -987,21 +987,57 @@ class PostMsgHost {
     }
     final uri = Uri.tryParse(s.contains(':') ? s : 'package:$s');
     if (uri == null || !uri.hasScheme) return;
-    if (Platform.isAndroid && (uri.scheme == 'package' || uri.scheme == 'intent')) return;
+    if (Platform.isAndroid && (uri.scheme == 'package' || uri.scheme == 'intent')) {
+      _hintScanLogin();
+      return;
+    }
     try {
       final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (ok) return;
     } catch (_) {}
+    var opened = false;
     try {
       if (Platform.isMacOS) {
-        await Process.run('open', [s]);
+        opened = (await Process.run('open', [s])).exitCode == 0;
       } else if (Platform.isWindows) {
         // 勿用 `cmd /c start URL`：查询串里的 & 会被 cmd 当成命令分隔符截断。
-        await Process.run('rundll32', ['url.dll,FileProtocolHandler', s]);
+        opened = (await Process.run('rundll32', ['url.dll,FileProtocolHandler', s])).exitCode == 0;
       } else if (Platform.isLinux) {
-        await Process.run('xdg-open', [s]);
+        opened = (await Process.run('xdg-open', [s])).exitCode == 0;
       }
     } catch (_) {}
+    if (!opened && _clientLaunch(uri)) _hintScanLogin();
+  }
+
+  bool _clientLaunch(Uri uri) {
+    switch (uri.scheme.toLowerCase()) {
+      case 'intent':
+      case 'package':
+      case 'qkclouddrive':
+      case 'ucclouddrive':
+      case 'smartdrive':
+      case 'quark':
+      case 'ucbrowser':
+        return true;
+      case 'http':
+      case 'https':
+        final host = uri.host.toLowerCase();
+        return host == 'su.quark.cn' ||
+            host == 'su.uc.cn' ||
+            host == 'www.aliyundrive.com' ||
+            host == 'www.alipan.com' ||
+            host.endsWith('.aliyundrive.com');
+      default:
+        return false;
+    }
+  }
+
+  void _hintScanLogin() {
+    final ctx = navigatorKey.currentContext;
+    if (ctx == null) return;
+    ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(
+      const SnackBar(content: Text('未安装对应客户端，请改用扫码登录'), duration: Duration(seconds: 3)),
+    );
   }
 
 }

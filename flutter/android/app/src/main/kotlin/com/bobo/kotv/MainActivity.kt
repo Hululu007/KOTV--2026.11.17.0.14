@@ -582,27 +582,56 @@ class MainActivity : FlutterActivity() {
     val target = raw?.trim().orEmpty()
     if (target.isEmpty()) return false
     return try {
-      val intent = when {
+      when {
         target.startsWith("package:") -> {
           val pkg = target.removePrefix("package:").substringBefore('/').substringBefore('?')
-          packageManager.getLaunchIntentForPackage(pkg) ?: return false
+          val intent = packageManager.getLaunchIntentForPackage(pkg) ?: return false
+          startActivity(intent)
+          true
         }
-        target.startsWith("intent:") || target.contains("#Intent") ->
-          Intent.parseUri(target, Intent.URI_INTENT_SCHEME)
+        target.startsWith("intent:") || target.contains("#Intent") -> openIntentView(target)
         else -> {
           val parsed = Uri.parse(target)
-          if (parsed.scheme.isNullOrEmpty() && target.contains('.')) {
+          val intent = if (parsed.scheme.isNullOrEmpty() && target.contains('.')) {
             packageManager.getLaunchIntentForPackage(target) ?: return false
           } else {
             Intent(Intent.ACTION_VIEW, parsed)
           }
+          startActivity(intent)
+          true
         }
       }
-      startActivity(intent)
-      true
     } catch (_: Throwable) {
       false
     }
+  }
+
+  private fun openIntentView(target: String): Boolean {
+    val parsed = Intent.parseUri(target, Intent.URI_INTENT_SCHEME)
+    val more = parsed.getStringExtra("kotv_packages").orEmpty()
+    parsed.removeExtra("kotv_packages")
+    if (parsed.component != null) {
+      startActivity(parsed)
+      return true
+    }
+    val packages = LinkedHashSet<String>()
+    parsed.`package`?.trim()?.takeIf { it.isNotEmpty() }?.let { packages.add(it) }
+    more.split(',').forEach { part ->
+      val pkg = part.trim()
+      if (pkg.isNotEmpty()) packages.add(pkg)
+    }
+    if (packages.isEmpty()) {
+      startActivity(parsed)
+      return true
+    }
+    for (pkg in packages) {
+      try {
+        startActivity(Intent(parsed).setPackage(pkg))
+        return true
+      } catch (_: Throwable) {
+      }
+    }
+    return false
   }
 
   private fun openExternalPlayer(call: MethodCall, result: MethodChannel.Result) {
