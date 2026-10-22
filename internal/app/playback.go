@@ -11,9 +11,9 @@ import (
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
-	"github.com/bobo/KOTV/internal/m3u8"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/playproxy"
+	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/thunder"
 )
 
@@ -50,84 +50,96 @@ func IsLocalMediaURL(u string) bool {
 // IsEphemeralPlayURL 是否为进程内临时代理地址（不应写入历史或跨会话复用）。
 func IsEphemeralPlayURL(u string) bool {
 	u = strings.ToLower(strings.TrimSpace(u))
-	return strings.Contains(u, "/proxy/cached_m3u8") ||
+	return strings.Contains(u, "/proxy/play?") ||
+		strings.Contains(u, "/proxy/cached_m3u8") ||
 		strings.Contains(u, "/proxy/rolling_m3u8") ||
-		strings.Contains(u, "/proxy/play?") ||
 		strings.Contains(u, "/proxy/hls/") ||
 		strings.Contains(u, "/proxy/bt/")
 }
 
-// PreparePlaybackURL 将媒体直链转为当前会话可播地址（m3u8 过滤缓存 + header 代理）。
+// PreparePlaybackURL 将媒体地址转成当前会话可播的地址。
 func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
-	play, _ := a.PreparePlayback(raw, headers)
+	play, _, _ := a.PreparePlayback(raw, headers)
 	return play
 }
 
-// PreparePlayback 的第二个返回值是能自己带请求头的播放器要打开的站点地址。
-// 为空时，这类播放器也打开第一个返回值。
-func (a *App) PreparePlayback(raw string, headers map[string]string) (string, string) {
-	return a.preparePlayback(raw, headers, true)
+// PreparePlayback 返回透传地址、播放器能自己打开的原地址，以及请求头。
+// 去广告打开且是 m3u8 时，只给 /proxy/play，过滤发生在这条透传里。
+// 其它时候原地址留给带得了请求头的播放器；带不了的用 /proxy/play。
+func (a *App) PreparePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
+	return a.preparePlayback(raw, headers, true, false)
 }
 
-// PreparePlaybackListed 直播列表批量用：只做代理/公网化，不拉每路 m3u8。
-// 广告过滤在 livePlay / 点播起播时再 Resolve；列表里上百路绝对不能串行抓。
-func (a *App) PreparePlaybackListed(raw string, headers map[string]string) (string, string) {
-	return a.preparePlayback(raw, headers, false)
+// PrepareLivePlayback 直播开播、回看。源上有请求头，或去广告要过滤节目单时，只给 /proxy/play。
+func (a *App) PrepareLivePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
+	return a.preparePlayback(raw, headers, true, true)
 }
 
-func (a *App) preparePlayback(raw string, headers map[string]string, resolveM3U8 bool) (string, string) {
+// PreparePlaybackListed 直播列表批量用。须透传的线路返回空串，由开播接口再登记，列表本身不拉流。
+func (a *App) PreparePlaybackListed(raw string, headers map[string]string) (string, string, map[string]string) {
+	return a.preparePlayback(raw, headers, false, false)
+}
+
+func (a *App) preparePlayback(raw string, headers map[string]string, allowAd, forceHeaderProxy bool) (string, string, map[string]string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || IsEphemeralPlayURL(raw) {
-		return raw, ""
+		return raw, "", headers
 	}
 	if IsLocalMediaURL(raw) {
-		return exposeLocalFile(raw), ""
+		return exposeLocalFile(raw), "", headers
 	}
-	// convert：proxy:// → http://127.0.0.1/proxy?...
 	raw = localproxy.ConvertScheme(raw)
-	// 远端才把网盘类 url+header 展开成 CDN→/proxy/play；本机保持 /proxy→jar。
 	if playproxy.ShouldExpandSpiderMediaProxy() {
 		if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(raw, headers); ok {
 			raw = media
 			headers = hdrs
 		}
 	}
-	port := localproxy.DefaultPort
-	if a != nil && a.Server != nil {
-		if p := a.Server.Port(); p > 0 {
-			port = p
-		}
-	}
-	playURL := raw
 	direct := ""
-	if !thunder.Match(playURL) {
-		// do=js|py 仍是脚本代理，只改写对外可达根。
-		if localproxy.IsSpiderProxyURL(playURL) {
-			return playproxy.PublicizeURL(playURL, headers), ""
+	if !thunder.Match(raw) {
+		if localproxy.IsSpiderProxyURL(raw) {
+			return playproxy.PublicizeURL(raw, headers), "", headers
 		}
-		if resolveM3U8 {
-			if resolved, src, err := m3u8.ResolveForPlayback(playURL, headers, port); err == nil && resolved != "" {
-				if src != "" && src != resolved {
-					direct = src
-				}
-				playURL = resolved
+		if !allowAd && liveListNeedsPlay(raw, headers) {
+			return "", "", headers
+		}
+		ad, headed := proxyCause(raw, headers)
+		if allowAd && (ad || headed) {
+			before := raw
+			raw = playproxy.RegisterAlways(raw, headers)
+			if !ad && !(forceHeaderProxy && headed) {
+				direct = directPlayable(before)
 			}
 		}
-		before := playURL
-		playURL = playproxy.Register(playURL, headers)
-		if direct == "" && playURL != before {
-			direct = before
-		}
 	}
-	return playproxy.PublicizeURL(playURL, headers), headerCapableDirect(direct)
+	return playproxy.PublicizeURL(raw, headers), direct, headers
 }
 
-// headerCapableDirect 留下播放器自己能请求的 http(s)。回环、本机代拉地址留空。
-func headerCapableDirect(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || playproxy.NeedsLocalRelay(raw) {
-		return ""
+// proxyCause 是否要走透传：去广告且地址里有节目单，或调用方带了请求头。
+func proxyCause(raw string, headers map[string]string) (ad, headed bool) {
+	headed = hasPlaybackHeaders(headers)
+	ad = settings.IsAdFilterEnabled() && strings.Contains(strings.ToLower(raw), "m3u8")
+	return ad, headed
+}
+
+// liveListNeedsPlay 列表不能下发可直开地址，客户端见到空串再请求开播。
+func liveListNeedsPlay(raw string, headers map[string]string) bool {
+	ad, headed := proxyCause(raw, headers)
+	return ad || headed
+}
+
+func hasPlaybackHeaders(headers map[string]string) bool {
+	for k, v := range headers {
+		if strings.TrimSpace(k) != "" && strings.TrimSpace(v) != "" {
+			return true
+		}
 	}
+	return false
+}
+
+// directPlayable 播放器自己打得开的 http(s)。回环和本机代理留空。
+func directPlayable(raw string) string {
+	raw = strings.TrimSpace(raw)
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return ""
@@ -138,7 +150,7 @@ func headerCapableDirect(raw string) string {
 		return ""
 	}
 	host := strings.ToLower(u.Hostname())
-	if host == "localhost" || host == "::1" {
+	if host == "localhost" || host == "::1" || host == "127.0.0.1" {
 		return ""
 	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
@@ -190,7 +202,7 @@ func (a *App) PlayHistory(h database.History) error {
 		return fmt.Errorf("历史地址已过期")
 	}
 	url := a.PreparePlaybackURL(h.EpisodeURL, nil)
-	if url == "" || IsEphemeralPlayURL(url) {
+	if url == "" {
 		return fmt.Errorf("无法准备播放地址")
 	}
 	return PlayURLWithHistory(url, h.Key)

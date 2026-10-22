@@ -13,7 +13,19 @@ import (
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/playproxy"
+	"github.com/bobo/KOTV/internal/settings"
 )
+
+func withAdFilter(t *testing.T, on bool) {
+	t.Helper()
+	prev := settings.Get(settings.AdFilter)
+	v := "false"
+	if on {
+		v = "true"
+	}
+	settings.Set(settings.AdFilter, v)
+	t.Cleanup(func() { settings.Set(settings.AdFilter, prev) })
+}
 
 func TestHandleKeepsCookieAcrossRedirect(t *testing.T) {
 	t.Parallel()
@@ -300,6 +312,7 @@ func TestHandleLeavesCDNPlaylistBytes(t *testing.T) {
 }
 
 func TestHandleRewritesPlaylistWithoutM3U8InURL(t *testing.T) {
+	withAdFilter(t, false)
 	done := hostclient.EnterSession("playlist-rewrite", "", false)
 	defer done()
 	hostclient.SetPublicBase("http://192.168.1.8:9978")
@@ -321,37 +334,19 @@ func TestHandleRewritesPlaylistWithoutM3U8InURL(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", res.StatusCode, text)
 	}
-	if strings.Contains(text, "127.0.0.1") || strings.Contains(text, srv.URL) {
-		t.Fatalf("segment stayed on origin: %s", text)
-	}
-	if !strings.Contains(text, "http://192.168.1.8:9978/proxy/play?id=") {
-		t.Fatalf("body=%s", text)
-	}
-	lines := strings.Split(text, "\n")
-	var media string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		media = line
-		break
-	}
-	upstream, headers := playproxy.Resolve(media)
-	if upstream != srv.URL+"/seg.ts" {
-		t.Fatalf("segment upstream=%q", upstream)
-	}
-	if headers["Cookie"] != "qk=1" {
-		t.Fatalf("segment headers=%v", headers)
-	}
-	if !strings.Contains(text, `URI="http://192.168.1.8:9978/proxy/play?id=`) {
-		t.Fatalf("key uri not rewritten: %s", text)
+	const want = "#EXTM3U\n#EXTINF:1,\nseg.ts\n#EXT-X-KEY:METHOD=AES-128,URI=\"key\"\n"
+	if text != want {
+		t.Fatalf("playlist should pass through, got %q", text)
 	}
 }
 
 func TestHandleAbsolutizesRedirectedPlaylist(t *testing.T) {
+	withAdFilter(t, true)
+	var gotCookie string
 	dst := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCookie = r.Header.Get("Cookie")
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		w.Header().Set("X-Upstream", "1")
 		_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:1,\n/seg.ts\n"))
 	}))
 	defer dst.Close()
@@ -360,7 +355,7 @@ func TestHandleAbsolutizesRedirectedPlaylist(t *testing.T) {
 	}))
 	defer src.Close()
 
-	proxyURL := playproxy.Register(src.URL+"/entry", map[string]string{"Cookie": "qk=1"})
+	proxyURL := playproxy.Register(src.URL+"/entry", map[string]string{"Cookie": "qk=1", "User-Agent": "Quark"})
 	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
 	rr := httptest.NewRecorder()
 	playproxy.Handle(rr, req)
@@ -371,23 +366,13 @@ func TestHandleAbsolutizesRedirectedPlaylist(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", res.StatusCode, text)
 	}
-	if strings.Contains(text, "/seg.ts") || strings.Contains(text, src.URL) {
-		t.Fatalf("relative segment was not rewritten: %s", text)
+	if gotCookie != "qk=1" {
+		t.Fatalf("cookie=%q", gotCookie)
 	}
-	var media string
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		media = line
-		break
+	if !strings.Contains(text, dst.URL+"/seg.ts") {
+		t.Fatalf("body=%s", text)
 	}
-	upstream, headers := playproxy.Resolve(media)
-	if upstream != dst.URL+"/seg.ts" {
-		t.Fatalf("segment upstream=%q", upstream)
-	}
-	if headers["Cookie"] != "qk=1" {
-		t.Fatalf("segment headers=%v", headers)
+	if res.Header.Get("X-Upstream") != "1" {
+		t.Fatalf("upstream header=%q", res.Header.Get("X-Upstream"))
 	}
 }

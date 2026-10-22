@@ -763,7 +763,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		playURL = exposeLocalFile(playURL)
 		mediaURL = playURL
 	} else if !thunder.IsLocalStream(playURL) {
-		playURL, directURL = a.PreparePlayback(playURL, headers)
+		playURL, directURL, headers = a.PreparePlayback(playURL, headers)
 		mediaURL = playURL
 	}
 	isMagnetPlay := magnet || thunder.IsLocalStream(playURL)
@@ -1774,13 +1774,12 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 				ch.URLIndex = i
 				u, h := live.ResolvePlayURL(ch)
 				lineHeaders = append(lineHeaders, h)
-				// 须引擎二次解析的线路不下发直链：客户端见空串则走 livePlay。
+				// 二次解析，或要透传的线路，下发空串。客户端只看空不空，再走 livePlay。
 				if live.NeedsEnginePlay(ch, u) {
 					playURLs = append(playURLs, "")
 					directURLs = append(directURLs, "")
 				} else {
-					// 列表勿 Resolve 每路 m3u8（默认广告过滤会对含 m3u8 的 URL 逐条 HTTP）。
-					play, direct := a.PreparePlaybackListed(u, h)
+					play, direct, _ := a.PreparePlaybackListed(u, h)
 					playURLs = append(playURLs, play)
 					directURLs = append(directURLs, direct)
 				}
@@ -1894,7 +1893,8 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		sourceTitle = strings.TrimSpace(info.Name)
 		sourceArtwork = strings.TrimSpace(info.Artwork)
 	}
-	playURL, directURL := a.PreparePlayback(playURL, headers)
+	var directURL string
+	playURL, directURL, headers = a.PrepareLivePlayback(playURL, headers)
 	if runtime.GOOS != "android" {
 		prepared, derr := model.PrepareForDesktop(ch.Drm)
 		if derr != nil {
@@ -1996,7 +1996,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
-	playURL, directURL := a.PreparePlayback(url, headers)
+	playURL, directURL, headers := a.PrepareLivePlayback(url, headers)
 	var playDrm *model.Drm
 	if runtime.GOOS != "android" {
 		prepared, derr := model.PrepareForDesktop(ch.Drm)

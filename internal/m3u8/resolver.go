@@ -2,7 +2,6 @@ package m3u8
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,113 +11,34 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bobo/KOTV/internal/hostclient"
-	"github.com/bobo/KOTV/internal/localproxy"
-	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/settings"
 )
 
-var httpClient = &http.Client{Timeout: 20 * time.Second}
-
 var headClient = &http.Client{Timeout: 4 * time.Second}
 
-// ResolveForPlayback 下载并过滤 m3u8。
-// 第一个返回值是不能自己带请求头的播放器要打开的地址。
-// 第二个返回值只在第一个被换成滚动列表时给出，是站点原来的地址。
-func ResolveForPlayback(rawURL string, headers map[string]string, localPort int) (string, string, error) {
-	if rawURL == "" || !strings.Contains(strings.ToLower(rawURL), "m3u8") {
-		return rawURL, "", nil
+// FilterPlaylist 去广告开着时过滤节目单，相对切片按这一次响应的最终地址补全。
+// 过滤把片长砍崩时退回补全后的原文。关闭或不是节目单时原样返回。
+func FilterPlaylist(content, base string, headers map[string]string) string {
+	if !settings.IsAdFilterEnabled() || !strings.HasPrefix(strings.TrimSpace(content), "#EXTM3U") {
+		return content
 	}
-	if strings.Contains(rawURL, "/proxy/cached_m3u8") || strings.Contains(rawURL, RollingPlaylistPath) || strings.HasPrefix(rawURL, "file:") {
-		return rawURL, "", nil
-	}
-	if !settings.IsAdFilterEnabled() {
-		return rawURL, "", nil
-	}
-
-	content, final, err := fetch(rawURL, headers)
-	if err != nil {
-		return rawURL, "", nil // 失败时回退原地址
-	}
-	if final == "" {
-		final = rawURL
-	}
-	// 再拉取时用入口或变体地址，相对路径按这一次响应的最终地址补全。
-	refetch := rawURL
-	base := final
-	if IsMasterPlaylist(content) {
-		variant := firstVariantURL(content, base)
-		if variant == "" {
-			return rawURL, "", nil
-		}
-		content, final, err = fetch(variant, headers)
-		if err != nil {
-			return rawURL, "", nil
-		}
-		if final == "" {
-			final = variant
-		}
-		base = final
-		refetch = variant
-	}
-
-	// 没有 #EXT-X-ENDLIST 的列表还会继续追加切片。不能把这一次的正文存成静态文件。
-	if !strings.Contains(content, "#EXT-X-ENDLIST") {
-		if !hasPlaybackHeaders(headers) {
-			return base, "", nil
-		}
-		id := RegisterRolling(refetch, headers)
-		rolling := fmt.Sprintf("%s%s?id=%s", playbackProxyBase(localPort), RollingPlaylistPath, id)
-		return rolling, rawURL, nil
-	}
-
-	content = absolutizeURIs(content, base)
-	content = absolutizeTagURIs(content, base)
+	text := absolutizeURIs(content, base)
+	text = absolutizeTagURIs(text, base)
 	cfg := loadFilterConfig()
-
 	var lms []time.Time
-	if cfg.Mode == ModeSmart && cfg.UseLastModified && strings.Contains(content, "#EXT-X-DISCONTINUITY") {
-		lms = sampleChunkLastModifieds(content, headers)
+	if cfg.Mode == ModeSmart && cfg.UseLastModified && strings.Contains(text, "#EXT-X-DISCONTINUITY") {
+		lms = sampleChunkLastModifieds(text, headers)
 	}
-
-	fil := NewFilter(cfg)
-	filtered := fil.Apply(content, lms...)
-	// 不按 URI 扩展名删切片：正片常伪装成 .png/.jpg/.mp3/无后缀等。
+	filtered := NewFilter(cfg).Apply(text, lms...)
 	filtered = absolutizeURIs(filtered, base)
 	filtered = absolutizeTagURIs(filtered, base)
-	// 分片带 Cookie/Referer：改写为 /proxy/play，避免播放器直拉 CDN 报 412。
-	filtered = proxyMediaURIs(filtered, headers)
-
-	segments := countSegments(filtered)
-	if segments < 2 {
-		return rawURL, "", nil
+	if countSegments(filtered) < 2 && countSegments(text) >= 2 {
+		return text
 	}
-	// 过滤把片长砍崩 → 回退原址。
-	if dur := sumExtinf(content); dur >= 120 && sumExtinf(filtered) < dur*0.5 {
-		return rawURL, "", nil
+	if dur := sumExtinf(text); dur >= 120 && sumExtinf(filtered) < dur*0.5 {
+		return text
 	}
-
-	id := DefaultCache.Put(filtered)
-	return fmt.Sprintf("%s/proxy/cached_m3u8?id=%s", playbackProxyBase(localPort), id), rawURL, nil
-}
-
-func playbackProxyBase(localPort int) string {
-	if pb := hostclient.PublicBase(); pb != "" {
-		return strings.TrimRight(pb, "/")
-	}
-	if localPort <= 0 || localPort == localproxy.DefaultPort {
-		return localproxy.LocalBaseURL()
-	}
-	return fmt.Sprintf("http://127.0.0.1:%d", localPort)
-}
-
-func hasPlaybackHeaders(headers map[string]string) bool {
-	for k, v := range headers {
-		if strings.TrimSpace(k) != "" && strings.TrimSpace(v) != "" {
-			return true
-		}
-	}
-	return false
+	return filtered
 }
 
 func loadFilterConfig() FilterConfig {
@@ -138,33 +58,6 @@ func loadFilterConfig() FilterConfig {
 	}
 	_ = json.Unmarshal([]byte(raw), &cfg)
 	return cfg.normalized()
-}
-
-func fetch(u string, headers map[string]string) (body, final string, err error) {
-	req, err := http.NewRequest(http.MethodGet, u, nil)
-	if err != nil {
-		return "", "", err
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", settings.PlayUA())
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", err
-	}
-	final = u
-	if resp.Request != nil && resp.Request.URL != nil {
-		final = resp.Request.URL.String()
-	}
-	return string(b), final, nil
 }
 
 // sampleChunkLastModifieds 对每个 DISCONTINUITY 段抽一个媒体 URI 做 HEAD，取 Last-Modified。
@@ -249,20 +142,6 @@ func headLastModified(u string, headers map[string]string) (time.Time, bool) {
 	return do(http.MethodGet)
 }
 
-func firstVariantURL(content, base string) string {
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "#EXT-X-STREAM-INF") && i+1 < len(lines) {
-			next := strings.TrimSpace(lines[i+1])
-			if next != "" && !strings.HasPrefix(next, "#") {
-				return resolveURL(base, next)
-			}
-		}
-	}
-	return ""
-}
-
 func absolutizeURIs(content, base string) string {
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
@@ -338,42 +217,4 @@ func sumExtinf(content string) float64 {
 		sum += v
 	}
 	return sum
-}
-
-// proxyMediaURIs 把 http(s) 媒体行与 URI="…" 登记为 /proxy/play，使分片请求带上 headers。
-func proxyMediaURIs(content string, headers map[string]string) string {
-	if len(headers) == 0 || content == "" {
-		return content
-	}
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		trim := strings.TrimSpace(line)
-		if trim == "" || strings.HasPrefix(trim, "#") {
-			continue
-		}
-		if strings.HasPrefix(trim, "http://") || strings.HasPrefix(trim, "https://") {
-			lines[i] = playproxy.Register(trim, headers)
-		}
-	}
-	out := strings.Join(lines, "\n")
-	if !strings.Contains(strings.ToUpper(out), "URI=") {
-		return out
-	}
-	return tagURIRe.ReplaceAllStringFunc(out, func(m string) string {
-		sub := tagURIRe.FindStringSubmatch(m)
-		if len(sub) < 2 {
-			return m
-		}
-		raw := sub[1]
-		if raw == "" || strings.HasPrefix(raw, "data:") {
-			return m
-		}
-		if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
-			return m
-		}
-		if strings.Contains(raw, "/proxy/play?") || strings.Contains(raw, "/proxy/cached_m3u8") || strings.Contains(raw, RollingPlaylistPath) {
-			return m
-		}
-		return `URI="` + playproxy.Register(raw, headers) + `"`
-	})
 }

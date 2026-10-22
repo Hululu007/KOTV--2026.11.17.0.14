@@ -21,7 +21,6 @@ import (
 	"github.com/bobo/KOTV/internal/dlna"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
-	"github.com/bobo/KOTV/internal/m3u8"
 	"github.com/bobo/KOTV/internal/player/embed"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/remote"
@@ -107,8 +106,6 @@ func (a *App) clearVolatileMemory(opt cacheclean.Options) {
 		spider.ClearJSRedirectMap()
 		playproxy.Clear()
 		smbproxy.Clear()
-		m3u8.ClearRolling()
-		m3u8.DefaultCache.Clear()
 		danmaku.Clear()
 		a.liveLoadCachedKey = ""
 		a.liveLoadCached = nil

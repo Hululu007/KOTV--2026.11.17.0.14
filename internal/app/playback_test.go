@@ -10,7 +10,19 @@ import (
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/playproxy"
+	"github.com/bobo/KOTV/internal/settings"
 )
+
+func withAdFilter(t *testing.T, on bool) {
+	t.Helper()
+	prev := settings.Get(settings.AdFilter)
+	v := "false"
+	if on {
+		v = "true"
+	}
+	settings.Set(settings.AdFilter, v)
+	t.Cleanup(func() { settings.Set(settings.AdFilter, prev) })
+}
 
 func TestIsLocalMediaURL(t *testing.T) {
 	t.Parallel()
@@ -135,16 +147,19 @@ func TestPreparePlaybackURLRemoteExpandsQuarkProxy(t *testing.T) {
 	raw := "proxy://do=quark&type=video&url=" +
 		base64.StdEncoding.EncodeToString([]byte(cdn)) +
 		"&header=" + base64.StdEncoding.EncodeToString([]byte(hdrJSON))
-	got := a.PreparePlaybackURL(raw, nil)
+	got, direct, headers := a.PreparePlayback(raw, nil)
 	if !strings.Contains(got, "/proxy/play?id=") {
-		t.Fatalf("remote default expected /proxy/play, got %q", got)
+		t.Fatalf("headers should use /proxy/play, got %q", got)
 	}
-	upstream, headers := playproxy.Resolve(got)
+	if direct != cdn {
+		t.Fatalf("direct=%q", direct)
+	}
+	upstream, stored := playproxy.Resolve(got)
 	if upstream != cdn {
-		t.Fatalf("upstream=%q want %q", upstream, cdn)
+		t.Fatalf("upstream=%q", upstream)
 	}
-	if headers["Cookie"] != "qk=1" {
-		t.Fatalf("headers=%v", headers)
+	if headers["Cookie"] != "qk=1" || stored["Cookie"] != "qk=1" || headers["User-Agent"] != "Quark" {
+		t.Fatalf("headers=%v stored=%v", headers, stored)
 	}
 }
 
@@ -194,6 +209,7 @@ func TestPreparePlaybackURLLocalKeepsOtherLoopbackPort(t *testing.T) {
 }
 
 func TestPreparePlaybackURLRemoteExpandsM3U8Proxy(t *testing.T) {
+	withAdFilter(t, false)
 	done := hostclient.EnterSession("m3u8-proxy", "", false)
 	defer done()
 	hostclient.SetPublicBase("http://192.168.1.8:9978")
@@ -204,45 +220,56 @@ func TestPreparePlaybackURLRemoteExpandsM3U8Proxy(t *testing.T) {
 	raw := "proxy://do=quark&type=video&url=" +
 		base64.StdEncoding.EncodeToString([]byte(cdn)) +
 		"&header=" + base64.StdEncoding.EncodeToString([]byte(hdrJSON))
-	got := a.PreparePlaybackURL(raw, nil)
-	if !strings.Contains(got, "/proxy/play?id=") {
-		t.Fatalf("remote m3u8 proxy should be /proxy/play, got %q", got)
+	got, _, headers := a.PreparePlayback(raw, nil)
+	if !strings.Contains(got, "http://192.168.1.8:9978/proxy/play?id=") {
+		t.Fatalf("remote loopback m3u8 should be relayed, got %q", got)
 	}
-	upstream, headers := playproxy.Resolve(got)
+	upstream, stored := playproxy.Resolve(got)
 	if upstream != cdn {
 		t.Fatalf("upstream=%q want %q", upstream, cdn)
 	}
-	if headers["Cookie"] != "qk=1" {
-		t.Fatalf("headers=%v", headers)
+	if stored["Cookie"] != "qk=1" || headers["Cookie"] != "qk=1" {
+		t.Fatalf("headers=%v stored=%v", headers, stored)
 	}
 }
 
 func TestPreparePlaybackDirectKeepsPublicURL(t *testing.T) {
 	a := &App{}
 	raw := "https://cdn.example/a.mp4"
-	play, direct := a.PreparePlayback(raw, map[string]string{"Cookie": "a=b"})
+	play, direct, headers := a.PreparePlayback(raw, map[string]string{"Cookie": "a=b"})
 	if !strings.Contains(play, "/proxy/play?id=") {
-		t.Fatalf("other players still use proxy, got %q", play)
+		t.Fatalf("play=%q", play)
 	}
 	if direct != raw {
-		t.Fatalf("direct=%q want %q", direct, raw)
+		t.Fatalf("direct=%q", direct)
+	}
+	if headers["Cookie"] != "a=b" {
+		t.Fatalf("headers=%v", headers)
 	}
 }
 
 func TestPreparePlaybackDirectSkipsLoopback(t *testing.T) {
 	a := &App{}
 	raw := "http://127.0.0.1:5266/a.mp4"
-	_, direct := a.PreparePlayback(raw, map[string]string{"Cookie": "a=b"})
+	play, direct, _ := a.PreparePlayback(raw, map[string]string{"Cookie": "a=b"})
+	if !strings.Contains(play, "/proxy/play?id=") {
+		t.Fatalf("headers should pass through, got %q", play)
+	}
 	if direct != "" {
-		t.Fatalf("loopback must not be opened by the player, got %q", direct)
+		t.Fatalf("direct=%q", direct)
+	}
+	upstream, stored := playproxy.Resolve(play)
+	if upstream != raw || stored["Cookie"] != "a=b" {
+		t.Fatalf("upstream=%q headers=%v", upstream, stored)
 	}
 }
 
 // 直播 Load/livePlay 与点播共用 PreparePlayback：无头则 url=原址、direct 空。
 func TestPreparePlaybackLivePlainURL(t *testing.T) {
+	withAdFilter(t, false)
 	a := &App{}
 	raw := "https://cdn.example/live.m3u8"
-	play, direct := a.PreparePlayback(raw, nil)
+	play, direct, _ := a.PreparePlayback(raw, nil)
 	if play != raw {
 		t.Fatalf("play=%q want %q", play, raw)
 	}
@@ -251,19 +278,85 @@ func TestPreparePlaybackLivePlainURL(t *testing.T) {
 	}
 }
 
-// 列表路径不得去拉含 m3u8 的直播地址（广告过滤默认开时 Resolve 会 HTTP）。
+func TestPreparePlaybackAdFilterUsesRoute(t *testing.T) {
+	withAdFilter(t, true)
+	a := &App{}
+	raw := "https://cdn.example/live.m3u8"
+	play, direct, headers := a.PreparePlayback(raw, map[string]string{"Cookie": "a=b"})
+	if !strings.Contains(play, "/proxy/play?id=") {
+		t.Fatalf("play=%q", play)
+	}
+	if direct != "" {
+		t.Fatalf("direct=%q want empty while ad filter is on", direct)
+	}
+	if headers["Cookie"] != "a=b" {
+		t.Fatalf("headers=%v", headers)
+	}
+
+	done := hostclient.EnterSession("ad-remote", "", false)
+	defer done()
+	hostclient.SetPublicBase("http://192.168.1.8:9978")
+	remote, remoteDirect, _ := a.PreparePlayback(raw, map[string]string{"User-Agent": "Quark"})
+	if !strings.HasPrefix(remote, "http://192.168.1.8:9978/proxy/play?id=") {
+		t.Fatalf("remote=%q", remote)
+	}
+	if remoteDirect != "" {
+		t.Fatalf("remote direct=%q", remoteDirect)
+	}
+}
+
+// 列表不拉流。无头且去广告关闭时原样下发；有请求头或要过滤节目单时下发空串，开播再透传。
 func TestPreparePlaybackListedSkipsM3U8Resolve(t *testing.T) {
+	withAdFilter(t, false)
 	a := &App{}
 	raw := "https://tv.bobohome.store:20250/migu?id=608807420.m3u8"
 	start := time.Now()
-	play, direct := a.PreparePlaybackListed(raw, nil)
+	play, direct, _ := a.PreparePlaybackListed(raw, nil)
 	if dur := time.Since(start); dur > 200*time.Millisecond {
-		t.Fatalf("listed prepare too slow: %s (must not Resolve)", dur)
+		t.Fatalf("listed prepare too slow: %s (must not fetch)", dur)
 	}
 	if play != raw {
 		t.Fatalf("play=%q want %q", play, raw)
 	}
 	if direct != "" {
 		t.Fatalf("direct=%q want empty", direct)
+	}
+
+	play, direct, _ = a.PreparePlaybackListed(raw, map[string]string{"Cookie": "a=b", "User-Agent": "okhttp/5.5.0"})
+	if play != "" || direct != "" {
+		t.Fatalf("headed list play=%q direct=%q want empty", play, direct)
+	}
+
+	withAdFilter(t, true)
+	play, direct, _ = a.PreparePlaybackListed(raw, nil)
+	if play != "" || direct != "" {
+		t.Fatalf("ad list play=%q direct=%q want empty", play, direct)
+	}
+	mp4 := "https://cdn.example/live.mp4"
+	play, direct, _ = a.PreparePlaybackListed(mp4, nil)
+	if play != mp4 || direct != "" {
+		t.Fatalf("mp4 play=%q direct=%q", play, direct)
+	}
+}
+
+// 直播源配了请求头或鉴权时只走透传，不把原地址交给播放器。
+func TestPrepareLivePlaybackHeadersUseProxy(t *testing.T) {
+	withAdFilter(t, false)
+	a := &App{}
+	raw := "https://cdn.example/live.m3u8"
+	headers := map[string]string{"Cookie": "a=b", "User-Agent": "okhttp/5.5.0"}
+	play, direct, got := a.PrepareLivePlayback(raw, headers)
+	if !strings.Contains(play, "/proxy/play?id=") {
+		t.Fatalf("play=%q", play)
+	}
+	if direct != "" {
+		t.Fatalf("direct=%q want empty", direct)
+	}
+	if got["Cookie"] != "a=b" || got["User-Agent"] != "okhttp/5.5.0" {
+		t.Fatalf("headers=%v", got)
+	}
+	upstream, stored := playproxy.Resolve(play)
+	if upstream != raw || stored["Cookie"] != "a=b" {
+		t.Fatalf("upstream=%q headers=%v", upstream, stored)
 	}
 }

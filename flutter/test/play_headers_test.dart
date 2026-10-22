@@ -5,7 +5,7 @@ import 'package:kotv/player/play_headers.dart';
 void main() {
   test('header-capable player opens the site url', () {
     final got = kotvResolvePlayOpenTarget(
-      playUrl: 'http://127.0.0.1:9978/proxy/rolling_m3u8?id=1',
+      playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
       directUrl: 'https://cdn.example/live.m3u8',
       headers: const {'Cookie': 'a=b'},
       magnet: false,
@@ -17,12 +17,12 @@ void main() {
 
   test('other players keep the engine url', () {
     final got = kotvResolvePlayOpenTarget(
-      playUrl: 'http://127.0.0.1:9978/proxy/rolling_m3u8?id=1',
+      playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
       directUrl: 'https://cdn.example/live.m3u8',
       headers: const {'Cookie': 'a=b'},
       magnet: false,
     );
-    expect(got.url, contains('/proxy/rolling_m3u8'));
+    expect(got.url, contains('/proxy/play'));
     expect(got.headers, isNull);
   });
 
@@ -48,7 +48,7 @@ void main() {
       isTrue,
     );
     final got = kotvResolvePlayOpenTarget(
-      playUrl: 'http://127.0.0.1:9978/proxy/rolling_m3u8?id=1',
+      playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
       directUrl: 'https://cdn.example/live.m3u8',
       headers: const {'Cookie': 'a=b'},
       magnet: false,

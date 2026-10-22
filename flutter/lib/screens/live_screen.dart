@@ -959,7 +959,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     Map<String, dynamic>? drm,
     List<Map<String, dynamic>>? subs,
   }) {
-    // 单槽 cached_m3u8 换台即失效，写回会导致同台再直开 404。
+    // 透传 id 会过期，写回会导致同台再开失败。
     if (_isEphemeralLivePlayUrl(url) || _isEphemeralLivePlayUrl(direct)) {
       return;
     }
@@ -1043,7 +1043,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   bool _isEphemeralLivePlayUrl(String url) {
     final u = url.toLowerCase();
-    return u.contains('/proxy/cached_m3u8') || u.contains('/proxy/rolling_m3u8');
+    return u.contains('/proxy/play');
   }
 
   Future<void> _toggleChannelFav(int chIdx) async {

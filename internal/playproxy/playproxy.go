@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
+	"github.com/bobo/KOTV/internal/m3u8"
 	"github.com/bobo/KOTV/internal/settings"
 )
 
@@ -50,6 +50,14 @@ func SetPortFunc(fn func() int) { portFn = fn }
 func Register(rawURL string, headers map[string]string) string {
 	if rawURL == "" || len(headers) == 0 {
 		return rawURL
+	}
+	return register(rawURL, headers)
+}
+
+// RegisterAlways 无论有没有请求头都登记 /proxy/play。去广告要在这条透传里过滤时用。
+func RegisterAlways(rawURL string, headers map[string]string) string {
+	if strings.TrimSpace(rawURL) == "" {
+		return ""
 	}
 	return register(rawURL, headers)
 }
@@ -438,34 +446,41 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, playI
 		return
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if !settings.IsAdFilterEnabled() {
 		writePassthrough(w, resp, resp.Body)
 		return
 	}
 	prefix := make([]byte, len("#EXTM3U"))
 	n, _ := io.ReadFull(resp.Body, prefix)
 	head := prefix[:n]
-	if n == len(prefix) && bytes.Equal(head, []byte("#EXTM3U")) {
-		rest, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		raw := make([]byte, 0, n+len(rest))
-		raw = append(raw, head...)
-		raw = append(raw, rest...)
-		base := e.URL
-		if resp.Request != nil && resp.Request.URL != nil && resp.Request.URL.String() != "" {
-			base = resp.Request.URL.String()
-		}
-		if out, ok := rewritePlaylist(string(raw), base, e.Headers); ok {
-			writeRewrittenPlaylist(w, resp, []byte(out))
-			return
-		}
-		writePassthrough(w, resp, bytes.NewReader(raw))
+	if !bytes.Equal(head, []byte("#EXTM3U")) {
+		writePassthrough(w, resp, io.MultiReader(bytes.NewReader(head), resp.Body))
 		return
 	}
-	writePassthrough(w, resp, io.MultiReader(bytes.NewReader(head), resp.Body))
+	rest, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	raw := append(append([]byte{}, head...), rest...)
+	final := e.URL
+	if resp.Request != nil && resp.Request.URL != nil && resp.Request.URL.String() != "" {
+		final = resp.Request.URL.String()
+	}
+	filtered := m3u8.FilterPlaylist(string(raw), final, e.Headers)
+	writePlaylist(w, resp, []byte(filtered))
+}
+
+func writePlaylist(w http.ResponseWriter, resp *http.Response, body []byte) {
+	copyResponseHeaders(w, resp.Header)
+	w.Header().Del("Content-Length")
+	w.Header().Del("Content-Range")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(body)
 }
 
 func writePassthrough(w http.ResponseWriter, resp *http.Response, body io.Reader) {
@@ -476,21 +491,6 @@ func writePassthrough(w http.ResponseWriter, resp *http.Response, body io.Reader
 		dst = flushWriter{w: w, f: f}
 	}
 	_, _ = io.Copy(countingWriter{w: dst}, body)
-}
-
-func writeRewrittenPlaylist(w http.ResponseWriter, resp *http.Response, out []byte) {
-	copyResponseHeaders(w, resp.Header)
-	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
-	w.Header().Del("Content-Range")
-	if w.Header().Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	}
-	w.WriteHeader(resp.StatusCode)
-	dst := io.Writer(w)
-	if f, ok := w.(http.Flusher); ok {
-		dst = flushWriter{w: w, f: f}
-	}
-	_, _ = countingWriter{w: dst}.Write(out)
 }
 
 // copyResponseHeaders 原样转发响应头。去掉逐跳头，不补 Accept-Ranges。
@@ -536,59 +536,6 @@ func (fw flushWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-var playlistTagURIRe = regexp.MustCompile(`(?i)\bURI="([^"]+)"`)
-
-func rewritePlaylist(content, base string, headers map[string]string) (string, bool) {
-	changed := false
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		trim := strings.TrimSpace(strings.TrimRight(line, "\r"))
-		if trim == "" || strings.HasPrefix(trim, "#") {
-			continue
-		}
-		abs := resolveRef(base, trim)
-		next := proxyIfRemote(abs, headers)
-		if next != trim {
-			lines[i] = next
-			changed = true
-		}
-	}
-	out := strings.Join(lines, "\n")
-	if strings.Contains(strings.ToUpper(out), "URI=") {
-		out = playlistTagURIRe.ReplaceAllStringFunc(out, func(m string) string {
-			sub := playlistTagURIRe.FindStringSubmatch(m)
-			if len(sub) < 2 {
-				return m
-			}
-			raw := sub[1]
-			if raw == "" || strings.HasPrefix(raw, "data:") {
-				return m
-			}
-			abs := resolveRef(base, raw)
-			next := proxyIfRemote(abs, headers)
-			if next == raw {
-				return m
-			}
-			changed = true
-			return `URI="` + next + `"`
-		})
-	}
-	if !changed {
-		return content, false
-	}
-	return out, true
-}
-
-func proxyIfRemote(abs string, headers map[string]string) string {
-	if !NeedsLocalRelay(abs) {
-		return abs
-	}
-	if strings.Contains(abs, "/proxy/play?") || strings.Contains(abs, "/proxy/cached_m3u8") || strings.Contains(abs, "/proxy/rolling_m3u8") {
-		return abs
-	}
-	return register(abs, headers)
-}
-
 func resolveRef(base, ref string) string {
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
 		return ref
@@ -626,7 +573,7 @@ func tryRawSplice(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, pla
 	}
 	slot := beginSplice(key)
 	defer slot.release()
-	br, head, peek, finalURL, err := openRawUpstream(slot, e, rangeHdr, clientSpliceUA(r, e.Headers), r.Header.Get("If-Range"), r.Header.Get("Connection"), r.Header.Get("Accept-Encoding"))
+	br, head, peek, _, err := openRawUpstream(slot, e, rangeHdr, clientSpliceUA(r, e.Headers), r.Header.Get("If-Range"), r.Header.Get("Connection"), r.Header.Get("Accept-Encoding"))
 	if errors.Is(err, errUseHTTPClient) {
 		return false
 	}
@@ -637,23 +584,8 @@ func tryRawSplice(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, pla
 		http.Error(w, "连接本机播放端口失败", http.StatusBadGateway)
 		return true
 	}
-	if bytes.Equal(peek, []byte("#EXTM3U")) {
-		raw, rerr := readPlaylist(br, peek, head.header)
-		if rerr != nil {
-			http.Error(w, "读取播放列表失败", http.StatusBadGateway)
-			return true
-		}
-		base := e.URL
-		if finalURL != "" {
-			base = finalURL
-		}
-		resp := &http.Response{StatusCode: head.statusCode, Header: head.header}
-		if out, ok := rewritePlaylist(string(raw), base, e.Headers); ok {
-			writeRewrittenPlaylist(w, resp, []byte(out))
-			return true
-		}
-		writePassthrough(w, resp, bytes.NewReader(raw))
-		return true
+	if settings.IsAdFilterEnabled() && bytes.Equal(peek, []byte("#EXTM3U")) {
+		return false
 	}
 	spliceToClient(w, slot, br, head, peek)
 	return true
@@ -861,35 +793,6 @@ func spliceToClient(w http.ResponseWriter, slot *spliceHold, br *bufio.Reader, h
 	body := bufio.NewReader(io.MultiReader(bytes.NewReader(peek), br))
 	copyBuf := make([]byte, 256*1024)
 	_ = copyUpstreamBody(countingWriter{w: client}, body, head.header, copyBuf)
-}
-
-func readPlaylist(br *bufio.Reader, peek []byte, h http.Header) ([]byte, error) {
-	const limit = 8 << 20
-	if cl, ok := contentLength(h); ok {
-		if int64(len(peek)) > cl {
-			peek = peek[:cl]
-		}
-		need := cl - int64(len(peek))
-		if need > limit {
-			need = limit
-		}
-		rest := make([]byte, need)
-		if _, err := io.ReadFull(br, rest); err != nil {
-			return nil, err
-		}
-		raw := make([]byte, 0, len(peek)+len(rest))
-		raw = append(raw, peek...)
-		raw = append(raw, rest...)
-		return raw, nil
-	}
-	rest, err := io.ReadAll(io.LimitReader(br, limit))
-	if err != nil {
-		return nil, err
-	}
-	raw := make([]byte, 0, len(peek)+len(rest))
-	raw = append(raw, peek...)
-	raw = append(raw, rest...)
-	return raw, nil
 }
 
 func copyUpstreamBody(dst io.Writer, br *bufio.Reader, h http.Header, buf []byte) error {

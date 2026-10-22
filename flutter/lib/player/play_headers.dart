@@ -43,9 +43,7 @@ String kotvEffectivePlayUa() {
 
 bool kotvIsLocalProxyUrl(String url) {
   final u = url.toLowerCase();
-  if (u.contains('/proxy/play') ||
-      u.contains('/proxy/cached_m3u8') ||
-      u.contains('/proxy/bt/')) {
+  if (u.contains('/proxy/play') || u.contains('/proxy/bt/')) {
     return true;
   }
   // spider 本地代理：改写到局域网 IP 后仍是 /proxy?...，不能再带 CDN 头。
@@ -128,7 +126,7 @@ bool kotvCanOpenDirect(String url) {
   if (host.isEmpty || host == 'localhost' || host == '127.0.0.1' || host == '::1') {
     return false;
   }
-  if (kotvIsLocalProxyUrl(u) || u.contains('/proxy/rolling_m3u8')) return false;
+  if (kotvIsLocalProxyUrl(u)) return false;
   return true;
 }
 
@@ -147,10 +145,6 @@ bool kotvCanOpenDirect(String url) {
   }
   if (sendHeaders && kotvCanOpenDirect(directUrl)) {
     return (url: directUrl, headers: headers.isEmpty ? null : headers);
-  }
-  final cached = playUrl.contains('/proxy/cached_m3u8');
-  if (cached) {
-    return (url: playUrl, headers: null);
   }
   final proxied = kotvIsLocalProxyUrl(playUrl);
   return (
