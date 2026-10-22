@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -162,23 +163,23 @@ type LiveChannel struct {
 // UnmarshalJSON 接受 url/urls、数字 number/parse，并规范化 format。
 func (c *LiveChannel) UnmarshalJSON(b []byte) error {
 	type raw struct {
-		Name    string     `json:"name"`
-		Logo    string     `json:"logo"`
-		Number  FlexString `json:"number"`
-		TvgID   string     `json:"tvgId"`
-		TvgName string     `json:"tvgName"`
-		EPG     string     `json:"epg"`
-		Parse   FlexInt    `json:"parse"`
-		UA      string     `json:"ua"`
-		Referer string     `json:"referer"`
-		Origin  string     `json:"origin"`
-		Click   string     `json:"click"`
-		URL     []string   `json:"url"`
-		URLs    []string   `json:"urls"`
-		Header  FlexHeader `json:"header"`
-		Format  string     `json:"format"`
-		Drm     *Drm       `json:"drm"`
-		Catchup *Catchup   `json:"catchup"`
+		Name    string          `json:"name"`
+		Logo    string          `json:"logo"`
+		Number  FlexString      `json:"number"`
+		TvgID   string          `json:"tvgId"`
+		TvgName string          `json:"tvgName"`
+		EPG     string          `json:"epg"`
+		Parse   FlexInt         `json:"parse"`
+		UA      string          `json:"ua"`
+		Referer string          `json:"referer"`
+		Origin  string          `json:"origin"`
+		Click   string          `json:"click"`
+		URL     json.RawMessage `json:"url"`
+		URLs    json.RawMessage `json:"urls"`
+		Header  FlexHeader      `json:"header"`
+		Format  string          `json:"format"`
+		Drm     *Drm            `json:"drm"`
+		Catchup *Catchup        `json:"catchup"`
 	}
 	var r raw
 	if err := json.Unmarshal(b, &r); err != nil {
@@ -197,9 +198,9 @@ func (c *LiveChannel) UnmarshalJSON(b []byte) error {
 	c.Referer = r.Referer
 	c.Origin = r.Origin
 	c.Click = r.Click
-	urls := r.URL
+	urls := flexURLList(r.URL)
 	if len(urls) == 0 {
-		urls = r.URLs
+		urls = flexURLList(r.URLs)
 	}
 	c.URLs = urls
 	if len(r.Header) > 0 {
@@ -209,6 +210,51 @@ func (c *LiveChannel) UnmarshalJSON(b []byte) error {
 	c.Drm = r.Drm
 	c.Catchup = r.Catchup
 	return nil
+}
+
+// flexURLList 接受字符串或字符串数组。形状不对时返回空，不让整条频道解析失败。
+func flexURLList(raw json.RawMessage) []string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	if raw[0] == '"' {
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			return nil
+		}
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil
+		}
+		return []string{s}
+	}
+	if raw[0] != '[' {
+		return nil
+	}
+	var strs []string
+	if json.Unmarshal(raw, &strs) == nil {
+		return strs
+	}
+	var anys []any
+	if json.Unmarshal(raw, &anys) != nil {
+		return nil
+	}
+	out := make([]string, 0, len(anys))
+	for _, v := range anys {
+		switch t := v.(type) {
+		case string:
+			if strings.TrimSpace(t) != "" {
+				out = append(out, t)
+			}
+		default:
+			b, err := json.Marshal(t)
+			if err == nil && len(b) > 0 && !bytes.Equal(b, []byte("null")) {
+				out = append(out, string(b))
+			}
+		}
+	}
+	return out
 }
 
 // NormalizeManifest 把 mpd/hls 等简写换成播放器识别的 MIME。
@@ -241,7 +287,7 @@ func (c *LiveChannel) CurrentURL() string {
 
 func (c *LiveChannel) HasMultipleLines() bool { return len(c.URLs) > 1 }
 
-// IsLastLine 是否已是最后一条线路（是否最后一条线路）。
+// IsLastLine 是否已是最后一条线路。
 func (c *LiveChannel) IsLastLine() bool {
 	if c == nil || len(c.URLs) == 0 {
 		return true

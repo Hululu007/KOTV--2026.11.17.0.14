@@ -164,6 +164,20 @@ func TestParseJSON_GroupNameKeepsUnderscoreAndDoesNotMerge(t *testing.T) {
 	}
 }
 
+func TestParseJSON_StringURLDoesNotDropSiblings(t *testing.T) {
+	live := &model.Live{}
+	text := `[{"name":"G","channel":[{"name":"A","urls":["http://a"]},{"name":"B","url":"http://b"}]}]`
+	Parse(live, text)
+	if len(live.Groups) != 1 || len(live.Groups[0].Channels) != 2 {
+		t.Fatalf("groups=%+v", live.Groups)
+	}
+	a := live.Groups[0].Channels[0]
+	b := live.Groups[0].Channels[1]
+	if len(a.URLs) != 1 || a.URLs[0] != "http://a" || len(b.URLs) != 1 || b.URLs[0] != "http://b" {
+		t.Fatalf("A=%v B=%v", a.URLs, b.URLs)
+	}
+}
+
 func TestParseTXT_RepeatedGenreStartsNewGroup(t *testing.T) {
 	live := &model.Live{}
 	Parse(live, "央视,#genre#\nA,http://a\n央视,#genre#\nB,http://b\n")

@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestClearKeyHexKidKey(t *testing.T) {
 	d := &Drm{Type: "clearkey", Key: "00112233445566778899aabbccddeeff:ffeeddccbbaa99887766554433221100"}
@@ -21,6 +24,21 @@ func TestClearKeyHexRejectsHTTP(t *testing.T) {
 	d := &Drm{Type: "clearkey", Key: "https://license.example/ck"}
 	if d.DesktopSupported() {
 		t.Fatal("http license should not be DesktopSupported without prepare")
+	}
+}
+
+func TestNormalizeClearKeyKeepsJWK(t *testing.T) {
+	in := `{"keys":[{"kty":"oct","kid":"YQ","k":"YQ"}],"type":"temporary"}`
+	if got := NormalizeClearKey(in); got != in {
+		t.Fatalf("got %s", got)
+	}
+}
+
+func TestNormalizeClearKeyKidKey(t *testing.T) {
+	in := "00112233445566778899aabbccddeeff:ffeeddccbbaa99887766554433221100"
+	got := NormalizeClearKey(in)
+	if !strings.Contains(got, `"kty":"oct"`) || !strings.Contains(got, `"k":`) {
+		t.Fatalf("got %s", got)
 	}
 }
 

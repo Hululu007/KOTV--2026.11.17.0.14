@@ -213,23 +213,30 @@ func fetchClearKeyLicense(d *Drm) (string, error) {
 	return body, nil
 }
 
+func existingClearKeyJWK(raw string) string {
+	if !strings.HasPrefix(strings.TrimSpace(raw), "{") {
+		return ""
+	}
+	var probe struct {
+		Keys []json.RawMessage `json:"keys"`
+	}
+	if err := json.Unmarshal([]byte(raw), &probe); err != nil || len(probe.Keys) == 0 {
+		return ""
+	}
+	return raw
+}
+
 // NormalizeClearKey 将 kid:key 或已有 JSON 规范为 ClearKey JWK JSON。
 func NormalizeClearKey(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
 	}
-	raw = strings.ReplaceAll(raw, "\"", "")
-	// 已是 JSON
-	if strings.HasPrefix(raw, "{") {
-		var probe struct {
-			Keys []json.RawMessage `json:"keys"`
-		}
-		if err := json.Unmarshal([]byte(raw), &probe); err == nil && len(probe.Keys) > 0 {
-			return raw
-		}
+	if jwk := existingClearKeyJWK(raw); jwk != "" {
+		return jwk
 	}
-	cleaned := strings.ReplaceAll(strings.ReplaceAll(raw, "{", ""), "}", "")
+	cleaned := strings.ReplaceAll(raw, "\"", "")
+	cleaned = strings.ReplaceAll(strings.ReplaceAll(cleaned, "{", ""), "}", "")
 	type keyEntry struct {
 		Kty string `json:"kty"`
 		Kid string `json:"kid"`
