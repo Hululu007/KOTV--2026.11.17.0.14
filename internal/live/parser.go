@@ -351,7 +351,7 @@ func (s *lineSetting) applyAmpHeaders(dst map[string]string, raw string) {
 	if raw == "" {
 		return
 	}
-	// 有 | 一律先按 | 拆（即便值里带 &，如 Referer=http://x?a=1&b=2）。
+	// 先按 | 分条，再按 & 分对。值里的 & 会被切开。
 	if strings.Contains(raw, "|") {
 		for _, part := range strings.Split(raw, "|") {
 			s.applyAmpHeaders(dst, part)
@@ -382,7 +382,12 @@ func (s *lineSetting) applyPipeHeaders(raw string) {
 	}
 	raw = strings.TrimSpace(raw)
 	if strings.HasPrefix(raw, "{") {
-		_ = json.Unmarshal([]byte(raw), &s.header)
+		var parsed model.FlexHeader
+		if json.Unmarshal([]byte(raw), &parsed) == nil {
+			for k, v := range parsed {
+				s.header[k] = v
+			}
+		}
 		return
 	}
 	s.applyAmpHeaders(s.header, raw)

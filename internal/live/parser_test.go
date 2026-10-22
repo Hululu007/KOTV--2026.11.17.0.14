@@ -97,6 +97,15 @@ func TestParseTXT_ParseZeroSticky(t *testing.T) {
 	}
 }
 
+func TestParseTXT_HeaderJSONNumber(t *testing.T) {
+	live := &model.Live{}
+	Parse(live, "G,#genre#\nheader={\"Referer\":1,\"User-Agent\":\"VLC\"}\nC,http://a/1\n")
+	h := live.Groups[0].Channels[0].Header
+	if h["Referer"] != "1" || h["User-Agent"] != "VLC" {
+		t.Fatalf("hdr=%v", h)
+	}
+}
+
 func TestParseTXT_UAStripQuotes(t *testing.T) {
 	live := &model.Live{}
 	Parse(live, "G,#genre#\nua=\"VLC/3.0\"\nreferer=\"http://r/\"\nC,http://c\n")

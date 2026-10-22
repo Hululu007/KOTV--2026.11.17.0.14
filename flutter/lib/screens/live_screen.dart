@@ -2201,7 +2201,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: _title, url: url);
     } catch (e) {
       if (!mounted || serial != _playSerial) return;
-      // isChange 且非末线路 → nextLine。
+      // 失败换线开着且不是最后一条线路时，切下一条。
       final curLine = _line;
       if (_liveAutoChange && _lines > 1 && curLine < _lines - 1) {
         final next = curLine + 1;

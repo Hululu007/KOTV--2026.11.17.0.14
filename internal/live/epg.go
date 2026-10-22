@@ -71,7 +71,7 @@ func (d EpgData) Range() string {
 	return "clock=" + fmtUTC(d.StartTime) + "-" + fmtUTC(end)
 }
 
-// SplitEpgURLs Live.getEpgApi / getEpgXml：逗号拆分模板 API 与 XMLTV 文件。
+// SplitEpgURLs 按逗号拆分：第一段含 { 的当节目接口，xml、gz 或 http(s) 当节目单文件。
 func SplitEpgURLs(epg string) (apiTemplate string, xmlURLs []string) {
 	for _, part := range strings.Split(epg, ",") {
 		part = strings.TrimSpace(part)
