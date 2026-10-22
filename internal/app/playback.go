@@ -64,23 +64,31 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 }
 
 // PreparePlayback 返回透传地址、播放器能自己打开的原地址，以及请求头。
-// 去广告打开且是 m3u8 时，只给 /proxy/play，过滤发生在这条透传里。
+// 点播在去广告打开且是 m3u8 时，只给 /proxy/play，过滤发生在这条透传里。
 // 其它时候原地址留给带得了请求头的播放器；带不了的用 /proxy/play。
 func (a *App) PreparePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
-	return a.preparePlayback(raw, headers, true, false)
+	return a.preparePlayback(raw, headers, prepareVOD)
 }
 
-// PrepareLivePlayback 直播开播、回看。源上有请求头，或去广告要过滤节目单时，只给 /proxy/play。
+// PrepareLivePlayback 直播开播、回看。不走去广告。有请求头时登记透传，同时把原地址留给带得了头的播放器。
 func (a *App) PrepareLivePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
-	return a.preparePlayback(raw, headers, true, true)
+	return a.preparePlayback(raw, headers, prepareLive)
 }
 
-// PreparePlaybackListed 直播列表批量用。须透传的线路返回空串，由开播接口再登记，列表本身不拉流。
+// PreparePlaybackListed 直播列表批量用。有请求头的线路返回空串，由开播接口再登记，列表本身不拉流。
 func (a *App) PreparePlaybackListed(raw string, headers map[string]string) (string, string, map[string]string) {
-	return a.preparePlayback(raw, headers, false, false)
+	return a.preparePlayback(raw, headers, prepareList)
 }
 
-func (a *App) preparePlayback(raw string, headers map[string]string, allowAd, forceHeaderProxy bool) (string, string, map[string]string) {
+type prepareMode int
+
+const (
+	prepareVOD prepareMode = iota
+	prepareLive
+	prepareList
+)
+
+func (a *App) preparePlayback(raw string, headers map[string]string, mode prepareMode) (string, string, map[string]string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || IsEphemeralPlayURL(raw) {
 		return raw, "", headers
@@ -100,14 +108,16 @@ func (a *App) preparePlayback(raw string, headers map[string]string, allowAd, fo
 		if localproxy.IsSpiderProxyURL(raw) {
 			return playproxy.PublicizeURL(raw, headers), "", headers
 		}
-		if !allowAd && liveListNeedsPlay(raw, headers) {
-			return "", "", headers
-		}
-		ad, headed := proxyCause(raw, headers)
-		if allowAd && (ad || headed) {
+		headed := hasPlaybackHeaders(headers)
+		filter := mode == prepareVOD && vodAdFilter(raw)
+		if mode == prepareList {
+			if headed {
+				return "", "", headers
+			}
+		} else if filter || headed {
 			before := raw
-			raw = playproxy.RegisterAlways(raw, headers)
-			if !ad && !(forceHeaderProxy && headed) {
+			raw = playproxy.RegisterAlways(raw, headers, filter)
+			if !filter {
 				direct = directPlayable(before)
 			}
 		}
@@ -115,17 +125,8 @@ func (a *App) preparePlayback(raw string, headers map[string]string, allowAd, fo
 	return playproxy.PublicizeURL(raw, headers), direct, headers
 }
 
-// proxyCause 是否要走透传：去广告且地址里有节目单，或调用方带了请求头。
-func proxyCause(raw string, headers map[string]string) (ad, headed bool) {
-	headed = hasPlaybackHeaders(headers)
-	ad = settings.IsAdFilterEnabled() && strings.Contains(strings.ToLower(raw), "m3u8")
-	return ad, headed
-}
-
-// liveListNeedsPlay 列表不能下发可直开地址，客户端见到空串再请求开播。
-func liveListNeedsPlay(raw string, headers map[string]string) bool {
-	ad, headed := proxyCause(raw, headers)
-	return ad || headed
+func vodAdFilter(raw string) bool {
+	return settings.IsAdFilterEnabled() && strings.Contains(strings.ToLower(raw), "m3u8")
 }
 
 func hasPlaybackHeaders(headers map[string]string) bool {

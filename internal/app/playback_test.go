@@ -289,6 +289,9 @@ func TestPreparePlaybackAdFilterUsesRoute(t *testing.T) {
 	if direct != "" {
 		t.Fatalf("direct=%q want empty while ad filter is on", direct)
 	}
+	if !playproxy.RegisteredFilter(play) {
+		t.Fatal("vod ad registration must filter")
+	}
 	if headers["Cookie"] != "a=b" {
 		t.Fatalf("headers=%v", headers)
 	}
@@ -305,7 +308,7 @@ func TestPreparePlaybackAdFilterUsesRoute(t *testing.T) {
 	}
 }
 
-// 列表不拉流。无头且去广告关闭时原样下发；有请求头或要过滤节目单时下发空串，开播再透传。
+// 列表不拉流。直播不去广告，无请求头时原样下发；有请求头时下发空串，开播再透传。
 func TestPreparePlaybackListedSkipsM3U8Resolve(t *testing.T) {
 	withAdFilter(t, false)
 	a := &App{}
@@ -329,8 +332,8 @@ func TestPreparePlaybackListedSkipsM3U8Resolve(t *testing.T) {
 
 	withAdFilter(t, true)
 	play, direct, _ = a.PreparePlaybackListed(raw, nil)
-	if play != "" || direct != "" {
-		t.Fatalf("ad list play=%q direct=%q want empty", play, direct)
+	if play != raw || direct != "" {
+		t.Fatalf("ad list play=%q direct=%q want raw", play, direct)
 	}
 	mp4 := "https://cdn.example/live.mp4"
 	play, direct, _ = a.PreparePlaybackListed(mp4, nil)
@@ -339,21 +342,28 @@ func TestPreparePlaybackListedSkipsM3U8Resolve(t *testing.T) {
 	}
 }
 
-// 直播源配了请求头或鉴权时只走透传，不把原地址交给播放器。
+// 直播不去广告。无请求头时即使用户开着去广告也返回原地址。有请求头时登记透传并留下原地址，且不过滤。
 func TestPrepareLivePlaybackHeadersUseProxy(t *testing.T) {
-	withAdFilter(t, false)
+	withAdFilter(t, true)
 	a := &App{}
 	raw := "https://cdn.example/live.m3u8"
+	play, direct, _ := a.PrepareLivePlayback(raw, nil)
+	if play != raw || direct != "" {
+		t.Fatalf("plain play=%q direct=%q", play, direct)
+	}
 	headers := map[string]string{"Cookie": "a=b", "User-Agent": "okhttp/5.5.0"}
 	play, direct, got := a.PrepareLivePlayback(raw, headers)
 	if !strings.Contains(play, "/proxy/play?id=") {
 		t.Fatalf("play=%q", play)
 	}
-	if direct != "" {
-		t.Fatalf("direct=%q want empty", direct)
+	if direct != raw {
+		t.Fatalf("direct=%q want %q", direct, raw)
 	}
 	if got["Cookie"] != "a=b" || got["User-Agent"] != "okhttp/5.5.0" {
 		t.Fatalf("headers=%v", got)
+	}
+	if playproxy.RegisteredFilter(play) {
+		t.Fatal("live registration must not filter")
 	}
 	upstream, stored := playproxy.Resolve(play)
 	if upstream != raw || stored["Cookie"] != "a=b" {

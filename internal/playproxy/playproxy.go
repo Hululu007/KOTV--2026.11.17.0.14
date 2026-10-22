@@ -30,6 +30,7 @@ type entry struct {
 	URL       string
 	Headers   map[string]string
 	ExpiresAt time.Time
+	Filter    bool
 }
 
 var (
@@ -51,15 +52,15 @@ func Register(rawURL string, headers map[string]string) string {
 	if rawURL == "" || len(headers) == 0 {
 		return rawURL
 	}
-	return register(rawURL, headers)
+	return register(rawURL, headers, false)
 }
 
-// RegisterAlways 无论有没有请求头都登记 /proxy/play。去广告要在这条透传里过滤时用。
-func RegisterAlways(rawURL string, headers map[string]string) string {
+// RegisterAlways 无论有没有请求头都登记 /proxy/play。filter 为真时，这条透传才过滤节目单。
+func RegisterAlways(rawURL string, headers map[string]string, filter bool) string {
 	if strings.TrimSpace(rawURL) == "" {
 		return ""
 	}
-	return register(rawURL, headers)
+	return register(rawURL, headers, filter)
 }
 
 // NeedsLocalRelay 回环地址是否标了非引擎端口。这种端口只在跑引擎的机器上听得到。
@@ -84,7 +85,7 @@ func enginePort() int {
 	return localproxy.DefaultPort
 }
 
-func register(rawURL string, headers map[string]string) string {
+func register(rawURL string, headers map[string]string, filter bool) string {
 	if rawURL == "" {
 		return ""
 	}
@@ -107,7 +108,7 @@ func register(rawURL string, headers map[string]string) string {
 		}
 	}
 	trimEntriesHalfLocked(entriesMax)
-	entries[id] = entry{URL: rawURL, Headers: cp, ExpiresAt: now.Add(6 * time.Hour)}
+	entries[id] = entry{URL: rawURL, Headers: cp, ExpiresAt: now.Add(6 * time.Hour), Filter: filter}
 	mu.Unlock()
 	return fmt.Sprintf("%s/proxy/play?id=%s", LocalHTTPBase(), id)
 }
@@ -187,7 +188,7 @@ func PublicizeURL(raw string, headers ...map[string]string) string {
 		if len(headers) > 0 {
 			hdr = headers[0]
 		}
-		raw = register(raw, hdr)
+		raw = register(raw, hdr, false)
 	}
 	return rewritePublicHost(raw)
 }
@@ -304,16 +305,7 @@ func Resolve(proxyOrRaw string) (rawURL string, headers map[string]string) {
 	if proxyOrRaw == "" {
 		return "", nil
 	}
-	if !strings.Contains(proxyOrRaw, "/proxy/play?") {
-		return proxyOrRaw, nil
-	}
-	id := ""
-	if i := strings.Index(proxyOrRaw, "id="); i >= 0 {
-		id = proxyOrRaw[i+3:]
-		if j := strings.IndexAny(id, "&?#"); j >= 0 {
-			id = id[:j]
-		}
-	}
+	id := playID(proxyOrRaw)
 	if id == "" {
 		return proxyOrRaw, nil
 	}
@@ -326,6 +318,31 @@ func Resolve(proxyOrRaw string) (rawURL string, headers map[string]string) {
 		cp[k] = v
 	}
 	return e.URL, cp
+}
+
+// RegisteredFilter 这条透传登记是否要过滤节目单。不是 /proxy/play 时为假。
+func RegisteredFilter(proxyOrRaw string) bool {
+	id := playID(proxyOrRaw)
+	if id == "" {
+		return false
+	}
+	e, ok := lookup(id)
+	return ok && e.Filter
+}
+
+func playID(proxyOrRaw string) string {
+	proxyOrRaw = strings.TrimSpace(proxyOrRaw)
+	if proxyOrRaw == "" || !strings.Contains(proxyOrRaw, "/proxy/play?") {
+		return ""
+	}
+	id := ""
+	if i := strings.Index(proxyOrRaw, "id="); i >= 0 {
+		id = proxyOrRaw[i+3:]
+		if j := strings.IndexAny(id, "&?#"); j >= 0 {
+			id = id[:j]
+		}
+	}
+	return id
 }
 
 // Handle 代理拉流并转发 Range，注入登记的请求头。
@@ -446,7 +463,7 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, playI
 		return
 	}
 	defer resp.Body.Close()
-	if !settings.IsAdFilterEnabled() {
+	if !e.Filter {
 		writePassthrough(w, resp, resp.Body)
 		return
 	}
@@ -584,7 +601,7 @@ func tryRawSplice(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, pla
 		http.Error(w, "连接本机播放端口失败", http.StatusBadGateway)
 		return true
 	}
-	if settings.IsAdFilterEnabled() && bytes.Equal(peek, []byte("#EXTM3U")) {
+	if e.Filter && bytes.Equal(peek, []byte("#EXTM3U")) {
 		return false
 	}
 	spliceToClient(w, slot, br, head, peek)

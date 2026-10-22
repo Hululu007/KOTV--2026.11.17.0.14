@@ -355,7 +355,7 @@ func TestHandleAbsolutizesRedirectedPlaylist(t *testing.T) {
 	}))
 	defer src.Close()
 
-	proxyURL := playproxy.Register(src.URL+"/entry", map[string]string{"Cookie": "qk=1", "User-Agent": "Quark"})
+	proxyURL := playproxy.RegisterAlways(src.URL+"/entry", map[string]string{"Cookie": "qk=1", "User-Agent": "Quark"}, true)
 	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
 	rr := httptest.NewRecorder()
 	playproxy.Handle(rr, req)
@@ -374,5 +374,32 @@ func TestHandleAbsolutizesRedirectedPlaylist(t *testing.T) {
 	}
 	if res.Header.Get("X-Upstream") != "1" {
 		t.Fatalf("upstream header=%q", res.Header.Get("X-Upstream"))
+	}
+}
+
+func TestHandleSkipsFilterWhenUnset(t *testing.T) {
+	withAdFilter(t, true)
+	const raw = "#EXTM3U\n#EXTINF:1,\n/seg.ts\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		_, _ = w.Write([]byte(raw))
+	}))
+	defer srv.Close()
+
+	proxyURL := playproxy.RegisterAlways(srv.URL+"/live.m3u8", map[string]string{"Cookie": "qk=1"}, false)
+	if playproxy.RegisteredFilter(proxyURL) {
+		t.Fatal("live registration must not filter")
+	}
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	rr := httptest.NewRecorder()
+	playproxy.Handle(rr, req)
+	res := rr.Result()
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+	if string(body) != raw {
+		t.Fatalf("body=%q", body)
 	}
 }
