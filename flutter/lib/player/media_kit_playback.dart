@@ -84,6 +84,7 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.log.listen((log) {
       if (log.level != 'error') return;
       if (!_hlsRetryAllowed || _hlsRetried || _hlsMedia == null) return;
+      if (!kotvMpvNetworkUrl(_url)) return;
       if (!kotvMpvHlsOpenFailed(log.prefix, log.text)) return;
       final gen = _hlsGen;
       final media = _hlsMedia!;

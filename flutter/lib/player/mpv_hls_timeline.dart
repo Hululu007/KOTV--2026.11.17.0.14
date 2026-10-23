@@ -37,18 +37,30 @@ bool kotvIsHls(String url, String? format) {
   return (format?.trim().toLowerCase() ?? '') == 'application/x-mpegurl';
 }
 
-/// 交给播放器的 mime。是 HLS 时固定为 `application/x-mpegURL`。
+/// Exo 在 mime 非空时不看地址。只有空 mime 才按地址补成 HLS。
 String? kotvPlayMime(String url, String? format) {
-  if (kotvIsHls(url, format)) return 'application/x-mpegURL';
   final f = format?.trim() ?? '';
-  return f.isEmpty ? null : f;
+  if (f.isNotEmpty) {
+    if (f.toLowerCase() == 'application/x-mpegurl') return 'application/x-mpegURL';
+    return f;
+  }
+  if (kotvMpvUrlIsHls(url)) return 'application/x-mpegURL';
+  return null;
 }
 
-/// 主文件打开失败的日志。解码器报错不算。
+/// 主文件打开失败。认不出容器不算，解码器报错也不算。
 bool kotvMpvHlsOpenFailed(String prefix, String text) {
   final p = prefix.toLowerCase();
   if (p == 'vd' || p == 'ad') return false;
-  final t = text.toLowerCase();
-  return t.contains('avformat_open_input() failed') ||
-      t.contains('failed to recognize file format');
+  return text.toLowerCase().contains('avformat_open_input() failed');
+}
+
+bool kotvMpvNetworkUrl(String url) {
+  final scheme = Uri.tryParse(url.trim())?.scheme.toLowerCase() ?? '';
+  return scheme == 'http' ||
+      scheme == 'https' ||
+      scheme == 'rtmp' ||
+      scheme == 'rtsp' ||
+      scheme == 'rtspt' ||
+      scheme == 'proxy';
 }

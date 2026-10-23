@@ -257,14 +257,12 @@ func flexURLList(raw json.RawMessage) []string {
 	return out
 }
 
-// NormalizeManifest 把 mpd/hls 等简写换成播放器识别的 MIME。
+// NormalizeManifest 把 mpd/dash 换成播放器识别的 MIME。hls 字面量留给行解析。
 func NormalizeManifest(f string) string {
 	f = strings.ToLower(strings.TrimSpace(f))
 	switch f {
 	case "mpd", "dash":
 		return "application/dash+xml"
-	case "hls":
-		return "application/x-mpegURL"
 	default:
 		return f
 	}

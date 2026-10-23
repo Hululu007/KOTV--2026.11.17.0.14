@@ -9,6 +9,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -1722,11 +1723,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         emit(mapOf("event" to "completed"))
       }
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
-        if (!forceLavfHls && !ioHlsRetried && shouldRetryHls(error, errorText)) {
+        val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
+        if (!forceLavfHls && !ioHlsRetried && shouldRetryHls(url, error)) {
           ioHlsRetried = true
           forceLavfHls = true
           Log.w(TAG, "hls retry err=$error text=$errorText")
-          val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
           val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
           val gen = loadGen.get()
           if (url.isNotBlank()) {
@@ -1751,21 +1752,16 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** LOADING_FAILED / UNKNOWN_FORMAT / GENERIC，或文案像 IO。 */
-  private fun shouldRetryHls(error: Int, errorText: String?): Boolean {
-    when (error) {
-      MPVLib.MpvError.MPV_ERROR_LOADING_FAILED,
-      MPVLib.MpvError.MPV_ERROR_UNKNOWN_FORMAT,
-      MPVLib.MpvError.MPV_ERROR_GENERIC,
-      MPVLib.MpvError.MPV_ERROR_NOTHING_TO_PLAY,
-      -> return true
-    }
-    val t = errorText?.lowercase().orEmpty()
-    return t.contains("i/o") ||
-      t.contains("io error") ||
-      t.contains("failed to open") ||
-      t.contains("http error") ||
-      t.contains("unable to open")
+  /** 只有网络地址上的 LOADING_FAILED 才重试。认不出格式不重试。 */
+  private fun shouldRetryHls(url: String, error: Int): Boolean {
+    if (error != MPVLib.MpvError.MPV_ERROR_LOADING_FAILED) return false
+    val scheme = Uri.parse(url).scheme?.lowercase().orEmpty()
+    return scheme == "http" ||
+      scheme == "https" ||
+      scheme == "rtmp" ||
+      scheme == "rtsp" ||
+      scheme == "rtspt" ||
+      scheme == "proxy"
   }
 
   private fun emitSize() {

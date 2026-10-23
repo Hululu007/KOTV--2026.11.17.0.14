@@ -8,6 +8,36 @@ import (
 	"github.com/bobo/KOTV/internal/model"
 )
 
+func TestParseJSON_HlsWordStays(t *testing.T) {
+	live := &model.Live{}
+	Parse(live, `[{"name":"G","channel":[{"name":"C","url":"http://x/a.mp4","format":"hls"}]}]`)
+	if len(live.Groups) != 1 || len(live.Groups[0].Channels) != 1 {
+		t.Fatalf("groups=%+v", live.Groups)
+	}
+	if got := live.Groups[0].Channels[0].Format; got != "hls" {
+		t.Fatalf("format=%q", got)
+	}
+}
+
+func TestParseM3U_FormatHls(t *testing.T) {
+	live := &model.Live{}
+	Parse(live, "#EXTM3U\nformat=hls\n#EXTINF:-1,C\nhttp://x/a.mp4\n")
+	if len(live.Groups) != 1 || len(live.Groups[0].Channels) != 1 {
+		t.Fatalf("groups=%+v", live.Groups)
+	}
+	if got := live.Groups[0].Channels[0].Format; got != "application/x-mpegURL" {
+		t.Fatalf("format=%q", got)
+	}
+	live = &model.Live{}
+	Parse(live, "#EXTM3U\n#KODIPROP:inputstream.adaptive.manifest_type=hls\n#EXTINF:-1,C\nhttp://x/a.mp4\n")
+	if len(live.Groups) != 1 || len(live.Groups[0].Channels) != 1 {
+		t.Fatalf("kodi groups=%+v", live.Groups)
+	}
+	if got := live.Groups[0].Channels[0].Format; got != "application/x-mpegURL" {
+		t.Fatalf("kodi format=%q", got)
+	}
+}
+
 func TestParseTXT_GroupPassSplitsAtFirstUnderscore(t *testing.T) {
 	live := &model.Live{}
 	Parse(live, "央视_a_b,#genre#\nCCTV1,http://x/1.m3u8\n")

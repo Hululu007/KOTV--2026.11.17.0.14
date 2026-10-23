@@ -252,6 +252,14 @@ func (s *lineSetting) matches(line string) bool {
 		strings.HasPrefix(line, "#EXTVLCOPT:") || strings.HasPrefix(line, "#KODIPROP:")
 }
 
+func lineManifest(raw string) string {
+	f := model.NormalizeManifest(raw)
+	if f == "hls" {
+		return "application/x-mpegURL"
+	}
+	return f
+}
+
 func (s *lineSetting) apply(line string) {
 	if s.header == nil {
 		s.header = make(map[string]string)
@@ -275,7 +283,7 @@ func (s *lineSetting) apply(line string) {
 			s.parseSet = true
 		}
 	case strings.HasPrefix(lower, "format="):
-		s.format = model.NormalizeManifest(strings.TrimSpace(line[len("format="):]))
+		s.format = lineManifest(line[len("format="):])
 	case strings.HasPrefix(lower, "forcekey="):
 		s.forceKey = strings.EqualFold(strings.TrimSpace(line[len("forceKey="):]), "true")
 	case strings.HasPrefix(line, "#EXTVLCOPT:http-user-agent="):
@@ -317,7 +325,7 @@ func (s *lineSetting) applyKodiProp(line string) {
 			s.setDrmKey(strings.TrimSpace(parts[1]))
 		}
 	case strings.Contains(lower, "manifest_type="):
-		s.format = model.NormalizeManifest(strings.TrimSpace(afterEq(body, "manifest_type=")))
+		s.format = lineManifest(afterEq(body, "manifest_type="))
 	case strings.Contains(lower, "stream_headers=") || strings.Contains(lower, "common_headers="):
 		raw := body
 		if i := strings.Index(lower, "headers="); i >= 0 {

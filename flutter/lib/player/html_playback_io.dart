@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import 'kotv_platform.dart';
 import 'kotv_playback.dart';
+import 'mpv_hls_timeline.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
@@ -116,7 +118,11 @@ class HtmlPlayback extends KotvPlayback {
     try {
       await stop();
       _completed = false;
-      final h = kotvNormalizePlayHeaders(headers, url: url);
+      final h = Map<String, String>.from(kotvNormalizePlayHeaders(headers, url: url));
+      if (kotvIsIOS() && kotvIsHls(url, format)) {
+        // 插件从请求头里拿掉，写进 AVURLAsset 的 MIME。
+        h['X-KOTV-Asset-Mime'] = 'application/vnd.apple.mpegurl';
+      }
       final uri = Uri.parse(url);
       final c = VideoPlayerController.networkUrl(uri, httpHeaders: h);
       _c = c;

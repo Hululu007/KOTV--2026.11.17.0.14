@@ -43,6 +43,9 @@
 # 有边框分支去掉这次最大化，只去标题栏样式并铺到显示器。无边框仍靠最大化改尺寸。
 # 进入末尾不要 ForceChildRefresh。离开时 WM_SIZE 里原有的那次保留。
 #
+# video_player 的 formatHint 只在 Android 生效。iOS 打开时若判断为 HLS，Dart 写入
+# X-KOTV-Asset-Mime，这里把它从 HTTP 头里拿掉，改成 AVURLAsset 的 MIME。
+#
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
 set -euo pipefail
@@ -1246,4 +1249,64 @@ if WM_MARKER not in enter or "ForceChildRefresh();" in enter:
 if "::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);" not in enter:
     print("ERROR: window_manager frameless fullscreen lost SC_MAXIMIZE", file=sys.stderr)
     sys.exit(1)
+PY
+
+_kotv_python - "$PKG_CFG" <<'PY'
+import json, pathlib, sys
+from urllib.parse import urlparse
+from urllib.request import url2pathname
+
+cfg = pathlib.Path(sys.argv[1])
+data = json.loads(cfg.read_text(encoding="utf-8"))
+root = None
+for pkg in data.get("packages", []):
+    if pkg.get("name") != "video_player_avfoundation":
+        continue
+    uri = pkg.get("rootUri") or ""
+    if uri.startswith("file:"):
+        root = pathlib.Path(url2pathname(urlparse(uri).path))
+    break
+if root is None:
+    print("skip avfoundation mime hint: package not in package_config")
+    sys.exit(0)
+candidates = list(root.rglob("VideoPlayerPlugin.swift"))
+if not candidates:
+    print(f"skip avfoundation mime hint: no VideoPlayerPlugin.swift under {root}")
+    sys.exit(0)
+swift = candidates[0]
+text = swift.read_text(encoding="utf-8")
+if "X-KOTV-Asset-Mime" in text:
+    print(f"avfoundation mime hint already patched ({swift})")
+    sys.exit(0)
+old = """  private func playerItem(with options: CreationOptions) throws -> FVPAVPlayerItem {
+    let headers = options.httpHeaders
+    let itemOptions = headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers]
+    guard let url = URL(string: options.uri) else {
+      throw PigeonError(code: "video_player", message: "Invalid URI", details: nil)
+    }
+    let asset = avFactory.urlAsset(with: url, options: itemOptions)
+    return avFactory.playerItem(with: asset)
+  }"""
+new = """  private func playerItem(with options: CreationOptions) throws -> FVPAVPlayerItem {
+    var headers = options.httpHeaders
+    let assetMime = headers.removeValue(forKey: "X-KOTV-Asset-Mime")
+    var itemOptions: [String: Any] = [:]
+    if !headers.isEmpty {
+      itemOptions["AVURLAssetHTTPHeaderFieldsKey"] = headers
+    }
+    if let assetMime, !assetMime.isEmpty {
+      itemOptions[AVURLAssetOutOfBandMIMETypeKey] = assetMime
+    }
+    let opts: [String: Any]? = itemOptions.isEmpty ? nil : itemOptions
+    guard let url = URL(string: options.uri) else {
+      throw PigeonError(code: "video_player", message: "Invalid URI", details: nil)
+    }
+    let asset = avFactory.urlAsset(with: url, options: opts)
+    return avFactory.playerItem(with: asset)
+  }"""
+if old not in text:
+    print(f"skip avfoundation mime hint: playerItem shape differs ({swift})")
+    sys.exit(0)
+swift.write_text(text.replace(old, new, 1), encoding="utf-8")
+print(f"patched avfoundation mime hint ({swift})")
 PY

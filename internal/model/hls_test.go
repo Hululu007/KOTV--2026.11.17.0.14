@@ -32,10 +32,10 @@ func TestURLIsHls(t *testing.T) {
 }
 
 func TestNormalizeManifest(t *testing.T) {
-	if got := NormalizeManifest("hls"); got != "application/x-mpegURL" {
+	if got := NormalizeManifest("hls"); got != "hls" {
 		t.Fatalf("hls=%q", got)
 	}
-	if got := NormalizeManifest("HLS"); got != "application/x-mpegURL" {
+	if got := NormalizeManifest("HLS"); got != "hls" {
 		t.Fatalf("HLS=%q", got)
 	}
 	if got := NormalizeManifest("m3u8"); got != "m3u8" {

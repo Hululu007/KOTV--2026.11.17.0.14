@@ -22,7 +22,8 @@ void main() {
   test('only application/x-mpegURL counts as hls mime', () {
     expect(kotvIsHls('https://cdn/a.mp4', 'application/x-mpegURL'), isTrue);
     expect(kotvIsHls('https://cdn/a.m3u8', 'video/mp4'), isTrue);
-    expect(kotvPlayMime('https://cdn/a.m3u8', 'video/mp4'), 'application/x-mpegURL');
+    expect(kotvPlayMime('https://cdn/a.m3u8', 'video/mp4'), 'video/mp4');
+    expect(kotvPlayMime('https://cdn/a.m3u8', null), 'application/x-mpegURL');
     expect(kotvPlayMime('https://cdn/a.mp4', 'application/x-mpegURL'), 'application/x-mpegURL');
     expect(kotvIsHls('https://cdn/a.mp4', 'application/vnd.apple.mpegurl'), isFalse);
     expect(kotvIsHls('https://cdn/a.mp4', 'hls'), isFalse);
@@ -34,7 +35,9 @@ void main() {
 
   test('open failure text', () {
     expect(kotvMpvHlsOpenFailed('lavf', 'avformat_open_input() failed'), isTrue);
-    expect(kotvMpvHlsOpenFailed('cplayer', 'Failed to recognize file format.'), isTrue);
+    expect(kotvMpvHlsOpenFailed('cplayer', 'Failed to recognize file format.'), isFalse);
+    expect(kotvMpvNetworkUrl('https://cdn/a.mp4'), isTrue);
+    expect(kotvMpvNetworkUrl('file:///tmp/a.mp4'), isFalse);
     expect(kotvMpvHlsOpenFailed('lavf', 'could not open codec'), isFalse);
     expect(kotvMpvHlsOpenFailed('vd', 'could not open codec'), isFalse);
   });
