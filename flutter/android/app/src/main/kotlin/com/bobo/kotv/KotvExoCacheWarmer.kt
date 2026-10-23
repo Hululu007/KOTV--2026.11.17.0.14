@@ -55,9 +55,7 @@ object KotvExoCacheWarmer {
         try {
           val cache = KotvExoCache.get(ctx)
           val factory =
-            OkHttpDataSource.Factory(http)
-              .setUserAgent(headers["User-Agent"] ?: headers["user-agent"] ?: "KOTV")
-              .setDefaultRequestProperties(headers)
+            OkHttpDataSource.Factory(http).setDefaultRequestProperties(headers)
           val upstream = DefaultDataSource.Factory(ctx, factory)
           val cacheDs =
             CacheDataSource.Factory()

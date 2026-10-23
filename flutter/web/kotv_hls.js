@@ -2,6 +2,18 @@
 (function (global) {
   'use strict';
 
+  function applyXhrHeaders(xhr, headers) {
+    if (!xhr || !headers) return;
+    try {
+      Object.keys(headers).forEach(function (k) {
+        try {
+          xhr.setRequestHeader(k, headers[k]);
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+  global.kotvApplyXhrHeaders = applyXhrHeaders;
+
   function destroy(video) {
     if (!video) return;
     try {
@@ -149,14 +161,7 @@
         enableWorker: true,
         lowLatencyMode: false,
         xhrSetup: function (xhr) {
-          if (!headers) return;
-          try {
-            Object.keys(headers).forEach(function (k) {
-              try {
-                xhr.setRequestHeader(k, headers[k]);
-              } catch (_) {}
-            });
-          } catch (_) {}
+          applyXhrHeaders(xhr, headers);
         },
       });
       hls.loadSource(url);

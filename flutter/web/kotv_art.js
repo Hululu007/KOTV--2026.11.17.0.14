@@ -28,14 +28,7 @@
         enableWorker: true,
         lowLatencyMode: false,
         xhrSetup: function (xhr) {
-          if (!headers) return;
-          try {
-            Object.keys(headers).forEach(function (k) {
-              try {
-                xhr.setRequestHeader(k, headers[k]);
-              } catch (_) {}
-            });
-          } catch (_) {}
+          if (global.kotvApplyXhrHeaders) global.kotvApplyXhrHeaders(xhr, headers);
         },
       });
       hls.loadSource(url);

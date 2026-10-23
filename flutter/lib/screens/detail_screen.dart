@@ -2321,7 +2321,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             sendHeaders: kotvPlaybackSendsHeaders(
               playerVal: failover.playerVal,
               mediaUrl: mediaHint,
-              headers: headers,
             ),
           );
           openUrl = resolved.url;

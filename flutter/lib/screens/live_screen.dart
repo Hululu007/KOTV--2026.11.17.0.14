@@ -1601,7 +1601,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         sendHeaders: kotvPlaybackSendsHeaders(
           playerVal: failover.playerVal,
           mediaUrl: mediaHint,
-          headers: hdrMap,
         ),
       );
       final openUrl = resolved.url;

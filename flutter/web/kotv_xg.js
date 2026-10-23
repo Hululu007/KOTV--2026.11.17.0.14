@@ -29,6 +29,12 @@
       return 'none';
     }
     var mode = isHlsUrl(url) && global.HlsJsPlayer ? 'hls' : 'html';
+    var hlsOpts = {};
+    if (headers && global.kotvApplyXhrHeaders) {
+      hlsOpts.xhrSetup = function (xhr) {
+        global.kotvApplyXhrHeaders(xhr, headers);
+      };
+    }
     var player = new Ctor({
       el: container,
       url: url,
@@ -56,7 +62,7 @@
         'playNext',
       ],
       controlPlugins: [],
-      customConfig: headers || {},
+      hlsOpts: hlsOpts,
     });
     container._kotvXg = player;
     container._kotvXgMode = mode;

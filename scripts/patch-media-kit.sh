@@ -535,7 +535,7 @@ PREPARE_START_OLD = """    if (dataSource.httpHeaders.isNotEmpty) {
     player.media = uri;
     int ret = await player.prepare(); // required!
 """
-PREPARE_START_NEW = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip before avio.headers (CDN).
+PREPARE_START_MID = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip before avio.headers (CDN).
     // Same idea as Mac MPV Media(start:) / mdk prepare(startPosition).
     var prepareMs = 0;
     if (dataSource.httpHeaders.isNotEmpty) {
@@ -554,8 +554,45 @@ PREPARE_START_NEW = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip bef
     player.media = uri;
     int ret = await player.prepare(position: prepareMs); // required!
 """
-if "X-KOTV-Prepare-Ms" in mdk_text:
-    print(f"ok fvp ({fvp_version}) already patched: prepare(startPosition) via X-KOTV-Prepare-Ms")
+PREPARE_START_NEW = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip before avio.headers (CDN).
+    // UA / Referer 走 avio.user_agent / avio.referer，其余进 avio.headers。
+    var prepareMs = 0;
+    var ua = '';
+    var referer = '';
+    var headers = '';
+    if (dataSource.httpHeaders.isNotEmpty) {
+      dataSource.httpHeaders.forEach((key, value) {
+        if (key == 'X-KOTV-Prepare-Ms') {
+          prepareMs = int.tryParse(value) ?? 0;
+          return;
+        }
+        final low = key.toLowerCase();
+        if (low == 'user-agent' || low == 'ua') {
+          ua = value;
+          return;
+        }
+        if (low == 'referer' || low == 'referrer') {
+          referer = value;
+          return;
+        }
+        headers += '$key: $value\\r\\n';
+      });
+    }
+    if (ua.isNotEmpty) player.setProperty('avio.user_agent', ua);
+    if (referer.isNotEmpty) player.setProperty('avio.referer', referer);
+    if (headers.isNotEmpty) player.setProperty('avio.headers', headers);
+    player.media = uri;
+    int ret = await player.prepare(position: prepareMs); // required!
+"""
+if "avio.user_agent" in mdk_text and "avio.referer" in mdk_text:
+    print(f"ok fvp ({fvp_version}) already patched: avio.user_agent / avio.referer")
+elif PREPARE_START_MID in mdk_text:
+    mdk_text = _once(
+        "avio.user_agent / avio.referer",
+        mdk_text,
+        PREPARE_START_MID,
+        PREPARE_START_NEW,
+    )
 else:
     mdk_text = _once(
         "prepare(startPosition) via X-KOTV-Prepare-Ms",
@@ -797,6 +834,9 @@ if "player.setBufferRange(min: 0, max: 0);" not in mdk_check or "_lowLatency <= 
     sys.exit(1)
 if "X-KOTV-Prepare-Ms" not in mdk_check or "prepare(position: prepareMs)" not in mdk_check:
     print("ERROR: fvp create missing prepare(startPosition) via X-KOTV-Prepare-Ms", file=sys.stderr)
+    sys.exit(1)
+if "avio.user_agent" not in mdk_check or "avio.referer" not in mdk_check:
+    print("ERROR: fvp create missing avio.user_agent / avio.referer", file=sys.stderr)
     sys.exit(1)
 if "player.setBufferRange(min: 0);" in mdk_check and "_lowLatency > 1" in mdk_check:
     print("ERROR: fvp lowLatency still has setBufferRange(min: 0) without max", file=sys.stderr)

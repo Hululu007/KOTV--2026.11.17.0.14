@@ -40,17 +40,11 @@
       nativecontrols: false,
       alwaysShowControls: false,
     };
-    // 部分版本支持 headers / xhr
-    if (headers) {
-      opts.headers = headers;
-      opts.xhrSetup = function (xhr) {
-        try {
-          Object.keys(headers).forEach(function (k) {
-            try {
-              xhr.setRequestHeader(k, headers[k]);
-            } catch (_) {}
-          });
-        } catch (_) {}
+    if (headers && global.kotvApplyXhrHeaders) {
+      opts.hlsOpts = {
+        xhrSetup: function (xhr) {
+          global.kotvApplyXhrHeaders(xhr, headers);
+        },
       };
     }
     var player = new ZW(opts);
