@@ -12,13 +12,22 @@ bool kotvMpvUrlIsHls(String url) {
   }
   if (raw.contains('=m3u8')) return true;
   if (raw.contains('=mpd')) return false;
-  if (uri.pathSegments.isEmpty) return false;
-  final seg = uri.pathSegments.last;
+  final seg = _lastSegment(uri);
+  if (seg == null) return false;
   if (seg.toLowerCase() == 'm3u8') return true;
   final dot = seg.lastIndexOf('.');
   if (dot < 0 || dot == seg.length - 1) return false;
   final ext = seg.substring(dot + 1).toLowerCase();
   return ext == 'm3u8' || ext == 'php';
+}
+
+/// 结尾斜杠会产生空段，取最后一段非空路径。
+String? _lastSegment(Uri uri) {
+  for (var i = uri.pathSegments.length - 1; i >= 0; i--) {
+    final seg = uri.pathSegments[i];
+    if (seg.isNotEmpty) return seg;
+  }
+  return null;
 }
 
 /// 这一次打开要指定 lavf 的 hls。地址或格式命中后，失败不再改回探测。

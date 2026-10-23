@@ -1575,13 +1575,21 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     if (s.contains("=m3u8")) return true
     if (s.contains("=mpd")) return false
-    val seg = uri.lastPathSegment ?: return false
-    if (seg.isEmpty()) return false
+    val seg = lastNonEmptySegment(uri) ?: return false
     if (seg.equals("m3u8", ignoreCase = true)) return true
     val dot = seg.lastIndexOf('.')
     if (dot < 0 || dot == seg.length - 1) return false
     val ext = seg.substring(dot + 1)
     return ext.equals("m3u8", ignoreCase = true) || ext.equals("php", ignoreCase = true)
+  }
+
+  private fun lastNonEmptySegment(uri: android.net.Uri): String? {
+    val segs = uri.pathSegments
+    for (i in segs.size - 1 downTo 0) {
+      val seg = segs[i]
+      if (seg.isNotEmpty()) return seg
+    }
+    return null
   }
 
   /**
