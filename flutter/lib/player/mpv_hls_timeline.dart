@@ -1,38 +1,37 @@
-import 'dart:async';
-import 'dart:convert';
-
-import 'package:http/http.dart' as http;
-
-const _headBytes = 64 * 1024;
-
-/// 跳过 BOM 和空白后：FLV / TS 不是整段 HLS。
-/// `#EXTM3U` 且含分片或 EXT-X 标签才是。
-bool kotvMpvHeadIsHlsTimeline(List<int> bytes) {
-  if (bytes.isEmpty) return false;
-  var i = 0;
-  if (bytes.length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) {
-    i = 3;
+/// 地址按路径和查询判断是不是 HLS。
+bool kotvMpvUrlIsHls(String url) {
+  final raw = url.trim();
+  if (raw.isEmpty) return false;
+  if (raw.contains('=m3u8')) return true;
+  final uri = Uri.tryParse(raw);
+  if (uri == null) return false;
+  if (uri.scheme.toLowerCase() == 'data') {
+    final body = raw.length > 5 ? raw.substring(5) : '';
+    return !body.startsWith('application/dash+xml');
   }
-  while (i < bytes.length) {
-    final b = bytes[i];
-    if (b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D) {
-      i++;
-      continue;
-    }
-    break;
-  }
-  if (i >= bytes.length) return false;
-  if (bytes[i] == 0x47) return false;
-  if (_asciiAt(bytes, i, 'FLV')) return false;
-  if (!_asciiAt(bytes, i, '#EXTM3U')) return false;
-  final text = latin1.decode(bytes, allowInvalid: true).toUpperCase();
-  return text.contains('#EXTINF') ||
-      text.contains('#EXT-X-STREAM-INF') ||
-      text.contains('#EXT-X-TARGETDURATION') ||
-      text.contains('#EXT-X-MEDIA-SEQUENCE');
+  if (uri.pathSegments.isEmpty) return false;
+  final seg = uri.pathSegments.last;
+  if (seg.toLowerCase() == 'm3u8') return true;
+  final dot = seg.lastIndexOf('.');
+  if (dot < 0 || dot == seg.length - 1) return false;
+  final ext = seg.substring(dot + 1).toLowerCase();
+  return ext == 'm3u8' || ext == 'php';
 }
 
-bool kotvMpvHlsForceRejected(String prefix, String text) {
+/// 格式字段已经是 mpegURL。这种打开失败后不再重试。
+bool kotvMpvFormatIsMpegUrl(String? format) {
+  return format?.trim().toLowerCase() == 'application/x-mpegurl';
+}
+
+/// 这一次打开要指定 lavf 的 hls。
+bool kotvMpvHlsLavf(String url, String? format) {
+  if (kotvMpvUrlIsHls(url)) return true;
+  final f = format?.trim().toLowerCase() ?? '';
+  return f == 'application/x-mpegurl' || f == 'hls' || f == 'm3u8';
+}
+
+/// 打开失败、可以再按 HLS 试一次的日志。
+bool kotvMpvHlsOpenFailed(String prefix, String text) {
   final t = text.toLowerCase();
   if (t.contains('avformat_open_input() failed')) return true;
   if (t.contains('failed to recognize file format')) return true;
@@ -41,48 +40,4 @@ bool kotvMpvHlsForceRejected(String prefix, String text) {
     return t.contains('failed') && t.contains('open');
   }
   return false;
-}
-
-Future<bool> kotvMpvHlsTimeline(String url, Map<String, String> headers) async {
-  final bytes = await _readPlayHead(url, headers);
-  if (bytes == null || bytes.isEmpty) return false;
-  return kotvMpvHeadIsHlsTimeline(bytes);
-}
-
-Future<List<int>?> _readPlayHead(String url, Map<String, String> headers) async {
-  final uri = Uri.tryParse(url.trim());
-  if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) return null;
-  final client = http.Client();
-  try {
-    final req = http.Request('GET', uri);
-    headers.forEach((k, v) {
-      if (k.trim().isEmpty || v.trim().isEmpty) return;
-      if (k.trim().toLowerCase() == 'range') return;
-      req.headers[k] = v;
-    });
-    final res = await client.send(req).timeout(const Duration(seconds: 8));
-    if (res.statusCode >= 400) {
-      await res.stream.drain<void>();
-      return null;
-    }
-    final out = <int>[];
-    await for (final chunk in res.stream.timeout(const Duration(seconds: 8))) {
-      out.addAll(chunk);
-      if (out.length >= _headBytes) break;
-    }
-    if (out.length > _headBytes) return out.sublist(0, _headBytes);
-    return out;
-  } catch (_) {
-    return null;
-  } finally {
-    client.close();
-  }
-}
-
-bool _asciiAt(List<int> bytes, int start, String text) {
-  if (start + text.length > bytes.length) return false;
-  for (var n = 0; n < text.length; n++) {
-    if (bytes[start + n] != text.codeUnitAt(n)) return false;
-  }
-  return true;
 }

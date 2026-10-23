@@ -461,11 +461,10 @@ class NativeMpvPlayback extends KotvPlayback {
       if (ck != null) {
         props['demuxer-lavf-o'] = kotvLavfOWithClearKey(ck);
       }
-      final forceHls = await kotvMpvHlsTimeline(url, _headers);
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,
-        'forceHls': forceHls,
+        'forceHls': kotvMpvHlsLavf(url, format),
         'live': live,
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,

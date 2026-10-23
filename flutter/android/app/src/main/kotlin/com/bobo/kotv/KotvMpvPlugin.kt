@@ -91,7 +91,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** 首选字幕语言（BCP-47，逗号分隔）→ mpv slang。 */
   private var preferredTextLangs = ""
   private var livePlayback = false
-  /** 这次按正文强制过 hls，打开失败后再按内容探测一次。 */
+  /** 这次没指定 hls 时，IO/格式失败后只再指定一次。 */
   private var ioHlsRetried = false
   private var forceLavfHls = false
   /** 错误恢复后 seek 到该秒；&lt;0 表示不恢复。 */
@@ -1536,8 +1536,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       val opts = ArrayList<String>(3)
       if (startMs > 0L) opts.add("start=${startMs / 1000.0}")
       if (forceLavfHls) {
-        opts.add("demuxer=lavf")
         opts.add("demuxer-lavf-format=hls")
+        opts.add("demuxer-lavf-o-add=http_persistent=0")
       }
       if (opts.isEmpty()) {
         MPVLib.command(arrayOf("loadfile", url, "replace"))
@@ -1862,10 +1862,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         emit(mapOf("event" to "completed"))
       }
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
-        if (forceLavfHls && !ioHlsRetried && shouldRetryHls(error, errorText)) {
+        if (!forceLavfHls && !ioHlsRetried && shouldRetryHls(error, errorText)) {
           ioHlsRetried = true
-          forceLavfHls = false
-          Log.w(TAG, "forced hls open failed → probe retry err=$error text=$errorText")
+          forceLavfHls = true
+          Log.w(TAG, "hls retry err=$error text=$errorText")
           val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
           val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
           if (url.isNotBlank()) {

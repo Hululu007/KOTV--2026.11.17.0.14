@@ -80,11 +80,37 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.volume.listen((_) => notifyListeners()));
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
+    _subs.add(player.stream.log.listen((log) {
+      if (!_hlsRetryAllowed || _hlsRetried || _hlsMedia == null) return;
+      if (!kotvMpvHlsOpenFailed(log.prefix, log.text)) return;
+      final gen = _hlsGen;
+      final media = _hlsMedia!;
+      final key = _hlsClearKey;
+      final pending = _hlsJob;
+      _hlsRetried = true;
+      unawaited(() async {
+        if (pending != null) {
+          try {
+            await pending;
+          } catch (_) {}
+        }
+        if (gen != _hlsGen || _url.isEmpty) return;
+        await _applyHlsLavf(true, key);
+        if (gen != _hlsGen || _url.isEmpty) return;
+        await _openThenUnpause(media);
+      }());
+    }));
     // 网速浮层走 KotvTraffic；勿轮询 demuxer-cache-state（换集/换台重建 demuxer 时易卡音）。
     _optsReady = _prepareOpts();
   }
 
   int _openSerial = 0;
+  bool _hlsRetryAllowed = false;
+  bool _hlsRetried = false;
+  int _hlsGen = 0;
+  Future<void>? _hlsJob;
+  Media? _hlsMedia;
+  String? _hlsClearKey;
 
   final Player player;
   final VideoController controller;
@@ -138,7 +164,11 @@ class MediaKitPlayback extends KotvPlayback {
     await player.play();
   }
 
-  Future<void> _setMpvHlsForce(bool on) async {
+  /// 指定 hls 会重开当前解复用，所以先卸掉上一集再写。
+  Future<void> _applyHlsLavf(bool on, String? clearKey) async {
+    try {
+      await player.stop();
+    } catch (_) {}
     final platform = player.platform;
     if (platform == null) return;
     Future<void> set(String k, String v) async {
@@ -146,62 +176,10 @@ class MediaKitPlayback extends KotvPlayback {
         await (platform as dynamic).setProperty(k, v);
       } catch (_) {}
     }
-    if (on) {
-      await set('demuxer', 'lavf');
-      await set('demuxer-lavf-format', 'hls');
-      return;
-    }
-    await set('demuxer-lavf-format', '');
-    await set('demuxer', '');
-  }
 
-  /// 整段 HLS 用 lavf。这两个选项会重开当前解复用，所以先卸掉上一集再写。
-  /// 强制打开被拒绝且还没有时长或画面时，去掉这两个属性再开一次。
-  Future<void> _openWithHlsForce(Media media, bool force) async {
-    final playing = _url;
-    try {
-      await player.stop();
-    } catch (_) {}
-    await _setMpvHlsForce(force);
-    if (!force) {
-      await _openThenUnpause(media);
-      return;
-    }
-    var sawMedia = false;
-    var rejected = false;
-    final widths = player.stream.width.listen((w) {
-      if ((w ?? 0) > 0) sawMedia = true;
-    });
-    final durations = player.stream.duration.listen((d) {
-      if (d > Duration.zero) sawMedia = true;
-    });
-    final logs = player.stream.log.listen((log) {
-      if (kotvMpvHlsForceRejected(log.prefix, log.text)) rejected = true;
-    });
-    try {
-      await _openThenUnpause(media);
-      final gate = Completer<void>();
-      final tick = Timer.periodic(const Duration(milliseconds: 40), (_) {
-        if ((sawMedia || rejected) && !gate.isCompleted) gate.complete();
-      });
-      try {
-        await gate.future.timeout(const Duration(seconds: 4), onTimeout: () {});
-      } finally {
-        tick.cancel();
-      }
-      if (rejected && !sawMedia && _url == playing && playing.isNotEmpty) {
-        try {
-          await player.stop();
-        } catch (_) {}
-        if (_url != playing) return;
-        await _setMpvHlsForce(false);
-        await _openThenUnpause(media);
-      }
-    } finally {
-      await widths.cancel();
-      await durations.cancel();
-      await logs.cancel();
-    }
+    final base = kotvLavfOWithClearKey(clearKey);
+    await set('demuxer-lavf-o', on ? '$base,http_persistent=0' : base);
+    await set('demuxer-lavf-format', on ? 'hls' : '');
   }
 
   Future<void> _prepareOpts() async {
@@ -376,14 +354,6 @@ class MediaKitPlayback extends KotvPlayback {
     }
     await _optsReady;
     await _opts.applyAfterAttach(player, live: live);
-    if (clearKeyHex != null) {
-      try {
-        final platform = player.platform;
-        if (platform != null) {
-          await (platform as dynamic).setProperty('demuxer-lavf-o', kotvLavfOWithClearKey(clearKeyHex));
-        }
-      } catch (_) {}
-    }
     if (_extraOpenProps.isNotEmpty) {
       try {
         final platform = player.platform;
@@ -401,8 +371,18 @@ class MediaKitPlayback extends KotvPlayback {
       httpHeaders: _headers.isEmpty ? null : _headers,
       start: startAt > Duration.zero ? startAt : null,
     );
-    final forceHls = await kotvMpvHlsTimeline(url, _headers);
-    await _openWithHlsForce(media, forceHls);
+    final forceHls = kotvMpvHlsLavf(url, format);
+    _hlsGen++;
+    _hlsRetried = false;
+    _hlsRetryAllowed = !forceHls;
+    _hlsClearKey = clearKeyHex;
+    _hlsMedia = media;
+    final job = () async {
+      await _applyHlsLavf(forceHls, clearKeyHex);
+      await _openThenUnpause(media);
+    }();
+    _hlsJob = job;
+    await job;
     // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
     _acceptSize = true;
     _adoptPlayerSize();
