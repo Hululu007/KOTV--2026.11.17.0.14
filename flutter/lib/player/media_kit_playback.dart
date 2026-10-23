@@ -70,6 +70,7 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.width.listen((w) {
       if (!_acceptSize) return;
       _w = w ?? 0;
+      if (_w > 0) _hlsRetryAllowed = false;
       notifyListeners();
     }));
     _subs.add(player.stream.height.listen((h) {
@@ -81,6 +82,7 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
     _subs.add(player.stream.log.listen((log) {
+      if (log.level != 'error') return;
       if (!_hlsRetryAllowed || _hlsRetried || _hlsMedia == null) return;
       if (!kotvMpvHlsOpenFailed(log.prefix, log.text)) return;
       final gen = _hlsGen;
@@ -374,11 +376,14 @@ class MediaKitPlayback extends KotvPlayback {
     final forceHls = kotvMpvHlsLavf(url, format);
     _hlsGen++;
     _hlsRetried = false;
-    _hlsRetryAllowed = !forceHls;
+    _hlsRetryAllowed = false;
     _hlsClearKey = clearKeyHex;
     _hlsMedia = media;
+    final gen = _hlsGen;
     final job = () async {
       await _applyHlsLavf(forceHls, clearKeyHex);
+      if (gen != _hlsGen || _url.isEmpty) return;
+      _hlsRetryAllowed = !forceHls;
       await _openThenUnpause(media);
     }();
     _hlsJob = job;

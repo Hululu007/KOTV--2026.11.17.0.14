@@ -349,6 +349,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             height = 0
             ioHlsRetried = false
             forceLavfHls = forceHls
+            // 作废上一集还没落地的跟跳和失败重试。
+            loadGen.incrementAndGet()
             retrySeekSec = -1.0
             pendingUrl = url
             pendingHeaders = headers
@@ -1517,6 +1519,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       val resolved = followPlayUrl(url, headers)
       main.post {
         if (!created.get() || gen != loadGen.get()) return@post
+        // 播放器打开的是跳转后的地址。格式只描述跳转前那一次。
+        if (resolved != url) forceLavfHls = urlIsHls(resolved)
         startLoad(resolved, headers)
       }
     }
@@ -1552,6 +1556,32 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     } catch (e: Throwable) {
       emit(mapOf("event" to "error", "message" to (e.message ?: "load failed")))
     }
+  }
+
+  /** 跟跳之后按最终地址的协议、路径和查询判断。 */
+  private fun urlIsHls(raw: String): Boolean {
+    val s = raw.trim()
+    if (s.isEmpty()) return false
+    val uri = try {
+      android.net.Uri.parse(s)
+    } catch (_: Throwable) {
+      return s.contains("=m3u8")
+    }
+    val scheme = uri.scheme?.lowercase().orEmpty()
+    if (scheme == "rtsp" || scheme == "rtspt") return false
+    if (scheme == "data") {
+      val body = if (s.length > 5) s.substring(5) else ""
+      return !body.startsWith("application/dash+xml")
+    }
+    if (s.contains("=m3u8")) return true
+    if (s.contains("=mpd")) return false
+    val seg = uri.lastPathSegment ?: return false
+    if (seg.isEmpty()) return false
+    if (seg.equals("m3u8", ignoreCase = true)) return true
+    val dot = seg.lastIndexOf('.')
+    if (dot < 0 || dot == seg.length - 1) return false
+    val ext = seg.substring(dot + 1)
+    return ext.equals("m3u8", ignoreCase = true) || ext.equals("php", ignoreCase = true)
   }
 
   /**
@@ -1868,11 +1898,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           Log.w(TAG, "hls retry err=$error text=$errorText")
           val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
           val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
+          val gen = loadGen.get()
           if (url.isNotBlank()) {
             buffering = true
             playing = false
             retrySeekSec = positionSec.coerceAtLeast(0.0)
             main.post {
+              if (!created.get() || gen != loadGen.get()) return@post
               try {
                 startLoad(url, headers)
               } catch (t: Throwable) {

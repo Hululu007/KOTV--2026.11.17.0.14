@@ -275,7 +275,7 @@ class KotvMpvOpts {
         await set('hwdec', hwdecValue());
       } catch (_) {}
 
-      // HLS 伪装扩展名；不设 protocol_whitelist（名单外的 RTSP/RTMP 会被拒）。
+      // 分片后缀不按名单拦截；不设 protocol_whitelist（名单外的 RTSP/RTMP 会被拒）。
       try {
         await set('demuxer-lavf-o', kotvDemuxerLavfO);
       } catch (_) {}
