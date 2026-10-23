@@ -396,6 +396,7 @@ class NativeMpvPlayback extends KotvPlayback {
         notifyListeners();
         break;
       case 'completed':
+        if (_completed) break;
         _completed = true;
         _playing = false;
         if (!_endedCtrl.isClosed) _endedCtrl.add(true);

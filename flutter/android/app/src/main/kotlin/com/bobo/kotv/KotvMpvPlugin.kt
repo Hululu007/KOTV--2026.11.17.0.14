@@ -1576,14 +1576,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setPropertyString("demuxer-lavf-o", lavf)
     } catch (_: Throwable) {
     }
-    // 打开前写入。指定 hls 时按整条时间轴解，并禁止把 m3u8 展开成分片列表。
-    // 不指定时清掉，避免上一集的值留在会话里。
+    // 打开前写入。指定 hls 时按整条时间轴解。不指定时清掉，避免上一集的值留在会话里。
+    // 嵌套分片要保持默认可打开，关掉后分片请求会被拒绝。
     try {
       MPVLib.setPropertyString("demuxer-lavf-format", if (forceLavfHls) "hls" else "")
-    } catch (_: Throwable) {
-    }
-    try {
-      MPVLib.setPropertyString("access-references", if (forceLavfHls) "no" else "yes")
     } catch (_: Throwable) {
     }
   }
@@ -1694,7 +1690,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         if (value) postTerminal {
           eof = true
           playing = false
-          emitNow(mapOf("event" to "completed"))
         }
       }
       "paused-for-cache", "seeking" -> buffering = value
