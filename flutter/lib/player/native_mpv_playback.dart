@@ -465,7 +465,7 @@ class NativeMpvPlayback extends KotvPlayback {
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,
-        'forceHls': kotvMpvHlsLavf(url, format),
+        'forceHls': kotvIsHls(url, format),
         'live': live,
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,

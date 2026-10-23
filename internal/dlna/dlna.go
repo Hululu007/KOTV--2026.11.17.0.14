@@ -238,16 +238,6 @@ func LocalIP() string {
 }
 
 func buildDIDL(mediaURL, title string, headers map[string]string) string {
-	mime := "video/mp4"
-	low := strings.ToLower(mediaURL)
-	switch {
-	case strings.Contains(low, ".m3u8"):
-		mime = "application/vnd.apple.mpegurl"
-	case strings.Contains(low, ".mkv"):
-		mime = "video/x-matroska"
-	case strings.Contains(low, ".webm"):
-		mime = "video/webm"
-	}
 	esc := func(s string) string {
 		s = strings.ReplaceAll(s, "&", "&amp;")
 		s = strings.ReplaceAll(s, "<", "&lt;")
@@ -264,7 +254,7 @@ func buildDIDL(mediaURL, title string, headers map[string]string) string {
 	return fmt.Sprintf(
 		`<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">`+
 			`<item id="0" parentID="-1" restricted="1"><dc:title>%s</dc:title>%s<upnp:class>object.item.videoItem</upnp:class>`+
-			`<res protocolInfo="http-get:*:%s:*">%s</res></item></DIDL-Lite>`,
-		esc(title), desc, mime, esc(mediaURL),
+			`<res protocolInfo="http-get:*:video/*:*">%s</res></item></DIDL-Lite>`,
+		esc(title), desc, esc(mediaURL),
 	)
 }

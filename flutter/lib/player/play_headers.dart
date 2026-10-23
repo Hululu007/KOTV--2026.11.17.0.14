@@ -65,6 +65,7 @@ bool kotvIsLocalProxyUrl(String url) {
 bool kotvPlaybackSendsHeaders({
   required String playerVal,
   required String mediaUrl,
+  String? format,
   bool? hlsJsSupported,
 }) {
   switch (playerVal) {
@@ -77,7 +78,7 @@ bool kotvPlaybackSendsHeaders({
     case 'innie#xg':
     case 'innie#zw':
       if (!(hlsJsSupported ?? kotvWebHlsJsSupported())) return false;
-      return kotvMpvUrlIsHls(mediaUrl);
+      return kotvIsHls(mediaUrl, format);
     default:
       return false;
   }

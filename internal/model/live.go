@@ -263,7 +263,7 @@ func NormalizeManifest(f string) string {
 	switch f {
 	case "mpd", "dash":
 		return "application/dash+xml"
-	case "hls", "m3u8":
+	case "hls":
 		return "application/x-mpegURL"
 	default:
 		return f

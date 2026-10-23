@@ -10,6 +10,7 @@ import (
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
+	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/settings"
@@ -112,60 +113,13 @@ func vodAdFilter(raw string) bool {
 // proxyHlsFormat 透传丢掉扩展名。登记前的地址是 HLS 时，响应补上这个 mime。
 // 已经是 application/x-mpegURL 则保持原样。直播原地址和爬虫 /proxy 不改。
 func proxyHlsFormat(before, after, format string) string {
-	if !strings.Contains(after, "/proxy/play?") || !urlIsHls(before) {
+	if !strings.Contains(after, "/proxy/play?") || !model.URLIsHls(before) {
 		return format
 	}
 	if strings.EqualFold(strings.TrimSpace(format), "application/x-mpegURL") {
 		return format
 	}
 	return "application/x-mpegURL"
-}
-
-func urlIsHls(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return false
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return strings.Contains(raw, "=m3u8")
-	}
-	scheme := strings.ToLower(u.Scheme)
-	if scheme == "rtsp" || scheme == "rtspt" {
-		return false
-	}
-	if scheme == "data" {
-		body := ""
-		if len(raw) > 5 {
-			body = raw[5:]
-		}
-		return !strings.HasPrefix(body, "application/dash+xml")
-	}
-	if strings.Contains(raw, "=m3u8") {
-		return true
-	}
-	if strings.Contains(raw, "=mpd") {
-		return false
-	}
-	seg := lastPathSegment(u.Path)
-	if seg == "" {
-		return false
-	}
-	if strings.EqualFold(seg, "m3u8") {
-		return true
-	}
-	ext := strings.ToLower(path.Ext(seg))
-	return ext == ".m3u8" || ext == ".php"
-}
-
-func lastPathSegment(p string) string {
-	parts := strings.Split(p, "/")
-	for i := len(parts) - 1; i >= 0; i-- {
-		if parts[i] != "" {
-			return parts[i]
-		}
-	}
-	return ""
 }
 
 // exposeLocalFile 远端前端播放时，把本机文件改成 /file/ 地址。本机请求保持原路径。content: 不改。

@@ -44,9 +44,6 @@ String? kotvPlayMime(String url, String? format) {
   return f.isEmpty ? null : f;
 }
 
-/// 这一次打开要指定 lavf 的 hls。命中后，失败不再改回探测。
-bool kotvMpvHlsLavf(String url, String? format) => kotvIsHls(url, format);
-
 /// 主文件打开失败的日志。解码器报错不算。
 bool kotvMpvHlsOpenFailed(String prefix, String text) {
   final p = prefix.toLowerCase();

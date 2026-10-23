@@ -396,7 +396,7 @@ class MediaKitPlayback extends KotvPlayback {
       httpHeaders: split.fields.isEmpty ? null : split.fields,
       start: startAt > Duration.zero ? startAt : null,
     );
-    final forceHls = kotvMpvHlsLavf(url, format);
+    final forceHls = kotvIsHls(url, format);
     _hlsGen++;
     _hlsRetried = false;
     _hlsRetryAllowed = false;

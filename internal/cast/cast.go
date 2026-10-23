@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/dlna"
+	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/util"
 	castdns "github.com/vishen/go-chromecast/dns"
 )
@@ -367,10 +368,11 @@ func friendlyChromecastErr(err error) error {
 }
 
 func contentTypeForURL(u string) string {
+	if model.URLIsHls(u) {
+		return "application/x-mpegURL"
+	}
 	low := strings.ToLower(u)
 	switch {
-	case strings.Contains(low, ".m3u8"):
-		return "application/x-mpegURL"
 	case strings.Contains(low, ".mpd"):
 		return "application/dash+xml"
 	case strings.Contains(low, ".mp4"):

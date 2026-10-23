@@ -128,6 +128,24 @@ void main() {
       ),
       isTrue,
     );
+    expect(
+      kotvPlaybackSendsHeaders(
+        playerVal: 'innie#html',
+        mediaUrl: 'https://cdn.example/a.mp4',
+        format: 'application/x-mpegURL',
+        hlsJsSupported: true,
+      ),
+      isTrue,
+    );
+    expect(
+      kotvPlaybackSendsHeaders(
+        playerVal: 'innie#html',
+        mediaUrl: 'https://cdn.example/a.mp4',
+        format: 'm3u8',
+        hlsJsSupported: true,
+      ),
+      isFalse,
+    );
   });
 
   test('mpv keeps ua and referer off the header field list', () {
