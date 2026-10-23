@@ -12,7 +12,6 @@ import 'mpv_hls_timeline.dart';
 import 'mpv_opts.dart';
 import 'mpv_surface.dart';
 import 'play_headers.dart';
-import 'play_redirect.dart';
 import 'position_coalesce.dart';
 import 'silent_video_guard.dart';
 
@@ -65,7 +64,6 @@ class NativeMpvPlayback extends KotvPlayback {
   /// 再 open(live:true) 时因为 `_nativeReady` 直接 return 导致没重建。
   bool _nativeLive = false;
   String _url = '';
-  int _openEpoch = 0;
   Map<String, String> _headers = const {};
   String? _lastError;
   int? _textureId;
@@ -422,7 +420,6 @@ class NativeMpvPlayback extends KotvPlayback {
     Duration startAt = Duration.zero,
     bool waitReady = true,
   }) async {
-    final epoch = ++_openEpoch;
     _url = url;
     _live = live;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
@@ -446,7 +443,6 @@ class NativeMpvPlayback extends KotvPlayback {
     }
 
     await _ensureNative(live: live);
-    if (epoch != _openEpoch || _url.isEmpty) return;
     if (!_nativeReady) {
       _buffering = false;
       notifyListeners();
@@ -455,13 +451,6 @@ class NativeMpvPlayback extends KotvPlayback {
     // 点播/直播均先挂 Surface（页面已 setState 播控进树并 endOfFrame），再 loadfile。
     // 后台仅音频抑制时不挂。
     await _syncSurfaceLayer();
-    if (epoch != _openEpoch || _url.isEmpty) return;
-    final followed = await kotvFollowPlayUrl(url, _headers);
-    if (epoch != _openEpoch || _url.isEmpty) return;
-    if (followed.moved) {
-      _url = followed.url;
-      _headers = followed.headers;
-    }
     try {
       await KotvBufferBudget.warm(force: true);
       final props = <String, String>{
@@ -473,9 +462,9 @@ class NativeMpvPlayback extends KotvPlayback {
         props['demuxer-lavf-o'] = kotvLavfOWithClearKey(ck);
       }
       await _ch.invokeMethod('open', {
-        'url': followed.url,
-        'headers': followed.headers,
-        'forceHls': kotvMpvForceLavf(url, followed.url, format),
+        'url': url,
+        'headers': _headers,
+        'forceHls': kotvMpvHlsLavf(url, format),
         'live': live,
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,
@@ -577,7 +566,6 @@ class NativeMpvPlayback extends KotvPlayback {
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffered = Duration.zero;
-    _openEpoch++;
     _url = '';
     _w = 0;
     _h = 0;
@@ -609,7 +597,6 @@ class NativeMpvPlayback extends KotvPlayback {
     _playing = false;
     _buffering = false;
     _ready = false;
-    _openEpoch++;
     _url = '';
     _textureId = null;
     await _sub?.cancel();
