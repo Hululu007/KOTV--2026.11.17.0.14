@@ -9,6 +9,7 @@ import 'kotv_playback.dart';
 import 'mpv_hls_timeline.dart';
 import 'mpv_opts.dart';
 import 'play_headers.dart';
+import 'play_redirect.dart';
 import 'silent_video_guard.dart';
 import 'video_eq.dart';
 
@@ -368,19 +369,26 @@ class MediaKitPlayback extends KotvPlayback {
       _extraOpenProps = const {};
     }
     // start 经 Media 在 load 时定位（等同原生 loadfile start=），勿 open 后再 seek。
-    final media = Media(
-      url,
-      httpHeaders: _headers.isEmpty ? null : _headers,
-      start: startAt > Duration.zero ? startAt : null,
-    );
-    final forceHls = kotvMpvHlsLavf(url, format);
     _hlsGen++;
     _hlsRetried = false;
     _hlsRetryAllowed = false;
     _hlsClearKey = clearKeyHex;
-    _hlsMedia = media;
     final gen = _hlsGen;
+    final playHeaders = _headers;
     final job = () async {
+      final followed = await kotvFollowPlayUrl(url, playHeaders);
+      if (gen != _hlsGen || _url.isEmpty) return;
+      if (followed.moved) {
+        _url = followed.url;
+        _headers = followed.headers;
+      }
+      final forceHls = kotvMpvForceLavf(url, followed.url, format);
+      final media = Media(
+        followed.url,
+        httpHeaders: followed.headers.isEmpty ? null : followed.headers,
+        start: startAt > Duration.zero ? startAt : null,
+      );
+      _hlsMedia = media;
       await _applyHlsLavf(forceHls, clearKeyHex);
       if (gen != _hlsGen || _url.isEmpty) return;
       _hlsRetryAllowed = !forceHls;
@@ -388,6 +396,7 @@ class MediaKitPlayback extends KotvPlayback {
     }();
     _hlsJob = job;
     await job;
+    if (gen != _hlsGen || _url.isEmpty) return;
     // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
     _acceptSize = true;
     _adoptPlayerSize();

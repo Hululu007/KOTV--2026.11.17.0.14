@@ -19,6 +19,29 @@ void main() {
     expect(kotvMpvHlsLavf('data:application/vnd.apple.mpegurl,abc', null), isTrue);
   });
 
+  test('redirected url drops the previous format', () {
+    expect(
+      kotvMpvForceLavf(
+        'https://gw/live',
+        'https://cdn/a.flv',
+        'application/x-mpegURL',
+      ),
+      isFalse,
+    );
+    expect(
+      kotvMpvForceLavf(
+        'https://gw/live',
+        'https://cdn/a.m3u8',
+        'video/mp4',
+      ),
+      isTrue,
+    );
+    expect(
+      kotvMpvForceLavf('https://cdn/a.mp4', 'https://cdn/a.mp4', 'hls'),
+      isTrue,
+    );
+  });
+
   test('format hls uses lavf even without the suffix', () {
     expect(kotvMpvHlsLavf('https://cdn/a.mp4', 'application/x-mpegURL'), isTrue);
     expect(kotvMpvHlsLavf('https://cdn/a.mp4', 'application/vnd.apple.mpegurl'), isTrue);

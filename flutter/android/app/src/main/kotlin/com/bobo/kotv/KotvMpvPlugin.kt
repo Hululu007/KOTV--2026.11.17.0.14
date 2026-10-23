@@ -32,10 +32,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import `is`.xyz.mpv.MPVLib
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URI
-import java.net.URL
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
@@ -56,7 +52,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var surfaceHost: KotvMpvSurfaceHost? = null
 
   private val main = Handler(Looper.getMainLooper())
-  private val net = Executors.newSingleThreadExecutor()
   private val loadGen = AtomicInteger(0)
   private val created = AtomicBoolean(false)
   private var playing = false
@@ -349,7 +344,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             height = 0
             ioHlsRetried = false
             forceLavfHls = forceHls
-            // 作废上一集还没落地的跟跳和失败重试。
+            // 作废上一集还没落地的失败重试。
             loadGen.incrementAndGet()
             retrySeekSec = -1.0
             pendingUrl = url
@@ -1513,17 +1508,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (surfaceLayerEnabled && !surfaceAttached) return
     pendingUrl = null
     val headers = LinkedHashMap(pendingHeaders)
-    val gen = loadGen.incrementAndGet()
-    // 不在主线程跟跳。安卓 libmpv 没有 PC 的 libcurl，302 后仍用网关地址拼相对列表。
-    net.execute {
-      val resolved = followPlayUrl(url, headers)
-      main.post {
-        if (!created.get() || gen != loadGen.get()) return@post
-        // 播放器打开的是跳转后的地址。格式只描述跳转前那一次。
-        if (resolved != url) forceLavfHls = urlIsHls(resolved)
-        startLoad(resolved, headers)
-      }
-    }
+    loadGen.incrementAndGet()
+    startLoad(url, headers)
   }
 
   private fun startLoad(url: String, headers: Map<String, String>) {
@@ -1558,160 +1544,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** 跟跳之后按最终地址的协议、路径和查询判断。 */
-  private fun urlIsHls(raw: String): Boolean {
-    val s = raw.trim()
-    if (s.isEmpty()) return false
-    val uri = try {
-      android.net.Uri.parse(s)
-    } catch (_: Throwable) {
-      return s.contains("=m3u8")
-    }
-    val scheme = uri.scheme?.lowercase().orEmpty()
-    if (scheme == "rtsp" || scheme == "rtspt") return false
-    if (scheme == "data") {
-      val body = if (s.length > 5) s.substring(5) else ""
-      return !body.startsWith("application/dash+xml")
-    }
-    if (s.contains("=m3u8")) return true
-    if (s.contains("=mpd")) return false
-    val seg = lastNonEmptySegment(uri) ?: return false
-    if (seg.equals("m3u8", ignoreCase = true)) return true
-    val dot = seg.lastIndexOf('.')
-    if (dot < 0 || dot == seg.length - 1) return false
-    val ext = seg.substring(dot + 1)
-    return ext.equals("m3u8", ignoreCase = true) || ext.equals("php", ignoreCase = true)
-  }
-
-  private fun lastNonEmptySegment(uri: android.net.Uri): String? {
-    val segs = uri.pathSegments
-    for (i in segs.size - 1 downTo 0) {
-      val seg = segs[i]
-      if (seg.isNotEmpty()) return seg
-    }
-    return null
-  }
-
-  /**
-   * PC libmpv 用 libcurl 跟跳，最终地址才是播放列表的基准。
-   * 安卓这套是 FFmpeg，跟完 302 仍拿原始网关去拼 01.m3u8，咪咕就失败。
-   * 这里只换成跳转后的地址再交给播放器，不改协议、不走代理。
-   */
-  private fun followPlayUrl(raw: String, headers: MutableMap<String, String>): String {
-    var current = raw.trim()
-    if (!current.startsWith("http://") && !current.startsWith("https://")) return current
-    val cookies = LinkedHashMap<String, String>()
-    repeat(5) {
-      val conn = (URL(current).openConnection() as HttpURLConnection)
-      try {
-        conn.instanceFollowRedirects = false
-        conn.connectTimeout = 8000
-        conn.readTimeout = 8000
-        conn.requestMethod = "GET"
-        applyProbeHeaders(conn, headers)
-        if (cookies.isNotEmpty()) {
-          conn.setRequestProperty(
-            "Cookie",
-            cookies.entries.joinToString("; ") { "${it.key}=${it.value}" },
-          )
-        }
-        val code = conn.responseCode
-        collectCookies(conn, cookies)
-        if (code in 300..399) {
-          val loc = conn.getHeaderField("Location")?.trim().orEmpty()
-          if (loc.isEmpty()) return finishFollow(raw, current, cookies, headers)
-          val next = resolveRedirect(current, loc)
-          if (!next.startsWith("http://") && !next.startsWith("https://")) {
-            return finishFollow(raw, current, cookies, headers)
-          }
-          if (next == current) return finishFollow(raw, current, cookies, headers)
-          // 跨 host/scheme/port 时剥 Authorization，避免鉴权头带到新域。
-          if (authorityChanged(current, next)) {
-            headers.keys.filter { it.equals("Authorization", ignoreCase = true) }.toList().forEach {
-              headers.remove(it)
-            }
-          }
-          current = next
-          return@repeat
-        }
-        return finishFollow(raw, current, cookies, headers)
-      } catch (e: Throwable) {
-        Log.w(TAG, "follow redirect failed, play original", e)
-        return if (current != raw) finishFollow(raw, current, cookies, headers) else raw
-      } finally {
-        conn.disconnect()
-      }
-    }
-    return finishFollow(raw, current, cookies, headers)
-  }
-
-  private fun finishFollow(
-    raw: String,
-    current: String,
-    cookies: Map<String, String>,
-    headers: MutableMap<String, String>,
-  ): String {
-    if (cookies.isNotEmpty() && headers.keys.none { it.equals("Cookie", ignoreCase = true) }) {
-      headers["Cookie"] = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-    }
-    if (current != raw) Log.i(TAG, "play redirected url")
-    return current
-  }
-
   @OptIn(UnstableApi::class)
   private fun playUserAgent(): String {
     val ctx = appContext ?: return FALLBACK_PLAY_UA
     return Util.getUserAgent(ctx, ctx.packageName)
-  }
-
-  private fun applyProbeHeaders(conn: HttpURLConnection, headers: Map<String, String>) {
-    var ua = ""
-    for ((rawKey, rawValue) in headers) {
-      val key = rawKey.trim()
-      val value = rawValue.trim()
-      if (key.isEmpty() || value.isEmpty()) continue
-      if (key.equals("Range", ignoreCase = true) || key.equals("Host", ignoreCase = true)) continue
-      if (key.equals("User-Agent", ignoreCase = true) || key.equals("ua", ignoreCase = true)) {
-        ua = value
-        continue
-      }
-      conn.setRequestProperty(key, value)
-    }
-    if (ua.isEmpty()) ua = playUserAgent()
-    conn.setRequestProperty("User-Agent", ua)
-  }
-
-  private fun authorityChanged(from: String, to: String): Boolean {
-    return try {
-      val a = URI(from)
-      val b = URI(to)
-      !a.scheme.equals(b.scheme, ignoreCase = true) ||
-        !a.host.equals(b.host, ignoreCase = true) ||
-        a.port != b.port
-    } catch (_: Throwable) {
-      true
-    }
-  }
-
-  private fun collectCookies(conn: HttpURLConnection, out: MutableMap<String, String>) {
-    val fields = conn.headerFields ?: return
-    for ((key, values) in fields) {
-      if (key == null || !key.equals("Set-Cookie", ignoreCase = true) || values == null) continue
-      for (raw in values) {
-        val pair = raw.substringBefore(";").trim()
-        val eq = pair.indexOf('=')
-        if (eq <= 0) continue
-        out[pair.substring(0, eq).trim()] = pair.substring(eq + 1).trim()
-      }
-    }
-  }
-
-  private fun resolveRedirect(current: String, location: String): String {
-    return try {
-      URI(current).resolve(location).toString()
-    } catch (_: Throwable) {
-      location
-    }
   }
 
   /**

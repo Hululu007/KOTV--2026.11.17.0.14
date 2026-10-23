@@ -40,6 +40,12 @@ bool kotvMpvHlsLavf(String url, String? format) {
       f == 'm3u8';
 }
 
+/// 地址没变时仍看格式。换成最终地址后，格式只描述跳转前那一次，只按新地址判断。
+bool kotvMpvForceLavf(String original, String resolved, String? format) {
+  if (resolved != original) return kotvMpvUrlIsHls(resolved);
+  return kotvMpvHlsLavf(original, format);
+}
+
 /// 主文件打开失败的日志。解码器报错不算。
 bool kotvMpvHlsOpenFailed(String prefix, String text) {
   final p = prefix.toLowerCase();
