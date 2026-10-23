@@ -91,9 +91,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** 首选字幕语言（BCP-47，逗号分隔）→ mpv slang。 */
   private var preferredTextLangs = ""
   private var livePlayback = false
-  /** IO/探测失败后强制 lavf=hls 再试一次。 */
+  /** IO/探测失败后只再开一次。已经强制过 hls 时，这一次改回按内容探测。 */
   private var ioHlsRetried = false
   private var forceLavfHls = false
+  private var explicitHlsForce = false
   /** 错误恢复后 seek 到该秒；&lt;0 表示不恢复。 */
   private var retrySeekSec = -1.0
   /** open(startAtMs)：loadfile 后、unpause 前 seek，避免 play 后再 seek。 */
@@ -322,6 +323,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           renderTexture = resolveRenderTexture(it)
         }
         pendingStartAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L } ?: 0L
+        val forceHls = call.argument<Boolean>("forceHls") == true
         @Suppress("UNCHECKED_CAST")
         val props = (call.argument<Map<*, *>>("props") ?: emptyMap<Any, Any>())
           .entries
@@ -347,7 +349,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             width = 0
             height = 0
             ioHlsRetried = false
-            forceLavfHls = false
+            explicitHlsForce = forceHls
+            forceLavfHls = forceHls
             retrySeekSec = -1.0
             pendingUrl = url
             pendingHeaders = headers
@@ -1526,19 +1529,22 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       loadedUrl = url
       loadedHeaders = headers
       applyPlayHttpHeaders(headers)
-      applyForcedHlsFormat()
       applySpdif()
       MPVLib.setPropertyDouble("volume", volume)
       MPVLib.setPropertyDouble("speed", rate)
       val startMs = pendingStartAtMs
       pendingStartAtMs = 0L
-      // start= 经 loadfile options 在起播前定位（flags=replace, index=-1）。
-      if (startMs > 0L) {
-        MPVLib.command(
-          arrayOf("loadfile", url, "replace", "-1", "start=${startMs / 1000.0}"),
-        )
-      } else {
+      // start= 与 hls 强制都走这一次 loadfile 的选项，不留在会话里。
+      val opts = ArrayList<String>(3)
+      if (startMs > 0L) opts.add("start=${startMs / 1000.0}")
+      if (forceLavfHls) {
+        opts.add("demuxer=lavf")
+        opts.add("demuxer-lavf-format=hls")
+      }
+      if (opts.isEmpty()) {
         MPVLib.command(arrayOf("loadfile", url, "replace"))
+      } else {
+        MPVLib.command(arrayOf("loadfile", url, "replace", "-1", opts.joinToString(",")))
       }
       MPVLib.setPropertyBoolean("pause", false)
       paused = false
@@ -1547,21 +1553,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       eof = false
     } catch (e: Throwable) {
       emit(mapOf("event" to "error", "message" to (e.message ?: "load failed")))
-    }
-  }
-
-  private fun applyForcedHlsFormat() {
-    try {
-      if (forceLavfHls) {
-        MPVLib.setPropertyString("demuxer-lavf-format", "hls")
-      } else {
-        try {
-          MPVLib.setPropertyString("demuxer-lavf-format", "")
-        } catch (_: Throwable) {
-        }
-      }
-    } catch (t: Throwable) {
-      Log.w(TAG, "applyForcedHlsFormat", t)
     }
   }
 
@@ -1875,8 +1866,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
         if (shouldRetryHls(error, errorText) && !ioHlsRetried) {
           ioHlsRetried = true
-          forceLavfHls = true
-          Log.w(TAG, "mpv io/format error → force HLS retry err=$error text=$errorText")
+          if (explicitHlsForce) {
+            forceLavfHls = false
+            Log.w(TAG, "forced hls open failed → probe retry err=$error text=$errorText")
+          } else {
+            forceLavfHls = true
+            Log.w(TAG, "mpv io/format error → force HLS retry err=$error text=$errorText")
+          }
           val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
           val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
           if (url.isNotBlank()) {

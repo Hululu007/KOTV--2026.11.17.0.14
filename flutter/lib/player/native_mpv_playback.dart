@@ -8,6 +8,7 @@ import 'drm_opts.dart';
 import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
+import 'mpv_hls_timeline.dart';
 import 'mpv_opts.dart';
 import 'mpv_surface.dart';
 import 'play_headers.dart';
@@ -58,7 +59,6 @@ class NativeMpvPlayback extends KotvPlayback {
   Duration _buffered = Duration.zero;
   int _speedBps = 0;
   bool _live = false;
-  String? _format;
   /// Native MPV 上下文创建时的 live 模式。
   /// 目的：避免先因 setVideoScale/_setSurfaceLayerEnabled 创建了 VOD 上下文，
   /// 再 open(live:true) 时因为 `_nativeReady` 直接 return 导致没重建。
@@ -422,7 +422,6 @@ class NativeMpvPlayback extends KotvPlayback {
   }) async {
     _url = url;
     _live = live;
-    _format = format;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _completed = false;
     _ready = false;
@@ -462,13 +461,11 @@ class NativeMpvPlayback extends KotvPlayback {
       if (ck != null) {
         props['demuxer-lavf-o'] = kotvLavfOWithClearKey(ck);
       }
-      final fmt = format?.trim().toLowerCase() ?? '';
-      if (fmt.contains('mpegurl') || fmt == 'hls' || fmt == 'application/x-mpegurl' || fmt == 'application/vnd.apple.mpegurl') {
-        props['demuxer-lavf-format'] = 'hls';
-      }
+      final forceHls = await kotvMpvHlsTimeline(url, _headers, format);
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,
+        'forceHls': forceHls,
         'live': live,
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,

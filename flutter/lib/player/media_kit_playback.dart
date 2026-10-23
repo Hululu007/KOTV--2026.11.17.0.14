@@ -6,6 +6,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'buffer_budget.dart';
 import 'drm_opts.dart';
 import 'kotv_playback.dart';
+import 'mpv_hls_timeline.dart';
 import 'mpv_opts.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
@@ -135,6 +136,72 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> _openThenUnpause(Media media) async {
     await player.open(media, play: false);
     await player.play();
+  }
+
+  Future<void> _setMpvHlsForce(bool on) async {
+    final platform = player.platform;
+    if (platform == null) return;
+    Future<void> set(String k, String v) async {
+      try {
+        await (platform as dynamic).setProperty(k, v);
+      } catch (_) {}
+    }
+    if (on) {
+      await set('demuxer', 'lavf');
+      await set('demuxer-lavf-format', 'hls');
+      return;
+    }
+    await set('demuxer-lavf-format', '');
+    await set('demuxer', '');
+  }
+
+  /// 整段 HLS 用 lavf。这两个选项会重开当前解复用，所以先卸掉上一集再写。
+  /// 强制打开被拒绝且还没有时长或画面时，去掉这两个属性再开一次。
+  Future<void> _openWithHlsForce(Media media, bool force) async {
+    final playing = _url;
+    try {
+      await player.stop();
+    } catch (_) {}
+    await _setMpvHlsForce(force);
+    if (!force) {
+      await _openThenUnpause(media);
+      return;
+    }
+    var sawMedia = false;
+    var rejected = false;
+    final widths = player.stream.width.listen((w) {
+      if ((w ?? 0) > 0) sawMedia = true;
+    });
+    final durations = player.stream.duration.listen((d) {
+      if (d > Duration.zero) sawMedia = true;
+    });
+    final logs = player.stream.log.listen((log) {
+      if (kotvMpvHlsForceRejected(log.prefix, log.text)) rejected = true;
+    });
+    try {
+      await _openThenUnpause(media);
+      final gate = Completer<void>();
+      final tick = Timer.periodic(const Duration(milliseconds: 40), (_) {
+        if ((sawMedia || rejected) && !gate.isCompleted) gate.complete();
+      });
+      try {
+        await gate.future.timeout(const Duration(seconds: 4), onTimeout: () {});
+      } finally {
+        tick.cancel();
+      }
+      if (rejected && !sawMedia && _url == playing && playing.isNotEmpty) {
+        try {
+          await player.stop();
+        } catch (_) {}
+        if (_url != playing) return;
+        await _setMpvHlsForce(false);
+        await _openThenUnpause(media);
+      }
+    } finally {
+      await widths.cancel();
+      await durations.cancel();
+      await logs.cancel();
+    }
   }
 
   Future<void> _prepareOpts() async {
@@ -334,7 +401,8 @@ class MediaKitPlayback extends KotvPlayback {
       httpHeaders: _headers.isEmpty ? null : _headers,
       start: startAt > Duration.zero ? startAt : null,
     );
-    await _openThenUnpause(media);
+    final forceHls = await kotvMpvHlsTimeline(url, _headers, format);
+    await _openWithHlsForce(media, forceHls);
     // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
     _acceptSize = true;
     _adoptPlayerSize();
