@@ -1566,7 +1566,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.setPropertyString("user-agent", ua)
     MPVLib.setPropertyString("referrer", referer)
     MPVLib.setPropertyString("http-header-fields", fields.joinToString(","))
-    // 嵌套列表/分片不走 mpv 的 http-header-fields。有 UA/Referer 时再写进 lavf。
+    // 分片走上面的 user-agent / referrer / http-header-fields。
+    // lavf 回落不读这些属性，有 UA/Referer 时再写进 demuxer-lavf-o。
     val lavf = buildString {
       append(lavfBase)
       if (ua.isNotEmpty()) append(",user_agent=").append(escapeListValue(ua))
