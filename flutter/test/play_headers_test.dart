@@ -136,6 +136,25 @@ void main() {
     );
   });
 
+  test('mpv keeps ua and referer off the header field list', () {
+    final split = kotvSplitMpvHeaders(const {
+      'User-Agent': 'Site/1',
+      'Referer': 'https://site.example/',
+      'Cookie': 'a=b',
+      'Origin': 'https://site.example',
+    });
+    expect(split.userAgent, 'Site/1');
+    expect(split.referer, 'https://site.example/');
+    expect(split.fields.containsKey('User-Agent'), isFalse);
+    expect(split.fields.containsKey('Referer'), isFalse);
+    expect(split.fields['Cookie'], 'a=b');
+    expect(split.fields['Origin'], 'https://site.example');
+    final empty = kotvSplitMpvHeaders(const {});
+    expect(empty.userAgent, isEmpty);
+    expect(empty.referer, isEmpty);
+    expect(empty.fields, isEmpty);
+  });
+
   test('empty site header uses okhttp ua, settings ua wins', () {
     kotvApplyPlayUaSetting('');
     expect(kotvDefaultPlayUA, 'okhttp/5.5.0');

@@ -99,6 +99,8 @@ class MediaKitPlayback extends KotvPlayback {
         if (gen != _hlsGen || _url.isEmpty) return;
         await _applyHlsLavf(true, key);
         if (gen != _hlsGen || _url.isEmpty) return;
+        await _applyMpvHeaderProps();
+        if (gen != _hlsGen || _url.isEmpty) return;
         await _openThenUnpause(media);
       }());
     }));
@@ -113,6 +115,22 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void>? _hlsJob;
   Media? _hlsMedia;
   String? _hlsClearKey;
+  String _mpvUserAgent = '';
+  String _mpvReferer = '';
+
+  /// 每次打开都写。没有则写空，避免上一集的 UA / Referer 留在会话里。
+  Future<void> _applyMpvHeaderProps() async {
+    final platform = player.platform;
+    if (platform == null) return;
+    Future<void> set(String k, String v) async {
+      try {
+        await (platform as dynamic).setProperty(k, v);
+      } catch (_) {}
+    }
+
+    await set('user-agent', _mpvUserAgent);
+    await set('referrer', _mpvReferer);
+  }
 
   final Player player;
   final VideoController controller;
@@ -369,9 +387,13 @@ class MediaKitPlayback extends KotvPlayback {
     }
     // start 经 Media 在 load 时定位（等同原生 loadfile start=），勿 open 后再 seek。
     // 302 由 libmpv 在这一次打开里跟。
+    // UA / Referer 写独立属性；media_kit 只会把 httpHeaders 放进 http-header-fields。
+    final split = kotvSplitMpvHeaders(_headers);
+    _mpvUserAgent = split.userAgent;
+    _mpvReferer = split.referer;
     final media = Media(
       url,
-      httpHeaders: _headers.isEmpty ? null : _headers,
+      httpHeaders: split.fields.isEmpty ? null : split.fields,
       start: startAt > Duration.zero ? startAt : null,
     );
     final forceHls = kotvMpvHlsLavf(url, format);
@@ -383,6 +405,8 @@ class MediaKitPlayback extends KotvPlayback {
     final gen = _hlsGen;
     final job = () async {
       await _applyHlsLavf(forceHls, clearKeyHex);
+      if (gen != _hlsGen || _url.isEmpty) return;
+      await _applyMpvHeaderProps();
       if (gen != _hlsGen || _url.isEmpty) return;
       _hlsRetryAllowed = !forceHls;
       await _openThenUnpause(media);

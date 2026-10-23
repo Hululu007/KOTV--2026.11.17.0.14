@@ -1064,7 +1064,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       rebuildPlayer(live, effective, nextDrmKey)
     } else {
       httpFactory
-        ?.setUserAgent(currentHeaders["User-Agent"] ?: defaultUserAgent())
+        ?.setUserAgent(null)
         ?.setDefaultRequestProperties(currentHeaders)
       bindPlayerSurface()
     }
@@ -1149,7 +1149,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     releasePlayerInstance()
 
     val factory = OkHttpDataSource.Factory(httpClient)
-      .setUserAgent(currentHeaders["User-Agent"] ?: defaultUserAgent())
       .setDefaultRequestProperties(currentHeaders)
       .setTransferListener(netTransferListener)
     httpFactory = factory
@@ -2476,7 +2475,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return Util.getUserAgent(ctx, ctx.packageName)
   }
 
-  /** Dart 侧已做头规范化；此处仅补缺省 UA。 */
+  /** 沿用传入的头。没有 User-Agent 时不补，避免盖掉上游登记或设置里的播放 UA。 */
   private fun normalizeHeaders(raw: Map<String, String>): Map<String, String> {
     val out = linkedMapOf<String, String>()
     for ((k0, v0) in raw) {
@@ -2484,9 +2483,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       val v = v0.trim()
       if (k.isEmpty() || v.isEmpty()) continue
       out[k] = v
-    }
-    if (out.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
-      out["User-Agent"] = defaultUserAgent()
     }
     return out
   }

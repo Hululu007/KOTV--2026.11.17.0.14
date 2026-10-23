@@ -186,6 +186,43 @@ Map<String, String> kotvNormalizePlayHeaders(
   return out;
 }
 
+/// User-Agent、Referer 走播放器独立属性，其余交给 `http-header-fields`。
+class KotvMpvHeaderSplit {
+  const KotvMpvHeaderSplit({
+    required this.userAgent,
+    required this.referer,
+    required this.fields,
+  });
+
+  final String userAgent;
+  final String referer;
+  final Map<String, String> fields;
+}
+
+KotvMpvHeaderSplit kotvSplitMpvHeaders(Map<String, String> headers) {
+  var ua = '';
+  var referer = '';
+  final fields = <String, String>{};
+  for (final e in headers.entries) {
+    final k = e.key.trim();
+    final v = e.value.trim();
+    if (k.isEmpty || v.isEmpty) continue;
+    switch (k.toLowerCase()) {
+      case 'user-agent':
+      case 'ua':
+        ua = v;
+        break;
+      case 'referer':
+      case 'referrer':
+        referer = v;
+        break;
+      default:
+        fields[k] = v;
+    }
+  }
+  return KotvMpvHeaderSplit(userAgent: ua, referer: referer, fields: fields);
+}
+
 String _canonicalHeader(String k) {
   switch (k.toLowerCase()) {
     case 'user-agent':

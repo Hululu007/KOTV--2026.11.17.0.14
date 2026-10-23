@@ -27,9 +27,6 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
-import androidx.annotation.OptIn
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.common.util.Util
 import `is`.xyz.mpv.MPVLib
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
@@ -1544,15 +1541,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  @OptIn(UnstableApi::class)
-  private fun playUserAgent(): String {
-    val ctx = appContext ?: return FALLBACK_PLAY_UA
-    return Util.getUserAgent(ctx, ctx.packageName)
-  }
-
   /**
    * user-agent / referrer 走独立属性，
    * 其余头写成 mpv 的逗号列表。setOptionString 在 init 之后无效，必须 setPropertyString。
+   * 没有 UA 时写空，避免上一集的值留在会话里。
    */
   private fun applyPlayHttpHeaders(headers: Map<String, String>) {
     var ua = ""
@@ -1571,14 +1563,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         else -> fields.add("$key: ${escapeListValue(value)}")
       }
     }
-    if (ua.isEmpty()) ua = playUserAgent()
     MPVLib.setPropertyString("user-agent", ua)
     MPVLib.setPropertyString("referrer", referer)
     MPVLib.setPropertyString("http-header-fields", fields.joinToString(","))
-    // 嵌套列表/分片不走 mpv 的 http-header-fields，要把 UA 写进 lavf，否则子请求是 Lavf 默认头。
+    // 嵌套列表/分片不走 mpv 的 http-header-fields。有 UA/Referer 时再写进 lavf。
     val lavf = buildString {
       append(lavfBase)
-      append(",user_agent=").append(escapeListValue(ua))
+      if (ua.isNotEmpty()) append(",user_agent=").append(escapeListValue(ua))
       if (referer.isNotEmpty()) append(",referer=").append(escapeListValue(referer))
     }
     try {
@@ -1816,7 +1807,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "brightness", "contrast", "saturation", "gamma", "hue",
     )
     private const val TAG = "KotvMpv"
-    private const val FALLBACK_PLAY_UA = "okhttp/5.5.0"
     // 仅作 open 前的初值；open/setOpts 后以 Dart props 下发的 demuxer-lavf-o 为准（见 lavfBase）。
     // 不设 protocol_whitelist：写了就是拒绝名单外协议（RTSP/RTMP/RTP）。
     private const val LAVF_DEMUXER_O =
