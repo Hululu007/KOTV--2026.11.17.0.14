@@ -86,6 +86,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** 这次没指定 hls 时，IO/格式失败后只再指定一次。 */
   private var ioHlsRetried = false
   private var forceLavfHls = false
+  /** 换片时递增，丢掉上一集或改解复用属性时迟到的结束事件。 */
+  private var openSerial = 0
   /** 错误恢复后 seek 到该秒；&lt;0 表示不恢复。 */
   private var retrySeekSec = -1.0
   /** open(startAtMs)：loadfile 后、unpause 前 seek，避免 play 后再 seek。 */
@@ -1519,17 +1521,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setPropertyDouble("speed", rate)
       val startMs = pendingStartAtMs
       pendingStartAtMs = 0L
-      // start= 与 hls 强制都走这一次 loadfile 的选项，不留在会话里。
-      val opts = ArrayList<String>(3)
-      if (startMs > 0L) opts.add("start=${startMs / 1000.0}")
-      if (forceLavfHls) {
-        opts.add("demuxer-lavf-format=hls")
-        opts.add("demuxer-lavf-o-add=http_persistent=0")
-      }
-      if (opts.isEmpty()) {
-        MPVLib.command(arrayOf("loadfile", url, "replace"))
+      // 改解复用属性可能让上一集先结束；丢掉这些事件，再打开新文件。
+      openSerial++
+      // start= 只作用于这一次 loadfile。hls 在 applyPlayHttpHeaders 里写成会话属性。
+      if (startMs > 0L) {
+        MPVLib.command(arrayOf("loadfile", url, "replace", "-1", "start=${startMs / 1000.0}"))
       } else {
-        MPVLib.command(arrayOf("loadfile", url, "replace", "-1", opts.joinToString(",")))
+        MPVLib.command(arrayOf("loadfile", url, "replace"))
       }
       MPVLib.setPropertyBoolean("pause", false)
       paused = false
@@ -1572,9 +1570,20 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       append(lavfBase)
       if (ua.isNotEmpty()) append(",user_agent=").append(escapeListValue(ua))
       if (referer.isNotEmpty()) append(",referer=").append(escapeListValue(referer))
+      if (forceLavfHls) append(",http_persistent=0")
     }
     try {
       MPVLib.setPropertyString("demuxer-lavf-o", lavf)
+    } catch (_: Throwable) {
+    }
+    // 打开前写入。指定 hls 时按整条时间轴解，并禁止把 m3u8 展开成分片列表。
+    // 不指定时清掉，避免上一集的值留在会话里。
+    try {
+      MPVLib.setPropertyString("demuxer-lavf-format", if (forceLavfHls) "hls" else "")
+    } catch (_: Throwable) {
+    }
+    try {
+      MPVLib.setPropertyString("access-references", if (forceLavfHls) "no" else "yes")
     } catch (_: Throwable) {
     }
   }
@@ -1644,6 +1653,22 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
+  /** 只执行仍属于这一次打开的结束事件。已经在主线程，直接送出，避免再排队盖到下一集。 */
+  private fun postTerminal(block: () -> Unit) {
+    val serial = openSerial
+    main.post {
+      if (serial != openSerial) return@post
+      block()
+    }
+  }
+
+  private fun emitNow(payload: Map<String, Any?>) {
+    try {
+      eventSink?.success(payload)
+    } catch (_: Throwable) {
+    }
+  }
+
   override fun eventProperty(property: String) {}
 
   override fun eventProperty(property: String, value: Long) {
@@ -1666,10 +1691,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         playing = !value
       }
       "eof-reached" -> {
-        if (value) {
+        if (value) postTerminal {
           eof = true
           playing = false
-          emit(mapOf("event" to "completed"))
+          emitNow(mapOf("event" to "completed"))
         }
       }
       "paused-for-cache", "seeking" -> buffering = value
@@ -1721,11 +1746,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   override fun endFile(reason: Int, error: Int, errorText: String?) {
+    postTerminal { endFileNow(reason, error, errorText) }
+  }
+
+  private fun endFileNow(reason: Int, error: Int, errorText: String?) {
     when (reason) {
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_EOF -> {
         eof = true
         playing = false
-        emit(mapOf("event" to "completed"))
+        emitNow(mapOf("event" to "completed"))
       }
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
         if (!forceLavfHls && !ioHlsRetried && shouldRetryHls(error, errorText)) {
@@ -1751,7 +1780,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
         val msg = errorText?.takeIf { it.isNotBlank() } ?: "MPV error $error"
-        emit(mapOf("event" to "error", "message" to msg))
+        emitNow(mapOf("event" to "error", "message" to msg))
       }
       else -> {}
     }
