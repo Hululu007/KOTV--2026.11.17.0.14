@@ -148,12 +148,17 @@
     });
   }
 
-  function attach(video, url, headers, drm) {
+  function attach(video, url, headers, drm, useHls) {
     destroy(video);
     if (!video || !url) return 'none';
 
     // 异步装 ClearKey；失败不阻断起播（无密钥片源仍可试播）。
     try { setupClearKey(video, drm); } catch (_) {}
+
+    if (!useHls) {
+      video.src = url;
+      return 'html';
+    }
 
     var HlsCtor = global.Hls;
     if (HlsCtor && typeof HlsCtor.isSupported === 'function' && HlsCtor.isSupported()) {

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
 import 'kotv_playback.dart';
+import 'mpv_hls_timeline.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
@@ -24,7 +25,7 @@ external KotvJsPlayerApi get _kotvZw;
 
 extension type KotvJsPlayerApi._(JSObject _) implements JSObject {
   external bool get ready;
-  external String create(web.HTMLDivElement container, String url, JSAny? headers);
+  external String create(web.HTMLDivElement container, String url, JSAny? headers, [bool hls]);
   external void destroy(web.HTMLDivElement container);
   external void play(web.HTMLDivElement container);
   external void pause(web.HTMLDivElement container);
@@ -297,7 +298,7 @@ class WebJsPlayback extends KotvPlayback {
     final h = kotvNormalizePlayHeaders(headers, url: url);
     final hdrJs = h.isEmpty ? null : h.jsify();
     try {
-      final mode = _api.create(_container, url, hdrJs);
+      final mode = _api.create(_container, url, hdrJs, kotvIsHls(url, format));
       _engine = switch (mode) {
         'hls' => '$_defaultLabel·HLS',
         'native' => '$_defaultLabel·HLS',

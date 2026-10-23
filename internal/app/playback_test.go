@@ -364,3 +364,62 @@ func TestPrepareLivePlaybackHeadersUseProxy(t *testing.T) {
 		t.Fatalf("headers=%v", got)
 	}
 }
+
+func TestProxyHlsFormat(t *testing.T) {
+	withAdFilter(t, true)
+	a := &App{}
+
+	raw := "https://cdn.example/live.m3u8"
+	play, _, _ := a.PreparePlayback(raw, nil)
+	if !strings.Contains(play, "/proxy/play?id=") {
+		t.Fatalf("play=%q", play)
+	}
+	if got := proxyHlsFormat(raw, play, ""); got != "application/x-mpegURL" {
+		t.Fatalf("format=%q", got)
+	}
+	if got := proxyHlsFormat(raw, play, "application/x-mpegURL"); got != "application/x-mpegURL" {
+		t.Fatalf("kept format=%q", got)
+	}
+	if got := proxyHlsFormat(raw, play, "video/mp4"); got != "application/x-mpegURL" {
+		t.Fatalf("url wins format=%q", got)
+	}
+
+	php := "https://cdn.example/play.php?x=m3u8"
+	playPHP, _, _ := a.PreparePlayback(php, nil)
+	if got := proxyHlsFormat(php, playPHP, ""); got != "application/x-mpegURL" {
+		t.Fatalf("php format=%q play=%q", got, playPHP)
+	}
+
+	query := "https://cdn.example/v?file=m3u8"
+	playQuery, _, _ := a.PreparePlayback(query, nil)
+	if got := proxyHlsFormat(query, playQuery, ""); got != "application/x-mpegURL" {
+		t.Fatalf("query format=%q play=%q", got, playQuery)
+	}
+
+	flv := "https://cdn.example/fengshows?id=2.m3u8"
+	playFlv, _, _ := a.PreparePlayback(flv, nil)
+	if !strings.Contains(playFlv, "/proxy/play?id=") {
+		t.Fatalf("flv query still proxies, play=%q", playFlv)
+	}
+	if got := proxyHlsFormat(flv, playFlv, ""); got != "" {
+		t.Fatalf("flv query format=%q", got)
+	}
+
+	mp4 := "https://cdn.example/a.mp4"
+	playMP4, _, _ := a.PreparePlayback(mp4, nil)
+	if strings.Contains(playMP4, "/proxy/play?") {
+		t.Fatalf("mp4 proxied %q", playMP4)
+	}
+	if got := proxyHlsFormat(mp4, playMP4, ""); got != "" {
+		t.Fatalf("mp4 format=%q", got)
+	}
+
+	live, _, _ := a.PrepareLivePlayback(raw, nil)
+	if got := proxyHlsFormat(raw, live, "video/mp2t"); got != "video/mp2t" {
+		t.Fatalf("live format=%q", got)
+	}
+	spider := "http://127.0.0.1:9978/proxy?url=https%3A%2F%2Fcdn%2Fa.m3u8"
+	if got := proxyHlsFormat(spider, spider, ""); got != "" {
+		t.Fatalf("spider format=%q", got)
+	}
+}

@@ -2,12 +2,6 @@
 (function (global) {
   'use strict';
 
-  function isHlsUrl(url) {
-    if (!url) return false;
-    var u = String(url).split('?')[0].toLowerCase();
-    return u.indexOf('.m3u8') >= 0;
-  }
-
   function destroy(container) {
     if (!container) return;
     try {
@@ -50,7 +44,7 @@
     return 'html';
   }
 
-  function create(container, url, headers) {
+  function create(container, url, headers, hls) {
     destroy(container);
     if (!container || !url) return 'none';
     var Art = global.Artplayer;
@@ -63,7 +57,7 @@
     var art = new Art({
       container: container,
       url: url,
-      type: isHlsUrl(url) ? 'm3u8' : undefined,
+      type: hls ? 'm3u8' : undefined,
       autoplay: true,
       autoSize: false,
       autoOrientation: false,
@@ -105,7 +99,7 @@
       },
     });
 
-    if (!isHlsUrl(url)) {
+    if (!hls) {
       mode = 'html';
     } else if (!art._kotvHls && art.video) {
       // customType 已处理；兜底

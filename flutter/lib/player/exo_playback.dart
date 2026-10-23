@@ -7,6 +7,7 @@ import 'buffer_budget.dart';
 import 'exo_surface.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
+import 'mpv_hls_timeline.dart';
 import 'play_headers.dart';
 import 'playback_settings.dart';
 import 'position_coalesce.dart';
@@ -397,13 +398,6 @@ class ExoPlayback extends KotvPlayback {
     }
   }
 
-  static String? _guessMime(String url) {
-    final u = url.toLowerCase();
-    if (u.contains('.m3u8') || u.contains('m3u8')) return 'application/x-mpegURL';
-    if (u.contains('.mpd')) return 'application/dash+xml';
-    return null;
-  }
-
   @override
   Future<void> open(
     String url, {
@@ -444,7 +438,7 @@ class ExoPlayback extends KotvPlayback {
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,
-        'mime': (format != null && format.trim().isNotEmpty) ? format.trim() : _guessMime(url),
+        'mime': kotvPlayMime(url, format),
         'drm': drm,
         'decodeMode': _decodeMode,
         'render': _renderMode,

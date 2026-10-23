@@ -30,15 +30,22 @@ String? _lastSegment(Uri uri) {
   return null;
 }
 
-/// 这一次打开要指定 lavf 的 hls。地址或格式命中后，失败不再改回探测。
-bool kotvMpvHlsLavf(String url, String? format) {
+/// 这一次打开是 HLS。地址命中后，别的 mime 不能把它改回去。
+/// mime 只有 `application/x-mpegURL` 算。
+bool kotvIsHls(String url, String? format) {
   if (kotvMpvUrlIsHls(url)) return true;
-  final f = format?.trim().toLowerCase() ?? '';
-  return f == 'application/x-mpegurl' ||
-      f == 'application/vnd.apple.mpegurl' ||
-      f == 'hls' ||
-      f == 'm3u8';
+  return (format?.trim().toLowerCase() ?? '') == 'application/x-mpegurl';
 }
+
+/// 交给播放器的 mime。是 HLS 时固定为 `application/x-mpegURL`。
+String? kotvPlayMime(String url, String? format) {
+  if (kotvIsHls(url, format)) return 'application/x-mpegURL';
+  final f = format?.trim() ?? '';
+  return f.isEmpty ? null : f;
+}
+
+/// 这一次打开要指定 lavf 的 hls。命中后，失败不再改回探测。
+bool kotvMpvHlsLavf(String url, String? format) => kotvIsHls(url, format);
 
 /// 主文件打开失败的日志。解码器报错不算。
 bool kotvMpvHlsOpenFailed(String prefix, String text) {

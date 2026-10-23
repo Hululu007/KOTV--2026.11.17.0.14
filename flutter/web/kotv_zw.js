@@ -17,7 +17,7 @@
     } catch (_) {}
   }
 
-  function create(container, url, headers) {
+  function create(container, url, headers, hls) {
     destroy(container);
     if (!container || !url) return 'none';
     var ZW = global.ZWPlayer;
@@ -40,6 +40,7 @@
       nativecontrols: false,
       alwaysShowControls: false,
     };
+    if (hls) opts.streamtype = 'hls';
     if (headers && global.kotvApplyXhrHeaders) {
       opts.hlsOpts = {
         xhrSetup: function (xhr) {
@@ -49,7 +50,7 @@
     }
     var player = new ZW(opts);
     container._kotvZw = player;
-    container._kotvZwMode = String(url).toLowerCase().indexOf('.m3u8') >= 0 ? 'hls' : 'html';
+    container._kotvZwMode = hls ? 'hls' : 'html';
     try {
       var style = document.createElement('style');
       style.textContent = [

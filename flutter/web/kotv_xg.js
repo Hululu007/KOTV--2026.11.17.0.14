@@ -2,11 +2,6 @@
 (function (global) {
   'use strict';
 
-  function isHlsUrl(url) {
-    if (!url) return false;
-    return String(url).split('?')[0].toLowerCase().indexOf('.m3u8') >= 0;
-  }
-
   function destroy(container) {
     if (!container) return;
     try {
@@ -20,15 +15,15 @@
     } catch (_) {}
   }
 
-  function create(container, url, headers) {
+  function create(container, url, headers, hls) {
     destroy(container);
     if (!container || !url) return 'none';
-    var Ctor = isHlsUrl(url) && global.HlsJsPlayer ? global.HlsJsPlayer : global.Player;
+    var Ctor = hls && global.HlsJsPlayer ? global.HlsJsPlayer : global.Player;
     if (!Ctor) {
       console.warn('kotvXg: Player missing');
       return 'none';
     }
-    var mode = isHlsUrl(url) && global.HlsJsPlayer ? 'hls' : 'html';
+    var mode = hls && global.HlsJsPlayer ? 'hls' : 'html';
     var hlsOpts = {};
     if (headers && global.kotvApplyXhrHeaders) {
       hlsOpts.xhrSetup = function (xhr) {

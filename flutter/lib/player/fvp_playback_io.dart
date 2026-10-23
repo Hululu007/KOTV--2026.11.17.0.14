@@ -10,6 +10,7 @@ import 'fvp_decoders.dart';
 import 'drm_opts.dart';
 import 'fvp_register.dart';
 import 'kotv_playback.dart';
+import 'mpv_hls_timeline.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
 import 'playback_settings.dart';
@@ -281,6 +282,7 @@ class FvpPlayback extends KotvPlayback {
       clearKeyHex: clearKeyHex,
       syncClearKey: true,
       androidSurface: _androidSurface,
+      hlsInput: kotvIsHls(url, format),
     );
     _opening = true;
     _live = live;

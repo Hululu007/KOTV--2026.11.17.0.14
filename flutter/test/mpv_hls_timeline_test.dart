@@ -19,12 +19,17 @@ void main() {
     expect(kotvMpvHlsLavf('data:application/vnd.apple.mpegurl,abc', null), isTrue);
   });
 
-  test('format hls uses lavf even without the suffix', () {
+  test('only application/x-mpegURL counts as hls mime', () {
     expect(kotvMpvHlsLavf('https://cdn/a.mp4', 'application/x-mpegURL'), isTrue);
-    expect(kotvMpvHlsLavf('https://cdn/a.mp4', 'application/vnd.apple.mpegurl'), isTrue);
-    expect(kotvMpvHlsLavf('https://cdn/a.mp4', 'hls'), isTrue);
-    expect(kotvMpvHlsLavf('https://cdn/a.mp4', 'm3u8'), isTrue);
+    expect(kotvMpvHlsLavf('https://cdn/a.m3u8', 'video/mp4'), isTrue);
+    expect(kotvPlayMime('https://cdn/a.m3u8', 'video/mp4'), 'application/x-mpegURL');
+    expect(kotvPlayMime('https://cdn/a.mp4', 'application/x-mpegURL'), 'application/x-mpegURL');
+    expect(kotvMpvHlsLavf('https://cdn/a.mp4', 'application/vnd.apple.mpegurl'), isFalse);
+    expect(kotvMpvHlsLavf('https://cdn/a.mp4', 'hls'), isFalse);
+    expect(kotvMpvHlsLavf('https://cdn/a.mp4', 'm3u8'), isFalse);
     expect(kotvMpvHlsLavf('https://cdn/a.mp4', 'video/mp4'), isFalse);
+    expect(kotvPlayMime('https://cdn/a.mp4', 'video/mp4'), 'video/mp4');
+    expect(kotvPlayMime('https://cdn/a.mp4', null), isNull);
   });
 
   test('open failure text', () {

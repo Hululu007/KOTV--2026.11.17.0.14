@@ -1040,7 +1040,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     livePlayback = live
     currentUrl = url
     currentHeaders = normalizeHeaders(headers)
-    currentMime = mime ?: guessMime(url)
+    currentMime = mime?.trim()?.takeIf { it.isNotEmpty() }
     currentDrm = drm
     speedBps = 0
     speedLastBytes = -1
@@ -2568,16 +2568,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
         errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ||
         errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
-    }
-
-    fun guessMime(url: String): String? {
-      val u = url.lowercase()
-      return when {
-        u.contains(".m3u8") || u.contains("m3u8") -> MimeTypes.APPLICATION_M3U8
-        u.contains(".mpd") -> MimeTypes.APPLICATION_MPD
-        u.contains(".ism") || u.contains("mpd/") -> MimeTypes.APPLICATION_SS
-        else -> null
-      }
     }
 
     fun subtitleMimeFromPath(url: String): String {

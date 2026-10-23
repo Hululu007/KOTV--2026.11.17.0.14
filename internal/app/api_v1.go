@@ -733,6 +733,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 	mediaURL := playURL
 	directURL := ""
 	sourceTitle := ""
+	beforeProxy := ""
 	magnet := thunder.Match(playURL)
 	if magnet {
 		// 起播前 Source.stop，确保可被 cancelPending / 换集打断
@@ -763,6 +764,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		playURL = exposeLocalFile(playURL)
 		mediaURL = playURL
 	} else if !thunder.IsLocalStream(playURL) {
+		beforeProxy = playURL
 		playURL, directURL, headers = a.PreparePlayback(playURL, headers)
 		mediaURL = playURL
 	}
@@ -771,6 +773,9 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 	if runtime.GOOS != "android" {
 		playURL = smbproxy.Rewrite(playURL)
 		mediaURL = smbproxy.Rewrite(mediaURL)
+	}
+	if beforeProxy != "" {
+		playFormat = proxyHlsFormat(beforeProxy, playURL, playFormat)
 	}
 
 	// 片名：专用源标题 > 详情缓存名；勿默认 vodID（很多站 id 是详情页 URL，会盖掉 UI 片名）。
@@ -1894,6 +1899,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		sourceArtwork = strings.TrimSpace(info.Artwork)
 	}
 	var directURL string
+	beforeProxy := playURL
 	playURL, directURL, headers = a.PrepareLivePlayback(playURL, headers)
 	if runtime.GOOS != "android" {
 		prepared, derr := model.PrepareForDesktop(ch.Drm)
@@ -1918,7 +1924,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		"line":     ch.URLIndex,
 		"lines":    len(ch.URLs),
 		"lineName": ch.LineLabel(),
-		"format":   ch.Format,
+		"format":   proxyHlsFormat(beforeProxy, playURL, ch.Format),
 		"drm":      ch.Drm,
 		"subs":     subsPublicDTO(liveSubs),
 		"error":    errString(err),
@@ -1996,6 +2002,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
+	beforeProxy := url
 	playURL, directURL, headers := a.PrepareLivePlayback(url, headers)
 	var playDrm *model.Drm
 	if runtime.GOOS != "android" {
@@ -2016,7 +2023,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 		"name":    list[prog].Title,
 		"group":   g.Name,
 		"channel": ch.Name,
-		"format":  ch.Format,
+		"format":  proxyHlsFormat(beforeProxy, playURL, ch.Format),
 		"drm":     playDrm,
 	}, nil
 }

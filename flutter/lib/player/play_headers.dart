@@ -10,6 +10,7 @@ library;
 
 import 'hls_js_support.dart';
 import 'kotv_platform.dart';
+import 'mpv_hls_timeline.dart';
 
 /// 输入 `o` 时填入的串。Android 尚未取到系统 UA 时也用它。
 const kotvOkHttpPlayUA = 'okhttp/5.5.0';
@@ -57,16 +58,10 @@ bool kotvIsLocalProxyUrl(String url) {
   return u.contains('127.0.0.1:') && u.contains('/proxy');
 }
 
-bool kotvLooksLikeHlsUrl(String url) {
-  final path = url.split('?').first.toLowerCase();
-  return path.contains('.m3u8') || path.endsWith('.m3u');
-}
-
 /// 这次打开能否把请求头交给播放器。为真且直链可连时，打开站点地址。
 ///
 /// - Exo、FVP、MPV：列表和分片走各自的 HTTP 栈，整份头带上。
-/// - html：hls.js 可用时由 xhr 带上；否则是浏览器原生播放，带不上自定义头。
-/// - art / 西瓜 / 全能：只有 m3u8 且 hls.js 可用时由 xhr 带上。
+/// - html / art / 西瓜 / 全能：只有 HLS 且 hls.js 可用时由 xhr 带上。
 bool kotvPlaybackSendsHeaders({
   required String playerVal,
   required String mediaUrl,
@@ -78,12 +73,11 @@ bool kotvPlaybackSendsHeaders({
     case 'innie#mpv':
       return true;
     case 'innie#html':
-      return hlsJsSupported ?? kotvWebHlsJsSupported();
     case 'innie#art':
     case 'innie#xg':
     case 'innie#zw':
       if (!(hlsJsSupported ?? kotvWebHlsJsSupported())) return false;
-      return kotvLooksLikeHlsUrl(mediaUrl);
+      return kotvMpvUrlIsHls(mediaUrl);
     default:
       return false;
   }

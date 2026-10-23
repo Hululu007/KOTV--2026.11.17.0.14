@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
 import 'kotv_playback.dart';
+import 'mpv_hls_timeline.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
@@ -14,7 +15,13 @@ external KotvHlsApi get _kotvHls;
 
 /// index.html 注入的 hls.js 胶水。
 extension type KotvHlsApi._(JSObject _) implements JSObject {
-  external String attach(web.HTMLVideoElement video, String url, JSAny? headers, [JSAny? drm]);
+  external String attach(
+    web.HTMLVideoElement video,
+    String url,
+    JSAny? headers, [
+    JSAny? drm,
+    bool hls,
+  ]);
   external void destroy(web.HTMLVideoElement video);
   external bool get ready;
 }
@@ -205,7 +212,7 @@ class HtmlPlayback extends KotvPlayback {
     final hdrJs = h.isEmpty ? null : h.jsify();
     final drmJs = (drm == null || drm.isEmpty) ? null : drm.jsify();
     try {
-      final mode = _kotvHls.attach(_video, url, hdrJs, drmJs);
+      final mode = _kotvHls.attach(_video, url, hdrJs, drmJs, kotvIsHls(url, format));
       _engine = switch (mode) {
         'hls' => 'hls.js',
         'native' => 'HTML5·HLS',
