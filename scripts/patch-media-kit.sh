@@ -1276,7 +1276,13 @@ if not candidates:
 swift = candidates[0]
 text = swift.read_text(encoding="utf-8")
 if "X-KOTV-Asset-Mime" in text:
-    print(f"avfoundation mime hint already patched ({swift})")
+    old_key = "itemOptions[AVURLAssetOutOfBandMIMETypeKey] = assetMime"
+    new_key = 'itemOptions["AVURLAssetOverrideMIMETypeKey"] = assetMime'
+    if old_key in text:
+        swift.write_text(text.replace(old_key, new_key, 1), encoding="utf-8")
+        print(f"updated avfoundation mime key ({swift})")
+    else:
+        print(f"avfoundation mime hint already patched ({swift})")
     sys.exit(0)
 old = """  private func playerItem(with options: CreationOptions) throws -> FVPAVPlayerItem {
     let headers = options.httpHeaders
@@ -1295,7 +1301,7 @@ new = """  private func playerItem(with options: CreationOptions) throws -> FVPA
       itemOptions["AVURLAssetHTTPHeaderFieldsKey"] = headers
     }
     if let assetMime, !assetMime.isEmpty {
-      itemOptions[AVURLAssetOutOfBandMIMETypeKey] = assetMime
+      itemOptions["AVURLAssetOverrideMIMETypeKey"] = assetMime
     }
     let opts: [String: Any]? = itemOptions.isEmpty ? nil : itemOptions
     guard let url = URL(string: options.uri) else {
