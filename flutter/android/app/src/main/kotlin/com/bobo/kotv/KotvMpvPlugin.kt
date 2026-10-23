@@ -68,8 +68,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var appliedSurfaceSize: String? = null
   private var decodeMode = "auto"
   private var gpuNext = false
-  /** open/setOpts 的 props 里下发的 demuxer-lavf-o（可能带 ClearKey decryption_key）；无则用初值常量。 */
-  private var lavfBase = LAVF_DEMUXER_O
   private var vulkanEnabled = false
   private var conf = ""
   /** 默认校验证书；坏 CA 盒子可关（设置 mpvTlsVerify=false）。 */
@@ -1342,8 +1340,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun applyRuntimeOpts(props: Map<String, String>) {
     if (!created.get()) return
-    // 记下基串：随后 applyPlayHttpHeaders 会在其后拼 user_agent/referer 重写整条属性。
-    lavfBase = props["demuxer-lavf-o"]?.takeIf { it.isNotBlank() } ?: LAVF_DEMUXER_O
     val hw = resolveHwdec(props["hwdec"] ?: decodeMode)
     try {
       MPVLib.setPropertyString("hwdec", hw)
@@ -1542,8 +1538,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * user-agent / referrer 走独立属性，
-   * 其余头写成 mpv 的逗号列表。setOptionString 在 init 之后无效，必须 setPropertyString。
+   * user-agent / referrer 走独立属性，其余头写成逗号列表。
+   * setOptionString 在 init 之后无效，必须 setPropertyString。
    * 没有 UA 时写空，避免上一集的值留在会话里。
    */
   private fun applyPlayHttpHeaders(headers: Map<String, String>) {
@@ -1559,24 +1555,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           ua = value
         key.equals("Referer", ignoreCase = true) || key.equals("Referrer", ignoreCase = true) ->
           referer = value
-        key.equals("Range", ignoreCase = true) -> Unit
-        else -> fields.add("$key: ${escapeListValue(value)}")
+        else -> fields.add("${escapeListValue(key)}: ${escapeListValue(value)}")
       }
     }
     MPVLib.setPropertyString("user-agent", ua)
     MPVLib.setPropertyString("referrer", referer)
     MPVLib.setPropertyString("http-header-fields", fields.joinToString(","))
-    // 分片走上面的 user-agent / referrer / http-header-fields。
-    // lavf 回落不读这些属性，有 UA/Referer 时再写进 demuxer-lavf-o。
-    val lavf = buildString {
-      append(lavfBase)
-      if (ua.isNotEmpty()) append(",user_agent=").append(escapeListValue(ua))
-      if (referer.isNotEmpty()) append(",referer=").append(escapeListValue(referer))
-    }
-    try {
-      MPVLib.setPropertyString("demuxer-lavf-o", lavf)
-    } catch (_: Throwable) {
-    }
   }
 
   /** loadfile 选项按字节长度写，值里的等号和逗号不再被拆开。 */
@@ -1822,7 +1806,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "brightness", "contrast", "saturation", "gamma", "hue",
     )
     private const val TAG = "KotvMpv"
-    // 仅作 open 前的初值；open/setOpts 后以 Dart props 下发的 demuxer-lavf-o 为准（见 lavfBase）。
+    // 仅作 open 前的初值；之后由 props 里的 demuxer-lavf-o 覆盖。
     // 不设 protocol_whitelist：写了就是拒绝名单外协议（RTSP/RTMP/RTP）。
     private const val LAVF_DEMUXER_O =
       "seg_max_retry=5,strict=experimental," +

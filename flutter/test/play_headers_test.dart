@@ -136,6 +136,7 @@ void main() {
       'Referer': 'https://site.example/',
       'Cookie': 'a=b',
       'Origin': 'https://site.example',
+      'Range': 'bytes=0-1',
     });
     expect(split.userAgent, 'Site/1');
     expect(split.referer, 'https://site.example/');
@@ -143,6 +144,7 @@ void main() {
     expect(split.fields.containsKey('Referer'), isFalse);
     expect(split.fields['Cookie'], 'a=b');
     expect(split.fields['Origin'], 'https://site.example');
+    expect(split.fields['Range'], 'bytes=0-1');
     final empty = kotvSplitMpvHeaders(const {});
     expect(empty.userAgent, isEmpty);
     expect(empty.referer, isEmpty);
