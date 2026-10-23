@@ -401,7 +401,7 @@ class MediaKitPlayback extends KotvPlayback {
       httpHeaders: _headers.isEmpty ? null : _headers,
       start: startAt > Duration.zero ? startAt : null,
     );
-    final forceHls = await kotvMpvHlsTimeline(url, _headers, format);
+    final forceHls = await kotvMpvHlsTimeline(url, _headers);
     await _openWithHlsForce(media, forceHls);
     // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
     _acceptSize = true;

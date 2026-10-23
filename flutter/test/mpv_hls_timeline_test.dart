@@ -28,16 +28,9 @@ void main() {
     expect(kotvMpvHeadIsHlsTimeline([0x47, 0x00, 0x11]), isFalse);
   });
 
-  test('peek skips common media suffixes', () {
-    expect(kotvMpvShouldPeekTimeline('https://cdn/a.mp4', null), isFalse);
-    expect(kotvMpvShouldPeekTimeline('https://cdn/a.mkv?x=1', null), isFalse);
-    expect(kotvMpvShouldPeekTimeline('https://cdn/a.f300.m3u8', null), isTrue);
-    expect(kotvMpvShouldPeekTimeline('https://cdn/fengshows?id=2.m3u8', null), isTrue);
-    expect(kotvMpvShouldPeekTimeline('http://127.0.0.1:9978/proxy/play?id=1', null), isTrue);
-    expect(
-      kotvMpvShouldPeekTimeline('https://cdn/a.mp4', 'application/vnd.apple.mpegurl'),
-      isTrue,
-    );
+  test('non-http url is not read', () async {
+    expect(await kotvMpvHlsTimeline('file:///tmp/a.mp4', const {}), isFalse);
+    expect(await kotvMpvHlsTimeline('rtsp://cam/live', const {}), isFalse);
   });
 
   test('forced hls rejection text', () {
@@ -56,7 +49,7 @@ void main() {
     });
     addTearDown(() => server.close(force: true));
     final url = 'http://${server.address.host}:${server.port}/v.m3u8';
-    final got = await kotvMpvHlsTimeline(url, {'User-Agent': 'KotvTest'}, null);
+    final got = await kotvMpvHlsTimeline(url, {'User-Agent': 'KotvTest'});
     expect(got, isTrue);
     expect(ua, 'KotvTest');
   });
@@ -73,7 +66,7 @@ void main() {
     });
     addTearDown(() => server.close(force: true));
     final url = 'http://${server.address.host}:${server.port}/long.m3u8';
-    expect(await kotvMpvHlsTimeline(url, const {}, null), isTrue);
+    expect(await kotvMpvHlsTimeline(url, const {}), isTrue);
   });
 
   test('m3u8 name with flv body is not forced', () async {
@@ -84,6 +77,23 @@ void main() {
     });
     addTearDown(() => server.close(force: true));
     final url = 'http://${server.address.host}:${server.port}/clip.m3u8';
-    expect(await kotvMpvHlsTimeline(url, const {}, null), isFalse);
+    expect(await kotvMpvHlsTimeline(url, const {}), isFalse);
+  });
+
+  test('mp4 name is forced only when the body is a playlist', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((req) {
+      final path = req.uri.path;
+      if (path.endsWith('/playlist.mp4')) {
+        req.response.write('#EXTM3U\n#EXTINF:6,\nseg.ts\n');
+      } else {
+        req.response.add([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]);
+      }
+      req.response.close();
+    });
+    addTearDown(() => server.close(force: true));
+    final base = 'http://${server.address.host}:${server.port}';
+    expect(await kotvMpvHlsTimeline('$base/playlist.mp4', const {}), isTrue);
+    expect(await kotvMpvHlsTimeline('$base/movie.mp4', const {}), isFalse);
   });
 }

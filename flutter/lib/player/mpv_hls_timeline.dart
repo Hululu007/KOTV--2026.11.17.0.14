@@ -3,39 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import 'play_headers.dart';
-
 const _headBytes = 64 * 1024;
-
-const _mediaExts = {
-  '3g2', '3gp', 'avi', 'flv', 'ivf', 'm2ts', 'm4s', 'm4v', 'mkv', 'mov',
-  'mp4', 'mpeg', 'mpg', 'mxf', 'ogv', 'rmvb', 'ts', 'webm', 'wmv',
-  'aac', 'ac3', 'flac', 'm4a', 'mp3', 'ogg', 'opus', 'wav', 'wma',
-};
-
-bool _formatHintsHls(String? format) {
-  final fmt = format?.trim().toLowerCase() ?? '';
-  if (fmt.isEmpty) return false;
-  return fmt == 'hls' || fmt.contains('mpegurl');
-}
-
-String _pathExt(String url) {
-  final path = url.split('?').first.split('#').first;
-  final slash = path.lastIndexOf('/');
-  final name = slash >= 0 ? path.substring(slash + 1) : path;
-  final dot = name.lastIndexOf('.');
-  if (dot <= 0 || dot == name.length - 1) return '';
-  return name.substring(dot + 1).toLowerCase();
-}
-
-/// 常见音视频后缀不读开头。m3u8/m3u、HLS 格式提示、或没有这类后缀时才读。
-bool kotvMpvShouldPeekTimeline(String url, String? format) {
-  if (_formatHintsHls(format) || kotvLooksLikeHlsUrl(url)) return true;
-  final ext = _pathExt(url);
-  if (ext.isNotEmpty && _mediaExts.contains(ext)) return false;
-  final scheme = Uri.tryParse(url)?.scheme.toLowerCase() ?? '';
-  return scheme == 'http' || scheme == 'https';
-}
 
 /// 跳过 BOM 和空白后：FLV / TS 不是整段 HLS。
 /// `#EXTM3U` 且含分片或 EXT-X 标签才是。
@@ -75,12 +43,7 @@ bool kotvMpvHlsForceRejected(String prefix, String text) {
   return false;
 }
 
-Future<bool> kotvMpvHlsTimeline(
-  String url,
-  Map<String, String> headers,
-  String? format,
-) async {
-  if (!kotvMpvShouldPeekTimeline(url, format)) return false;
+Future<bool> kotvMpvHlsTimeline(String url, Map<String, String> headers) async {
   final bytes = await _readPlayHead(url, headers);
   if (bytes == null || bytes.isEmpty) return false;
   return kotvMpvHeadIsHlsTimeline(bytes);
