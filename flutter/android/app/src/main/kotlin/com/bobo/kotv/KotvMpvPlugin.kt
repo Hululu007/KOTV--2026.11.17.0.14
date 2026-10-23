@@ -1509,19 +1509,19 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     try {
       loadedUrl = url
       loadedHeaders = headers
-      applyPlayHttpHeaders(headers)
       applySpdif()
       MPVLib.setPropertyDouble("volume", volume)
       MPVLib.setPropertyDouble("speed", rate)
       val startMs = pendingStartAtMs
       pendingStartAtMs = 0L
-      // 只写在这一次 loadfile 上，不留在会话里。
-      val opts = ArrayList<String>(3)
+      // 只写在这一次 loadfile 上，播完恢复，不留在会话里。
+      val opts = ArrayList<String>(6)
       if (startMs > 0L) opts.add("start=${startMs / 1000.0}")
       if (forceLavfHls) {
         opts.add("demuxer-lavf-format=hls")
         opts.add("demuxer-lavf-o-add=http_persistent=0")
       }
+      appendHeaderOptions(headers, opts)
       if (opts.isEmpty()) {
         MPVLib.command(arrayOf("loadfile", url, "replace"))
       } else {
@@ -1537,12 +1537,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /**
-   * user-agent / referrer 走独立属性，其余头写成逗号列表。
-   * setOptionString 在 init 之后无效，必须 setPropertyString。
-   * 没有 UA 时写空，避免上一集的值留在会话里。
-   */
-  private fun applyPlayHttpHeaders(headers: Map<String, String>) {
+  /** User-Agent、Referer 单独成项，其余头合成一条列表。没有的项不写。 */
+  private fun appendHeaderOptions(headers: Map<String, String>, opts: MutableList<String>) {
     var ua = ""
     var referer = ""
     val fields = ArrayList<String>()
@@ -1558,9 +1554,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         else -> fields.add("${escapeListValue(key)}: ${escapeListValue(value)}")
       }
     }
-    MPVLib.setPropertyString("user-agent", ua)
-    MPVLib.setPropertyString("referrer", referer)
-    MPVLib.setPropertyString("http-header-fields", fields.joinToString(","))
+    if (ua.isNotEmpty()) opts.add("user-agent=$ua")
+    if (referer.isNotEmpty()) opts.add("referrer=$referer")
+    if (fields.isNotEmpty()) opts.add("http-header-fields=${fields.joinToString(",")}")
   }
 
   /** loadfile 选项按字节长度写，值里的等号和逗号不再被拆开。 */
