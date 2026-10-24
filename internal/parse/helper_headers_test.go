@@ -34,3 +34,21 @@ func TestPickPlayHeadersKeepsPlayKeysOnly(t *testing.T) {
 		t.Fatal("no play keys → nil out")
 	}
 }
+
+func TestDropRangeHeaderKeepsTheRest(t *testing.T) {
+	got := dropRangeHeader(map[string]string{
+		"Range":      "bytes=0-",
+		"Host":       "cdn.example",
+		"Cookie":     "a=b",
+		"Connection": "keep-alive",
+	})
+	if _, ok := got["Range"]; ok {
+		t.Fatalf("Range must go: %v", got)
+	}
+	if got["Host"] != "cdn.example" || got["Cookie"] != "a=b" || got["Connection"] != "keep-alive" {
+		t.Fatalf("other keys stay: %v", got)
+	}
+	if dropRangeHeader(map[string]string{"Range": "bytes=0-"}) != nil {
+		t.Fatal("only Range → nil")
+	}
+}

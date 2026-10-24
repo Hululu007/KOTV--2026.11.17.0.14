@@ -669,7 +669,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 			if result.Drm != nil {
 				playDrm = result.Drm
 			}
-			headers = mergeStringMaps(headers, map[string]string(result.Header))
+			headers = copyStringMap(map[string]string(result.Header))
 			qualNames = result.URL.Names
 			qualURLs = result.URL.URLs
 			playURL = apiResolvePlayURL("", result.PlayURL, result.URL.URLs, qualIdx)
@@ -1087,12 +1087,12 @@ func apiLooksUnplayable(u string) bool {
 	return !parse.IsVideoFormat(u)
 }
 
-func mergeStringMaps(a, b map[string]string) map[string]string {
-	out := map[string]string{}
-	for k, v := range a {
-		out[k] = v
+func copyStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
 	}
-	for k, v := range b {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
 		out[k] = v
 	}
 	return out

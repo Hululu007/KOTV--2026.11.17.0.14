@@ -24,9 +24,9 @@ type Options struct {
 	Rules       []model.Rule
 	Jar         string
 	Flag        string
-	Click       string // 结果自带 click
-	SiteClick   string // 站点 click；非空时优先于结果 click
-	Prefer      string // 用户指定解析器名称（空=自动）
+	Click       string            // 结果自带 click
+	SiteClick   string            // 站点 click；非空时优先于结果 click
+	Prefer      string            // 用户指定解析器名称（空=自动）
 	IsVideo     func(string) bool // 站点自定义视频地址判定；非空时优先于默认嗅探规则
 	ManualVideo bool              // spider.manualVideoCheck()：为真时拦截点禁用默认 snifferRe
 }
@@ -211,6 +211,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	}
 	// 非直链播放页再嗅一次媒体地址。
 	mergedHdr := overlayHeaders(hdr, sniffHdr)
+	fromWeb := false
 	if reParsed, reHdr, reErr := resniffIfNeeded(parsed, mergedHdr, click, opts.Rules, opts.IsVideo, opts.ManualVideo); reErr != nil {
 		parseLog("[parse] re-sniff fail via=%s err=%v", via, reErr)
 		return r, reErr
@@ -218,7 +219,8 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 		parseLog("[parse] re-sniff ok via=%s out=%s", via, parsePreview(reParsed, 200))
 		parsed = reParsed
 		if len(reHdr) > 0 {
-			sniffHdr = overlayHeaders(sniffHdr, reHdr)
+			sniffHdr = reHdr
+			fromWeb = true
 		}
 	}
 
@@ -226,14 +228,17 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	r.Parse = model.FlexInt{Valid: true, Value: 0}
 	r.URL = model.URL{URLs: []string{parsed}}
 	r.PlayURL = ""
-	if p != nil && p.TypeID() == 1 {
+	switch {
+	case fromWeb:
+		r.Header = model.FlexHeader(dropRangeHeader(sniffHdr))
+	case p != nil && p.TypeID() == 1:
 		if picked := pickPlayHeaders(sniffHdr); len(picked) > 0 {
-			r.Header = model.FlexHeader(picked)
+			r.Header = model.FlexHeader(dropRangeHeader(picked))
 		} else if ph := parseExtHeaders(p.Ext.String()); len(ph) > 0 {
-			r.Header = model.FlexHeader(ph)
+			r.Header = model.FlexHeader(dropRangeHeader(ph))
 		}
-	} else if len(sniffHdr) > 0 {
-		r.Header = model.FlexHeader(overlayHeaders(map[string]string(r.Header), sniffHdr))
+	case len(sniffHdr) > 0:
+		r.Header = model.FlexHeader(dropRangeHeader(sniffHdr))
 	}
 	return r, nil
 }
@@ -635,6 +640,24 @@ func pickPlayHeaders(h map[string]string) map[string]string {
 		case "cookie":
 			out["Cookie"] = val
 		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// dropRangeHeader 解析成功后的播放头去掉 Range，其余键保留。
+func dropRangeHeader(h map[string]string) map[string]string {
+	if len(h) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(h))
+	for k, v := range h {
+		if strings.EqualFold(strings.TrimSpace(k), "Range") {
+			continue
+		}
+		out[k] = v
 	}
 	if len(out) == 0 {
 		return nil
