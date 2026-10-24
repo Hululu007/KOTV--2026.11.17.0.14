@@ -33,6 +33,7 @@ import '../util/kotv_image_cache.dart';
 import '../util/kotv_wallpaper_cache.dart';
 import '../util/pick_font_file.dart';
 import '../util/runtime_info.dart';
+import '../vod/grid_style.dart';
 import '../widgets/auth_gate.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
@@ -94,7 +95,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     setState(() => _loading = true);
     try {
       final data = await ref.read(apiProvider).getSettings();
-      final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
+      final map = KotvSettingsCache.settingsOf(data);
       KotvSettingsCache.replace(map);
       _s = {for (final e in map.entries) e.key: '${e.value ?? ''}'};
       final rt = Map<String, dynamic>.from((data['runtime'] as Map?) ?? {});
@@ -136,24 +137,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   String g(String k, [String d = '']) => _s[k]?.isNotEmpty == true ? _s[k]! : d;
 
-  String _posterSizeLabel(String raw) {
-    switch (int.tryParse(raw.trim()) ?? 2) {
-      case 0:
-        return '小';
-      case 1:
-        return '中';
-      case 3:
-        return '特大';
-      default:
-        return '大';
-    }
-  }
-
   Future<void> _set(String key, String value, {String? msg}) async {
     try {
       final data =
           await KotvSettingsCache.set(ref.read(apiProvider), key, value);
-      final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
+      final map = KotvSettingsCache.settingsOf(data);
       setState(() {
         // 合并而非整表替换：避免 API 白名单漏键时把刚写入的值冲掉
         _s = {
@@ -192,7 +180,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _setMany(Map<String, String> kv, {String? msg}) async {
     try {
       final data = await KotvSettingsCache.setMany(ref.read(apiProvider), kv);
-      final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
+      final map = KotvSettingsCache.settingsOf(data);
       setState(() {
         _s = {
           ..._s,
@@ -2507,7 +2495,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         KotvSettingsCell(
                           label: '海报尺寸',
-                          value: _posterSizeLabel(g('size', '2')),
+                          value: kotvPosterSizeLabel(g('size', '2')),
                           onTap: () => _pick(
                               '海报尺寸',
                               'size',

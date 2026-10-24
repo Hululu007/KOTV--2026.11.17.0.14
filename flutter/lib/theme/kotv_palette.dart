@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/kotv_settings_cache.dart';
 import '../providers.dart';
 
 /// 壁纸主题中文名（与引擎 wallMode 一致）。
@@ -430,7 +431,7 @@ final effectiveLightProvider = Provider<bool>((ref) {
   final st = ref.watch(settingsProvider);
   final theme = st.maybeWhen(
     data: (d) {
-      final s = Map<String, dynamic>.from((d['settings'] as Map?) ?? const {});
+      final s = KotvSettingsCache.settingsOf(d);
       return '${s['theme'] ?? 'dark'}'.trim();
     },
     orElse: () => 'dark',

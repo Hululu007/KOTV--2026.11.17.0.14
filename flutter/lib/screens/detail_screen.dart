@@ -422,18 +422,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return p != null && p.stalling;
   }
 
-  /// 换集/解析时 [_playUrl] 可能已清空但原生仍在播，不能单靠它判断可否 pop。
-  bool get _playbackSessionActive {
-    if (_allowPop) return false;
-    if (_playUrl.isNotEmpty) return true;
-    if (_stoppedHard) return false;
-    final p = _existingPlayback;
-    if (p == null) return false;
-    if (p.playing || p.buffering) return true;
-    if (p.position > Duration.zero && !p.completed) return true;
-    return false;
-  }
-
   /// 是否已进入可播状态（勿等 2.5s 才改文案；出画/进度动即算开播）。
   bool _playbackStarted(KotvPlayback p) {
     if (_playbackLive) return true;
@@ -4223,7 +4211,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   Future<void> _pickParse() async {
     try {
       final st = await ref.read(apiProvider).getSettings();
-      KotvSettingsCache.replace(st['settings'] as Map?);
+      KotvSettingsCache.replace(KotvSettingsCache.settingsOf(st));
       final parses = ((st['parses'] as List?) ?? []).whereType<Map>().toList();
       if (parses.isEmpty) {
         setState(() => _status = '当前配置无解析器');

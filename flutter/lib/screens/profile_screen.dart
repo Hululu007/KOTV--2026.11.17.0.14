@@ -15,6 +15,7 @@ import '../util/runtime_info.dart';
 import '../widgets/chrome.dart';
 import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
+import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
 import '../widgets/poster_card.dart';
 import 'shell.dart';
@@ -98,6 +99,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final logoUrl = cfg.maybeWhen(data: (c) => '${c['logo'] ?? ''}'.trim(), orElse: () => '');
     final bottomNav = KotvLayout.useBottomNav(context);
     final compact = KotvLayout.isCompact(context);
+    final screen = MediaQuery.sizeOf(context);
+    final recentPosterH = kotvPosterStripHeight(
+      base: compact ? 168.0 : 240.0,
+      size: kotvWatchPosterSize(ref),
+      width: screen.width,
+      height: screen.height,
+      television: KotvLayout.television,
+    );
     // 小窗保持设计高度，大于 720p 再按同一倍数加高，避免字被缩回卡片里。
     final cardH = (compact ? 200.0 : 128.0) * grow;
     final featureH = (compact ? 72.0 : 104.0) * grow;
@@ -395,7 +404,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 )
               else
                 SizedBox(
-                  height: compact ? 168.0 : 240.0,
+                  height: recentPosterH,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     padding: EdgeInsets.zero,
@@ -405,14 +414,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     separatorBuilder: (_, __) => const SizedBox(width: 10),
                     itemBuilder: (_, i) {
                       final it = _recent[i];
-                      final posterH = compact ? 168.0 : 240.0;
-                      final posterW = posterH * 0.75;
+                      final posterW = recentPosterH * 0.75;
                       return SizedBox(
                         width: posterW,
-                        height: posterH,
+                        height: recentPosterH,
                         child: PosterCard(
                           item: it,
-                          onTap: () => openVodItem(context, ref, it, site: it.site),
+                          onTap: () =>
+                              openVodItem(context, ref, it, site: it.site),
                         ),
                       );
                     },

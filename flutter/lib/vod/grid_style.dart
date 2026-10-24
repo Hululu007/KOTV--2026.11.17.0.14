@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/kotv_settings_cache.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../theme/layout_scale.dart';
@@ -116,12 +117,57 @@ KotvGridStyle kotvGridStyleOfItems(List<VodItem> items) {
   return KotvGridStyle.normalize(it.styleType, it.styleRatio);
 }
 
+int kotvPosterSizeFromPayload(Map<String, dynamic>? payload) {
+  return kotvPosterSizeValue(
+    '${KotvSettingsCache.settingsOf(payload)['size'] ?? ''}',
+  );
+}
+
+String kotvPosterSizeLabel(String? raw) {
+  switch (kotvPosterSizeValue(raw)) {
+    case 0:
+      return '小';
+    case 1:
+      return '中';
+    case 3:
+      return '特大';
+    default:
+      return '大';
+  }
+}
+
 int kotvWatchPosterSize(WidgetRef ref) {
   final raw = ref.watch(settingsProvider).maybeWhen(
-        data: (m) => '${m['size'] ?? ''}',
-        orElse: () => '',
+        data: (m) => kotvPosterSizeFromPayload(m),
+        orElse: () => kotvPosterSizeValue(null),
       );
-  return kotvPosterSizeValue(raw);
+  return raw;
+}
+
+/// 横滑条高度。档位 2 保持 [base]；列数变少则海报变高，和大网格同一套档位。
+double kotvPosterStripHeight({
+  required double base,
+  required int size,
+  required double width,
+  required double height,
+  bool television = false,
+}) {
+  final atDefault = kotvPosterColumns(
+    width: width,
+    height: height,
+    size: 2,
+    landStyle: false,
+    television: television,
+  );
+  final cols = kotvPosterColumns(
+    width: width,
+    height: height,
+    size: size,
+    landStyle: false,
+    television: television,
+  );
+  if (cols < 1 || atDefault < 1) return base;
+  return base * atDefault / cols;
 }
 
 /// 横屏基数 7，竖屏 5；短边 ≥ 600 再加 1。列数 = |尺寸档 − 基数|，横图样式再减 1。

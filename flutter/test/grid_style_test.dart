@@ -63,6 +63,39 @@ void main() {
     expect(KotvGridStyle.parse({'type': 'rect'}).ratio, 0.75);
     expect(kotvPosterSizeValue(''), 2);
     expect(kotvPosterSizeValue('3'), 3);
+    expect(
+      kotvPosterSizeFromPayload({
+        'ok': true,
+        'settings': {'size': '0'},
+      }),
+      0,
+    );
+    expect(
+      kotvPosterSizeFromPayload({
+        'ok': true,
+        'size': '3',
+        'settings': {'theme': 'dark'},
+      }),
+      2,
+    );
+    expect(
+      kotvPosterStripHeight(
+        base: 240,
+        size: 2,
+        width: 1280,
+        height: 720,
+      ),
+      240,
+    );
+    expect(
+      kotvPosterStripHeight(
+        base: 240,
+        size: 3,
+        width: 1280,
+        height: 720,
+      ),
+      greaterThan(240),
+    );
   });
 
   test('title strip is one text line plus its padding', () {

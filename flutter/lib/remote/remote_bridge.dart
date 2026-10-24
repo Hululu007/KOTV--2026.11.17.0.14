@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../api/kotv_api.dart';
+import '../api/kotv_settings_cache.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
 import 'engine_api.dart';
@@ -170,7 +171,7 @@ class LocalHistory {
   static Future<bool> _incognito(KotvApi api) async {
     try {
       final s = await api.getSettings();
-      final map = (s['settings'] as Map?) ?? const {};
+      final map = KotvSettingsCache.settingsOf(s);
       final v = '${map['incognito'] ?? ''}'.trim().toLowerCase();
       return v == 'true' || v == '1' || v == 'on';
     } catch (_) {
