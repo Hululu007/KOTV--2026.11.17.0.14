@@ -64,7 +64,7 @@ class HtmlPlayback extends KotvPlayback {
   int get height => _c?.value.size.height.toInt() ?? 0;
 
   @override
-  String get engineLabel => 'HTML5';
+  String get engineLabel => kotvHtmlPlayerLabel();
 
   @override
   Stream<Duration> get positionStream => _posCtrl.stream;

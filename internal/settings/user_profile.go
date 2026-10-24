@@ -49,11 +49,26 @@ func OverlayClientProfile(vals map[string]string, platform string) {
 	}
 	platform = normalizePlatform(platform)
 	uid := hostclient.DataOwner()
-	if uid != "" && storeDB != nil {
+	loaded := map[Type]bool{}
+	if storeDB != nil && (uid != "" || platform == "ios") {
 		for t := range clientProfileKeys {
+			if uid == "" && t != Player && t != PlayerLive {
+				continue
+			}
 			id := platformSettingID(platform, string(t))
 			if v, ok, err := storeDB.GetSetting(uid, id); err == nil && ok {
 				vals[string(t)] = v
+				loaded[t] = true
+			}
+		}
+	}
+	if platform == "ios" {
+		if def, _, ok := playerChoices(platform); ok {
+			if !loaded[Player] {
+				vals[string(Player)] = def
+			}
+			if !loaded[PlayerLive] {
+				vals[string(PlayerLive)] = def
 			}
 		}
 	}
@@ -82,7 +97,7 @@ func playerChoices(platform string) (def string, allowed []string, ok bool) {
 	case "macos":
 		return "innie#mpv", []string{"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc", "outie#iina"}, true
 	case "ios":
-		return "innie#mpv", []string{"innie#mpv", "innie#fvp", "innie#html"}, true
+		return "innie#html", []string{"innie#html", "innie#mpv", "innie#fvp"}, true
 	case "web":
 		return "innie#html", []string{"innie#html", "innie#art", "innie#xg", "innie#zw"}, true
 	default:
@@ -102,19 +117,22 @@ func clampListedPlayer(v, def string, allowed ...string) string {
 
 // SetClientProfileKeys 远端租户写入平台画像；返回仍应写普通 setting 的键。
 func SetClientProfileKeys(kv map[string]string, platform string) map[string]string {
-	uid := hostclient.DataOwner()
-	if uid == "" || storeDB == nil {
+	if storeDB == nil {
 		return kv
 	}
 	platform = normalizePlatform(platform)
+	uid := hostclient.DataOwner()
+	if uid == "" && platform != "ios" {
+		return kv
+	}
 	rest := map[string]string{}
 	for k, v := range kv {
 		t := Type(k)
-		if clientProfileKeys[t] {
-			_ = storeDB.SetSetting(uid, platformSettingID(platform, k), v)
+		if !clientProfileKeys[t] || (uid == "" && t != Player && t != PlayerLive) {
+			rest[k] = v
 			continue
 		}
-		rest[k] = v
+		_ = storeDB.SetSetting(uid, platformSettingID(platform, k), v)
 	}
 	return rest
 }

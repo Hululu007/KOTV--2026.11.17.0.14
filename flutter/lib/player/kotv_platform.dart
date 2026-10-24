@@ -62,19 +62,18 @@ bool kotvPlayerRenderApplies(String playerVal) {
       b == KotvEmbedBackend.fvp;
 }
 
-/// 点播默认：Web=HTML5；Android=Exo；其它=MPV（含 iOS）。
+/// 点播默认：Web 与 iOS 用平台播放器（iOS 为 AVPlayer）；Android=Exo；桌面=MPV。
 String kotvDefaultVodPlayer() {
-  if (kIsWeb) return 'innie#html';
+  if (kIsWeb || kotvIsIOS()) return 'innie#html';
   if (kotvIsAndroid()) return 'innie#exo';
   return 'innie#mpv';
 }
 
-/// 直播默认：Web=HTML5；Android=Exo；其它=MPV（含 iOS）。
-String kotvDefaultLivePlayer() {
-  if (kIsWeb) return 'innie#html';
-  if (kotvIsAndroid()) return 'innie#exo';
-  return 'innie#mpv';
-}
+/// 直播默认与点播相同。
+String kotvDefaultLivePlayer() => kotvDefaultVodPlayer();
+
+/// `innie#html` 的显示名。iOS 上是 AVPlayer，其它平台是浏览器 HTML5。
+String kotvHtmlPlayerLabel() => kotvIsIOS() ? 'AVPlayer' : '浏览器 HTML5';
 
 String kotvClampPlayerVal(String raw, {required bool live}) {
   final v = raw.trim();
@@ -131,10 +130,10 @@ List<(String, String)> kotvPlayerOptions() {
     ];
   }
   if (kotvIsIOS()) {
-    return const [
-      ('内置 MPV（默认）', 'innie#mpv'),
+    return [
+      ('${kotvHtmlPlayerLabel()}（默认）', 'innie#html'),
+      ('内置 MPV', 'innie#mpv'),
       ('内置 FVP', 'innie#fvp'),
-      ('浏览器播放（HTML5）', 'innie#html'),
     ];
   }
   return [

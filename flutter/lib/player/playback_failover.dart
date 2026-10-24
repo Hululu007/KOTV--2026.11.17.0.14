@@ -137,7 +137,7 @@ class KotvPlaybackFailover {
       return const ['innie#exo', 'innie#mpv', 'innie#fvp'];
     }
     if (kotvIsIOS()) {
-      return const ['innie#mpv', 'innie#fvp', 'innie#html'];
+      return const ['innie#html', 'innie#mpv', 'innie#fvp'];
     }
     // 桌面（含 Windows）：media_kit MPV + FVP；macOS 可用 KOTV_MACOS_NO_FVP=1 打纯 MPV 包。
     if (Platform.isMacOS && kotvMacosNoFvp) {
@@ -155,7 +155,7 @@ class KotvPlaybackFailover {
       case 'innie#fvp':
         return '内置 FVP';
       case 'innie#html':
-        return '浏览器 HTML5';
+        return kotvHtmlPlayerLabel();
       case 'innie#art':
         return 'ArtPlayer';
       case 'innie#xg':

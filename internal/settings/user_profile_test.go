@@ -1,6 +1,11 @@
 package settings
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/bobo/KOTV/internal/database"
+)
 
 func TestClampPlayerDropsIINAOffMac(t *testing.T) {
 	for _, plat := range []string{"windows", "linux"} {
@@ -26,6 +31,40 @@ func TestClampPlayerDropsIINAOffMac(t *testing.T) {
 	clampPlayerKeysForPlatform(vals, "macos")
 	if vals[string(Player)] != "outie#iina" || vals[string(PlayerLive)] != "outie#vlc" {
 		t.Fatalf("macos: %v", vals)
+	}
+}
+
+func TestIOSPlayerDefaultIgnoresHostMPV(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "set.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	BindDB(db)
+	t.Cleanup(func() { BindDB(nil) })
+
+	vals := map[string]string{
+		string(Player):     "innie#mpv",
+		string(PlayerLive): "innie#mpv",
+	}
+	OverlayClientProfile(vals, "ios")
+	if vals[string(Player)] != "innie#html" || vals[string(PlayerLive)] != "innie#html" {
+		t.Fatalf("ios without profile: %v", vals)
+	}
+
+	if err := db.SetSetting("", "p:ios:player", "innie#mpv"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetSetting("", "p:ios:playerLive", "innie#mpv"); err != nil {
+		t.Fatal(err)
+	}
+	vals = map[string]string{
+		string(Player):     "innie#html",
+		string(PlayerLive): "innie#html",
+	}
+	OverlayClientProfile(vals, "ios")
+	if vals[string(Player)] != "innie#mpv" || vals[string(PlayerLive)] != "innie#mpv" {
+		t.Fatalf("ios kept profile: %v", vals)
 	}
 }
 
