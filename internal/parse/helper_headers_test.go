@@ -41,27 +41,16 @@ func TestPickPlayHeadersKeepsPlayKeysOnly(t *testing.T) {
 
 func TestDropRangeHeaderKeepsTheRest(t *testing.T) {
 	got := dropRangeHeader(map[string]string{
-		"Range":            "bytes=0-",
-		"Content-Length":   "24540",
-		"Content-Encoding": "gzip",
-		":authority":       "cdn.example",
-		"Host":             "cdn.example",
-		"Cookie":           "a=b",
-		"Connection":       "keep-alive",
+		"Range":          "bytes=0-",
+		"Content-Length": "24540",
+		"Host":           "cdn.example",
+		"Cookie":         "a=b",
+		"Connection":     "keep-alive",
 	})
 	if _, ok := got["Range"]; ok {
 		t.Fatalf("Range must go: %v", got)
 	}
-	if _, ok := got["Content-Length"]; ok {
-		t.Fatalf("Content-Length must go: %v", got)
-	}
-	if _, ok := got["Content-Encoding"]; ok {
-		t.Fatalf("Content-Encoding must go: %v", got)
-	}
-	if _, ok := got[":authority"]; ok {
-		t.Fatalf("pseudo header must go: %v", got)
-	}
-	if got["Host"] != "cdn.example" || got["Cookie"] != "a=b" || got["Connection"] != "keep-alive" {
+	if got["Content-Length"] != "24540" || got["Host"] != "cdn.example" || got["Cookie"] != "a=b" || got["Connection"] != "keep-alive" {
 		t.Fatalf("other keys stay: %v", got)
 	}
 	if dropRangeHeader(map[string]string{"Range": "bytes=0-"}) != nil {
@@ -97,11 +86,11 @@ func TestJSONParseHeaderReplacesSiteHeader(t *testing.T) {
 		t.Fatalf("empty json uses parse header: %v", r.Header)
 	}
 
-	r.Header = model.FlexHeader{"Host": "www.ncat3.app"}
+	r.Header = model.FlexHeader{"Host": "www.ncat3.app", "Range": "bytes=0-"}
 	p.Ext = ""
 	applyParsedHeaders(&r, p, nil, false)
-	if len(r.Header) != 0 {
-		t.Fatalf("empty json and empty parse header clear site header: %v", r.Header)
+	if r.Header["Host"] != "www.ncat3.app" || len(r.Header) != 1 {
+		t.Fatalf("empty json keeps the header already on the result: %v", r.Header)
 	}
 }
 
@@ -125,10 +114,7 @@ func TestWebSniffHeaderReplacesSiteHeader(t *testing.T) {
 	if _, ok := r.Header["Range"]; ok {
 		t.Fatalf("range must go: %v", r.Header)
 	}
-	if _, ok := r.Header["Content-Length"]; ok {
-		t.Fatalf("content-length must go: %v", r.Header)
-	}
-	if r.Header["Content-Type"] != "application/x-mpeg" {
-		t.Fatalf("request content-type stays: %v", r.Header)
+	if r.Header["Content-Length"] != "24540" || r.Header["Content-Type"] != "application/x-mpeg" {
+		t.Fatalf("request headers stay: %v", r.Header)
 	}
 }

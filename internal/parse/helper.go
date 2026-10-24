@@ -608,30 +608,34 @@ func parseExtURL(p model.Parse) string {
 	return u[:index+1] + "cat_ext=" + b64 + "&" + u[index+1:]
 }
 
-// applyParsedHeaders 在解析成功后决定播放头。
-// JSON 只用 User-Agent、Referer、Cookie，没有则用解析源自己的头，并替换站点头。
-// 扩展 JSON 有头就用那份，没有则用解析源自己的头。网页嗅探用请求头全文。
-// 去掉 Range，以及会让下一次 GET 带上正文长度的头。没有新头时保留站点头。
+// applyParsedHeaders 在解析成功后决定播放头，最后只去掉 Range。
+// JSON 有 User-Agent、Referer、Cookie 就换上；没有则用解析源自己的头；再没有就留着结果上已有的头。
+// 扩展和混合解析有新头就换上，没有就留着已有的头。网页嗅探用请求头全文换上。
 func applyParsedHeaders(r *model.Result, p *model.Parse, sniffed map[string]string, fromWeb bool) {
 	switch {
 	case fromWeb:
-		r.Header = model.FlexHeader(dropRangeHeader(sniffed))
+		r.Header = model.FlexHeader(sniffed)
 	case p != nil && p.TypeID() == 1:
-		r.Header = model.FlexHeader(dropRangeHeader(jsonPlayHeaders(sniffed, p.Ext.String())))
+		if h := jsonPlayHeaders(sniffed, p.Ext.String()); h != nil {
+			r.Header = model.FlexHeader(h)
+		}
 	case p != nil && (p.TypeID() == 2 || p.TypeID() == 3):
 		if len(sniffed) == 0 {
 			sniffed = parseExtHeaders(p.Ext.String())
 		}
-		r.Header = model.FlexHeader(dropRangeHeader(sniffed))
+		if len(sniffed) > 0 {
+			r.Header = model.FlexHeader(sniffed)
+		}
 	case p != nil && p.TypeID() == 4 && sniffed != nil:
-		r.Header = model.FlexHeader(dropRangeHeader(sniffed))
+		r.Header = model.FlexHeader(sniffed)
 	case len(sniffed) > 0:
-		r.Header = model.FlexHeader(dropRangeHeader(sniffed))
+		r.Header = model.FlexHeader(sniffed)
 	}
+	r.Header = model.FlexHeader(dropRangeHeader(map[string]string(r.Header)))
 }
 
 // jsonPlayHeaders JSON 解析头：User-Agent、Referer、Cookie，否则解析源 ext.header。
-// 两者都没有时返回空表，表示替换掉站点头。
+// 两者都没有时返回 nil，表示留着结果上已有的头。
 func jsonPlayHeaders(sniffed map[string]string, ext string) map[string]string {
 	if picked := pickPlayHeaders(sniffed); len(picked) > 0 {
 		return picked
@@ -639,7 +643,7 @@ func jsonPlayHeaders(sniffed map[string]string, ext string) map[string]string {
 	if ph := parseExtHeaders(ext); len(ph) > 0 {
 		return ph
 	}
-	return map[string]string{}
+	return nil
 }
 
 // pickPlayHeaders 从 JSON 解析结果里取出 User-Agent、Referer、Cookie。
@@ -670,15 +674,14 @@ func pickPlayHeaders(h map[string]string) map[string]string {
 	return out
 }
 
-// dropRangeHeader 解析成功后的播放头去掉 Range，以及不能跟到下一次 GET 的长度和伪头。
+// dropRangeHeader 解析成功后的播放头去掉 Range，其余键保留。
 func dropRangeHeader(h map[string]string) map[string]string {
 	if len(h) == 0 {
 		return nil
 	}
 	out := make(map[string]string, len(h))
 	for k, v := range h {
-		key := strings.TrimSpace(k)
-		if key == "" || strings.HasPrefix(key, ":") || replayHeader(key) {
+		if strings.EqualFold(strings.TrimSpace(k), "Range") {
 			continue
 		}
 		out[k] = v
@@ -687,15 +690,6 @@ func dropRangeHeader(h map[string]string) map[string]string {
 		return nil
 	}
 	return out
-}
-
-func replayHeader(key string) bool {
-	switch strings.ToLower(key) {
-	case "range", "content-length", "transfer-encoding", "content-encoding":
-		return true
-	default:
-		return false
-	}
 }
 
 func jarJSONExt(p model.Parse, webURL string, parses []model.Parse) (string, map[string]string, bool, error) {
