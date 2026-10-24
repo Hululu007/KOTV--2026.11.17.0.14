@@ -611,7 +611,7 @@ func parseExtURL(p model.Parse) string {
 // applyParsedHeaders 在解析成功后决定播放头。
 // JSON 只用 User-Agent、Referer、Cookie，没有则用解析源自己的头，并替换站点头。
 // 扩展 JSON 有头就用那份，没有则用解析源自己的头。网页嗅探用请求头全文。
-// 只去掉 Range。没有新头时保留站点头。
+// 去掉 Range，以及会让下一次 GET 带上正文长度的头。没有新头时保留站点头。
 func applyParsedHeaders(r *model.Result, p *model.Parse, sniffed map[string]string, fromWeb bool) {
 	switch {
 	case fromWeb:
@@ -670,14 +670,15 @@ func pickPlayHeaders(h map[string]string) map[string]string {
 	return out
 }
 
-// dropRangeHeader 解析成功后的播放头去掉 Range，其余键保留。
+// dropRangeHeader 解析成功后的播放头去掉 Range，以及不能跟到下一次 GET 的长度和伪头。
 func dropRangeHeader(h map[string]string) map[string]string {
 	if len(h) == 0 {
 		return nil
 	}
 	out := make(map[string]string, len(h))
 	for k, v := range h {
-		if strings.EqualFold(strings.TrimSpace(k), "Range") {
+		key := strings.TrimSpace(k)
+		if key == "" || strings.HasPrefix(key, ":") || replayHeader(key) {
 			continue
 		}
 		out[k] = v
@@ -686,6 +687,15 @@ func dropRangeHeader(h map[string]string) map[string]string {
 		return nil
 	}
 	return out
+}
+
+func replayHeader(key string) bool {
+	switch strings.ToLower(key) {
+	case "range", "content-length", "transfer-encoding", "content-encoding":
+		return true
+	default:
+		return false
+	}
 }
 
 func jarJSONExt(p model.Parse, webURL string, parses []model.Parse) (string, map[string]string, bool, error) {

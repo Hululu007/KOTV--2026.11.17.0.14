@@ -233,6 +233,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	defer hardTimer.Stop()
 
 	found := make(chan sniffHit, 1)
+	book := newSniffHeaderBook()
 	var once sync.Once
 	emit := func(u string, reqHdr map[string]string) {
 		if u == "" || !videoOK(u) {
@@ -365,6 +366,9 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			if IsAdURL(u) {
 				continue
 			}
+			if pending := book.noteRequest(e.RequestID, reqHdr); pending != "" {
+				emit(pending, reqHdr)
+			}
 			if strings.Contains(u, "/cdn-cgi/challenge-platform/") {
 				parseLog("[sniff] cloudflare challenge depth=%d url=%s", depth, parsePreview(u, 160))
 			}
@@ -392,12 +396,12 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			}
 			mime := strings.ToLower(e.Response.MimeType)
 			u := e.Response.URL
-			if strings.Contains(mime, "mpegurl") ||
-				strings.Contains(mime, "m3u8") ||
-				strings.Contains(mime, "application/vnd.apple.mpegurl") ||
-				strings.HasPrefix(mime, "video/") ||
-				strings.HasPrefix(mime, "audio/") {
-				emit(u, headerFromNetwork(e.Response.Headers))
+			if sniffMediaMime(mime) || videoOK(u) {
+				if h, ok := book.headersOrWait(e.RequestID, u); ok {
+					emit(u, h)
+				}
+			}
+			if sniffMediaMime(mime) {
 				continue
 			}
 			if shouldParseSniffBody(u, mime, e.Type) {
@@ -405,7 +409,6 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 				bodyPending[e.RequestID] = u
 				bodyMu.Unlock()
 			}
-			emit(u, headerFromNetwork(e.Response.Headers))
 		}
 	}()
 	go func() {
@@ -1146,6 +1149,47 @@ try{
   Object.defineProperty(navigator,'maxTouchPoints',{get:function(){return ` + touch + `}});
 }catch(e){}
 })();`
+}
+
+func sniffMediaMime(mime string) bool {
+	return strings.Contains(mime, "mpegurl") ||
+		strings.Contains(mime, "m3u8") ||
+		strings.Contains(mime, "application/vnd.apple.mpegurl") ||
+		strings.HasPrefix(mime, "video/") ||
+		strings.HasPrefix(mime, "audio/")
+}
+
+// sniffHeaderBook 按请求 ID 记住请求头。响应先到时先记下地址，等请求头到了再用那份，不用响应头。
+type sniffHeaderBook struct {
+	mu   sync.Mutex
+	byID map[network.RequestID]map[string]string
+	wait map[network.RequestID]string
+}
+
+func newSniffHeaderBook() *sniffHeaderBook {
+	return &sniffHeaderBook{
+		byID: map[network.RequestID]map[string]string{},
+		wait: map[network.RequestID]string{},
+	}
+}
+
+func (b *sniffHeaderBook) noteRequest(id network.RequestID, h map[string]string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.byID[id] = h
+	u := b.wait[id]
+	delete(b.wait, id)
+	return u
+}
+
+func (b *sniffHeaderBook) headersOrWait(id network.RequestID, mediaURL string) (map[string]string, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if h, ok := b.byID[id]; ok {
+		return h, true
+	}
+	b.wait[id] = mediaURL
+	return nil, false
 }
 
 func headerFromNetwork(h network.Headers) map[string]string {
