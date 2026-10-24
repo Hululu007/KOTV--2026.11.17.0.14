@@ -228,18 +228,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	r.Parse = model.FlexInt{Valid: true, Value: 0}
 	r.URL = model.URL{URLs: []string{parsed}}
 	r.PlayURL = ""
-	switch {
-	case fromWeb:
-		r.Header = model.FlexHeader(dropRangeHeader(sniffHdr))
-	case p != nil && p.TypeID() == 1:
-		if picked := pickPlayHeaders(sniffHdr); len(picked) > 0 {
-			r.Header = model.FlexHeader(dropRangeHeader(picked))
-		} else if ph := parseExtHeaders(p.Ext.String()); len(ph) > 0 {
-			r.Header = model.FlexHeader(dropRangeHeader(ph))
-		}
-	case len(sniffHdr) > 0:
-		r.Header = model.FlexHeader(dropRangeHeader(sniffHdr))
-	}
+	applyParsedHeaders(&r, p, sniffHdr, fromWeb)
 	return r, nil
 }
 
@@ -493,7 +482,7 @@ func superParse(webURL, flag string, headers map[string]string, parses []model.P
 			hdr := overlayHeaders(headers, parseExtHeaders(p.Ext.String()))
 			u, h, err := JSONParseEx(p.URL, webURL, hdr)
 			if err == nil && len(u) > 40 {
-				ch <- result{url: u, hdr: pickPlayHeaders(h)}
+				ch <- result{url: u, hdr: jsonPlayHeaders(h, p.Ext.String())}
 			}
 		}(item)
 	}
@@ -619,8 +608,42 @@ func parseExtURL(p model.Parse) string {
 	return u[:index+1] + "cat_ext=" + b64 + "&" + u[index+1:]
 }
 
+// applyParsedHeaders 在解析成功后决定播放头。
+// JSON 只用 User-Agent、Referer、Cookie，没有则用解析源自己的头，并替换站点头。
+// 扩展 JSON 有头就用那份，没有则用解析源自己的头。网页嗅探用请求头全文。
+// 只去掉 Range。没有新头时保留站点头。
+func applyParsedHeaders(r *model.Result, p *model.Parse, sniffed map[string]string, fromWeb bool) {
+	switch {
+	case fromWeb:
+		r.Header = model.FlexHeader(dropRangeHeader(sniffed))
+	case p != nil && p.TypeID() == 1:
+		r.Header = model.FlexHeader(dropRangeHeader(jsonPlayHeaders(sniffed, p.Ext.String())))
+	case p != nil && (p.TypeID() == 2 || p.TypeID() == 3):
+		if len(sniffed) == 0 {
+			sniffed = parseExtHeaders(p.Ext.String())
+		}
+		r.Header = model.FlexHeader(dropRangeHeader(sniffed))
+	case p != nil && p.TypeID() == 4 && sniffed != nil:
+		r.Header = model.FlexHeader(dropRangeHeader(sniffed))
+	case len(sniffed) > 0:
+		r.Header = model.FlexHeader(dropRangeHeader(sniffed))
+	}
+}
+
+// jsonPlayHeaders JSON 解析头：User-Agent、Referer、Cookie，否则解析源 ext.header。
+// 两者都没有时返回空表，表示替换掉站点头。
+func jsonPlayHeaders(sniffed map[string]string, ext string) map[string]string {
+	if picked := pickPlayHeaders(sniffed); len(picked) > 0 {
+		return picked
+	}
+	if ph := parseExtHeaders(ext); len(ph) > 0 {
+		return ph
+	}
+	return map[string]string{}
+}
+
 // pickPlayHeaders 从 JSON 解析结果里取出 User-Agent、Referer、Cookie。
-// 都没有时返回 nil，调用方继续用解析源自己的头。网页嗅探的请求头不走这里。
+// 都没有时返回 nil。网页嗅探的请求头不走这里。
 func pickPlayHeaders(h map[string]string) map[string]string {
 	if len(h) == 0 {
 		return nil

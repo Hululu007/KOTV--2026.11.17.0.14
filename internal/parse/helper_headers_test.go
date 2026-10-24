@@ -1,6 +1,10 @@
 package parse
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/bobo/KOTV/internal/model"
+)
 
 func TestPickPlayHeadersKeepsPlayKeysOnly(t *testing.T) {
 	in := map[string]string{
@@ -50,5 +54,61 @@ func TestDropRangeHeaderKeepsTheRest(t *testing.T) {
 	}
 	if dropRangeHeader(map[string]string{"Range": "bytes=0-"}) != nil {
 		t.Fatal("only Range → nil")
+	}
+}
+
+func TestJSONParseHeaderReplacesSiteHeader(t *testing.T) {
+	r := model.Result{Header: model.FlexHeader{
+		"Host":    "www.ncat3.app",
+		"Referer": "https://www.ncat3.app/",
+		"Cookie":  "site=1",
+	}}
+	p := &model.Parse{Type: model.FlexInt{Valid: true, Value: 1}}
+	applyParsedHeaders(&r, p, map[string]string{"ua": "UA/1", "Range": "bytes=0-"}, false)
+	if r.Header["User-Agent"] != "UA/1" {
+		t.Fatalf("json ua: %v", r.Header)
+	}
+	if _, ok := r.Header["Host"]; ok {
+		t.Fatalf("site host must not stay: %v", r.Header)
+	}
+	if _, ok := r.Header["Range"]; ok {
+		t.Fatalf("range must go: %v", r.Header)
+	}
+	if _, ok := r.Header["Cookie"]; ok {
+		t.Fatalf("site cookie must not stay: %v", r.Header)
+	}
+
+	r.Header = model.FlexHeader{"Host": "www.ncat3.app"}
+	p.Ext = `{"header":{"Referer":"https://parse.example/"}}`
+	applyParsedHeaders(&r, p, nil, false)
+	if r.Header["Referer"] != "https://parse.example/" || len(r.Header) != 1 {
+		t.Fatalf("empty json uses parse header: %v", r.Header)
+	}
+
+	r.Header = model.FlexHeader{"Host": "www.ncat3.app"}
+	p.Ext = ""
+	applyParsedHeaders(&r, p, nil, false)
+	if len(r.Header) != 0 {
+		t.Fatalf("empty json and empty parse header clear site header: %v", r.Header)
+	}
+}
+
+func TestWebSniffHeaderReplacesSiteHeader(t *testing.T) {
+	r := model.Result{Header: model.FlexHeader{"Host": "www.ncat3.app", "Cookie": "site=1"}}
+	p := &model.Parse{Type: model.FlexInt{Valid: true, Value: 0}}
+	applyParsedHeaders(&r, p, map[string]string{
+		"User-Agent": "Web/1",
+		"Referer":    "https://player.example/",
+		"Origin":     "https://player.example",
+		"Range":      "bytes=0-",
+	}, false)
+	if r.Header["User-Agent"] != "Web/1" || r.Header["Origin"] != "https://player.example" {
+		t.Fatalf("web request headers: %v", r.Header)
+	}
+	if _, ok := r.Header["Host"]; ok {
+		t.Fatalf("site host must not stay: %v", r.Header)
+	}
+	if _, ok := r.Header["Range"]; ok {
+		t.Fatalf("range must go: %v", r.Header)
 	}
 }
