@@ -75,7 +75,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           e.key: '${e.value ?? ''}',
       };
       final lines = <String>[
-        'KO影视 Flutter ${st['version'] ?? '0.1.0'}',
+        'KO影视 Flutter ${st['version'] ?? '0.2.0'}',
         '引擎端口：${st['port'] ?? kotvDefaultEnginePort}',
         '',
         '运行时：',
@@ -97,6 +97,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       orElse: () => 0,
     );
     final logoUrl = cfg.maybeWhen(data: (c) => '${c['logo'] ?? ''}'.trim(), orElse: () => '');
+    final versionText = ref.watch(settingsProvider).maybeWhen(
+      data: (d) {
+        final v = '${d['version'] ?? ''}'.trim();
+        return v.isEmpty ? '0.2.0' : v;
+      },
+      orElse: () => '0.2.0',
+    );
     final bottomNav = KotvLayout.useBottomNav(context);
     final compact = KotvLayout.isCompact(context);
     final screen = MediaQuery.sizeOf(context);
@@ -144,7 +151,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         children: [
                           Text('用户：本地用户', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.fg, fontSize: 17, fontWeight: FontWeight.w700, height: 1.15)),
                           const SizedBox(height: 4),
-                          Text('版本：0.1.0 · 站源：$siteCount', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted, fontSize: 13, height: 1.15)),
+                          Text('版本：$versionText · 站源：$siteCount', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted, fontSize: 13, height: 1.15)),
                           Text('历史 $_histCount · 收藏 $_keepCount', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted.withOpacity(0.85), fontSize: 12, height: 1.15)),
                         ],
                       ),
@@ -175,7 +182,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       Expanded(
                         child: FeatureCard(
                           title: '检查更新',
-                          subtitle: '当前 0.1.0',
+                          subtitle: '当前 $versionText',
                           start: const Color(0xF0E5BA43),
                           end: const Color(0xF0B57928),
                           icon: Icons.download,
@@ -227,7 +234,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           children: [
                             Text('用户：本地用户', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.fg, fontSize: 18, fontWeight: FontWeight.w700, height: 1.15)),
                             const SizedBox(height: 4),
-                            Text('版本：0.1.0   站源：$siteCount 个', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted, fontSize: 13, height: 1.15)),
+                            Text('版本：$versionText   站源：$siteCount 个', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted, fontSize: 13, height: 1.15)),
                             const SizedBox(height: 2),
                             Text('历史 $_histCount 条 · 收藏 $_keepCount 个', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted.withOpacity(0.85), fontSize: 12, height: 1.15)),
                           ],
@@ -256,7 +263,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       Expanded(
                         child: FeatureCard(
                           title: '检查更新',
-                          subtitle: '当前 0.1.0',
+                          subtitle: '当前 $versionText',
                           start: const Color(0xF0E5BA43),
                           end: const Color(0xF0B57928),
                           icon: Icons.download,

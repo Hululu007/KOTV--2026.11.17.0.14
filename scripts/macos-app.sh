@@ -5,10 +5,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=kotv-release-name.sh
+source "$ROOT/scripts/kotv-release-name.sh"
 PLAT="${1:?platform}"
 SRC="${2:?dist dir with KOTV binary + runtime}"
-VERSION="${KOTV_VERSION:-${VERSION:-0.1.0}}"
-VERSION="${VERSION#v}"
+if [[ -z "${KOTV_VERSION:-}" && -n "${VERSION:-}" ]]; then
+  KOTV_VERSION="$VERSION"
+fi
+VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 
 case "$PLAT" in
   macos-arm64|macos-x64) ;;

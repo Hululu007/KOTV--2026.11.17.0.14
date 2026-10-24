@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.0
+
+- 版本号收到 0.2.0。健康检查和「我的」页跟引擎版本走，不再各写一份。
+
 ## v0.1.0
 
 - 首个 GitHub Actions 多平台发行包（Windows / Linux / macOS arm64 / amd64）

@@ -55,7 +55,7 @@ func (a *App) APIHealth() map[string]any {
 		"error":         errMsg,
 		"source":        strings.TrimSpace(source),
 		"port":          a.Server.Port(),
-		"version":       "0.1.0",
+		"version":       update.CurrentVersion,
 		"remoteAuth":    strings.EqualFold(settings.Get(settings.RemoteAuth), "true"),
 		"allowRegister": strings.EqualFold(settings.Get(settings.AllowRegister), "true"),
 		"spiderOk":      spiderOk,

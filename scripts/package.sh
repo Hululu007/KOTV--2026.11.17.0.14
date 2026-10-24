@@ -4,6 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=kotv-release-name.sh
+source "$ROOT/scripts/kotv-release-name.sh"
 detect_platform() {
   local os arch
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -20,9 +22,11 @@ detect_platform() {
 PLAT="${1:-$(detect_platform)}"
 DIST="$ROOT/dist/KOTV-$PLAT"
 RUNTIME_SRC="$ROOT/runtime"
-# 版本号：优先环境变量 KOTV_VERSION / VERSION，去掉前导 v
-VERSION="${KOTV_VERSION:-${VERSION:-0.1.0}}"
-VERSION="${VERSION#v}"
+# 版本号：KOTV_VERSION / VERSION 优先，否则读 pubspec。
+if [[ -z "${KOTV_VERSION:-}" && -n "${VERSION:-}" ]]; then
+  KOTV_VERSION="$VERSION"
+fi
+VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 
 echo "platform=$PLAT"
 echo "dist=$DIST"
