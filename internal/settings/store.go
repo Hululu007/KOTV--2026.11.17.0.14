@@ -27,7 +27,6 @@ const (
 	Proxy              Type = "proxy"
 	Theme              Type = "theme"
 	AdFilter           Type = "adFilter"
-	M3U8Cfg            Type = "m3u8FilterConfig"
 	DanmakuOn          Type = "danmaku"
 	DanmakuAPI         Type = "danmakuApi"
 	DanmakuSize        Type = "danmakuSize"
@@ -222,7 +221,6 @@ func defaultFile() file {
 			{ID: "proxy", Label: "代理", Value: "false#"}, // false#=关；true#URL=开（界面不展示该串）
 			{ID: "theme", Label: "主题", Value: "system"},
 			{ID: "adFilter", Label: "M3U8广告过滤", Value: "true"},
-			{ID: "m3u8FilterConfig", Label: "M3U8过滤配置(smart|mild)", Value: "{\"mode\":\"smart\"}"},
 			{ID: "danmaku", Label: "弹幕", Value: "true"},
 			{ID: "danmakuApi", Label: "弹幕API", Value: ""},
 			{ID: "danmakuSize", Label: "弹幕字号", Value: "18"},
@@ -680,11 +678,6 @@ func SetBool(t Type, on bool) {
 	} else {
 		Set(t, "false")
 	}
-}
-
-// GetM3U8FilterConfigJSON 返回原始 JSON 配置。
-func GetM3U8FilterConfigJSON() string {
-	return Get(M3U8Cfg)
 }
 
 // SearchHistory 搜索历史。

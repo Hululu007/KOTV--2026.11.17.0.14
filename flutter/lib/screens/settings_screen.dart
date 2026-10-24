@@ -177,7 +177,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           key.startsWith('mpv') ||
           key == 'preferredParse' ||
           key == 'adFilter' ||
-          key == 'm3u8FilterConfig' ||
           key == 'danmaku' ||
           key == 'danmakuApi' ||
           key == 'danmakuSize' ||
@@ -1750,47 +1749,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _ellipsize(String s, [int n = 28]) =>
       s.length <= n ? s : '${s.substring(0, n)}…';
 
-  String get _adMode {
+  bool get _adOn {
     final on = g('adFilter', 'true');
-    final enabled = on.isEmpty || on == 'true' || on == '1' || on == 'on';
-    if (!enabled) return 'off';
-    final cfg = g('m3u8FilterConfig');
-    if (cfg.contains('"mode":"mild"') || cfg.contains('"mode": "mild"'))
-      return 'mild';
-    // 旧版「暴力」配置 → 温和（只去断点）
-    if (cfg.contains('"violentFilterModeFlag":true')) return 'mild';
-    return 'smart';
+    return on.isEmpty || on == 'true' || on == '1' || on == 'on';
   }
 
-  Future<void> _setAdMode(String mode) async {
-    if (mode == 'off') {
-      await _setMany({
-        'adFilter': 'false',
-        'm3u8FilterConfig': '',
-      }, msg: '广告过滤已关闭');
-    } else if (mode == 'mild') {
-      await _setMany({
-        'adFilter': 'true',
-        'm3u8FilterConfig': '{"mode":"mild"}',
-      }, msg: '已开启温和过滤（仅去断点）');
-    } else {
-      await _setMany({
-        'adFilter': 'true',
-        'm3u8FilterConfig': '{"mode":"smart"}',
-      }, msg: '已开启智能过滤');
-    }
+  Future<void> _setAd(bool on) async {
+    await _set('adFilter', on ? 'true' : 'false',
+        msg: on ? '广告过滤已开启' : '广告过滤已关闭');
   }
 
   Future<void> _pickAd() async {
     final v = await pickChoice(context,
         title: '广告过滤',
-        current: _adMode,
+        current: _adOn ? 'on' : 'off',
         options: const [
+          ('开启', 'on'),
           ('关闭', 'off'),
-          ('智能（推荐）', 'smart'),
-          ('温和（仅去断点）', 'mild'),
         ]);
-    if (v != null) await _setAdMode(v);
+    if (v != null) await _setAd(v == 'on');
   }
 
   Future<void> _checkUpdate() async {
@@ -2241,7 +2218,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final parseName = g('preferredParse').isEmpty ? '自动' : g('preferredParse');
     final wall = g('wallMode', 'config');
     final theme = g('theme', 'dark');
-    final ad = _adMode;
+    final adOn = _adOn;
     final scaleLabel = {
           'default': '适应',
           'fill': '拉伸',
@@ -2265,8 +2242,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         (playerFailover == 'off' || playerFailover == 'false') ? '关闭' : '自动';
     final liveChangeLabel =
         (liveAutoChange == 'false' || liveAutoChange == 'off') ? '关闭' : '开启';
-    final adLabel =
-        {'off': '关闭', 'smart': '智能', 'mild': '温和', 'on': '智能'}[ad] ?? ad;
+    final adLabel = adOn ? '开启' : '关闭';
     final themeLabel =
         {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
     final audioPassThrough =

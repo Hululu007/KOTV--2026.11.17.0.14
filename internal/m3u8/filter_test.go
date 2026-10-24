@@ -1,395 +1,145 @@
 package m3u8
 
 import (
-	"fmt"
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestNoDiscontinuityUnchanged(t *testing.T) {
-	in := `#EXTM3U
-#EXTINF:3.0,
-https://cdn.com/a.ts
-#EXTINF:3.0,
-https://cdn.com/b.ts
-#EXT-X-ENDLIST
-`
-	out := NewFilter(DefaultConfig()).Process(in)
-	if out != in {
-		t.Fatalf("expected unchanged without DISCONTINUITY")
+func TestNoEndlistUnchanged(t *testing.T) {
+	in := "" +
+		"#EXTM3U\n" +
+		"#EXTINF:4.0,\nhttps://cdn.example/a/1.ts\n" +
+		"#EXT-X-DISCONTINUITY\n" +
+		"#EXTINF:1.0,\nhttps://ad.example/x/ad.ts\n"
+	if got := Process(in); got != in {
+		t.Fatalf("no ENDLIST must stay original\n got:\n%s", got)
 	}
 }
 
-func TestKeepsNonNumericHashNames(t *testing.T) {
-	// 旧序号法会在这种哈希名上乱砍；新规则应按时长保留正片。
-	in := `#EXTM3U
-#EXTINF:4.0,
-https://cdn.com/vod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ts
-#EXTINF:4.0,
-https://cdn.com/vod/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ts
-#EXTINF:4.0,
-https://cdn.com/vod/cccccccccccccccccccccccccccccccc.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:2.0,
-https://cdn.com/ad/x1.ts
-#EXTINF:2.0,
-https://cdn.com/ad/x2.ts
-#EXTINF:2.0,
-https://cdn.com/ad/x3.ts
-#EXTINF:2.0,
-https://cdn.com/ad/x4.ts
-#EXTINF:2.0,
-https://cdn.com/ad/x5.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:4.0,
-https://cdn.com/vod/dddddddddddddddddddddddddddddddd.ts
-#EXTINF:4.0,
-https://cdn.com/vod/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.ts
-#EXTINF:4.0,
-https://cdn.com/vod/ffffffffffffffffffffffffffffffff.ts
-#EXTINF:4.0,
-https://cdn.com/vod/gggggggggggggggggggggggggggggggg.ts
-#EXTINF:4.0,
-https://cdn.com/vod/hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh.ts
-#EXTINF:4.0,
-https://cdn.com/vod/iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii.ts
-#EXTINF:4.0,
-https://cdn.com/vod/jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj.ts
-#EXTINF:4.0,
-https://cdn.com/vod/kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk.ts
-#EXTINF:4.0,
-https://cdn.com/vod/llllllllllllllllllllllllllllllll.ts
-#EXTINF:4.0,
-https://cdn.com/vod/mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm.ts
-#EXTINF:4.0,
-https://cdn.com/vod/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn.ts
-#EXTINF:4.0,
-https://cdn.com/vod/oooooooooooooooooooooooooooooooo.ts
-#EXTINF:4.0,
-https://cdn.com/vod/pppppppppppppppppppppppppppppppp.ts
-#EXTINF:4.0,
-https://cdn.com/vod/qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq.ts
-#EXTINF:4.0,
-https://cdn.com/vod/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr.ts
-#EXTINF:4.0,
-https://cdn.com/vod/ssssssssssssssssssssssssssssssss.ts
-#EXT-X-ENDLIST
-`
-	// 中间广告：齐 EXTINF、总和 10s 边界——用 2*4=8s 明确短突发
-	in = strings.Replace(in, `#EXTINF:2.0,
-https://cdn.com/ad/x1.ts
-#EXTINF:2.0,
-https://cdn.com/ad/x2.ts
-#EXTINF:2.0,
-https://cdn.com/ad/x3.ts
-#EXTINF:2.0,
-https://cdn.com/ad/x4.ts
-#EXTINF:2.0,
-https://cdn.com/ad/x5.ts`, `#EXTINF:2.0,
-https://cdn.com/ad/x1.ts
-#EXTINF:2.0,
-https://cdn.com/ad/x2.ts
-#EXTINF:2.0,
-https://cdn.com/ad/x3.ts
-#EXTINF:2.0,
-https://cdn.com/ad/x4.ts`, 1)
-
-	f := NewFilter(FilterConfig{KeepMinDuration: 60, UniformShortMax: 10, MaxRemoveDuration: 120, UseLastModified: false})
-	out := f.Process(in)
-	if strings.Contains(out, "/ad/") {
-		t.Fatalf("ad path not removed:\n%s", out)
-	}
-	if countSegments(out) < 15 {
-		t.Fatalf("content over-removed: segs=%d removedDur=%.1f reverted=%v\n%s", countSegments(out), f.RemovedDuration(), f.Reverted(), out)
-	}
-}
-
-func TestRemovesUniformShortBurst(t *testing.T) {
-	in := `#EXTM3U
-#EXTINF:5.0,
-https://cdn.com/v/hash_aaa.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_bbb.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:1.5,
-https://cdn.com/p/ad1.ts
-#EXTINF:1.5,
-https://cdn.com/p/ad2.ts
-#EXTINF:1.5,
-https://cdn.com/p/ad3.ts
-#EXTINF:1.5,
-https://cdn.com/p/ad4.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:5.0,
-https://cdn.com/v/hash_ccc.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_ddd.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_eee.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_fff.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_ggg.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_hhh.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_iii.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_jjj.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_kkk.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_lll.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_mmm.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_nnn.ts
-#EXT-X-ENDLIST
-`
-	f := NewFilter(FilterConfig{KeepMinDuration: 60, UniformShortMax: 10, MaxRemoveDuration: 120, UseLastModified: false})
-	out := f.Process(in)
-	if strings.Contains(out, "ad1.ts") || strings.Contains(out, "ad4.ts") {
-		t.Fatalf("uniform short ad not removed:\n%s", out)
-	}
-	if !strings.Contains(out, "hash_aaa") || !strings.Contains(out, "hash_nnn") {
-		t.Fatalf("content missing:\n%s", out)
-	}
-}
-
-func TestRevertWhenRemoveTooMuch(t *testing.T) {
+func TestLastDiscontinuityBlockKept(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n")
-	for i := 0; i < 5; i++ {
-		fmt.Fprintf(&b, "#EXTINF:3.0,\nhttps://cdn.com/v/%d.ts\n", i)
+	for i := 1; i <= 8; i++ {
+		b.WriteString("#EXTINF:4.0,\nhttps://cdn.example/a/" + itoa(i) + ".ts\n")
 	}
-	// 多个「齐短」段组，累计删除 > 120s → 回滚
-	for g := 0; g < 20; g++ {
+	b.WriteString("#EXT-X-DISCONTINUITY\n#EXTINF:1.0,\nhttps://cdn.example/a/tail.ts\n#EXT-X-ENDLIST\n")
+	in := b.String()
+	got := Process(in)
+	if got != in {
+		t.Fatalf("short last block must stay\n got:\n%s", got)
+	}
+}
+
+func TestMinorityHostRemoved(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n")
+	for i := 1; i <= 8; i++ {
+		b.WriteString("#EXTINF:4.0,\nhttps://cdn.example/a/" + itoa(i) + ".ts\n")
+	}
+	b.WriteString("#EXTINF:4.0,\nhttps://ad.example/x/ad1.ts\n")
+	b.WriteString("#EXTINF:4.0,\nhttps://ad.example/x/ad2.ts\n")
+	b.WriteString("#EXT-X-ENDLIST\n")
+	got := Process(b.String())
+	if strings.Contains(got, "ad.example") {
+		t.Fatalf("minority host should go:\n%s", got)
+	}
+	if !strings.Contains(got, "https://cdn.example/a/8.ts") || !strings.Contains(got, "#EXT-X-ENDLIST") {
+		t.Fatalf("content and endlist must stay:\n%s", got)
+	}
+	if !strings.Contains(got, "#EXT-X-PLAYLIST-TYPE:VOD") {
+		t.Fatalf("playlist tag must stay:\n%s", got)
+	}
+	if strings.Count(got, "#EXT-X-ENDLIST") != 1 {
+		t.Fatalf("one endlist:\n%s", got)
+	}
+}
+
+func TestEqualHostsNotCut(t *testing.T) {
+	in := "#EXTM3U\n" +
+		"#EXTINF:4.0,\nhttps://a.example/1.ts\n" +
+		"#EXTINF:4.0,\nhttps://a.example/2.ts\n" +
+		"#EXTINF:4.0,\nhttps://b.example/3.ts\n" +
+		"#EXTINF:4.0,\nhttps://b.example/4.ts\n" +
+		"#EXT-X-ENDLIST\n"
+	if got := Process(in); got != in {
+		t.Fatalf("no majority, keep original\n%s", got)
+	}
+}
+
+func TestSameHostHashNamesKept(t *testing.T) {
+	in := "#EXTM3U\n" +
+		"#EXTINF:4.0,\nhttps://cdn.example/v/a75c0511.ts\n" +
+		"#EXTINF:4.0,\nhttps://cdn.example/v/11eed2e8.ts\n" +
+		"#EXTINF:4.0,\nhttps://cdn.example/v/3ad8620b.ts\n" +
+		"#EXTINF:4.0,\nhttps://cdn.example/v/9f00aa11.ts\n" +
+		"#EXT-X-ENDLIST\n"
+	if got := Process(in); got != in {
+		t.Fatalf("one host must not be cut by name:\n%s", got)
+	}
+}
+
+func TestTooManyMinorityBlocksKept(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("#EXTM3U\n")
+	for n := 0; n < 5; n++ {
+		writeSegs(&b, "https://cdn.example/a/"+itoa(n), 1, 8)
 		b.WriteString("#EXT-X-DISCONTINUITY\n")
-		for j := 0; j < 5; j++ {
-			fmt.Fprintf(&b, "#EXTINF:2.0,\nhttps://cdn.com/x/g%d_%d.ts\n", g, j)
-		}
 	}
+	for n := 0; n < 4; n++ {
+		b.WriteString("#EXTINF:1.0,\nhttps://cdn.example/a/ad" + itoa(n) + ".ts\n#EXT-X-DISCONTINUITY\n")
+	}
+	writeSegs(&b, "https://cdn.example/a/z", 1, 8)
 	b.WriteString("#EXT-X-ENDLIST\n")
 	in := b.String()
-	f := NewFilter(FilterConfig{KeepMinDuration: 60, UniformShortMax: 15, MaxRemoveDuration: 120, UseLastModified: false})
-	out := f.Process(in)
-	if !f.Reverted() {
-		t.Fatalf("expected revert, removedDur=%.1f groups=%d", f.RemovedDuration(), f.RemovedGroups())
-	}
-	if out != in {
-		t.Fatalf("reverted filter must return original")
+	if got := Process(in); got != in {
+		t.Fatalf("too many minority blocks must stay\n%s", got)
 	}
 }
 
-func TestLastModifiedCluster(t *testing.T) {
-	in := `#EXTM3U
-#EXTINF:10.0,
-https://cdn.com/v/a.ts
-#EXTINF:10.0,
-https://cdn.com/v/b.ts
-#EXTINF:10.0,
-https://cdn.com/v/c.ts
-#EXTINF:10.0,
-https://cdn.com/v/d.ts
-#EXTINF:10.0,
-https://cdn.com/v/e.ts
-#EXTINF:10.0,
-https://cdn.com/v/f.ts
-#EXTINF:10.0,
-https://cdn.com/v/g.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:8.0,
-https://cdn.com/p/ad.ts
-#EXTINF:8.0,
-https://cdn.com/p/ad2.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:10.0,
-https://cdn.com/v/h.ts
-#EXTINF:10.0,
-https://cdn.com/v/i.ts
-#EXTINF:10.0,
-https://cdn.com/v/j.ts
-#EXTINF:10.0,
-https://cdn.com/v/k.ts
-#EXTINF:10.0,
-https://cdn.com/v/l.ts
-#EXTINF:10.0,
-https://cdn.com/v/m.ts
-#EXTINF:10.0,
-https://cdn.com/v/n.ts
-#EXT-X-ENDLIST
-`
-	main := time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)
-	ad := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
-	lms := []time.Time{main, ad, main}
-	f := NewFilter(FilterConfig{KeepMinDuration: 60, UniformShortMax: 5, MaxRemoveDuration: 120, UseLastModified: true})
-	out := f.Process(in, lms...)
-	if strings.Contains(out, "/p/ad") {
-		t.Fatalf("LM ad not removed:\n%s", out)
+func TestOneMinorityBlockRemoved(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n")
+	writeSegs(&b, "https://cdn.example/a/", 1, 8)
+	b.WriteString("#EXT-X-DISCONTINUITY\n#EXTINF:4.0,\nhttps://cdn.example/a/ad.ts\n#EXT-X-DISCONTINUITY\n")
+	writeSegs(&b, "https://cdn.example/a/z", 1, 8)
+	b.WriteString("#EXT-X-ENDLIST\n")
+	got := Process(b.String())
+	if strings.Contains(got, "/ad.ts") {
+		t.Fatalf("ad segment should go:\n%s", got)
 	}
-	if countSegments(out) < 12 {
-		t.Fatalf("over-removed: %d", countSegments(out))
+	if strings.Contains(got, "#EXT-X-DISCONTINUITY") {
+		t.Fatalf("orphan discontinuity should go:\n%s", got)
+	}
+	if !strings.Contains(got, "#EXT-X-VERSION:3") || !strings.Contains(got, "#EXT-X-TARGETDURATION:10") {
+		t.Fatalf("playlist tags must stay:\n%s", got)
+	}
+	if !strings.Contains(got, "https://cdn.example/a/1.ts") || !strings.Contains(got, "https://cdn.example/a/z8.ts") {
+		t.Fatalf("both content blocks must stay:\n%s", got)
+	}
+	if !strings.Contains(got, "#EXT-X-ENDLIST") {
+		t.Fatalf("endlist must stay:\n%s", got)
 	}
 }
 
-func TestStrongAdPath(t *testing.T) {
-	in := `#EXTM3U
-#EXTINF:30.0,
-https://cdn.com/v/a.ts
-#EXTINF:30.0,
-https://cdn.com/v/b.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:20.0,
-https://cdn.com/adjump/x.ts
-#EXTINF:20.0,
-https://cdn.com/adjump/y.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:30.0,
-https://cdn.com/v/c.ts
-#EXTINF:30.0,
-https://cdn.com/v/d.ts
-#EXT-X-ENDLIST
-`
-	f := NewFilter(FilterConfig{KeepMinDuration: 60, UniformShortMax: 5, MaxRemoveDuration: 120, UseLastModified: false})
-	out := f.Process(in)
-	if strings.Contains(out, "adjump") {
-		t.Fatalf("strong path ad kept:\n%s", out)
+func writeSegs(b *strings.Builder, prefix string, from, n int) {
+	for i := from; i < from+n; i++ {
+		b.WriteString("#EXTINF:4.0,\n")
+		b.WriteString(prefix)
+		b.WriteString(itoa(i))
+		b.WriteString(".ts\n")
 	}
 }
 
-func TestMildOnlyStripsDiscontinuity(t *testing.T) {
-	in := `#EXTM3U
-#EXT-X-PLAYLIST-TYPE:VOD
-#EXT-X-DISCONTINUITY
-#EXTINF:2.0,
-https://cdn.com/v/a.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:2.0,
-https://cdn.com/ad/b.ts
-#EXT-X-ENDLIST
-`
-	f := NewFilter(FilterConfig{Mode: ModeMild})
-	out := f.Apply(in)
-	if !f.UsedMild() {
-		t.Fatal("expected usedMild")
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
 	}
-	if strings.Contains(out, "#EXT-X-DISCONTINUITY\n#EXTINF:2.0,\nhttps://cdn.com/ad") {
-		t.Fatalf("mid discontinuity should be stripped:\n%s", out)
+	var d [12]byte
+	i := len(d)
+	for n > 0 {
+		i--
+		d[i] = byte('0' + n%10)
+		n /= 10
 	}
-	// PLAYLIST-TYPE 后的 DISCONTINUITY 保留
-	if !strings.Contains(out, "#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-DISCONTINUITY") {
-		t.Fatalf("playlist-type discontinuity should keep:\n%s", out)
-	}
-	// 切片都在
-	if !strings.Contains(out, "a.ts") || !strings.Contains(out, "ad/b.ts") {
-		t.Fatalf("mild must keep all segments:\n%s", out)
-	}
-}
-
-func TestSmartFallsBackToMildWhenNoStructureHit(t *testing.T) {
-	// 有 DISCONTINUITY，但段组都较长且 EXTINF 不齐短 → 结构不过滤，智能档应温和去断点。
-	in := `#EXTM3U
-#EXTINF:10.0,
-https://cdn.com/v/a.ts
-#EXTINF:10.0,
-https://cdn.com/v/b.ts
-#EXTINF:10.0,
-https://cdn.com/v/c.ts
-#EXTINF:10.0,
-https://cdn.com/v/d.ts
-#EXTINF:10.0,
-https://cdn.com/v/e.ts
-#EXTINF:10.0,
-https://cdn.com/v/f.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:10.0,
-https://cdn.com/v/g.ts
-#EXTINF:12.0,
-https://cdn.com/v/h.ts
-#EXTINF:11.0,
-https://cdn.com/v/i.ts
-#EXTINF:10.0,
-https://cdn.com/v/j.ts
-#EXTINF:10.0,
-https://cdn.com/v/k.ts
-#EXTINF:10.0,
-https://cdn.com/v/l.ts
-#EXT-X-ENDLIST
-`
-	f := NewFilter(FilterConfig{
-		Mode:              ModeSmart,
-		KeepMinDuration:   60,
-		UniformShortMax:   5,
-		MaxRemoveDuration: 120,
-		UseLastModified:   false,
-	})
-	out := f.Apply(in)
-	if !f.UsedMild() {
-		t.Fatal("expected mild fallback")
-	}
-	if strings.Contains(out, "#EXT-X-DISCONTINUITY") {
-		t.Fatalf("discontinuity should be stripped by mild fallback:\n%s", out)
-	}
-	if countSegments(out) != countSegments(in) {
-		t.Fatalf("segments changed: before=%d after=%d", countSegments(in), countSegments(out))
-	}
-}
-
-func TestSmartKeepsStructureResultWithoutMild(t *testing.T) {
-	in := `#EXTM3U
-#EXTINF:5.0,
-https://cdn.com/v/hash_aaa.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_bbb.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:1.5,
-https://cdn.com/p/ad1.ts
-#EXTINF:1.5,
-https://cdn.com/p/ad2.ts
-#EXTINF:1.5,
-https://cdn.com/p/ad3.ts
-#EXTINF:1.5,
-https://cdn.com/p/ad4.ts
-#EXT-X-DISCONTINUITY
-#EXTINF:5.0,
-https://cdn.com/v/hash_ccc.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_ddd.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_eee.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_fff.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_ggg.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_hhh.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_iii.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_jjj.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_kkk.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_lll.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_mmm.ts
-#EXTINF:5.0,
-https://cdn.com/v/hash_nnn.ts
-#EXT-X-ENDLIST
-`
-	f := NewFilter(FilterConfig{
-		Mode:              ModeSmart,
-		KeepMinDuration:   60,
-		UniformShortMax:   10,
-		MaxRemoveDuration: 120,
-		UseLastModified:   false,
-	})
-	out := f.Apply(in)
-	if f.UsedMild() {
-		t.Fatal("structure hit should not fall back to mild")
-	}
-	if strings.Contains(out, "ad1.ts") {
-		t.Fatalf("ad should be removed by structure:\n%s", out)
-	}
+	return string(d[i:])
 }

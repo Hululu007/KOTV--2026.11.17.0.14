@@ -1,394 +1,299 @@
 package m3u8
 
-import (
-	"math"
-	"net/url"
-	"path"
-	"regexp"
-	"strconv"
-	"strings"
-	"time"
+import "strings"
+
+const (
+	reasonableGroupLimit = 10
+	adBlockSizeRatio     = 0.75
 )
 
-// Filter 按 #EXT-X-DISCONTINUITY 分段过滤插播广告。
-// 不依赖切片文件名序号连续（哈希名 / 非数字名同样适用）。
-// 规则思路参考 HLS(m3u8) 广告移除脚本，本实现为独立编写。
-type Filter struct {
-	cfg FilterConfig
-
-	removedDuration float64
-	removedGroups   int
-	reverted        bool
-	usedMild        bool
-}
-
-func NewFilter(cfg FilterConfig) *Filter {
-	return &Filter{cfg: cfg.normalized()}
-}
-
-func (f *Filter) RemovedDuration() float64 { return f.removedDuration }
-func (f *Filter) RemovedGroups() int       { return f.removedGroups }
-func (f *Filter) Reverted() bool           { return f.reverted }
-func (f *Filter) UsedMild() bool           { return f.usedMild }
-
-var (
-	extinfRe   = regexp.MustCompile(`(?i)#?EXTINF:\s*([0-9.]+)\s*,`)
-	mediaURIRe = regexp.MustCompile(`(?im)^(.*\.(?:ts|m4s|mp4|jpg|jpeg|png))(?:\?|#|$)`)
-)
-
-type discChunk struct {
-	raw          string
-	duration     float64
-	extinfs      []float64
-	paths        []string
-	lastModified time.Time // zero = unknown
-	hasMedia     bool
-}
-
-// Apply 按配置档位过滤。智能：先结构删段，无改动或回滚则温和去断点；温和：只去 DISCONTINUITY。
-func (f *Filter) Apply(content string, lastModifieds ...time.Time) string {
-	f.usedMild = false
-	switch f.cfg.Mode {
-	case ModeMild:
-		f.usedMild = true
-		return StripDiscontinuityMarkers(content)
-	default:
-		out := f.Process(content, lastModifieds...)
-		if out != content && !f.reverted {
-			return out
-		}
-		// 结构过滤未改动或已回滚 → 温和兜底（不删切片）。
-		mild := StripDiscontinuityMarkers(content)
-		if mild != content {
-			f.usedMild = true
-			return mild
-		}
+// Process 只在节目单带结束标记、且能分出明确少数广告时删段。
+// 没有结束标记、分组说不清、或少数块太多时，原样返回。
+func Process(content string) string {
+	if strings.TrimSpace(content) == "" || !strings.Contains(content, "#EXT-X-ENDLIST") {
 		return content
 	}
-}
-
-// StripDiscontinuityMarkers 只删除 #EXT-X-DISCONTINUITY（保留紧跟 PLAYLIST-TYPE 的那一行）。
-// 不删媒体切片，避免误杀正片。
-func StripDiscontinuityMarkers(content string) string {
-	normalized := strings.ReplaceAll(strings.ReplaceAll(content, "\r\n", "\n"), "\r", "")
-	if !strings.Contains(normalized, "#EXT-X-DISCONTINUITY") {
+	lines := splitLines(content)
+	ads := findAds(lines)
+	if len(ads) == 0 {
 		return content
 	}
-	lines := strings.Split(normalized, "\n")
+	return rebuild(lines, ads)
+}
+
+func splitLines(content string) []string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+	return strings.Split(content, "\n")
+}
+
+func findAds(lines []string) map[int]struct{} {
+	segments := segmentLines(lines)
+	if ads := findAdsByLocation(segments); len(ads) > 0 {
+		return ads
+	}
+	return findAdsByDiscontinuity(lines)
+}
+
+func segmentLines(lines []string) []string {
 	out := make([]string, 0, len(lines))
-	for i, line := range lines {
+	for _, line := range lines {
 		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "#EXT-X-DISCONTINUITY") {
-			if i > 0 && strings.HasPrefix(strings.TrimSpace(lines[i-1]), "#EXT-X-PLAYLIST-TYPE") {
-				out = append(out, line)
+		if isSegmentLine(trim) {
+			out = append(out, trim)
+		}
+	}
+	return out
+}
+
+func isSegmentLine(trim string) bool {
+	return trim != "" && !strings.HasPrefix(trim, "#")
+}
+
+// findAdsByLocation 按协议加主机，或相对地址的目录分组。
+// 组数不在 2 到 10，或没有超过一半的主组时，不按地址删。
+func findAdsByLocation(segments []string) map[int]struct{} {
+	if len(segments) < 2 {
+		return nil
+	}
+	groups := map[string][]int{}
+	for i, seg := range segments {
+		key := structuralID(seg)
+		groups[key] = append(groups[key], i)
+	}
+	if len(groups) <= 1 || len(groups) > reasonableGroupLimit {
+		return nil
+	}
+	return minorityIndexes(groups, len(segments))
+}
+
+func structuralID(segment string) string {
+	if scheme := strings.Index(segment, "://"); scheme >= 0 {
+		rest := segment[scheme+3:]
+		if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+			return segment[:scheme+3+slash]
+		}
+		return segment
+	}
+	if slash := strings.LastIndex(segment, "/"); slash >= 0 {
+		return segment[:slash]
+	}
+	return "NO_PATH"
+}
+
+func minorityIndexes(groups map[string][]int, total int) map[int]struct{} {
+	maxSize := 0
+	for _, g := range groups {
+		if len(g) > maxSize {
+			maxSize = len(g)
+		}
+	}
+	if maxSize*2 <= total {
+		return nil
+	}
+	ads := map[int]struct{}{}
+	for _, g := range groups {
+		if len(g) < maxSize {
+			for _, i := range g {
+				ads[i] = struct{}{}
 			}
+		}
+	}
+	return ads
+}
+
+func findAdsByDiscontinuity(lines []string) map[int]struct{} {
+	blocks := discontinuityBlocks(lines)
+	if len(blocks) < 2 {
+		return nil
+	}
+	analysis := blocks[:len(blocks)-1]
+	modeSize := modeBlockSize(analysis)
+	if modeSize <= 0 {
+		return nil
+	}
+	threshold := float64(modeSize) * adBlockSizeRatio
+	ads := map[int]struct{}{}
+	minority := 0
+	for _, block := range analysis {
+		if float64(len(block)) < threshold {
+			minority++
+			for _, i := range block {
+				ads[i] = struct{}{}
+			}
+		}
+	}
+	limit := minorityLimit(totalDurationMinutes(lines))
+	if minority > 0 && minority <= limit {
+		return ads
+	}
+	return nil
+}
+
+func discontinuityBlocks(lines []string) [][]int {
+	var blocks [][]int
+	var cur []int
+	index := 0
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == "#EXT-X-DISCONTINUITY" {
+			if len(cur) > 0 {
+				blocks = append(blocks, cur)
+			}
+			cur = nil
+			continue
+		}
+		if isSegmentLine(trim) {
+			cur = append(cur, index)
+			index++
+		}
+	}
+	if len(cur) > 0 {
+		blocks = append(blocks, cur)
+	}
+	return blocks
+}
+
+func modeBlockSize(blocks [][]int) int {
+	freq := map[int]int{}
+	for _, block := range blocks {
+		freq[len(block)]++
+	}
+	mode := -1
+	best := -1
+	for size, n := range freq {
+		if n > best || (n == best && size > mode) {
+			best = n
+			mode = size
+		}
+	}
+	return mode
+}
+
+func totalDurationMinutes(lines []string) float64 {
+	var seconds float64
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if !strings.HasPrefix(trim, "#EXTINF") {
+			continue
+		}
+		if d, ok := extinfSeconds(trim); ok {
+			seconds += d
+		}
+	}
+	return seconds / 60
+}
+
+func extinfSeconds(line string) (float64, bool) {
+	if len(line) <= len("#EXTINF") || line[len("#EXTINF")] != ':' {
+		return 0, false
+	}
+	body := line[len("#EXTINF")+1:]
+	if comma := strings.IndexByte(body, ','); comma >= 0 {
+		body = body[:comma]
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return 0, false
+	}
+	var n float64
+	sign := 1.0
+	if body[0] == '-' {
+		sign = -1
+		body = body[1:]
+	}
+	dot := false
+	div := 1.0
+	seen := false
+	for _, c := range body {
+		switch {
+		case c >= '0' && c <= '9':
+			seen = true
+			n = n*10 + float64(c-'0')
+			if dot {
+				div *= 10
+			}
+		case c == '.' && !dot:
+			dot = true
+		default:
+			return 0, false
+		}
+	}
+	if !seen {
+		return 0, false
+	}
+	return sign * n / div, true
+}
+
+func minorityLimit(minutes float64) int {
+	switch {
+	case minutes <= 30:
+		return 3
+	case minutes <= 60:
+		return 4
+	case minutes <= 90:
+		return 5
+	default:
+		return 6
+	}
+}
+
+func rebuild(lines []string, ads map[int]struct{}) string {
+	kept := removeAdSegments(lines, ads)
+	kept = removeOrphanedDiscontinuity(kept)
+	var b strings.Builder
+	for _, line := range kept {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func removeAdSegments(lines []string, ads map[int]struct{}) []string {
+	out := make([]string, 0, len(lines))
+	skipping := false
+	index := 0
+	for _, source := range lines {
+		line := strings.TrimSpace(source)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#EXTINF") {
+			if _, ad := ads[index]; ad {
+				skipping = true
+				continue
+			}
+		}
+		if isSegmentLine(line) {
+			_, ad := ads[index]
+			index++
+			if skipping || ad {
+				skipping = false
+				continue
+			}
+		} else if skipping {
 			continue
 		}
 		out = append(out, line)
 	}
-	joined := strings.Join(out, "\n")
-	if strings.HasSuffix(normalized, "\n") && !strings.HasSuffix(joined, "\n") {
-		joined += "\n"
-	}
-	return joined
-}
-
-// Process 结构过滤：按 DISCONTINUITY 分段删广告段组。lastModifieds 与分段一一对应。
-func (f *Filter) Process(content string, lastModifieds ...time.Time) string {
-	f.removedDuration = 0
-	f.removedGroups = 0
-	f.reverted = false
-
-	normalized := strings.ReplaceAll(strings.ReplaceAll(content, "\r\n", "\n"), "\r", "")
-	if !strings.Contains(normalized, "#EXT-X-DISCONTINUITY") {
-		return content
-	}
-
-	parts := strings.Split(normalized, "#EXT-X-DISCONTINUITY")
-	if len(parts) < 2 {
-		return content
-	}
-
-	chunks := make([]discChunk, len(parts))
-	for i, p := range parts {
-		c := parseChunk(p)
-		if i < len(lastModifieds) {
-			c.lastModified = lastModifieds[i]
-		}
-		chunks[i] = c
-	}
-
-	suspiciousLM := map[int64]struct{}{}
-	if f.cfg.UseLastModified {
-		var samples []time.Time
-		for _, c := range chunks {
-			if !c.lastModified.IsZero() {
-				samples = append(samples, c.lastModified)
-			}
-		}
-		for _, t := range suspiciousLastModifieds(samples) {
-			suspiciousLM[t.UnixMilli()] = struct{}{}
-		}
-	}
-
-	// 永远保留第一段（片头正片 / 片头元数据）。
-	kept := []string{chunks[0].raw}
-	lastPath := ""
-	if len(chunks[0].paths) > 0 {
-		lastPath = chunks[0].paths[len(chunks[0].paths)-1]
-	}
-	maxDistance := 0
-	removedDur := 0.0
-	removedN := 0
-
-	for i := 1; i < len(chunks); i++ {
-		c := chunks[i]
-		if !c.hasMedia {
-			kept = append(kept, c.raw)
-			continue
-		}
-
-		// 长段组：正片。
-		if c.duration >= f.cfg.KeepMinDuration {
-			kept = append(kept, c.raw)
-			lastPath, maxDistance = updatePathStats(c.paths, lastPath, maxDistance)
-			continue
-		}
-
-		remove := false
-		// 齐 EXTINF 短突发（常见贴片）。
-		if len(c.extinfs) > 0 && allSameFloat(c.extinfs) && c.duration < f.cfg.UniformShortMax {
-			remove = true
-		}
-		// Last-Modified 落在「小时间簇」。
-		if !remove && f.cfg.UseLastModified && !c.lastModified.IsZero() {
-			if _, ok := suspiciousLM[c.lastModified.UnixMilli()]; ok {
-				remove = true
-			}
-		}
-		// 路径相对正片突然跳变（编辑距离）。
-		if !remove && lastPath != "" && len(c.paths) > 0 {
-			d := levenshtein(c.paths[0], lastPath)
-			if maxDistance > 0 && maxDistance < 10 && d > maxDistance {
-				remove = true
-			}
-		}
-		// 路径特征（保守，不依赖序号）。
-		if !remove && strongAdPath(c.paths) {
-			remove = true
-		}
-
-		if remove {
-			removedDur += c.duration
-			removedN++
-			continue
-		}
-		kept = append(kept, c.raw)
-		lastPath, maxDistance = updatePathStats(c.paths, lastPath, maxDistance)
-	}
-
-	if removedN == 0 {
-		return content
-	}
-	// 删太多 → 整单回滚，避免正片被砍成几十秒。
-	if removedDur > f.cfg.MaxRemoveDuration {
-		f.reverted = true
-		f.removedDuration = removedDur
-		f.removedGroups = removedN
-		return content
-	}
-	if len(kept) < 2 {
-		f.reverted = true
-		f.removedDuration = removedDur
-		f.removedGroups = removedN
-		return content
-	}
-
-	f.removedDuration = removedDur
-	f.removedGroups = removedN
-	out := strings.Join(kept, "#EXT-X-DISCONTINUITY")
-	if strings.HasSuffix(normalized, "\n") && !strings.HasSuffix(out, "\n") {
-		out += "\n"
-	}
 	return out
 }
 
-func parseChunk(raw string) discChunk {
-	c := discChunk{raw: raw}
-	for _, m := range extinfRe.FindAllStringSubmatch(raw, -1) {
-		if len(m) < 2 {
-			continue
-		}
-		v, err := strconv.ParseFloat(m[1], 64)
-		if err != nil {
-			continue
-		}
-		c.extinfs = append(c.extinfs, v)
-		c.duration += v
-	}
-	for _, m := range mediaURIRe.FindAllStringSubmatch(raw, -1) {
-		if len(m) < 2 {
-			continue
-		}
-		uri := strings.TrimSpace(m[1])
-		if uri == "" || strings.HasPrefix(uri, "#") {
-			continue
-		}
-		c.paths = append(c.paths, mediaPath(uri))
-		c.hasMedia = true
-	}
-	return c
-}
-
-func updatePathStats(paths []string, lastPath string, maxDistance int) (string, int) {
-	cur := lastPath
-	maxD := maxDistance
-	for _, p := range paths {
-		if cur != "" {
-			d := levenshtein(p, cur)
-			if d > maxD {
-				maxD = d
+func removeOrphanedDiscontinuity(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if line == "#EXT-X-DISCONTINUITY" {
+			prevBoundary := i == 0 || lines[i-1] == "#EXT-X-DISCONTINUITY"
+			next := ""
+			if i+1 < len(lines) {
+				next = lines[i+1]
+			}
+			nextBoundary := i+1 >= len(lines) || next == "#EXT-X-DISCONTINUITY" || next == "#EXT-X-ENDLIST"
+			if prevBoundary || nextBoundary {
+				continue
 			}
 		}
-		cur = p
-	}
-	return cur, maxD
-}
-
-func allSameFloat(vs []float64) bool {
-	if len(vs) == 0 {
-		return false
-	}
-	first := vs[0]
-	for _, v := range vs[1:] {
-		if math.Abs(v-first) > 1e-6 {
-			return false
-		}
-	}
-	return true
-}
-
-func strongAdPath(paths []string) bool {
-	for _, p := range paths {
-		low := strings.ToLower(p)
-		if strings.Contains(low, "adjump") ||
-			strings.Contains(low, "/ad/") ||
-			strings.Contains(low, "/ads/") ||
-			strings.Contains(low, "advert") {
-			return true
-		}
-	}
-	return false
-}
-
-// suspiciousLastModifieds：按 24h 间隙分簇，长度 ≤3 的小簇视为可疑广告上传时间。
-func suspiciousLastModifieds(times []time.Time) []time.Time {
-	const gap = 24 * time.Hour
-	if len(times) == 0 {
-		return nil
-	}
-	sorted := append([]time.Time(nil), times...)
-	for i := 0; i < len(sorted); i++ {
-		for j := i + 1; j < len(sorted); j++ {
-			if sorted[j].Before(sorted[i]) {
-				sorted[i], sorted[j] = sorted[j], sorted[i]
-			}
-		}
-	}
-	var groups [][]time.Time
-	cur := []time.Time{sorted[0]}
-	for i := 1; i < len(sorted); i++ {
-		if sorted[i].Sub(sorted[i-1]) < gap {
-			cur = append(cur, sorted[i])
-		} else {
-			groups = append(groups, cur)
-			cur = []time.Time{sorted[i]}
-		}
-	}
-	groups = append(groups, cur)
-	var out []time.Time
-	for _, g := range groups {
-		if len(g) <= 3 {
-			out = append(out, g...)
-		}
+		out = append(out, line)
 	}
 	return out
-}
-
-func mediaPath(uri string) string {
-	trim := strings.TrimSpace(uri)
-	if i := strings.IndexAny(trim, "?#"); i >= 0 {
-		trim = trim[:i]
-	}
-	if strings.Contains(trim, "://") {
-		if u, err := url.Parse(trim); err == nil {
-			return u.Path
-		}
-	}
-	if !strings.HasPrefix(trim, "/") {
-		return "/" + trim
-	}
-	return trim
-}
-
-// mediaBase 切片文件名（去 query）；供去图片伪装切片等使用。
-func mediaBase(line string) string {
-	trim := strings.TrimSpace(line)
-	if trim == "" || strings.HasPrefix(trim, "#") {
-		return trim
-	}
-	if i := strings.IndexAny(trim, "?#"); i >= 0 {
-		trim = trim[:i]
-	}
-	if strings.Contains(trim, "://") {
-		if u, err := url.Parse(trim); err == nil && u.Path != "" {
-			return path.Base(u.Path)
-		}
-	}
-	return path.Base(trim)
-}
-
-// IsMasterPlaylist 是否为多码率主列表。
-func IsMasterPlaylist(content string) bool {
-	return strings.Contains(content, "#EXT-X-STREAM-INF")
-}
-
-func levenshtein(a, b string) int {
-	if a == b {
-		return 0
-	}
-	la, lb := len(a), len(b)
-	if la == 0 {
-		return lb
-	}
-	if lb == 0 {
-		return la
-	}
-	prev := make([]int, lb+1)
-	cur := make([]int, lb+1)
-	for j := 0; j <= lb; j++ {
-		prev[j] = j
-	}
-	for i := 1; i <= la; i++ {
-		cur[0] = i
-		ca := a[i-1]
-		for j := 1; j <= lb; j++ {
-			cost := 1
-			if ca == b[j-1] {
-				cost = 0
-			}
-			del := prev[j] + 1
-			ins := cur[j-1] + 1
-			sub := prev[j-1] + cost
-			cur[j] = del
-			if ins < cur[j] {
-				cur[j] = ins
-			}
-			if sub < cur[j] {
-				cur[j] = sub
-			}
-		}
-		prev, cur = cur, prev
-	}
-	return prev[lb]
 }

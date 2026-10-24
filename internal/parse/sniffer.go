@@ -140,27 +140,15 @@ func parseJSONPlayBody(body string) (string, map[string]string) {
 			u = arr[0]
 		}
 	}
-	hdr := map[string]string{}
+	flat := map[string]string{}
 	for k, raw := range obj {
-		switch {
-		case strings.EqualFold(k, "User-Agent"),
-			strings.EqualFold(k, "ua"),
-			strings.EqualFold(k, "Referer"),
-			strings.EqualFold(k, "Cookie"):
-			var s string
-			if json.Unmarshal(raw, &s) == nil && strings.TrimSpace(s) != "" {
-				key := k
-				if strings.EqualFold(k, "ua") {
-					key = "User-Agent"
-				}
-				hdr[key] = s
-			}
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			continue
 		}
+		flat[k] = s
 	}
-	if len(hdr) == 0 {
-		hdr = nil
-	}
-	return u, hdr
+	return u, pickPlayHeaders(flat)
 }
 
 func jsonStringField(obj map[string]json.RawMessage, key string) string {

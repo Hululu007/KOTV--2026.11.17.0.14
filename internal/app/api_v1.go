@@ -1250,7 +1250,7 @@ func (a *App) APIGetSettings() map[string]any {
 		settings.PlayerVolume, settings.PlayerAmbient, settings.PlayerStableVolume,
 		settings.UA,
 		settings.MpvVulkan, settings.MpvGpuNext, settings.MpvConf,
-		settings.PreferredParse, settings.AdFilter, settings.M3U8Cfg, settings.DanmakuOn, settings.DanmakuAPI,
+		settings.PreferredParse, settings.AdFilter, settings.DanmakuOn, settings.DanmakuAPI,
 		settings.DanmakuSize, settings.DanmakuOpacity, settings.DanmakuRows,
 		settings.AssrtToken, settings.UpdateURL, settings.WallMode, settings.WallURL,
 		settings.WallFile, settings.Incognito, settings.LiveAcross, settings.LiveChange,

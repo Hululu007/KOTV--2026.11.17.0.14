@@ -226,8 +226,14 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	r.Parse = model.FlexInt{Valid: true, Value: 0}
 	r.URL = model.URL{URLs: []string{parsed}}
 	r.PlayURL = ""
-	if len(sniffHdr) > 0 {
-		r.Header = model.FlexHeader(overlayHeaders(map[string]string(r.Header), pickPlayHeaders(sniffHdr)))
+	if p != nil && p.TypeID() == 1 {
+		if picked := pickPlayHeaders(sniffHdr); len(picked) > 0 {
+			r.Header = model.FlexHeader(picked)
+		} else if ph := parseExtHeaders(p.Ext.String()); len(ph) > 0 {
+			r.Header = model.FlexHeader(ph)
+		}
+	} else if len(sniffHdr) > 0 {
+		r.Header = model.FlexHeader(overlayHeaders(map[string]string(r.Header), sniffHdr))
 	}
 	return r, nil
 }
@@ -276,7 +282,7 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 			return out, nil, err
 		}
 		out, h, err := sniffParsedWeb(u, headers, click, rules, nil, false)
-		return out, pickPlayHeaders(h), err
+		return out, h, err
 	}
 	if strings.HasPrefix(raw, "json:") {
 		u := strings.TrimPrefix(raw, "json:")
@@ -294,7 +300,7 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 		for _, p := range parses {
 			if p.Name == name {
 				u, h, err := executeParse(p, "", "", headers, parses, rules, click, nil, false)
-				return u, pickPlayHeaders(h), err
+				return u, h, err
 			}
 		}
 	}
@@ -307,7 +313,7 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 	if p != nil && !selectedEmpty(p) {
 		out, h, err := executeParse(*p, raw, "", headers, parses, rules, click, nil, false)
 		if err == nil && out != "" {
-			return out, pickPlayHeaders(h), nil
+			return out, h, nil
 		}
 	}
 	if sniffed, h, _ := sniff(raw); sniffed != "" {
@@ -406,7 +412,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 		if needWeb {
 			return sniffParsedWeb(u, overlayHeaders(headers, h), click, rules, isVideo, manualVideo)
 		}
-		return u, pickPlayHeaders(h), nil
+		return u, h, nil
 	case 3:
 		u, h, needWeb, err := jarJSONExtMix(p, flag, webURL, parses)
 		if err != nil {
@@ -417,7 +423,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 		if needWeb {
 			return sniffParsedWeb(u, overlayHeaders(headers, h), click, rules, isVideo, manualVideo)
 		}
-		return u, pickPlayHeaders(h), nil
+		return u, h, nil
 	case 4:
 		// type1（按 flag 筛）竞速 + type0 Web 嗅探。
 		parseLog("[parse] type4 superParse flag=%q", flag)
@@ -608,40 +614,32 @@ func parseExtURL(p model.Parse) string {
 	return u[:index+1] + "cat_ext=" + b64 + "&" + u[index+1:]
 }
 
-// pickPlayHeaders 保留嗅探到的媒体请求头（含 Cookie / Token 等自定义头）。
-// 去掉 hop-by-hop 与不宜重放的头，其余原样交给播放器。
+// pickPlayHeaders 从 JSON 解析结果里取出 User-Agent、Referer、Cookie。
+// 都没有时返回 nil，调用方继续用解析源自己的头。网页嗅探的请求头不走这里。
 func pickPlayHeaders(h map[string]string) map[string]string {
 	if len(h) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(h))
+	out := make(map[string]string, 3)
 	for k, v := range h {
-		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+		key := strings.TrimSpace(k)
+		val := strings.TrimSpace(v)
+		if key == "" || val == "" {
 			continue
 		}
-		if dropPlaySniffHeader(k) {
-			continue
+		switch strings.ToLower(key) {
+		case "user-agent", "ua":
+			out["User-Agent"] = val
+		case "referer", "referrer":
+			out["Referer"] = val
+		case "cookie":
+			out["Cookie"] = val
 		}
-		out[k] = v
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
-}
-
-func dropPlaySniffHeader(k string) bool {
-	switch {
-	case strings.EqualFold(k, "Range"),
-		strings.EqualFold(k, "Host"),
-		strings.EqualFold(k, "Connection"),
-		strings.EqualFold(k, "Content-Length"),
-		strings.EqualFold(k, "Transfer-Encoding"),
-		strings.EqualFold(k, "Accept-Encoding"):
-		return true
-	default:
-		return false
-	}
 }
 
 func jarJSONExt(p model.Parse, webURL string, parses []model.Parse) (string, map[string]string, bool, error) {

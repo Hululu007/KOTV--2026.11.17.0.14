@@ -155,6 +155,8 @@ void main() {
       'Cookie': 'a=b',
       'Origin': 'https://site.example',
       'Range': 'bytes=0-1',
+      'Host': 'www.ncat3.app',
+      'Connection': 'keep-alive',
     });
     expect(split.userAgent, 'Site/1');
     expect(split.referer, 'https://site.example/');
@@ -163,6 +165,22 @@ void main() {
     expect(split.fields['Cookie'], 'a=b');
     expect(split.fields['Origin'], 'https://site.example');
     expect(split.fields['Range'], 'bytes=0-1');
+    expect(split.fields['Host'], 'www.ncat3.app');
+    expect(split.fields['Connection'], 'keep-alive');
+    final kept = kotvNormalizePlayHeaders(
+      const {
+        'Host': 'www.ncat3.app',
+        'Connection': 'keep-alive',
+        'Cookie': 'a=1',
+        'Referer': 'https://www.ncat3.app',
+      },
+      url: 'https://vip.example/a.m3u8',
+      addDefaultUa: false,
+    );
+    expect(kept['Host'], 'www.ncat3.app');
+    expect(kept['Connection'], 'keep-alive');
+    expect(kept['Cookie'], 'a=1');
+    expect(kept['Referer'], 'https://www.ncat3.app');
     final empty = kotvSplitMpvHeaders(const {});
     expect(empty.userAgent, isEmpty);
     expect(empty.referer, isEmpty);

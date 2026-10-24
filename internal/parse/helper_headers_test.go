@@ -2,14 +2,14 @@ package parse
 
 import "testing"
 
-func TestPickPlayHeadersKeepsTokenDropsHopByHop(t *testing.T) {
+func TestPickPlayHeadersKeepsPlayKeysOnly(t *testing.T) {
 	in := map[string]string{
-		"User-Agent":        "UA/1",
+		"ua":                "UA/1",
 		"Cookie":            "a=b",
 		"Authorization":     "Bearer tok",
 		"Token":             "site-token",
 		"X-Token":           "x",
-		"Referer":           "https://ref.example/",
+		"referrer":          "https://ref.example/",
 		"Origin":            "https://o.example",
 		"Range":             "bytes=0-",
 		"Host":              "cdn.example",
@@ -21,22 +21,16 @@ func TestPickPlayHeadersKeepsTokenDropsHopByHop(t *testing.T) {
 		"Empty":             "  ",
 	}
 	got := pickPlayHeaders(in)
-	wantKeep := []string{"User-Agent", "Cookie", "Authorization", "Token", "X-Token", "Referer", "Origin"}
-	for _, k := range wantKeep {
-		if got[k] != in[k] {
-			t.Fatalf("%s: got %q want %q (map=%v)", k, got[k], in[k], got)
-		}
+	if got["User-Agent"] != "UA/1" || got["Cookie"] != "a=b" || got["Referer"] != "https://ref.example/" {
+		t.Fatalf("canonical play headers: %v", got)
 	}
-	wantDrop := []string{"Range", "Host", "Connection", "Content-Length", "Transfer-Encoding", "Accept-Encoding", " ", "Empty"}
-	for _, k := range wantDrop {
-		if _, ok := got[k]; ok {
-			t.Fatalf("should drop %q, got map=%v", k, got)
-		}
+	if len(got) != 3 {
+		t.Fatalf("only User-Agent, Referer, Cookie: %v", got)
 	}
 	if pickPlayHeaders(nil) != nil {
 		t.Fatal("nil in → nil out")
 	}
-	if pickPlayHeaders(map[string]string{"Range": "bytes=0-"}) != nil {
-		t.Fatal("only hop-by-hop → nil out")
+	if pickPlayHeaders(map[string]string{"Range": "bytes=0-", "Host": "cdn.example"}) != nil {
+		t.Fatal("no play keys → nil out")
 	}
 }
