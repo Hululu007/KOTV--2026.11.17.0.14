@@ -5,7 +5,6 @@ import com.github.catvod.Proxy;
 import com.github.catvod.crawler.SpiderDebug;
 import com.github.catvod.net.OkHttp;
 import com.github.catvod.net.OkResult;
-import cn.hutool.core.util.URLUtil;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -795,24 +794,17 @@ public class Util {
 
     public static HashMap<String, String> webHeaders(String referer, String url, String cookie) {
         webHttpHeaderMap = new HashMap<>();
-//                    webHttpHeaderMap.put(HttpHeaders.CONTENT_TYPE, ContentType.Application.INSTANCE.getJson().getContentType());
         webHttpHeaderMap.put("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2");
         webHttpHeaderMap.put("Connection", "keep-alive");
         webHttpHeaderMap.put("User-Agent", CHROME);
         webHttpHeaderMap.put("Accept", "*/*");
-//        webHttpHeaderMap.put("Accept"_ENCODING, "br, deflate, gzip, x-gzip");
         if (StringUtils.isNotBlank(referer)) {
             webHttpHeaderMap.put("Referer", referer);
         }
-        if (StringUtils.isNotBlank(url)) {
-            URI host = URLUtil.getHost(URLUtil.url(url));
-            webHttpHeaderMap.put("Host", host.getHost());
-        }
+        // Host 由 HTTP 栈按请求地址填写。这里写页面主机后，同一张表若被挂到 CDN 播放地址上会 404。
         if (StringUtils.isNotBlank(cookie)) {
             webHttpHeaderMap.put("Cookie", cookie);
         }
-
-//        webHttpHeaderMap.put(io.ktor.http.HttpHeaders.INSTANCE.getOrigin(), u);
         return webHttpHeaderMap;
     }
 
