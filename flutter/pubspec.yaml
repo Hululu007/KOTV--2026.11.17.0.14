@@ -1,7 +1,7 @@
 name: kotv
 description: KO影视 Flutter UI（Go 引擎 :9978）
 publish_to: "none"
-version: 0.2.0+2
+version: 0.2.1+3
 
 environment:
   sdk: ^3.5.4

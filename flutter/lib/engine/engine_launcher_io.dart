@@ -123,14 +123,15 @@ class EngineLauncher {
     return ensureReady(timeout: const Duration(seconds: 20));
   }
 
-  /// 远端可达则返回 true；不可达则清 client 引擎地址/登录态、切本机并拉起。
-  /// 已是本机则等同 [recoverIfNeeded]。
+  /// 远端可达则返回 true。不可达时，桌面和安卓清掉远端地址并切本机。
+  /// iOS 没有本机引擎，探失败直接返回，不清地址。已是本机则等同 [recoverIfNeeded]。
   Future<bool> recoverOrFallbackLocal({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
     if (kotvIsLocalEngineBaseUrl(baseUrl)) {
       return recoverIfNeeded(forceRestart: forceRestart);
     }
     if (await _ping(baseUrl)) return true;
+    if (Platform.isIOS) return false;
     debugPrint('engine: remote unreachable → fallback local ($baseUrl)');
     try {
       // draft 保留，方便设置页再次登录；业务地址与登录态清掉。
@@ -427,7 +428,11 @@ class EngineLauncher {
   }
 
   Future<void> _tryStartBundled() async {
-    if (kIsWeb || Platform.isIOS) return;
+    if (kIsWeb || Platform.isIOS) {
+      // 没有随包引擎。不置位时，ensureReady 会把 127.0.0.1 探满整个超时。
+      _noBundledEngine = true;
+      return;
+    }
     if (!kotvIsLocalEngineBaseUrl(baseUrl)) {
       debugPrint('engine: skip local start; remote baseUrl=$baseUrl');
       return;

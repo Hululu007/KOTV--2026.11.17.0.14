@@ -75,7 +75,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           e.key: '${e.value ?? ''}',
       };
       final lines = <String>[
-        'KO影视 Flutter ${st['version'] ?? '0.2.0'}',
+        'KO影视 Flutter ${st['version'] ?? '0.2.1'}',
         '引擎端口：${st['port'] ?? kotvDefaultEnginePort}',
         '',
         '运行时：',
@@ -100,9 +100,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final versionText = ref.watch(settingsProvider).maybeWhen(
       data: (d) {
         final v = '${d['version'] ?? ''}'.trim();
-        return v.isEmpty ? '0.2.0' : v;
+        return v.isEmpty ? '0.2.1' : v;
       },
-      orElse: () => '0.2.0',
+      orElse: () => '0.2.1',
     );
     final bottomNav = KotvLayout.useBottomNav(context);
     final compact = KotvLayout.isCompact(context);
