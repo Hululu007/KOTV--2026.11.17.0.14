@@ -41,7 +41,8 @@
 # window_manager 0.4.3 有边框进入系统全屏会先 SC_MAXIMIZE。窗口已经最大化后，
 # 紧接着的 SetWindowPos 常常改不到尺寸，子窗口收不到新的 WM_SIZE，画面停在最后一帧。
 # 有边框分支去掉这次最大化，只去标题栏样式并铺到显示器。无边框仍靠最大化改尺寸。
-# 进入末尾不要 ForceChildRefresh。离开时 WM_SIZE 里原有的那次保留。
+# 不最大化时 WM_SIZE 不是 SIZE_MAXIMIZED，离开全屏那次 ForceChildRefresh 不会跑。
+# Win7 第一次系统全屏画面定住，退回详情后整个窗口也不动。进入末尾补一次，并记下已进入。
 #
 # video_player 的 formatHint 只在 Android 生效。iOS 打开时若判断为 HLS，Dart 写入
 # X-KOTV-Asset-Mime，这里把它从 HTTP 头里拿掉，改成 AVURLAsset 的 MIME。
@@ -1204,10 +1205,16 @@ if not wm_cpp.is_file():
     print(f"ERROR: missing {wm_cpp}", file=sys.stderr)
     sys.exit(1)
 WM_MARKER = "bordered enter does not SC_MAXIMIZE"
+WM_CHILD = "enter refreshes the Flutter child"
 WM_KICK = """    // KOTV patch (scripts/patch-media-kit.sh): leave already calls
     // ForceChildRefresh from WM_SIZE. Enter never did, so the first
     // fullscreen on Windows 7 leaves the picture stuck.
     ForceChildRefresh();
+"""
+WM_CHILD_BLOCK = """    // KOTV patch (scripts/patch-media-kit.sh): enter refreshes the Flutter child.
+    // Bordered fullscreen is not maximized, so leave never sees SIZE_MAXIMIZED.
+    ForceChildRefresh();
+    last_state = STATE_FULLSCREEN_ENTERED;
 """
 WM_MAX_OLD = """  if (isFullScreen) {  // Set to fullscreen
     ::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
@@ -1223,12 +1230,11 @@ WM_CLOSE_NEW = """                     SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
       ::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
     }
   } else {  // Restore from fullscreen"""
+WM_RESTORE = "  } else {  // Restore from fullscreen"
 wm_text = wm_cpp.read_text(encoding="utf-8")
-if WM_MARKER in wm_text:
-    print(f"ok window_manager ({wm_version}) already patched: bordered enter does not SC_MAXIMIZE")
-else:
-    if WM_KICK in wm_text:
-        wm_text = wm_text.replace(WM_KICK, "", 1)
+if WM_KICK in wm_text:
+    wm_text = wm_text.replace(WM_KICK, "", 1)
+if WM_MARKER not in wm_text:
     if WM_MAX_OLD not in wm_text or WM_CLOSE_OLD not in wm_text:
         print(
             f"ERROR: window_manager ({wm_version}) SetFullScreen anchor missing; "
@@ -1237,17 +1243,31 @@ else:
         )
         sys.exit(1)
     wm_text = wm_text.replace(WM_MAX_OLD, WM_MAX_NEW, 1).replace(WM_CLOSE_OLD, WM_CLOSE_NEW, 1)
-    wm_cpp.write_text(wm_text, encoding="utf-8")
     print(f"patched window_manager ({wm_version}): bordered enter does not SC_MAXIMIZE")
+if WM_CHILD not in wm_text:
+    if WM_RESTORE not in wm_text:
+        print(
+            f"ERROR: window_manager ({wm_version}) fullscreen restore anchor missing",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    wm_text = wm_text.replace(WM_RESTORE, WM_CHILD_BLOCK + WM_RESTORE, 1)
+    print(f"patched window_manager ({wm_version}): fullscreen enter ForceChildRefresh")
+else:
+    print(f"ok window_manager ({wm_version}) already patched: bordered enter and child refresh")
+wm_cpp.write_text(wm_text, encoding="utf-8")
 wm_check = wm_cpp.read_text(encoding="utf-8")
 anchor = "} else {  // Restore from fullscreen"
 idx = wm_check.find(anchor)
-enter = wm_check[max(0, idx - 1600):idx] if idx >= 0 else ""
-if WM_MARKER not in enter or "ForceChildRefresh();" in enter:
-    print("ERROR: window_manager enter-fullscreen still maximizes first or still kicks the child", file=sys.stderr)
+enter = wm_check[max(0, idx - 1800):idx] if idx >= 0 else ""
+if WM_MARKER not in enter or WM_CHILD not in enter or "ForceChildRefresh();" not in enter:
+    print("ERROR: window_manager enter-fullscreen missing child refresh", file=sys.stderr)
     sys.exit(1)
 if "::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);" not in enter:
     print("ERROR: window_manager frameless fullscreen lost SC_MAXIMIZE", file=sys.stderr)
+    sys.exit(1)
+if enter.find("::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);") < enter.find("if (!is_frameless_)"):
+    print("ERROR: window_manager bordered fullscreen still maximizes first", file=sys.stderr)
     sys.exit(1)
 PY
 
