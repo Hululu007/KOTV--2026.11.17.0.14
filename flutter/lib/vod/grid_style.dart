@@ -200,7 +200,8 @@ double kotvPosterCellAspect({required double ratio, bool oval = false}) =>
   required int size,
 }) {
   final screen = MediaQuery.sizeOf(context);
-  final gap = LayoutScale.s(context, KotvLayout.isCompact(context) ? 6 : 10);
+  // 间距只随窗口放大。小窗 scale 会把 6～10 压到几个像素，海报贴在一起。
+  final gap = LayoutScale.dp(context, KotvLayout.isCompact(context) ? 10 : 12);
   final cols = !extent.isFinite || extent <= 0
       ? 1
       : kotvPosterColumns(

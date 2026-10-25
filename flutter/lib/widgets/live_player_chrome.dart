@@ -157,36 +157,44 @@ class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
                           offerDisplayChoice: widget.offerFullscreenChoice,
                           onSelect: (kind) => _tap(() => widget.onExpand!(kind)),
                         ),
-                if (!compact && widget.onPlayer != null)
-                  _textAct(resolvedPlayerLabel, () => _tap(widget.onPlayer)),
-                if (!compact && widget.onDecode != null)
-                  _textAct(widget.decodeLabel, () => _tap(widget.onDecode)),
-                if (widget.onScale != null)
-                  _textAct(
-                    widget.scaleLabel.trim().isEmpty ? '比例' : widget.scaleLabel,
-                    () => _tap(widget.onScale),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        if (!compact && widget.onPlayer != null)
+                          _textAct(resolvedPlayerLabel, () => _tap(widget.onPlayer)),
+                        if (!compact && widget.onDecode != null)
+                          _textAct(widget.decodeLabel, () => _tap(widget.onDecode)),
+                        if (widget.onScale != null)
+                          _textAct(
+                            widget.scaleLabel.trim().isEmpty ? '比例' : widget.scaleLabel,
+                            () => _tap(widget.onScale),
+                          ),
+                        if (widget.onAcross != null)
+                          _textAct(widget.acrossOn ? '跨组开' : '跨组关', () => _tap(widget.onAcross)),
+                        if (widget.onInvert != null)
+                          _textAct(widget.invertOn ? '反转开' : '反转关', () => _tap(widget.onInvert)),
+                        if (widget.onFailSwitch != null)
+                          _textAct(widget.failSwitchOn ? '换线开' : '换线关', () => _tap(widget.onFailSwitch)),
+                        if (widget.showSeek) ...[
+                          const SizedBox(width: 6),
+                          StreamBuilder<Duration>(
+                            stream: player.positionStream,
+                            builder: (context, _) {
+                              final pos = player.position;
+                              final dur = player.duration;
+                              return Text(
+                                compact ? fmtBoundedPlayerTime(pos) : '${fmtBoundedPlayerTime(pos)} / ${fmtBoundedPlayerTime(dur)}',
+                                style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : (compact ? 11 : 12)),
+                              );
+                            },
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                if (widget.onAcross != null)
-                  _textAct(widget.acrossOn ? '跨组开' : '跨组关', () => _tap(widget.onAcross)),
-                if (widget.onInvert != null)
-                  _textAct(widget.invertOn ? '反转开' : '反转关', () => _tap(widget.onInvert)),
-                if (widget.onFailSwitch != null)
-                  _textAct(widget.failSwitchOn ? '换线开' : '换线关', () => _tap(widget.onFailSwitch)),
-                if (widget.showSeek) ...[
-                  const SizedBox(width: 6),
-                  StreamBuilder<Duration>(
-                    stream: player.positionStream,
-                    builder: (context, _) {
-                      final pos = player.position;
-                      final dur = player.duration;
-                      return Text(
-                        compact ? fmtBoundedPlayerTime(pos) : '${fmtBoundedPlayerTime(pos)} / ${fmtBoundedPlayerTime(dur)}',
-                        style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : (compact ? 11 : 12)),
-                      );
-                    },
-                  ),
-                ],
-                const Spacer(),
+                ),
                 KotvVolumeControl(
                   player: player,
                   iconSize: iconSize,

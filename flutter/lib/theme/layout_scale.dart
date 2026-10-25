@@ -88,6 +88,12 @@ class KotvLayout {
   }
 }
 
+/// 首页内容区左右边距。分类页用同一份，左右缘和顶栏对齐。
+double kotvContentInset(BuildContext context) {
+  final base = KotvLayout.isCompact(context) ? 12.0 : 30.0;
+  return base * LayoutScale.of(context);
+}
+
 /// 给子树注入缩放；文字缩放仅在与父级不同时才包一层 MediaQuery，
 /// 避免每帧嵌套替换 MediaQuery 触发 InheritedElement.notifyClients 断言崩溃。
 class ScaledLayoutBox extends StatelessWidget {

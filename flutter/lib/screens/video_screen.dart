@@ -1096,8 +1096,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     }
 
     final onHome = (_tid ?? '').isEmpty;
-    final pad = KotvLayout.isCompact(context) ? 12.0 : 30.0;
-    final catPad = KotvLayout.isCompact(context) ? 16.0 : 60.0;
+    final inset = kotvContentInset(context);
+    final s = LayoutScale.of(context);
     final bottomPad = 24.0;
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
@@ -1116,25 +1116,18 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           if (onHome) ...[
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                    pad * LayoutScale.of(context),
-                    10 * LayoutScale.of(context),
-                    pad * LayoutScale.of(context),
-                    0),
+                padding: EdgeInsets.fromLTRB(inset, 10 * s, inset, 0),
                 child: _buildHomeFeatureGrid(),
               ),
             ),
-            SliverToBoxAdapter(
-                child: SizedBox(height: 16 * LayoutScale.of(context))),
+            SliverToBoxAdapter(child: SizedBox(height: 16 * s)),
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.symmetric(
-                    horizontal: pad * LayoutScale.of(context)),
+                padding: EdgeInsets.symmetric(horizontal: inset),
                 child: const SectionTitle('为你推荐', subtitle: '来自当前站源的热门内容'),
               ),
             ),
-            SliverToBoxAdapter(
-                child: SizedBox(height: 10 * LayoutScale.of(context))),
+            SliverToBoxAdapter(child: SizedBox(height: 10 * s)),
             if (_items.isEmpty && _loading)
               SliverFillRemaining(
                 hasScrollBody: false,
@@ -1144,18 +1137,14 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               )
             else
               SliverPadding(
-                padding: EdgeInsets.fromLTRB(
-                    pad * LayoutScale.of(context),
-                    0,
-                    pad * LayoutScale.of(context),
-                    bottomPad * LayoutScale.of(context)),
+                padding: EdgeInsets.fromLTRB(inset, 0, inset, bottomPad * s),
                 sliver:
                     _listStyle ? _listSliver(_items) : _posterSliver(_items),
               ),
           ] else ...[
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(catPad, 10, catPad, 0),
+                padding: EdgeInsets.fromLTRB(inset, 10 * s, inset, 0),
                 child: SectionTitle(
                   _types
                           .where((t) => t.id == _tid)
@@ -1166,7 +1155,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                 ),
               ),
             ),
-            const SliverToBoxAdapter(child: SizedBox(height: 10)),
+            SliverToBoxAdapter(child: SizedBox(height: 10 * s)),
             if (_items.isEmpty && _loading)
               SliverFillRemaining(
                 hasScrollBody: false,
@@ -1186,7 +1175,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               )
             else
               SliverPadding(
-                padding: EdgeInsets.fromLTRB(catPad, 0, catPad, bottomPad),
+                padding: EdgeInsets.fromLTRB(inset, 0, inset, bottomPad * s),
                 sliver: _listStyle
                     ? _listSliver(_items)
                     : _posterSliver(_items),

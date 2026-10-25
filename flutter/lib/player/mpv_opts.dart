@@ -236,9 +236,11 @@ class KotvMpvOpts {
       }
       return hard ? 'd3d11va' : 'd3d11va,dxva2,no';
     }
-    if (!kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.macOS ||
-            defaultTargetPlatform == TargetPlatform.iOS)) {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      // 画面经 OpenGL ES 画进 FBO。直出 videotoolbox 的帧进不了这块缓冲，只能拷贝后再画。
+      return hard ? 'videotoolbox-copy' : 'videotoolbox-copy,no';
+    }
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
       return hard ? 'videotoolbox' : 'videotoolbox,no';
     }
     // Linux 等：直出硬解链，自动再兜底软解
