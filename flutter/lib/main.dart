@@ -453,6 +453,11 @@ class _EngineOfflinePage extends ConsumerWidget {
     if (v == null) return;
     final stored = kotvStoreEngineBaseUrl(v);
     if (stored.isEmpty) {
+      launcher.connectError = (!kIsWeb &&
+              defaultTargetPlatform == TargetPlatform.iOS &&
+              v.isNotEmpty)
+          ? '没有本机引擎，请填写远端地址'
+          : '';
       await KotvClientStore.clearEngine();
       launcher.applyBaseUrl('');
     } else {
@@ -463,6 +468,7 @@ class _EngineOfflinePage extends ConsumerWidget {
         if (nav.mounted) {
           final prompt = await promptRemoteLoginIfNeeded(nav, ref, baseUrl: stored);
           if (prompt == RemoteLoginPrompt.cancelled) {
+            launcher.connectError = '';
             await KotvClientStore.clearEngine();
             launcher.applyBaseUrl('');
           }
@@ -497,6 +503,14 @@ class _EngineOfflinePage extends ConsumerWidget {
                   textAlign: TextAlign.center,
                   style: TextStyle(color: muted),
                 ),
+                if (ref.read(engineLauncherProvider).connectError.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    ref.read(engineLauncherProvider).connectError,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 if (!kIsWeb)
                   Row(

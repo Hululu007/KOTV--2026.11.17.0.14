@@ -1206,6 +1206,7 @@ if not wm_cpp.is_file():
     sys.exit(1)
 WM_MARKER = "bordered enter does not SC_MAXIMIZE"
 WM_CHILD = "enter refreshes the Flutter child"
+WM_DEFER = "defer Flutter child refresh"
 WM_KICK = """    // KOTV patch (scripts/patch-media-kit.sh): leave already calls
     // ForceChildRefresh from WM_SIZE. Enter never did, so the first
     // fullscreen on Windows 7 leaves the picture stuck.
@@ -1216,6 +1217,104 @@ WM_CHILD_BLOCK = """    // KOTV patch (scripts/patch-media-kit.sh): enter refres
     ForceChildRefresh();
     last_state = STATE_FULLSCREEN_ENTERED;
 """
+WM_DEFER_BLOCK = """    // KOTV patch (scripts/patch-media-kit.sh): defer Flutter child refresh.
+    // Bordered fullscreen is not maximized, so leave never sees SIZE_MAXIMIZED.
+    // 回到消息循环再改子窗口。在这次调用里同步改会重入 WM_SIZE，界面卡死。
+    last_state = STATE_FULLSCREEN_ENTERED;
+    ::PostMessage(mainWindow, WM_APP + 0x51, 0, 0);
+"""
+WM_SAVE_OLD = """    // Save current window information.
+    g_maximized_before_fullscreen = ::IsZoomed(mainWindow);
+    g_style_before_fullscreen = GetWindowLong(mainWindow, GWL_STYLE);
+    ::GetWindowRect(mainWindow, &g_frame_before_fullscreen);"""
+WM_SAVE_NEW = """    // Save current window information.
+    // 最大化时 GetWindowRect 是屏幕矩形。退出再按它还原，窗口会停在全屏尺寸。
+    WINDOWPLACEMENT placement = {};
+    placement.length = sizeof(WINDOWPLACEMENT);
+    ::GetWindowPlacement(mainWindow, &placement);
+    g_maximized_before_fullscreen = placement.showCmd == SW_SHOWMAXIMIZED;
+    g_style_before_fullscreen = GetWindowLong(mainWindow, GWL_STYLE);
+    if (g_maximized_before_fullscreen) {
+      g_frame_before_fullscreen = placement.rcNormalPosition;
+    } else {
+      ::GetWindowRect(mainWindow, &g_frame_before_fullscreen);
+    }"""
+WM_EXIT_OLD = """  } else {  // Restore from fullscreen
+    if (!g_maximized_before_fullscreen)
+      Restore();
+    ::SetWindowLongPtr(mainWindow, GWL_STYLE,
+                       g_style_before_fullscreen | WS_OVERLAPPEDWINDOW);
+    if (::IsZoomed(mainWindow)) {
+      // Refresh the parent mainWindow.
+      ::SetWindowPos(mainWindow, nullptr, 0, 0, 0, 0,
+                     SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                         SWP_FRAMECHANGED);
+      auto rect = RECT{};
+      ::GetClientRect(mainWindow, &rect);
+      auto flutter_view = ::FindWindowEx(mainWindow, nullptr,
+                                         kFlutterViewWindowClassName, nullptr);
+      ::SetWindowPos(flutter_view, nullptr, rect.left, rect.top,
+                     rect.right - rect.left, rect.bottom - rect.top,
+                     SWP_NOACTIVATE | SWP_NOZORDER);
+      if (g_maximized_before_fullscreen)
+        PostMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+    } else {
+      ::SetWindowPos(
+          mainWindow, nullptr, g_frame_before_fullscreen.left,
+          g_frame_before_fullscreen.top,
+          g_frame_before_fullscreen.right - g_frame_before_fullscreen.left,
+          g_frame_before_fullscreen.bottom - g_frame_before_fullscreen.top,
+          SWP_NOACTIVATE | SWP_NOZORDER);
+    }
+  }
+}"""
+WM_EXIT_NEW = """  } else {  // Restore from fullscreen
+    // 进入时的 SetWindowPos 会清掉 zoomed，不能再靠 IsZoomed 决定还原。
+    ::SetWindowLongPtr(mainWindow, GWL_STYLE,
+                       g_style_before_fullscreen | WS_OVERLAPPEDWINDOW);
+    ::SetWindowPos(
+        mainWindow, nullptr, g_frame_before_fullscreen.left,
+        g_frame_before_fullscreen.top,
+        g_frame_before_fullscreen.right - g_frame_before_fullscreen.left,
+        g_frame_before_fullscreen.bottom - g_frame_before_fullscreen.top,
+        SWP_NOACTIVATE | SWP_NOZORDER);
+    if (g_maximized_before_fullscreen) {
+      ::PostMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+    }
+    ::PostMessage(mainWindow, WM_APP + 0x51, 0, 0);
+  }
+}"""
+WM_REFRESH_OLD = """void WindowManager::ForceChildRefresh() {
+  HWND hWnd = GetWindow(GetMainWindow(), GW_CHILD);
+
+  RECT rect;
+
+  GetWindowRect(hWnd, &rect);
+  SetWindowPos(
+      hWnd, nullptr, rect.left, rect.top, rect.right - rect.left + 1,
+      rect.bottom - rect.top,
+      SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_FRAMECHANGED);
+  SetWindowPos(
+      hWnd, nullptr, rect.left, rect.top, rect.right - rect.left,
+      rect.bottom - rect.top,
+      SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_FRAMECHANGED);
+}"""
+WM_REFRESH_NEW = """void WindowManager::ForceChildRefresh() {
+  HWND main = GetMainWindow();
+  if (!main) return;
+  RECT rect;
+  if (!::GetClientRect(main, &rect)) return;
+  const int w = rect.right - rect.left;
+  const int h = rect.bottom - rect.top;
+  if (w <= 0 || h <= 0) return;
+  HWND view = ::FindWindowEx(main, nullptr, kFlutterViewWindowClassName, nullptr);
+  if (!view) return;
+  // 尺寸没变时子窗口不重画。不用 SWP_FRAMECHANGED，避免重入非客户区计算。
+  ::SetWindowPos(view, nullptr, 0, 0, w + 1, h,
+                 SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+  ::SetWindowPos(view, nullptr, 0, 0, w, h,
+                 SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+}"""
 WM_MAX_OLD = """  if (isFullScreen) {  // Set to fullscreen
     ::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
     if (!is_frameless_) {"""
@@ -1244,30 +1343,95 @@ if WM_MARKER not in wm_text:
         sys.exit(1)
     wm_text = wm_text.replace(WM_MAX_OLD, WM_MAX_NEW, 1).replace(WM_CLOSE_OLD, WM_CLOSE_NEW, 1)
     print(f"patched window_manager ({wm_version}): bordered enter does not SC_MAXIMIZE")
-if WM_CHILD not in wm_text:
+if WM_CHILD_BLOCK in wm_text:
+    wm_text = wm_text.replace(WM_CHILD_BLOCK, WM_DEFER_BLOCK, 1)
+    print(f"patched window_manager ({wm_version}): defer Flutter child refresh")
+elif WM_DEFER not in wm_text:
     if WM_RESTORE not in wm_text:
         print(
             f"ERROR: window_manager ({wm_version}) fullscreen restore anchor missing",
             file=sys.stderr,
         )
         sys.exit(1)
-    wm_text = wm_text.replace(WM_RESTORE, WM_CHILD_BLOCK + WM_RESTORE, 1)
-    print(f"patched window_manager ({wm_version}): fullscreen enter ForceChildRefresh")
-else:
-    print(f"ok window_manager ({wm_version}) already patched: bordered enter and child refresh")
+    wm_text = wm_text.replace(WM_RESTORE, WM_DEFER_BLOCK + WM_RESTORE, 1)
+    print(f"patched window_manager ({wm_version}): defer Flutter child refresh")
+if WM_SAVE_OLD in wm_text:
+    wm_text = wm_text.replace(WM_SAVE_OLD, WM_SAVE_NEW, 1)
+    print(f"patched window_manager ({wm_version}): save restored window rect")
+elif "rcNormalPosition" not in wm_text:
+    print(
+        f"ERROR: window_manager ({wm_version}) fullscreen save anchor missing",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+if WM_EXIT_OLD in wm_text:
+    wm_text = wm_text.replace(WM_EXIT_OLD, WM_EXIT_NEW, 1)
+    print(f"patched window_manager ({wm_version}): restore saved window rect")
+elif "不能再靠 IsZoomed" not in wm_text:
+    print(
+        f"ERROR: window_manager ({wm_version}) fullscreen exit anchor missing",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+if WM_REFRESH_OLD in wm_text:
+    wm_text = wm_text.replace(WM_REFRESH_OLD, WM_REFRESH_NEW, 1)
+    print(f"patched window_manager ({wm_version}): Flutter view client rect")
+elif "FindWindowEx(main, nullptr, kFlutterViewWindowClassName, nullptr)" not in wm_text:
+    print(
+        f"ERROR: window_manager ({wm_version}) ForceChildRefresh anchor missing",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 wm_cpp.write_text(wm_text, encoding="utf-8")
+wm_plugin = wm_root / "windows" / "window_manager_plugin.cpp"
+plugin = wm_plugin.read_text(encoding="utf-8")
+plugin_leave_old = """      window_manager->ForceChildRefresh();
+      _EmitEvent("leave-full-screen");"""
+plugin_leave_new = """      _EmitEvent("leave-full-screen");"""
+if plugin_leave_old in plugin:
+    plugin = plugin.replace(plugin_leave_old, plugin_leave_new, 1)
+    print(f"patched window_manager plugin ({wm_version}): leave does not resize inline")
+plugin_msg = "message == WM_APP + 0x51"
+if plugin_msg not in plugin:
+    plugin_anchor = "  std::optional<LRESULT> result = std::nullopt;\n"
+    plugin_insert = """  std::optional<LRESULT> result = std::nullopt;
+
+  if (message == WM_APP + 0x51) {
+    window_manager->ForceChildRefresh();
+    return 0;
+  }
+"""
+    if plugin_anchor not in plugin:
+        print(
+            f"ERROR: window_manager plugin ({wm_version}) HandleWindowProc anchor missing",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    plugin = plugin.replace(plugin_anchor, plugin_insert, 1)
+    print(f"patched window_manager plugin ({wm_version}): deferred child refresh")
+wm_plugin.write_text(plugin, encoding="utf-8")
 wm_check = wm_cpp.read_text(encoding="utf-8")
 anchor = "} else {  // Restore from fullscreen"
 idx = wm_check.find(anchor)
 enter = wm_check[max(0, idx - 1800):idx] if idx >= 0 else ""
-if WM_MARKER not in enter or WM_CHILD not in enter or "ForceChildRefresh();" not in enter:
-    print("ERROR: window_manager enter-fullscreen missing child refresh", file=sys.stderr)
+if WM_MARKER not in enter or WM_DEFER not in enter or "WM_APP + 0x51" not in enter:
+    print("ERROR: window_manager enter-fullscreen missing deferred child refresh", file=sys.stderr)
+    sys.exit(1)
+if "ForceChildRefresh();" in enter:
+    print("ERROR: window_manager enter-fullscreen still refreshes inline", file=sys.stderr)
     sys.exit(1)
 if "::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);" not in enter:
     print("ERROR: window_manager frameless fullscreen lost SC_MAXIMIZE", file=sys.stderr)
     sys.exit(1)
 if enter.find("::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);") < enter.find("if (!is_frameless_)"):
     print("ERROR: window_manager bordered fullscreen still maximizes first", file=sys.stderr)
+    sys.exit(1)
+plugin_check = wm_plugin.read_text(encoding="utf-8")
+if "message == WM_APP + 0x51" not in plugin_check:
+    print("ERROR: window_manager plugin missing deferred child refresh", file=sys.stderr)
+    sys.exit(1)
+if plugin_leave_old in plugin_check:
+    print("ERROR: window_manager plugin still resizes inside WM_SIZE", file=sys.stderr)
     sys.exit(1)
 PY
 
