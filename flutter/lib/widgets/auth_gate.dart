@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
+import '../api/kotv_engine_url.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
 import 'chrome.dart';
@@ -40,6 +41,84 @@ Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async
     subtitle: '使用本站账号登录后即可观看',
   );
   return r.ok;
+}
+
+enum RemoteLoginPrompt {
+  /// 本机、未开鉴权，或已有有效登录态。
+  ready,
+  /// 刚刚在弹窗里登录成功。
+  signedIn,
+  /// 用户取消或登录失败。
+  cancelled,
+  /// 引擎暂时连不上，交给原来的重试。
+  skipped,
+}
+
+/// 远端地址需要登录时直接弹出登录框。
+Future<RemoteLoginPrompt> promptRemoteLoginIfNeeded(
+  BuildContext context,
+  WidgetRef ref, {
+  required String baseUrl,
+  bool allowCancel = true,
+}) async {
+  final normalized = baseUrl.trim();
+  if (normalized.isEmpty || kotvIsLocalEngineBaseUrl(normalized)) {
+    return RemoteLoginPrompt.ready;
+  }
+  final probe = KotvApi(baseUrl: normalized);
+  try {
+    final h = await probe.health().timeout(const Duration(seconds: 6));
+    if (h['ok'] != true) return RemoteLoginPrompt.skipped;
+  } catch (_) {
+    return RemoteLoginPrompt.skipped;
+  }
+  var allowReg = false;
+  var needsLogin = false;
+  try {
+    final st = await probe.authStatus().timeout(const Duration(seconds: 4));
+    needsLogin = st['remoteAccess'] == true || st['remoteAuth'] == true;
+    allowReg = st['allowRegister'] == true;
+  } catch (_) {}
+  if (!needsLogin) return RemoteLoginPrompt.ready;
+  final tok = await kotvAuthToken();
+  if (tok.isNotEmpty) {
+    try {
+      await probe.authMe();
+      return RemoteLoginPrompt.ready;
+    } catch (_) {
+      await kotvClearAuthToken();
+    }
+  }
+  if (!context.mounted) return RemoteLoginPrompt.cancelled;
+  final r = await showRemoteLoginDialog(
+    context,
+    ref,
+    api: probe,
+    allowRegister: allowReg,
+    allowCancel: allowCancel,
+    title: '远端登录',
+    subtitle: '登录成功后才使用远端仓库',
+  );
+  return r.ok ? RemoteLoginPrompt.signedIn : RemoteLoginPrompt.cancelled;
+}
+
+bool kotvMessageNeedsLogin(Object error) {
+  final s = '$error';
+  return s.contains('需要登录') || s.contains('登录已失效');
+}
+
+/// 点播、直播、详情碰到未登录时直接弹登录框。
+/// 先清掉失效 token，避免探测认为已经登录而把对话框跳过。
+/// 登录成功返回 true。
+Future<bool> kotvPresentLoginIfNeeded(BuildContext context, WidgetRef ref) async {
+  if (!context.mounted) return false;
+  await kotvClearAuthToken();
+  final prompt = await promptRemoteLoginIfNeeded(
+    context,
+    ref,
+    baseUrl: ref.read(engineLauncherProvider).baseUrl,
+  );
+  return prompt == RemoteLoginPrompt.signedIn;
 }
 
 class RemoteLoginResult {
@@ -91,6 +170,8 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
                 KotvTvTextField(
                   controller: userCtrl,
                   autofocus: true,
+                  keyboardType: TextInputType.text,
+                  textInputAction: TextInputAction.next,
                   style: TextStyle(color: p.fg),
                   decoration: InputDecoration(
                     hintText: '用户名',
@@ -104,6 +185,8 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
                 KotvTvTextField(
                   controller: passCtrl,
                   obscureText: true,
+                  keyboardType: TextInputType.visiblePassword,
+                  textInputAction: TextInputAction.done,
                   onSubmitted: (_) => Navigator.pop(ctx, true),
                   style: TextStyle(color: p.fg),
                   decoration: InputDecoration(

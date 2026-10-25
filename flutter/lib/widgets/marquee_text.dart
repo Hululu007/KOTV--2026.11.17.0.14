@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/kotv_emoji_text.dart';
+
 /// 外层焦点或悬停时，内部超长文案跟着跑马灯。
 class KotvMarqueeHost extends InheritedWidget {
   const KotvMarqueeHost({super.key, required this.active, required super.child});
@@ -106,7 +108,7 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
 
   double _measure(String text, TextStyle style, TextScaler scaler) {
     final tp = TextPainter(
-      text: TextSpan(text: text, style: style),
+      text: kotvEmojiSpan(text, style),
       textDirection: TextDirection.ltr,
       textScaler: scaler,
       maxLines: 1,
@@ -175,13 +177,10 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
         if (!_overflow || !_wantRun) {
           return SizedBox(
             width: maxW.isFinite && maxW > 0 ? maxW : null,
-            child: Text(
+            child: KotvEmojiText(
               widget.text,
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-              textAlign: widget.textAlign,
               style: style,
+              textAlign: widget.textAlign,
             ),
           );
         }
@@ -202,20 +201,16 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
                   children: [
                     Transform.translate(
                       offset: Offset(dx, 0),
-                      child: Text(
+                      child: KotvEmojiText(
                         widget.text,
-                        maxLines: 1,
-                        softWrap: false,
                         overflow: TextOverflow.visible,
                         style: style,
                       ),
                     ),
                     Transform.translate(
                       offset: Offset(dx + _textW + widget.blankGap, 0),
-                      child: Text(
+                      child: KotvEmojiText(
                         widget.text,
-                        maxLines: 1,
-                        softWrap: false,
                         overflow: TextOverflow.visible,
                         style: style,
                       ),

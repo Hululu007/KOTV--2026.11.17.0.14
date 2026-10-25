@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 /// | macOS | `~/Library/Application Support/KOTV` |
 /// | Linux | `~/.local/share/KOTV` |
 /// | Android | 应用 files/`KOTV`（与引擎 `KOTV_DATA_DIR` 一致） |
+/// | iOS | 应用 Application Support/`KOTV` |
 Future<Directory> kotvDataRoot() async {
   if (kIsWeb) {
     return Directory.systemTemp;
@@ -20,7 +21,21 @@ Future<Directory> kotvDataRoot() async {
   if (Platform.isAndroid) {
     return _androidDataRoot();
   }
+  if (Platform.isIOS) {
+    return _iosDataRoot();
+  }
   return kotvDataRootSync();
+}
+
+String? _iosDataRootPath;
+
+Future<Directory> _iosDataRoot() async {
+  final cached = _iosDataRootPath;
+  if (cached != null && cached.isNotEmpty) return _ensureDir(cached);
+  final support = await getApplicationSupportDirectory();
+  final dir = _ensureDir(p.join(support.path, 'KOTV'));
+  _iosDataRootPath = dir.path;
+  return dir;
 }
 
 /// 同步版数据根（桌面错误落盘等不能 await 的路径）。
@@ -38,6 +53,11 @@ Directory kotvDataRootSync() {
   }
   if (Platform.isAndroid) {
     return _ensureDir(p.join(Directory.systemTemp.path, 'KOTV'));
+  }
+  if (Platform.isIOS) {
+    final cached = _iosDataRootPath;
+    if (cached != null && cached.isNotEmpty) return _ensureDir(cached);
+    return Directory.systemTemp;
   }
   if (Platform.isWindows) {
     var base = Platform.environment['APPDATA']?.trim() ?? '';

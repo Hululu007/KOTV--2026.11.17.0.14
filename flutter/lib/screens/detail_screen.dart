@@ -48,6 +48,7 @@ import '../theme/kotv_theme.dart';
 import '../theme/stable_focus.dart';
 import '../util/kotv_app_dirs.dart';
 import '../vod/content_clicker.dart';
+import '../widgets/auth_gate.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
@@ -1213,10 +1214,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   @override
   void deactivate() {
-    // dispose 不能用 ref。仅在「本地已退出沉浸」时清壳层标志。
-    // 若仍 _immersiveFullscreen 却在这里清 provider，底栏/SafeArea 会立刻回来，
-    // 竖屏全屏画面按 MediaQuery 整屏高居中就会偏下，也不像沉浸。
-    if (!_immersiveFullscreen) {
+    // dispose 不能用 ref。详情还在树上的沉浸全屏不能清壳层标志，
+    // 否则底栏/SafeArea 立刻回来，竖屏全屏会按整屏高居中偏下。
+    // 路由已经弹出（isActive == false）时必须清，否则回首页后顶栏仍画进状态栏。
+    final route = ModalRoute.of(context);
+    final popped = route == null || !route.isActive;
+    if (popped || !_immersiveFullscreen) {
       try {
         ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
       } catch (_) {}
@@ -1486,6 +1489,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       }
     } catch (e) {
       if (!mounted) return;
+      if (kotvMessageNeedsLogin(e)) {
+        setState(() => _loading = false);
+        final ok = await kotvPresentLoginIfNeeded(context, ref);
+        if (ok && mounted) await _load();
+        return;
+      }
       setState(() {
         _error = '$e';
         _loading = false;
@@ -2116,6 +2125,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         // 上一集已卸文件。清舞台 URL，避免集号新、地址旧。
         final tip = '${data['msg'] ?? ''}'.trim();
         if (!mounted) return;
+        if (kotvMessageNeedsLogin(tip)) {
+          final ok = await kotvPresentLoginIfNeeded(context, ref);
+          if (ok && mounted && serial == _playAtSerial) {
+            unawaited(_playAt(epIdx, fullscreen: fullscreen));
+          }
+          return;
+        }
         _clearResumeSeek();
         setState(() {
           _playUrl = '';
@@ -2486,6 +2502,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       }
     } catch (e) {
       if (serial != _playAtSerial) return;
+      if (kotvMessageNeedsLogin(e)) {
+        final ok = await kotvPresentLoginIfNeeded(context, ref);
+        if (ok && mounted && serial == _playAtSerial) {
+          unawaited(_playAt(epIdx, fullscreen: fullscreen));
+        }
+        return;
+      }
       _stopBtProgressPoll();
       _playbackLive = false;
       _sessionStartedAt = null;
@@ -3792,10 +3815,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               if (_immersiveFullscreen && _detail != null)
                 _buildImmersiveFullscreenPage(externalVideo: true),
               // 非全屏：顶栏必须在视频层之上（返回/片名可点可见）。
-              // 壳层放宽顶 SafeArea 时用 padding.top；壳层仍垫顶时 padding 已为 0。
+              // 顶栏自己吃掉壳层没垫的状态栏高度，这里不再加一次。
               if (!_immersiveFullscreen)
                 Positioned(
-                  top: MediaQuery.paddingOf(context).top,
+                  top: 0,
                   left: 0,
                   right: 0,
                   child: buildTopBar(),

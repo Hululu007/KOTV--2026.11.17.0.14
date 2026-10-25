@@ -24,6 +24,9 @@ class FileBrowserScreen extends ConsumerStatefulWidget {
   final String root;
   final String title;
 
+  static int _open = 0;
+  static bool get isOpen => _open > 0;
+
   static Future<String?> pick(BuildContext context, {required String root, String title = '选择文件'}) {
     return Navigator.of(context, rootNavigator: true).push<String>(
       kotvDetailRoute(builder: (_) => FileBrowserScreen(root: root, title: title)),
@@ -43,9 +46,17 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   @override
   void initState() {
     super.initState();
+    FileBrowserScreen._open++;
     _dir = widget.root;
     _holdChromeCover();
     _load();
+  }
+
+  @override
+  void dispose() {
+    FileBrowserScreen._open--;
+    if (FileBrowserScreen._open < 0) FileBrowserScreen._open = 0;
+    super.dispose();
   }
 
   void _holdChromeCover() {

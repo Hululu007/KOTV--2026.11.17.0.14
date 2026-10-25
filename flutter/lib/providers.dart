@@ -110,3 +110,9 @@ void kotvPopChromeCover(StateController<bool> notifier) {
     notifier.state = false;
   }
 }
+
+/// 盖壳页已经不在树上，但深度或标志还留着。清掉，避免设置等页顶栏一直画进状态栏。
+void kotvResetChromeCover(StateController<bool> notifier) {
+  _detailChromeCoverDepth = 0;
+  if (notifier.state) notifier.state = false;
+}

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -71,8 +72,13 @@ class _KotvTvTextFieldState extends State<KotvTvTextField> {
     }
     if (widget.focusNode == null) {
       _ownedFocus = FocusNode(debugLabel: 'KotvTvTextField', onKeyEvent: _onKey);
+      _ownedFocus!.addListener(_onFocusChanged);
     } else {
       _bindExternal(widget.focusNode!);
+    }
+    if (widget.autofocus) {
+      // 对话框首帧还没布局完就 autofocus，键盘 token 会被吃掉，iOS 软键盘不再弹出。
+      WidgetsBinding.instance.addPostFrameCallback((_) => _focusAfterLayout());
     }
   }
 
@@ -82,8 +88,10 @@ class _KotvTvTextFieldState extends State<KotvTvTextField> {
     if (oldWidget.focusNode != widget.focusNode) {
       _unbindExternal();
       if (widget.focusNode == null) {
-        _ownedFocus ??= FocusNode(debugLabel: 'KotvTvTextField', onKeyEvent: _onKey);
+        _ownedFocus ??= FocusNode(debugLabel: 'KotvTvTextField', onKeyEvent: _onKey)
+          ..addListener(_onFocusChanged);
       } else {
+        _ownedFocus?.removeListener(_onFocusChanged);
         _ownedFocus?.dispose();
         _ownedFocus = null;
         _bindExternal(widget.focusNode!);
@@ -93,6 +101,7 @@ class _KotvTvTextFieldState extends State<KotvTvTextField> {
 
   void _bindExternal(FocusNode node) {
     _boundExternalFocus = node;
+    node.addListener(_onFocusChanged);
     _prevOnKeyEvent = node.onKeyEvent;
     node.onKeyEvent = (n, e) {
       final r = _onKey(n, e);
@@ -104,6 +113,7 @@ class _KotvTvTextFieldState extends State<KotvTvTextField> {
   void _unbindExternal() {
     final node = _boundExternalFocus;
     if (node != null) {
+      node.removeListener(_onFocusChanged);
       node.onKeyEvent = _prevOnKeyEvent;
     }
     _boundExternalFocus = null;
@@ -112,10 +122,35 @@ class _KotvTvTextFieldState extends State<KotvTvTextField> {
 
   @override
   void dispose() {
+    _ownedFocus?.removeListener(_onFocusChanged);
     _unbindExternal();
     _ownedController?.dispose();
     _ownedFocus?.dispose();
     super.dispose();
+  }
+
+  bool get _wantsSoftKeyboard {
+    if (kIsWeb || widget.readOnly) return false;
+    return defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android;
+  }
+
+  void _focusAfterLayout() {
+    if (!mounted || !widget.autofocus || widget.readOnly) return;
+    _focusNode.requestFocus();
+    _scheduleSoftKeyboard();
+  }
+
+  void _onFocusChanged() {
+    if (_focusNode.hasFocus) _scheduleSoftKeyboard();
+  }
+
+  void _scheduleSoftKeyboard() {
+    if (!_wantsSoftKeyboard) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_focusNode.hasFocus || widget.readOnly) return;
+      SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    });
   }
 
   bool _caretAtTextStart(TextSelection sel) {
@@ -175,7 +210,7 @@ class _KotvTvTextFieldState extends State<KotvTvTextField> {
       decoration: widget.decoration,
       style: widget.style,
       obscureText: widget.obscureText,
-      autofocus: widget.autofocus,
+      autofocus: false,
       maxLines: widget.maxLines,
       minLines: widget.minLines,
       keyboardType: widget.keyboardType,

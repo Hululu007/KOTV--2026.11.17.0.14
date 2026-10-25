@@ -13,6 +13,7 @@ import '../providers.dart';
 import '../desktop/mini_player_window.dart';
 import '../player/playback_guard.dart';
 import '../screens/detail_screen.dart';
+import '../widgets/auth_gate.dart';
 import '../screens/folder_screen.dart';
 
 /// 网盘授权等会写 `/TVBox/`；API 30+ 需「所有文件访问」。失败返回 false。
@@ -172,6 +173,10 @@ Future<void> _openVodItemBody(
       }
     } catch (e) {
       if (!context.mounted) return;
+      if (kotvMessageNeedsLogin(e)) {
+        await kotvPresentLoginIfNeeded(context, ref);
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$e')),
       );
@@ -217,10 +222,15 @@ Future<void> _openVodItemBody(
       }
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('切源失败: $e')),
-      );
-      return;
+      if (kotvMessageNeedsLogin(e)) {
+        final ok = await kotvPresentLoginIfNeeded(context, ref);
+        if (!ok || !context.mounted) return;
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('切源失败: $e')),
+        );
+        return;
+      }
     }
     if (!context.mounted) return;
   }

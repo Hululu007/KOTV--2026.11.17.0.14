@@ -32,10 +32,12 @@ import '../player/tv_remote_keys.dart';
 import '../providers.dart';
 import '../api/kotv_settings_cache.dart';
 import '../remote/remote_bridge.dart';
+import '../theme/kotv_emoji_text.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/stable_focus.dart';
 import '../theme/layout_scale.dart';
+import '../widgets/auth_gate.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
@@ -1143,6 +1145,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       }
     } catch (e) {
       if (!mounted) return;
+      if (kotvMessageNeedsLogin(e)) {
+        setState(() {
+          _loading = false;
+          _status = _liveIdleStatus;
+        });
+        final ok = await kotvPresentLoginIfNeeded(context, ref);
+        if (ok && mounted) {
+          await _loadSource(index, autoPlay: autoPlay, force: force);
+        }
+        return;
+      }
       setState(() {
         _loading = false;
         _status = '加载失败: $e';
@@ -1270,9 +1283,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       return true;
     } catch (e) {
       ctrl.dispose();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (!mounted) return false;
+      if (kotvMessageNeedsLogin(e)) {
+        await kotvPresentLoginIfNeeded(context, ref);
+        return false;
       }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
       return false;
     }
   }
@@ -2828,11 +2844,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   /// 未选中用省略号。选中才跑马灯，避免频道列表每一行都挂动画。
   Widget _liveListTitle(String text, {required bool selected, required TextStyle style, TextAlign align = TextAlign.left}) {
     if (!selected) {
-      return Text(
+      return KotvEmojiText(
         text,
-        maxLines: 1,
-        softWrap: false,
-        overflow: TextOverflow.ellipsis,
         textAlign: align,
         style: style,
       );

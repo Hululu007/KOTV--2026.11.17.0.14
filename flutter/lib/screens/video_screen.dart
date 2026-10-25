@@ -9,9 +9,11 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
+import '../theme/kotv_emoji_text.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../widgets/auth_gate.dart';
 import '../widgets/chrome.dart';
 import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
@@ -47,6 +49,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   bool _filtersExpanded = false;
   final Map<String, String> _extend = {};
   String? _statusMsg;
+  bool _authPromptOpen = false;
   bool _loading = true;
   bool _ready = false;
   List<ConfigBannerSlide> _apiBanners = [];
@@ -149,7 +152,14 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   Future<void> _bootstrap() async {
-    await _refreshLocalMeta();
+    try {
+      await _refreshLocalMeta();
+    } catch (e) {
+      if (_needsRemoteLogin('$e')) {
+        await _promptRemoteLogin(_loadGen);
+        return;
+      }
+    }
     // 暖启动：配置已 ready 且爬虫就绪时跳过 refreshRepo，直接拉首页。
     // 远端断开时由 _reload 内 recoverOrFallbackLocal 切本机并强制拉仓。
     var refreshRepo = true;
@@ -198,6 +208,33 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
     return cfg;
+  }
+
+  bool _needsRemoteLogin(String msg) {
+    return msg.contains('需要登录') || msg.contains('登录已失效');
+  }
+
+  Future<void> _promptRemoteLogin(int gen) async {
+    if (_authPromptOpen || !mounted || gen != _loadGen) return;
+    _authPromptOpen = true;
+    setState(() {
+      _loading = false;
+      _statusMsg = null;
+    });
+    final prompt = await promptRemoteLoginIfNeeded(
+      context,
+      ref,
+      baseUrl: ref.read(engineLauncherProvider).baseUrl,
+    );
+    _authPromptOpen = false;
+    if (!mounted || gen != _loadGen) return;
+    if (prompt == RemoteLoginPrompt.signedIn) {
+      unawaited(Future<void>(() => _reload(clearContent: true, refreshRepo: true)));
+      return;
+    }
+    if (prompt != RemoteLoginPrompt.ready) {
+      setState(() => _statusMsg = '需要登录');
+    }
   }
 
   Future<void> _reload({
@@ -279,6 +316,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       if (!ready) {
         final source = '${cfg['source'] ?? ''}'.trim();
         final err = '${cfg['error'] ?? ''}'.trim();
+        if (_needsRemoteLogin(err)) {
+          await _promptRemoteLogin(gen);
+          return;
+        }
         setState(() {
           _types = [];
           _filters = [];
@@ -326,6 +367,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     } catch (e) {
       if (!mounted || gen != _loadGen) return;
       final msg = '$e';
+      if (_needsRemoteLogin(msg)) {
+        await _promptRemoteLogin(gen);
+        return;
+      }
       if (msg.contains('TimeoutException') || msg.contains('Timeout')) {
         setState(() => _statusMsg = '首页加载超时，请重试或换源');
         return;
@@ -641,6 +686,15 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       });
     } catch (e) {
       if (!mounted) return;
+      if (kotvMessageNeedsLogin(e)) {
+        unawaited(() async {
+          final ok = await kotvPresentLoginIfNeeded(context, ref);
+          if (ok && mounted) {
+            unawaited(_reload(clearContent: true, refreshRepo: true));
+          }
+        }());
+        return;
+      }
       setState(() => _statusMsg = '页面数据异常: $e');
     }
   }
@@ -1440,9 +1494,18 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                 it.isFolder ? Icons.folder_outlined : Icons.movie_outlined,
                 color: p.primary,
               ),
-              title:
-                  Text(it.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-              subtitle: it.remarks.isEmpty ? null : Text(it.remarks),
+              title: KotvEmojiText(
+                it.name,
+                maxLines: 2,
+                style: TextStyle(color: p.fg, fontSize: 16),
+              ),
+              subtitle: it.remarks.isEmpty
+                  ? null
+                  : KotvEmojiText(
+                      it.remarks,
+                      maxLines: 1,
+                      style: TextStyle(color: p.muted, fontSize: 14),
+                    ),
               trailing: it.isFolder ? const Icon(Icons.chevron_right) : null,
               onTap: () => _open(it),
               onLongPress: () => _searchItem(it),

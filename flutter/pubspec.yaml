@@ -53,4 +53,9 @@ flutter:
   uses-material-design: true
   assets:
     - assets/engine/
-  # 内嵌字体仅 Win7 线：adapt-flutter-win7-sdk.sh 注入 fonts + fetch-flutter-fonts.sh（KOTV_WIN7=1）
+  # iOS / macOS 的 Skia 画不出 Apple Color Emoji。彩色表情用这份 CBDT。
+  # Win7 线再由 adapt-flutter-win7-sdk.sh 补 NotoSansSC / NotoEmoji。
+  fonts:
+    - family: NotoColorEmoji
+      fonts:
+        - asset: assets/fonts/NotoColorEmoji.ttf

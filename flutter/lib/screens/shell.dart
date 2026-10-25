@@ -22,6 +22,7 @@ import '../widgets/auth_gate.dart';
 import '../widgets/chrome.dart';
 import 'collect_screen.dart';
 import 'detail_screen.dart';
+import 'file_browser_screen.dart';
 import 'history_screen.dart';
 import 'live_screen.dart';
 import 'profile_screen.dart';
@@ -286,9 +287,23 @@ class _AppShellState extends ConsumerState<AppShell> {
     }
     final page = ref.watch(kotvPageProvider);
     final busy = ref.watch(uiBusyProvider);
-    final immersiveDetail =
-        ref.watch(detailImmersiveFullscreenProvider) || DetailScreen.isImmersive;
-    final detailCover = ref.watch(detailChromeCoverProvider);
+    final coverFlag = ref.watch(detailChromeCoverProvider);
+    final immersiveFlag = ref.watch(detailImmersiveFullscreenProvider);
+    // 标志只在详情/文件浏览器还在树上时生效。页已经拆掉但深度没归零时，
+    // 设置等页会关掉顶 SafeArea 和底栏，返回和标题画进状态栏。
+    final coverAlive = DetailScreen.isOpen || FileBrowserScreen.isOpen;
+    if (!coverAlive && (coverFlag || immersiveFlag)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (DetailScreen.isOpen || FileBrowserScreen.isOpen) return;
+        kotvResetChromeCover(ref.read(detailChromeCoverProvider.notifier));
+        if (ref.read(detailImmersiveFullscreenProvider)) {
+          ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
+        }
+      });
+    }
+    final immersiveDetail = coverAlive && (immersiveFlag || DetailScreen.isImmersive);
+    final detailCover = coverAlive && coverFlag;
     final bottomNav =
         KotvLayout.useBottomNav(context) && !immersiveDetail && !detailCover;
 

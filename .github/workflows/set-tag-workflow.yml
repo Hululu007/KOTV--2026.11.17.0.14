@@ -23,11 +23,12 @@ jobs:
 
       - id: get-latest-tag
         run: |
-          LATEST_TAG=$(git tag --list --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
-          if [ -z "$LATEST_TAG" ]; then
-            LATEST_TAG="v0.1.0"
+          VER=$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' flutter/pubspec.yaml | head -1)
+          if [ -z "$VER" ]; then
+            echo "flutter/pubspec.yaml 没有 version" >&2
+            exit 1
           fi
-          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "LATEST_TAG=v$VER" >> "$GITHUB_OUTPUT"
 
       - id: get-last-tag
         run: |

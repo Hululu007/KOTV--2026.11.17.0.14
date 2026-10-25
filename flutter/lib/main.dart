@@ -26,6 +26,7 @@ import 'theme/kotv_palette.dart';
 import 'theme/kotv_theme.dart';
 import 'util/kotv_app_dirs.dart';
 import 'util/kotv_image_cache.dart';
+import 'widgets/auth_gate.dart';
 import 'widgets/chrome.dart';
 import 'widgets/kotv_tv_text_field.dart';
 import 'widgets/h_scroll.dart';
@@ -221,12 +222,17 @@ Future<void> main() async {
     final tok = client.authToken.trim();
     final stored = client.engineBaseUrl.trim();
     if (stored.isNotEmpty && !kotvIsLocalEngineBaseUrl(stored) && tok.isEmpty) {
-      await KotvClientStore.update((d) {
-        d.engineBaseUrlDraft = kotvEffectiveEngineBaseUrl(stored);
-        d.engineBaseUrl = '';
-        d.remoteUsername = '';
-      });
-      engineUrl = kotvDefaultLocalEngineBaseUrl;
+      // iOS 没有本机引擎。地址还在、登录态没有时直接进远端，由首页弹出登录。
+      if (Platform.isIOS) {
+        engineUrl = kotvEffectiveEngineBaseUrl(stored);
+      } else {
+        await KotvClientStore.update((d) {
+          d.engineBaseUrlDraft = kotvEffectiveEngineBaseUrl(stored);
+          d.engineBaseUrl = '';
+          d.remoteUsername = '';
+        });
+        engineUrl = kotvDefaultLocalEngineBaseUrl;
+      }
     }
   }
   runApp(ProviderScope(
@@ -452,6 +458,16 @@ class _EngineOfflinePage extends ConsumerWidget {
     } else {
       await KotvClientStore.setEngineBaseUrl(stored);
       launcher.applyBaseUrl(stored);
+      if (!kotvIsLocalEngineBaseUrl(stored)) {
+        final nav = rootNavigatorKey.currentContext ?? context;
+        if (nav.mounted) {
+          final prompt = await promptRemoteLoginIfNeeded(nav, ref, baseUrl: stored);
+          if (prompt == RemoteLoginPrompt.cancelled) {
+            await KotvClientStore.clearEngine();
+            launcher.applyBaseUrl('');
+          }
+        }
+      }
     }
     KotvSettingsCache.clear();
     if (context.mounted) {

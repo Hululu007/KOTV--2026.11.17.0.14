@@ -239,7 +239,10 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
   @override
   void initState() {
     super.initState();
-    unawaited(_load());
+    // _load 里要读 View.of。initState 同步调用会直接失败，海报就一直是空的。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_load());
+    });
   }
 
   @override

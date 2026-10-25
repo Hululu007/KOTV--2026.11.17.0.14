@@ -72,7 +72,14 @@ List<String> _kotvFontFallbacks() {
   if (Platform.isAndroid) {
     return const ['sans-serif', 'Noto Sans CJK SC', 'Noto Color Emoji'];
   }
-  return const ['PingFang SC', 'Hiragino Sans GB', 'Apple Color Emoji'];
+  // 符号（┃、›）靠 Apple Symbols。彩色 emoji 不放进这条链：
+  // 标题是加粗，Apple Color Emoji 没有粗体，整段都会变成问号。
+  // 表情在 kotv_emoji_text 里单独用常规字重绘制。
+  return const [
+    'PingFang SC',
+    'Apple Symbols',
+    'Menlo',
+  ];
 }
 
 ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
@@ -91,7 +98,8 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
     onError: Colors.white,
     outline: palette.outline,
   );
-  final fallbacks = _kotvFontFallbacks();
+  final rawFallbacks = _kotvFontFallbacks();
+  final List<String>? fallbacks = rawFallbacks.isEmpty ? null : rawFallbacks;
   return ThemeData(
     useMaterial3: true,
     brightness: scheme.brightness,

@@ -3,27 +3,27 @@ import UIKit
 import Darwin
 
 @main
-@objc class AppDelegate: FlutterAppDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    GeneratedPluginRegistrant.register(with: self)
-    let ok = super.application(application, didFinishLaunchingWithOptions: launchOptions)
-    if let controller = window?.rootViewController as? FlutterViewController {
-      let channel = FlutterMethodChannel(
-        name: "kotv_host",
-        binaryMessenger: controller.binaryMessenger
-      )
-      channel.setMethodCallHandler { call, result in
-        if call.method == "getMemoryInfo" {
-          result(Self.memoryInfo())
-        } else {
-          result(FlutterMethodNotImplemented)
-        }
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let channel = FlutterMethodChannel(
+      name: "kotv_host",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    channel.setMethodCallHandler { call, result in
+      if call.method == "getMemoryInfo" {
+        result(Self.memoryInfo())
+      } else {
+        result(FlutterMethodNotImplemented)
       }
     }
-    return ok
   }
 
   private static func memoryInfo() -> [String: Int64] {

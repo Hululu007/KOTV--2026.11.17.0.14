@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
+import '../theme/kotv_emoji_text.dart';
 import '../theme/kotv_theme.dart';
 import '../util/kotv_wallpaper_cache.dart';
 import 'h_scroll.dart';
@@ -361,12 +362,13 @@ class AppPill extends StatelessWidget {
     final h = height * s;
     final w = width == null ? null : width! * s;
     final maxW = maxWidth == null ? null : maxWidth! * s;
+    final fallbacks = kotvFontFallbacks();
     final style = TextStyle(
       color: selected ? Colors.white : p.fg,
       fontSize: fontSize,
       fontWeight: FontWeight.w700,
       height: 1.2,
-      fontFamilyFallback: kotvFontFallbacks(),
+      fontFamilyFallback: fallbacks.isEmpty ? null : fallbacks,
     );
     final hasSuffix = suffix != null && suffix!.isNotEmpty;
     final labelText = marqueeWhenSelected
@@ -376,13 +378,10 @@ class AppPill extends StatelessWidget {
             active: selected,
             textAlign: hasSuffix ? TextAlign.left : TextAlign.center,
           )
-        : Text(
+        : KotvEmojiText(
             label,
-            maxLines: 1,
-            softWrap: false,
-            overflow: TextOverflow.ellipsis,
-            textAlign: hasSuffix ? TextAlign.left : TextAlign.center,
             style: style,
+            textAlign: hasSuffix ? TextAlign.left : TextAlign.center,
           );
     // 有 suffix 时拉满可用宽度，保证「（当前）」不被长 URL 挤掉。
     final effectiveWidth = w ?? (hasSuffix || marqueeWhenSelected ? double.infinity : null);
@@ -700,10 +699,11 @@ class _TopStatusBarState extends State<TopStatusBar> {
     final grow = LayoutScale.grow(context);
     final h = (compact ? 40.0 : (landscape ? 36.0 : 52.0)) * grow;
     final padH = compact ? 10.0 : (landscape ? 14.0 : 24.0 * s);
+    final topInset = kotvUnconsumedTopInset(context);
     return Container(
-      height: h,
+      height: h + topInset,
       color: p.statusBar,
-      padding: EdgeInsets.symmetric(horizontal: padH),
+      padding: EdgeInsets.fromLTRB(padH, topInset, padH, 0),
       child: LayoutBuilder(
         builder: (context, c) {
           final w = c.maxWidth;
@@ -815,6 +815,11 @@ class _NewsPill extends StatelessWidget {
   }
 }
 
+/// 壳层 SafeArea 没吃掉的顶部间距。盖页关掉壳层内边距时，顶栏仍要避开状态栏。
+double kotvUnconsumedTopInset(BuildContext context) {
+  return MediaQuery.paddingOf(context).top;
+}
+
 class LibraryTopBar extends StatelessWidget {
   const LibraryTopBar({
     super.key,
@@ -840,7 +845,7 @@ class LibraryTopBar extends StatelessWidget {
     final land = KotvLayout.isLandscapeCompact(context);
     final pad = EdgeInsets.fromLTRB(
       land ? 16 : (compact ? 12 : 50),
-      land ? 6 : 10,
+      (land ? 6 : 10) + kotvUnconsumedTopInset(context),
       land ? 16 : (compact ? 12 : 28),
       land ? 6 : 10,
     );

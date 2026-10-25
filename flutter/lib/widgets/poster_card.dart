@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../theme/kotv_emoji_text.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
@@ -105,10 +106,9 @@ class PosterCard extends StatelessWidget {
                             color: p.primary.withOpacity(0.9),
                             borderRadius: BorderRadius.circular(5 * s),
                           ),
-                          child: Text(
+                          child: KotvEmojiText(
                             item.remarks,
                             maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 12,
@@ -131,10 +131,9 @@ class PosterCard extends StatelessWidget {
                             horizontal: kotvPosterNamePad),
                         child: Align(
                           alignment: Alignment.center,
-                          child: Text(
+                          child: KotvEmojiText(
                             item.name,
                             maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.center,
                             style: kotvPosterNameStyle(
                               television: television,
@@ -207,18 +206,16 @@ class VodListTile extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  KotvEmojiText(
                     item.name,
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         color: p.fg, fontSize: 15, fontWeight: FontWeight.w600),
                   ),
                   if (item.remarks.isNotEmpty)
-                    Text(
+                    KotvEmojiText(
                       item.remarks,
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(color: p.muted, fontSize: 12),
                     ),
                 ],
