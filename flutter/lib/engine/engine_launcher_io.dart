@@ -25,9 +25,6 @@ class EngineLauncher {
   bool _androidSpiderServiceStarted = false;
   bool _noBundledEngine = false;
   String baseUrl = kotvDefaultLocalEngineBaseUrl;
-
-  /// 最近一次连接失败。空表示还没失败，或已经连上。
-  String connectError = '';
   KotvApi? _api;
   DateTime _lastStartAttempt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastResumeCheck = DateTime.fromMillisecondsSinceEpoch(0);
@@ -131,18 +128,10 @@ class EngineLauncher {
   Future<bool> recoverOrFallbackLocal({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
     if (kotvIsLocalEngineBaseUrl(baseUrl)) {
-      final ok = await recoverIfNeeded(forceRestart: forceRestart);
-      if (ok) connectError = '';
-      return ok;
+      return recoverIfNeeded(forceRestart: forceRestart);
     }
-    if (await _ping(baseUrl)) {
-      connectError = '';
-      return true;
-    }
-    if (Platform.isIOS) {
-      connectError = '无法连接 $baseUrl';
-      return false;
-    }
+    if (await _ping(baseUrl)) return true;
+    if (Platform.isIOS) return false;
     debugPrint('engine: remote unreachable → fallback local ($baseUrl)');
     try {
       // draft 保留，方便设置页再次登录；业务地址与登录态清掉。

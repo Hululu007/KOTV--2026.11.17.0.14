@@ -673,6 +673,59 @@ jobs:
             dist/KO影视-*-web-static.zip
           if-no-files-found: error
 
+  build-ios:
+    runs-on: macos-14
+    needs: [set-tag]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Package unsigned IPA
+        env:
+          LANG: en_US.UTF-8
+          LC_ALL: en_US.UTF-8
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          repo="$(pwd)"
+          if ! command -v pod >/dev/null 2>&1; then
+            brew install cocoapods
+          fi
+          chmod +x scripts/*.sh
+          # shellcheck source=scripts/kotv-fvp-deps.sh
+          source scripts/kotv-fvp-deps.sh
+          kotv_ensure_mdk_apple_pod
+          export KOTV_MDK_POD_PATH
+          flutter config --no-enable-swift-package-manager || true
+          ./scripts/flutter-pub-get.sh
+          cd flutter
+          flutter build ipa --no-codesign
+          app="build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app"
+          test -d "$app"
+          stage="$(mktemp -d)"
+          mkdir -p "$stage/Payload"
+          ditto "$app" "$stage/Payload/Runner.app"
+          ver="${KOTV_VERSION#v}"
+          mkdir -p "$repo/dist"
+          out="$repo/dist/KO影视-${ver}-ios.ipa"
+          rm -f "$out"
+          (cd "$stage" && zip -r -y -q "$out" Payload)
+          cp -f "$out" "$repo/KO影视-${ver}-ios.ipa"
+          ls -lh "$repo/KO影视-${ver}-ios.ipa"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          retention-days: 3
+          name: ios
+          path: KO影视-*-ios.ipa
+          if-no-files-found: error
+
   release:
     runs-on: ubuntu-latest
     needs:
@@ -685,6 +738,7 @@ jobs:
       - build-mac-amd64
       - build-android
       - build-web
+      - build-ios
     permissions:
       contents: write
     steps:
@@ -701,7 +755,8 @@ jobs:
             -name 'KO影视-*.zip' -o \
             -name 'KO影视-*.dmg' -o \
             -name 'KO影视-*-setup.exe' -o \
-            -name 'KO影视-*.apk' \
+            -name 'KO影视-*.apk' -o \
+            -name 'KO影视-*.ipa' \
           \) -print -exec cp -f {} ./release-files/ \;
           for spec in \
             "updater-linux-amd64/updater:updater-linux-amd64" \
@@ -744,6 +799,7 @@ jobs:
               "android-armv7": f"{base}/KO影视-{ver}-armv7.apk",
               "web-linux-amd64": f"{base}/KO影视-{ver}-web-linux-x86_64.zip",
               "web-static": f"{base}/KO影视-{ver}-web-static.zip",
+              "ios": f"{base}/KO影视-{ver}-ios.ipa",
             },
           }
           open("./release-files/version.json", "w").write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
@@ -793,6 +849,7 @@ jobs:
             echo "| Android aarch64 | [APK](${base}/KO影视-${ver}-aarch64.apk) |"
             echo "| Android armv7 | [APK](${base}/KO影视-${ver}-armv7.apk) |"
             echo "| **Web 包**（引擎同端口） | [引擎+Web](${base}/KO影视-${ver}-web-linux-x86_64.zip) · [仅 webapp](${base}/KO影视-${ver}-web-static.zip) |"
+            echo "| iOS（未签名） | [IPA](${base}/KO影视-${ver}-ios.ipa) |"
           } > ./RELEASE_NOTES.md
 
       - name: Create GitHub Release

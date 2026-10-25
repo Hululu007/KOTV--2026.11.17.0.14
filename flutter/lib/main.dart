@@ -14,7 +14,6 @@ import 'package:window_manager/window_manager.dart';
 import 'desktop/mini_player_window.dart';
 import 'api/kotv_client_store.dart';
 import 'api/kotv_engine_url.dart';
-import 'api/kotv_settings_cache.dart';
 import 'engine/engine_launcher.dart';
 import 'player/buffer_budget.dart';
 import 'player/play_headers.dart';
@@ -28,7 +27,6 @@ import 'util/kotv_app_dirs.dart';
 import 'util/kotv_image_cache.dart';
 import 'widgets/auth_gate.dart';
 import 'widgets/chrome.dart';
-import 'widgets/kotv_tv_text_field.dart';
 import 'widgets/h_scroll.dart';
 
 /// Release 构建里 build 抛异常会渲染成一块灰色空白（默认 ErrorWidget），
@@ -398,7 +396,12 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
         );
       },
       home: ready.when(
-        data: (ok) => ok ? const AppShell() : const _EngineOfflinePage(),
+        data: (ok) {
+          if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+            return _IosEntry(key: ValueKey(ok), engineUp: ok);
+          }
+          return ok ? const AppShell() : const _EngineOfflinePage();
+        },
         loading: () => const AppBackdrop(
           child: Scaffold(
             backgroundColor: Colors.transparent,
@@ -416,70 +419,78 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
   }
 }
 
+/// iOS：地址可用时先登录。取消登录才进入连接页。没有地址或地址不通时直接进连接页。
+class _IosEntry extends ConsumerStatefulWidget {
+  const _IosEntry({super.key, required this.engineUp});
+
+  final bool engineUp;
+
+  @override
+  ConsumerState<_IosEntry> createState() => _IosEntryState();
+}
+
+class _IosEntryState extends ConsumerState<_IosEntry> {
+  /// null：还在决定。true：进首页。false：连接页。
+  bool? _shell;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _decide());
+  }
+
+  Future<void> _decide() async {
+    final saved = await kotvSavedRemoteEngineAddress(ref);
+    if (!mounted) return;
+    if (!widget.engineUp) {
+      setState(() => _shell = false);
+      if (saved.isEmpty) return;
+      final typed = await kotvPromptEngineAddress(
+        context,
+        initial: saved,
+        errorText: '无法连接 $saved',
+      );
+      if (!mounted || typed == null || typed.isEmpty) return;
+      await kotvFinishEngineAddress(context, ref, typed);
+      return;
+    }
+    final prompt = await promptRemoteLoginIfNeeded(
+      context,
+      ref,
+      baseUrl: ref.read(engineLauncherProvider).baseUrl,
+      assumeReachable: true,
+    );
+    if (!mounted) return;
+    setState(() => _shell = prompt != RemoteLoginPrompt.cancelled);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_shell == true) return const AppShell();
+    if (_shell == false) return const _EngineOfflinePage();
+    return const AppBackdrop(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+      ),
+    );
+  }
+}
+
 /// 引擎未就绪页：必须作为 MaterialApp.home 的子树，dialog / Theme 才能用到 Navigator。
 class _EngineOfflinePage extends ConsumerWidget {
   const _EngineOfflinePage();
 
-  Future<void> _setupBackendUrl(BuildContext context, WidgetRef ref) async {
-    final launcher = ref.read(engineLauncherProvider);
-    final ctrl = TextEditingController(
-      text: kotvIsLocalEngineBaseUrl(launcher.baseUrl) ? '' : launcher.baseUrl,
-    );
-    final navCtx = rootNavigatorKey.currentContext ?? context;
-    final p = KotvPalette.of(navCtx);
-    final v = await showDialog<String>(
-      context: navCtx,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: p.dialogBg,
-        title: Text('连接后端服务', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
-        content: SizedBox(
-          width: LayoutScale.dp(ctx, 520),
-          child: KotvTvTextField(
-            controller: ctrl,
-            autofocus: true,
-            style: TextStyle(color: p.fg),
-            decoration: InputDecoration(
-              hintText: 'http://10.0.0.8:9978 或 https://api.example.com',
-              hintStyle: TextStyle(color: p.muted),
-            ),
-          ),
-        ),
-        actions: [
-          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
-          KotvFocusAction(label: '保存并重试', filled: true, onPressed: () => Navigator.pop(ctx, ctrl.text.trim())),
-        ],
-      ),
-    );
-    if (v == null) return;
-    final stored = kotvStoreEngineBaseUrl(v);
-    if (stored.isEmpty) {
-      launcher.connectError = (!kIsWeb &&
-              defaultTargetPlatform == TargetPlatform.iOS &&
-              v.isNotEmpty)
-          ? '没有本机引擎，请填写远端地址'
-          : '';
-      await KotvClientStore.clearEngine();
-      launcher.applyBaseUrl('');
-    } else {
-      await KotvClientStore.setEngineBaseUrl(stored);
-      launcher.applyBaseUrl(stored);
-      if (!kotvIsLocalEngineBaseUrl(stored)) {
-        final nav = rootNavigatorKey.currentContext ?? context;
-        if (nav.mounted) {
-          final prompt = await promptRemoteLoginIfNeeded(nav, ref, baseUrl: stored);
-          if (prompt == RemoteLoginPrompt.cancelled) {
-            launcher.connectError = '';
-            await KotvClientStore.clearEngine();
-            launcher.applyBaseUrl('');
-          }
-        }
-      }
+  Future<void> _editAddress(BuildContext context, WidgetRef ref) async {
+    final initial = await kotvSavedRemoteEngineAddress(ref);
+    if (!context.mounted) return;
+    final typed = await kotvPromptEngineAddress(context, initial: initial);
+    if (typed == null || !context.mounted) return;
+    if (typed.isEmpty) {
+      await kotvUseLocalEngine(ref);
+      return;
     }
-    KotvSettingsCache.clear();
-    if (context.mounted) {
-      await kotvClearImageMemory(ref: ref);
-    }
-    ref.invalidate(engineReadyProvider);
+    await kotvFinishEngineAddress(context, ref, typed);
   }
 
   @override
@@ -503,14 +514,6 @@ class _EngineOfflinePage extends ConsumerWidget {
                   textAlign: TextAlign.center,
                   style: TextStyle(color: muted),
                 ),
-                if (ref.read(engineLauncherProvider).connectError.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    ref.read(engineLauncherProvider).connectError,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
-                  ),
-                ],
                 const SizedBox(height: 16),
                 if (!kIsWeb)
                   Row(
@@ -520,13 +523,13 @@ class _EngineOfflinePage extends ConsumerWidget {
                         label: '连接后端',
                         width: 130,
                         autofocus: true,
-                        onTap: () => unawaited(_setupBackendUrl(context, ref)),
+                        onTap: () => unawaited(_editAddress(context, ref)),
                       ),
                       const SizedBox(width: 10),
                       AppPill(
                         label: '重试',
                         width: 90,
-                        onTap: () => ref.invalidate(engineReadyProvider),
+                        onTap: () => unawaited(kotvRetryEngineConnect(context, ref)),
                       ),
                     ],
                   )

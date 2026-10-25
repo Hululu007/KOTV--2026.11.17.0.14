@@ -9,7 +9,6 @@ class EngineLauncher {
 
   bool _shuttingDown = false;
   String baseUrl = kotvDefaultLocalEngineBaseUrl;
-  String connectError = '';
   KotvApi? _api;
 
   /// Web 固定同源，不会切本机进程。

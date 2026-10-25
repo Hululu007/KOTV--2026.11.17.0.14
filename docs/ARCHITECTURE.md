@@ -136,9 +136,10 @@ CI 在 **KOTV Build**（`github-action.yml`）统一构建：
 | macOS x64 | `build-mac-amd64` | DMG |
 | Android | `build-android` | aarch64 / armv7 APK |
 | Web | `build-web` | linux-x64 引擎 + `webapp/` ZIP |
+| iOS | `build-ios` | 未签名 IPA |
 
 > **Web / Win7 是主 CI 内的 job**，并非独立 workflow。
-> **iOS**：`flutter/ios/` 开发目录存在，但**尚未完全实现、未纳入 CI 构建**，不在已发布平台内。设计上 iOS 只做 UI 与播放：iOS 无法像 Android 那样动态加载 JAR/DEX，也不能在端侧跑 JVM/Python/QuickJS 爬虫运行时，本地抓取不可行，内容解析统一走远端 Go 引擎（共用 `/api/v1`）。
+> **iOS**：CI 打未签名 IPA（`build-ios`）。端上没有本机引擎，只做 UI 与播放：不能动态加载 JAR/DEX，也不能跑 JVM/Python/QuickJS。内容解析走远端 Go 引擎（共用 `/api/v1`）。未签名包不能直接装到真机。
 > **大屏（leanback）**：当前无独立大屏构建，Android 仅手机/平板 APK。
 
 打包脚本（`scripts/`）：

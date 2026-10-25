@@ -39,8 +39,9 @@ CI 统一在 **KOTV Build** 工作流里构建：
 | macOS x64 | DMG（KO影视.app） | Rosetta / 原生 x64 |
 | Android | aarch64 / armv7 APK | 手机/平板 |
 | Web | linux-x64 引擎 + `webapp/` ZIP | 引擎同端口放出页面 |
+| iOS | 未签名 IPA | 不能直接装到真机 |
 
-> **iOS**：仓库含 `flutter/ios/` 开发目录，但当前**未纳入 CI 构建**，属于后续嵌入目标（详见架构文档），不计入已发布平台。
+> **iOS**：CI 的 `build-ios` 打未签名 IPA。端上没有本机引擎，内容解析走远端 Go 引擎。
 > **大屏（leanback）**：当前 Android 构建为手机/平板 APK，无独立大屏构建。文档/UI 中出现的「电视」指 DLNA 投屏目标设备。
 
 ## 架构总览
@@ -137,11 +138,9 @@ open http://127.0.0.1:9978/remote/        # 遥控
 
 也可只解压 `*-web-static.zip` 到已有引擎目录下的 `webapp/`。
 
-## iOS（开发中，尚未发布）
+## iOS
 
-仓库含 `flutter/ios/` 开发目录，引擎可经 gomobile / 静态链嵌入 iOS App；但**当前 iOS 尚未完全实现，未纳入 CI 构建，也不在已发布平台内**。
-
-**设计上 iOS 只负责 UI 与播放链路**：受 iOS 沙盒与 App Store 限制，端侧无法动态加载 JAR / Python / JS 爬虫运行时——既没有可用的 JVM / Python，也不能像 Android 那样动态加载 DEX（ART）。因此本地抓取不可行，内容解析统一由远端 Go 引擎完成（共用同一套 `/api/v1`）。待嵌入与远端联调就绪后再开放。
+CI 的 `build-ios` 打未签名 IPA，不能直接装到真机。端上没有本机引擎，不能动态加载 JAR / Python / JS 爬虫运行时，内容解析走远端 Go 引擎（共用 `/api/v1`）。
 
 ## 数据目录
 
