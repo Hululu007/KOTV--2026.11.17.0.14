@@ -201,8 +201,6 @@ class MediaKitPlayback extends KotvPlayback {
     final base = kotvLavfOWithClearKey(clearKey);
     await set('demuxer-lavf-o', on ? '$base,http_persistent=0' : base);
     await set('demuxer-lavf-format', on ? 'hls' : '');
-    // 指定 hls 时不要把 m3u8 展开成分片列表。
-    await set('access-references', on ? 'no' : 'yes');
   }
 
   Future<void> _prepareOpts() async {
