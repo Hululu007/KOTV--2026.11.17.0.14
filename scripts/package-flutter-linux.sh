@@ -75,6 +75,7 @@ if [[ -f "$ROOT/cmd/updater/updater" ]]; then
 fi
 "$ROOT/scripts/verify-runtime.sh" "$BUNDLE/runtime" linux-x64
 [[ -x "$BUNDLE/kotv-engine" ]] || { echo "missing $BUNDLE/kotv-engine" >&2; exit 1; }
+kotv_flutter_strip_placeholder_assets "$BUNDLE/data/flutter_assets"
 kotv_flutter_asset_engines_reject "$BUNDLE"
 
 mkdir -p "$ROOT/dist"

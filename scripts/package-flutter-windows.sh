@@ -91,6 +91,11 @@ pwsh -NoProfile -Command "
   }
 "
 [[ -f "$RELEASE_DIR/kotv-engine.exe" ]] || { echo "missing Release kotv-engine.exe" >&2; exit 1; }
+kotv_flutter_strip_placeholder_assets "$RELEASE_DIR/data/flutter_assets"
+# 彩色表情字体只进 Win7 包。Win10/11 用 Segoe UI Emoji，这份 CBDT 会让安装包多出约 4.5MB。
+if [[ "${KOTV_WIN7:-}" != "1" ]]; then
+  kotv_flutter_drop_bundled_color_emoji "$RELEASE_DIR/data/flutter_assets"
+fi
 [[ -d "$RELEASE_DIR/runtime" ]] || { echo "missing $RELEASE_DIR/runtime (CMake install)" >&2; exit 1; }
 [[ ! -d "$RELEASE_DIR/runtime/runtime" ]] || { echo "nested runtime/runtime" >&2; exit 1; }
 

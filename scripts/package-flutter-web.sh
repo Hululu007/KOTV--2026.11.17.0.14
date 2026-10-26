@@ -64,6 +64,8 @@ cd "$ROOT/flutter"
 "$FLUTTER_BIN" build web --base-href / --no-wasm-dry-run
 kotv_flutter_asset_engines_restore
 kotv_flutter_asset_engines_reject "$ROOT/flutter/build/web"
+# Web 仍要 hls.js / no_sleep.js。引擎在包外的可执行文件，不在 flutter assets。
+kotv_flutter_strip_placeholder_assets "$ROOT/flutter/build/web/assets" 1
 
 echo "==> build engine"
 (cd "$ROOT/internal/spider" && go run gen_qjsinc.go)

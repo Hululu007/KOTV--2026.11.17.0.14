@@ -179,20 +179,7 @@ kotv_ios_strip_unused_assets() {
   local app="$1"
   local assets="$app/Frameworks/App.framework/flutter_assets"
   [[ -d "$assets" ]] || return 0
-  rm -rf \
-    "$assets/assets/engine" \
-    "$assets/packages/media_kit" \
-    "$assets/packages/wakelock_plus"
-  python3 - "$assets" <<'PY'
-import os, sys
-root = sys.argv[1]
-for dirpath, dirnames, filenames in os.walk(root, topdown=False):
-    if dirpath == root:
-        continue
-    if not os.listdir(dirpath):
-        os.rmdir(dirpath)
-        print("removed empty", os.path.relpath(dirpath, root), flush=True)
-PY
+  kotv_flutter_strip_placeholder_assets "$assets"
 }
 
 kotv_ios_require_ipa_entry() {

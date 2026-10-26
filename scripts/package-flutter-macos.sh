@@ -120,6 +120,10 @@ mkdir -p "$ROOT/dist" "$STAGE"
 
 echo "==> stage app from $APP_SRC"
 ditto "$APP_SRC" "$OUT_APP"
+while IFS= read -r assets_dir; do
+  [[ -n "$assets_dir" ]] || continue
+  kotv_flutter_strip_placeholder_assets "$assets_dir"
+done < <(find "$OUT_APP" -type d -name flutter_assets)
 
 chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
 "$ROOT/scripts/bundle-app-libmpv.sh" "$OUT_APP"
