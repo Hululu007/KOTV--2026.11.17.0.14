@@ -112,16 +112,9 @@ for line in sys.stdin:
     if not p or p.endswith("/"):
         continue
     parts = p.split("/")
-    # 只认 Android JNI：lib/<abi>/...；不要把 darwin/x86_64、win/x86 当 ABI
+    # 只认 Android JNI：lib/<abi>/...；不要把 darwin/x86_64、win/x86 当 ABI。
+    # assets/ 由 aapt 打入，packaging.resources.excludes 删不掉，留给后面的 tidy。
     if len(parts) >= 2 and parts[0] == "lib" and parts[1] in others:
-        hits.append(p)
-        continue
-    # assets/mpv-libs/<abi> 也会整目录打进 APK，单 ABI 包不能留另一套
-    if len(parts) >= 3 and parts[0] == "assets" and parts[1] == "mpv-libs" and parts[2] in others:
-        hits.append(p)
-        continue
-    # 32 位 ForceTech 只在 armv7 包里从 assets 解压
-    if p == "assets/libmitv.so" and want != "armeabi-v7a":
         hits.append(p)
         continue
     # Chaquopy：assets 里带 ABI 后缀的 zip/so

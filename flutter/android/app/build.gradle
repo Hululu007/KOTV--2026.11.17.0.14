@@ -165,8 +165,6 @@ android {
                 if (!kotvAbiFilters.contains(abi)) {
                     excludes += "lib/${abi}/**"
                     excludes += "**/lib/${abi}/**"
-                    excludes += "assets/mpv-libs/${abi}/**"
-                    excludes += "**/mpv-libs/${abi}/**"
                     excludes += "chaquopy/**/${abi}/**"
                     excludes += "chaquopy/**/*-${abi}*"
                     excludes += "chaquopy/**/*_${abi}*"
@@ -175,17 +173,9 @@ android {
                     excludes += "**/chaquopy/**/*_${abi}*"
                 }
             }
-            // forcetech 的 assets/libmitv.so 是 32 位 ELF，只给 armeabi-v7a 解压。
-            if (!kotvAbiFilters.contains("armeabi-v7a")) {
-                excludes += "assets/libmitv.so"
-            }
-            // 两个 ABI 都不要的构建期/桌面/测试残留。
+            // 这里只排除 JAR 资源。assets/（mpv-libs、libmitv.so、flutter_assets）
+            // 由 aapt 打入，excludes 匹配不到，打包后由 scripts/tidy-android-apk.sh 删。
             excludes += "**/.gitkeep"
-            excludes += "assets/test_*.js"
-            excludes += "assets/test_*.mjs"
-            excludes += "assets/flutter_assets/assets/engine/**"
-            excludes += "assets/flutter_assets/packages/media_kit/assets/web/**"
-            excludes += "assets/flutter_assets/packages/wakelock_plus/**"
             excludes += "OSGI-INF/**"
             excludes += "**/OSGI-INF/**"
             excludes += "XPP3_*_VERSION"
