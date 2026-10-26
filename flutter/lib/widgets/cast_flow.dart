@@ -38,6 +38,36 @@ Future<bool> ensureCastPermissions() async {
   }
 }
 
+/// 正在播放时投屏。没有地址就提示；投上后暂停本机，避免两边一起响。
+Future<void> kotvCastPlaying(
+  BuildContext context,
+  KotvApi api, {
+  required String playUrl,
+  required int positionMs,
+  required bool Function() isMounted,
+  required void Function(String status) setStatus,
+  required Future<void> Function() pauseLocal,
+}) async {
+  if (playUrl.isEmpty) {
+    if (isMounted()) showAppNews(context, '请先播放内容再投屏');
+    return;
+  }
+  final msg = await runKotvCast(
+    context,
+    api,
+    positionMs: positionMs,
+    onStatus: (m) {
+      if (isMounted()) setStatus(m);
+    },
+  );
+  if (msg != null && isMounted()) {
+    setStatus(msg);
+    if (msg.startsWith('已投屏到')) {
+      unawaited(pauseLocal());
+    }
+  }
+}
+
 /// 搜索设备并投送；弹窗显示投屏中/可断开；成功返回状态文案，取消返回 null。
 /// [positionMs] 为本机播放进度，投到电视时用于续看。
 Future<String?> runKotvCast(

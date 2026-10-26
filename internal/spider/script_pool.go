@@ -5,6 +5,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 // scriptPoolSize 同站 JS/Python 并发 worker 数（多用户打同一站时可并行）。
@@ -23,4 +25,84 @@ func scriptPoolSize() int {
 		n = 8
 	}
 	return n
+}
+
+// scriptSlotPool 是同站脚本槽位：空闲复用，满了等待，关闭后拒绝新调用。
+type scriptSlotPool[T any] struct {
+	mu      sync.Mutex
+	slots   []T
+	max     int
+	waiters []chan struct{}
+	busy    []bool
+	closed  atomic.Bool
+	spawn   func(index int) T
+}
+
+func (p *scriptSlotPool[T]) acquire() (T, int, error) {
+	var zero T
+	p.mu.Lock()
+	for {
+		if p.closed.Load() {
+			p.mu.Unlock()
+			return zero, -1, ErrScriptInterrupted
+		}
+		for i, s := range p.slots {
+			if !p.busy[i] {
+				p.busy[i] = true
+				p.mu.Unlock()
+				return s, i, nil
+			}
+		}
+		if len(p.slots) < p.max {
+			s := p.spawn(len(p.slots))
+			p.slots = append(p.slots, s)
+			p.busy = append(p.busy, true)
+			idx := len(p.slots) - 1
+			p.mu.Unlock()
+			return s, idx, nil
+		}
+		ch := make(chan struct{})
+		p.waiters = append(p.waiters, ch)
+		p.mu.Unlock()
+		<-ch
+		p.mu.Lock()
+	}
+}
+
+func (p *scriptSlotPool[T]) release(idx int) {
+	p.mu.Lock()
+	if idx >= 0 && idx < len(p.busy) {
+		p.busy[idx] = false
+	}
+	if len(p.waiters) > 0 {
+		ch := p.waiters[0]
+		p.waiters = p.waiters[1:]
+		p.mu.Unlock()
+		ch <- struct{}{}
+		return
+	}
+	p.mu.Unlock()
+}
+
+func (p *scriptSlotPool[T]) snapshot() []T {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]T(nil), p.slots...)
+}
+
+func (p *scriptSlotPool[T]) shutdown(done func(T)) {
+	p.mu.Lock()
+	p.closed.Store(true)
+	slots := append([]T(nil), p.slots...)
+	p.slots = nil
+	p.busy = nil
+	waiters := p.waiters
+	p.waiters = nil
+	p.mu.Unlock()
+	for _, ch := range waiters {
+		close(ch)
+	}
+	for _, s := range slots {
+		done(s)
+	}
 }

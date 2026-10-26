@@ -2,24 +2,21 @@ package spider
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
 )
 
 // jsPool 同站 QuickJS Runtime 池：每个 slot 独立 Runtime，多用户可并行打同一站。
 type jsPool struct {
 	key, api, ext, jar string
-
-	mu      sync.Mutex
-	slots   []*jsSpider
-	max     int
-	waiters []chan struct{}
-	busy    []bool
-	closed  atomic.Bool
+	scriptSlotPool[*jsSpider]
 }
 
 func newJsPool(key, api, ext, jar string) *jsPool {
-	return &jsPool{key: key, api: api, ext: ext, jar: jar, max: scriptPoolSize()}
+	p := &jsPool{key: key, api: api, ext: ext, jar: jar}
+	p.max = scriptPoolSize()
+	p.spawn = func(int) *jsSpider {
+		return newJsSpiderWorker(p.key, p.api, p.ext, p.jar)
+	}
+	return p
 }
 
 func (p *jsPool) retarget(key, ext, jar string) {
@@ -48,51 +45,6 @@ func newJsSpiderWorker(key, api, ext, jar string) *jsSpider {
 	}
 }
 
-func (p *jsPool) acquire() (*jsSpider, int, error) {
-	p.mu.Lock()
-	for {
-		if p.closed.Load() {
-			p.mu.Unlock()
-			return nil, -1, ErrScriptInterrupted
-		}
-		for i, s := range p.slots {
-			if !p.busy[i] {
-				p.busy[i] = true
-				p.mu.Unlock()
-				return s, i, nil
-			}
-		}
-		if len(p.slots) < p.max {
-			s := newJsSpiderWorker(p.key, p.api, p.ext, p.jar)
-			p.slots = append(p.slots, s)
-			p.busy = append(p.busy, true)
-			idx := len(p.slots) - 1
-			p.mu.Unlock()
-			return s, idx, nil
-		}
-		ch := make(chan struct{})
-		p.waiters = append(p.waiters, ch)
-		p.mu.Unlock()
-		<-ch
-		p.mu.Lock()
-	}
-}
-
-func (p *jsPool) release(idx int) {
-	p.mu.Lock()
-	if idx >= 0 && idx < len(p.busy) {
-		p.busy[idx] = false
-	}
-	if len(p.waiters) > 0 {
-		ch := p.waiters[0]
-		p.waiters = p.waiters[1:]
-		p.mu.Unlock()
-		ch <- struct{}{}
-		return
-	}
-	p.mu.Unlock()
-}
-
 func (p *jsPool) matchesClient(clientID string) bool {
 	if clientID == "" {
 		return true
@@ -108,10 +60,7 @@ func (p *jsPool) matchesClient(clientID string) bool {
 }
 
 func (p *jsPool) interrupt() {
-	p.mu.Lock()
-	slots := append([]*jsSpider(nil), p.slots...)
-	p.mu.Unlock()
-	for _, s := range slots {
+	for _, s := range p.snapshot() {
 		s.interrupt()
 	}
 }
@@ -209,18 +158,5 @@ func (p *jsPool) IsVideoFormat(u string) (bool, error) {
 	return s.IsVideoFormat(u)
 }
 func (p *jsPool) Destroy() {
-	p.mu.Lock()
-	p.closed.Store(true)
-	slots := append([]*jsSpider(nil), p.slots...)
-	p.slots = nil
-	p.busy = nil
-	waiters := p.waiters
-	p.waiters = nil
-	p.mu.Unlock()
-	for _, ch := range waiters {
-		close(ch)
-	}
-	for _, s := range slots {
-		s.Destroy()
-	}
+	p.shutdown(func(s *jsSpider) { s.Destroy() })
 }

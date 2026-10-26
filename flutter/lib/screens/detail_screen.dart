@@ -3365,25 +3365,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   Future<void> _cast() async {
-    if (_playUrl.isEmpty) {
-      if (mounted) showAppNews(context, '请先播放内容再投屏');
-      return;
-    }
-    final msg = await runKotvCast(
+    await kotvCastPlaying(
       context,
       ref.read(apiProvider),
+      playUrl: _playUrl,
       positionMs: _playback.position.inMilliseconds,
-      onStatus: (m) {
-        if (mounted) setState(() => _status = m);
-      },
+      isMounted: () => mounted,
+      setStatus: (m) => setState(() => _status = m),
+      pauseLocal: _playback.pause,
     );
-    if (msg != null && mounted) {
-      setState(() => _status = msg);
-      // 投屏成功后暂停本机，避免双端同播；播放器保留便于停投后续看。
-      if (msg.startsWith('已投屏到')) {
-        unawaited(_playback.pause());
-      }
-    }
   }
 
   Future<void> _enterMini() async {

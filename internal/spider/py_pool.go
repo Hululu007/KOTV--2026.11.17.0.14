@@ -2,24 +2,21 @@ package spider
 
 import (
 	"strings"
-	"sync"
-	"sync/atomic"
 )
 
 // pyPool 同站 Python 进程池：每个 slot 一个常驻 pySpider，多用户可并行打同一站。
 type pyPool struct {
 	key, api, ext, jar string
-
-	mu      sync.Mutex
-	slots   []*pySpider
-	max     int
-	waiters []chan struct{}
-	busy    []bool
-	closed  atomic.Bool
+	scriptSlotPool[*pySpider]
 }
 
 func newPyPool(key, api, ext, jar string) *pyPool {
-	return &pyPool{key: key, api: api, ext: ext, jar: jar, max: scriptPoolSize()}
+	p := &pyPool{key: key, api: api, ext: ext, jar: jar}
+	p.max = scriptPoolSize()
+	p.spawn = func(index int) *pySpider {
+		return &pySpider{key: p.key, api: p.api, ext: p.ext, jar: p.jar, sessionSlot: index}
+	}
+	return p
 }
 
 func (p *pyPool) retarget(key, ext, jar string) {
@@ -39,51 +36,6 @@ func (p *pyPool) retarget(key, ext, jar string) {
 	}
 }
 
-func (p *pyPool) acquire() (*pySpider, int, error) {
-	p.mu.Lock()
-	for {
-		if p.closed.Load() {
-			p.mu.Unlock()
-			return nil, -1, ErrScriptInterrupted
-		}
-		for i, s := range p.slots {
-			if !p.busy[i] {
-				p.busy[i] = true
-				p.mu.Unlock()
-				return s, i, nil
-			}
-		}
-		if len(p.slots) < p.max {
-			s := &pySpider{key: p.key, api: p.api, ext: p.ext, jar: p.jar, sessionSlot: len(p.slots)}
-			p.slots = append(p.slots, s)
-			p.busy = append(p.busy, true)
-			idx := len(p.slots) - 1
-			p.mu.Unlock()
-			return s, idx, nil
-		}
-		ch := make(chan struct{})
-		p.waiters = append(p.waiters, ch)
-		p.mu.Unlock()
-		<-ch
-		p.mu.Lock()
-	}
-}
-
-func (p *pyPool) release(idx int) {
-	p.mu.Lock()
-	if idx >= 0 && idx < len(p.busy) {
-		p.busy[idx] = false
-	}
-	if len(p.waiters) > 0 {
-		ch := p.waiters[0]
-		p.waiters = p.waiters[1:]
-		p.mu.Unlock()
-		ch <- struct{}{}
-		return
-	}
-	p.mu.Unlock()
-}
-
 func (p *pyPool) matchesClient(clientID string) bool {
 	if clientID == "" {
 		return true
@@ -99,9 +51,7 @@ func (p *pyPool) matchesClient(clientID string) bool {
 }
 
 func (p *pyPool) activeClientIDs() []string {
-	p.mu.Lock()
-	slots := append([]*pySpider(nil), p.slots...)
-	p.mu.Unlock()
+	slots := p.snapshot()
 	var out []string
 	for _, s := range slots {
 		if s == nil {
@@ -115,10 +65,7 @@ func (p *pyPool) activeClientIDs() []string {
 }
 
 func (p *pyPool) interrupt() {
-	p.mu.Lock()
-	slots := append([]*pySpider(nil), p.slots...)
-	p.mu.Unlock()
-	for _, s := range slots {
+	for _, s := range p.snapshot() {
 		s.interrupt()
 	}
 }
@@ -194,18 +141,5 @@ func (p *pyPool) IsVideoFormat(u string) (bool, error) {
 	return s.IsVideoFormat(u)
 }
 func (p *pyPool) Destroy() {
-	p.mu.Lock()
-	p.closed.Store(true)
-	slots := append([]*pySpider(nil), p.slots...)
-	p.slots = nil
-	p.busy = nil
-	waiters := p.waiters
-	p.waiters = nil
-	p.mu.Unlock()
-	for _, ch := range waiters {
-		close(ch)
-	}
-	for _, s := range slots {
-		s.Destroy()
-	}
+	p.shutdown(func(s *pySpider) { s.Destroy() })
 }
