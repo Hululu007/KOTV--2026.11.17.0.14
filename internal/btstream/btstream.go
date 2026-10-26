@@ -225,13 +225,7 @@ func waitBuffer(ctx context.Context, t *torrent.Torrent, file *torrent.File) err
 }
 
 func localURL(ih string) string {
-	port := localproxy.DefaultPort
-	if portFn != nil {
-		if p := portFn(); p > 0 {
-			port = p
-		}
-	}
-	return fmt.Sprintf("http://127.0.0.1:%d/proxy/bt/%s", port, ih)
+	return fmt.Sprintf("http://127.0.0.1:%d/proxy/bt/%s", localproxy.PortOrDefault(portFn), ih)
 }
 
 func pickVideo(files []*torrent.File) *torrent.File {

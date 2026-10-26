@@ -71,12 +71,7 @@ func NeedsLocalRelay(rawURL string) bool {
 }
 
 func enginePort() int {
-	if portFn != nil {
-		if p := portFn(); p > 0 {
-			return p
-		}
-	}
-	return localproxy.DefaultPort
+	return localproxy.PortOrDefault(portFn)
 }
 
 func register(rawURL string, headers map[string]string, filter bool) string {

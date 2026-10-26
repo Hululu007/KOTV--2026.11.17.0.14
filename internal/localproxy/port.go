@@ -36,6 +36,16 @@ func Port() int {
 	return p
 }
 
+// PortOrDefault 读取注入的端口；未设置或不是正数时用 DefaultPort。
+func PortOrDefault(fn func() int) int {
+	if fn != nil {
+		if p := fn(); p > 0 {
+			return p
+		}
+	}
+	return DefaultPort
+}
+
 // DefaultLocalBaseURL 本机引擎默认根（无 /proxy），供回落与客户端约定。
 func DefaultLocalBaseURL() string {
 	return fmt.Sprintf("http://127.0.0.1:%d", DefaultPort)

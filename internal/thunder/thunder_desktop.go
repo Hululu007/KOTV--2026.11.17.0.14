@@ -563,13 +563,7 @@ func entryKey(ih string, index int) string {
 }
 
 func localURL(key string) string {
-	port := localproxy.DefaultPort
-	if portFn != nil {
-		if p := portFn(); p > 0 {
-			port = p
-		}
-	}
-	return fmt.Sprintf("http://127.0.0.1:%d/proxy/bt/%s", port, url.PathEscape(key))
+	return fmt.Sprintf("http://127.0.0.1:%d/proxy/bt/%s", localproxy.PortOrDefault(portFn), url.PathEscape(key))
 }
 
 func md5str(s string) string {
