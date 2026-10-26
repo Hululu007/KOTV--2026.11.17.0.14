@@ -255,7 +255,7 @@ class PosterFlow extends StatelessWidget {
     required this.items,
     required this.onOpen,
     this.onLongPress,
-    this.padding = const EdgeInsets.fromLTRB(50, 10, 50, 24),
+    this.padding,
     this.size = 2,
     this.style = const KotvGridStyle(),
   });
@@ -263,7 +263,7 @@ class PosterFlow extends StatelessWidget {
   final List<VodItem> items;
   final void Function(VodItem) onOpen;
   final void Function(VodItem)? onLongPress;
-  final EdgeInsets padding;
+  final EdgeInsets? padding;
   final int size;
   final KotvGridStyle style;
 
@@ -273,7 +273,7 @@ class PosterFlow extends StatelessWidget {
       builder: (context, c) {
         final pad = KotvLayout.isCompact(context)
             ? const EdgeInsets.fromLTRB(12, 8, 12, 16)
-            : padding;
+            : (padding ?? const EdgeInsets.fromLTRB(50, 10, 50, 24));
         final inner = c.maxWidth - pad.horizontal;
         final m =
             kotvPosterMetrics(context, extent: inner, style: style, size: size);

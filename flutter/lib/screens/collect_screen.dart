@@ -4,13 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
-import '../theme/kotv_palette.dart';
-import '../theme/layout_scale.dart';
-import '../vod/grid_style.dart';
-import '../vod/vod_open.dart';
-import '../widgets/chrome.dart';
-import '../widgets/poster_card.dart';
-import 'shell.dart';
+import 'library_shelf.dart';
 
 class CollectScreen extends ConsumerStatefulWidget {
   const CollectScreen({super.key});
@@ -51,78 +45,24 @@ class _CollectScreenState extends ConsumerState<CollectScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final compact =
-        KotvLayout.isCompact(context) || KotvLayout.useBottomNav(context);
-    final land = KotvLayout.isLandscapeCompact(context);
-    final pillH = land ? 30.0 : (compact ? 32.0 : 40.0);
-    final pillFs = land ? 12.0 : (compact ? 13.0 : 15.0);
-    final delW = land ? 72.0 : (compact ? 88.0 : 120.0);
-    final clearW = land ? 72.0 : (compact ? 88.0 : 120.0);
-    final gap = land ? 6.0 : (compact ? 6.0 : 8.0);
-    final p = KotvPalette.of(context);
-    return Column(
-      children: [
-        LibraryTopBar(
-          onBack: () => kotvPageBack(ref),
-          onSearch: () => goKotvPage(ref, KotvPage.search),
-          onProfile: () => goKotvPage(ref, KotvPage.profile),
-          onNews: () => showAppNews(context, remoteHint(ref)),
-          title: '收藏',
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AppPill(
-                label: _deleting ? '完成' : (compact ? '删除' : '删除记录'),
-                width: delW,
-                height: pillH,
-                fontSize: pillFs,
-                selected: _deleting,
-                onTap: () => setState(() => _deleting = !_deleting),
-              ),
-              SizedBox(width: gap),
-              AppPill(
-                label: compact ? '清空' : '清空收藏',
-                width: clearW,
-                height: pillH,
-                fontSize: pillFs,
-                onTap: () async {
-                  await LocalCollect.clear();
-                  await _reload();
-                },
-              ),
-            ],
-          ),
-        ),
-        if (_deleting)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text('删除模式：点击海报即可移除',
-                style: TextStyle(color: p.primary, fontSize: 14)),
-          ),
-        Expanded(
-          child: _loading
-              ? Center(child: CircularProgressIndicator(color: p.primary))
-              : _items.isEmpty
-                  ? Center(
-                      child: Text('暂无收藏',
-                          style: TextStyle(color: p.muted, fontSize: 18)))
-                  : PosterFlow(
-                      items: _items,
-                      size: kotvWatchPosterSize(ref),
-                      style: kotvGridStyleOfItems(_items),
-                      padding: const EdgeInsets.fromLTRB(60, 10, 60, 24),
-                      onOpen: (it) async {
-                        if (_deleting) {
-                          await LocalCollect.remove(it);
-                          await _reload();
-                          return;
-                        }
-                        if (!context.mounted) return;
-                        await openVodItem(context, ref, it, site: it.site);
-                      },
-                    ),
-        ),
-      ],
+    return LibraryShelf(
+      title: '收藏',
+      items: _items,
+      loading: _loading,
+      deleting: _deleting,
+      emptyText: '暂无收藏',
+      clearShort: '清空',
+      clearFull: '清空收藏',
+      onToggleDelete: () => setState(() => _deleting = !_deleting),
+      onClear: () async {
+        await LocalCollect.clear();
+        await _reload();
+      },
+      onRemove: (it) async {
+        await LocalCollect.remove(it);
+        await _reload();
+      },
+      gridPadding: const EdgeInsets.fromLTRB(60, 10, 60, 24),
     );
   }
 }
