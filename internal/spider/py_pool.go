@@ -37,17 +37,7 @@ func (p *pyPool) retarget(key, ext, jar string) {
 }
 
 func (p *pyPool) matchesClient(clientID string) bool {
-	if clientID == "" {
-		return true
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for _, s := range p.slots {
-		if s.activeClientID() == clientID {
-			return true
-		}
-	}
-	return false
+	return pooledMatchesClient(&p.scriptSlotPool, clientID)
 }
 
 func (p *pyPool) activeClientIDs() []string {
@@ -65,23 +55,12 @@ func (p *pyPool) activeClientIDs() []string {
 }
 
 func (p *pyPool) interrupt() {
-	for _, s := range p.snapshot() {
-		s.interrupt()
-	}
-}
-
-func (p *pyPool) withSlot(fn func(s *pySpider, slot int) (string, error)) (string, error) {
-	s, idx, err := p.acquire()
-	if err != nil {
-		return "", err
-	}
-	defer p.release(idx)
-	return fn(s, idx)
+	pooledInterrupt(&p.scriptSlotPool)
 }
 
 func (p *pyPool) Init(ext string) error {
 	p.ext = ext
-	_, err := p.withSlot(func(s *pySpider, _ int) (string, error) {
+	_, err := withPooled(&p.scriptSlotPool, func(s *pySpider) (string, error) {
 		s.ext = ext
 		return "", s.Init(ext)
 	})
@@ -89,29 +68,29 @@ func (p *pyPool) Init(ext string) error {
 }
 
 func (p *pyPool) HomeContent(filter bool) (string, error) {
-	return p.withSlot(func(s *pySpider, _ int) (string, error) { return s.HomeContent(filter) })
+	return withPooled(&p.scriptSlotPool, func(s *pySpider) (string, error) { return s.HomeContent(filter) })
 }
 func (p *pyPool) HomeVideoContent() (string, error) {
-	return p.withSlot(func(s *pySpider, _ int) (string, error) { return s.HomeVideoContent() })
+	return withPooled(&p.scriptSlotPool, func(s *pySpider) (string, error) { return s.HomeVideoContent() })
 }
 func (p *pyPool) CategoryContent(tid, pg string, filter bool, extend map[string]string) (string, error) {
-	return p.withSlot(func(s *pySpider, _ int) (string, error) {
+	return withPooled(&p.scriptSlotPool, func(s *pySpider) (string, error) {
 		return s.CategoryContent(tid, pg, filter, extend)
 	})
 }
 func (p *pyPool) DetailContent(ids []string) (string, error) {
-	return p.withSlot(func(s *pySpider, _ int) (string, error) { return s.DetailContent(ids) })
+	return withPooled(&p.scriptSlotPool, func(s *pySpider) (string, error) { return s.DetailContent(ids) })
 }
 func (p *pyPool) SearchContent(key string, quick bool, pg string) (string, error) {
-	return p.withSlot(func(s *pySpider, _ int) (string, error) { return s.SearchContent(key, quick, pg) })
+	return withPooled(&p.scriptSlotPool, func(s *pySpider) (string, error) { return s.SearchContent(key, quick, pg) })
 }
 func (p *pyPool) PlayerContent(flag, id string, vipFlags []string) (string, error) {
-	return p.withSlot(func(s *pySpider, _ int) (string, error) {
+	return withPooled(&p.scriptSlotPool, func(s *pySpider) (string, error) {
 		return s.PlayerContent(flag, id, vipFlags)
 	})
 }
 func (p *pyPool) LiveContent(url string) (string, error) {
-	return p.withSlot(func(s *pySpider, _ int) (string, error) { return s.LiveContent(url) })
+	return withPooled(&p.scriptSlotPool, func(s *pySpider) (string, error) { return s.LiveContent(url) })
 }
 func (p *pyPool) Proxy(params map[string]string) (int, string, []byte, map[string]string, error) {
 	s, idx, err := p.acquire()
@@ -122,23 +101,13 @@ func (p *pyPool) Proxy(params map[string]string) (int, string, []byte, map[strin
 	return s.Proxy(params)
 }
 func (p *pyPool) Action(action string) (string, error) {
-	return p.withSlot(func(s *pySpider, _ int) (string, error) { return s.Action(action) })
+	return withPooled(&p.scriptSlotPool, func(s *pySpider) (string, error) { return s.Action(action) })
 }
 func (p *pyPool) ManualVideoCheck() (bool, error) {
-	s, idx, err := p.acquire()
-	if err != nil {
-		return false, err
-	}
-	defer p.release(idx)
-	return s.ManualVideoCheck()
+	return withPooled(&p.scriptSlotPool, func(s *pySpider) (bool, error) { return s.ManualVideoCheck() })
 }
 func (p *pyPool) IsVideoFormat(u string) (bool, error) {
-	s, idx, err := p.acquire()
-	if err != nil {
-		return false, err
-	}
-	defer p.release(idx)
-	return s.IsVideoFormat(u)
+	return withPooled(&p.scriptSlotPool, func(s *pySpider) (bool, error) { return s.IsVideoFormat(u) })
 }
 func (p *pyPool) Destroy() {
 	p.shutdown(func(s *pySpider) { s.Destroy() })

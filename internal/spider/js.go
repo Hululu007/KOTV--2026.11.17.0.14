@@ -91,6 +91,10 @@ func (s *jsSpider) activeClientID() string {
 	return v
 }
 
+func (s *jsSpider) matchesClient(clientID string) bool {
+	return clientID == "" || s.activeClientID() == clientID
+}
+
 var postMsgEmitter func(msg, clientID string)
 
 // SetPostMsgEmitter 由引擎进程注册。JS 吐司直接进界面队列，不再回环请求本机。

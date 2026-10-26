@@ -66,6 +66,10 @@ func (s *pySpider) activeClientID() string {
 	return v
 }
 
+func (s *pySpider) matchesClient(clientID string) bool {
+	return clientID == "" || s.activeClientID() == clientID
+}
+
 // CurrentPyCallScope 返回进行中 Python 调用的会话键。
 // 没有进行中的调用时键为空。同时有两个不同的键时 conflict 为真。
 func CurrentPyCallScope() (string, bool) {
@@ -227,25 +231,15 @@ func InterruptScriptSpidersForClient(clientID string) {
 	}
 	jsPyMu.Unlock()
 	for _, spider := range spiders {
-		switch s := spider.(type) {
-		case *pyPool:
-			if clientID == "" || s.matchesClient(clientID) {
-				s.interrupt()
-			}
-		case *pySpider:
-			if clientID == "" || s.activeClientID() == clientID {
-				s.interrupt()
-			}
-		case *jsPool:
-			if clientID == "" || s.matchesClient(clientID) {
-				s.interrupt()
-			}
-		case *jsSpider:
-			if clientID == "" || s.activeClientID() == clientID {
-				s.interrupt()
-			}
+		if s, ok := spider.(scriptInterrupt); ok && s.matchesClient(clientID) {
+			s.interrupt()
 		}
 	}
+}
+
+type scriptInterrupt interface {
+	matchesClient(string) bool
+	interrupt()
 }
 
 func (s *pySpider) ensureScript() (string, error) {

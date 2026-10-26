@@ -90,6 +90,36 @@ func (p *scriptSlotPool[T]) snapshot() []T {
 	return append([]T(nil), p.slots...)
 }
 
+func withPooled[T any, R any](p *scriptSlotPool[T], fn func(T) (R, error)) (R, error) {
+	var zero R
+	s, idx, err := p.acquire()
+	if err != nil {
+		return zero, err
+	}
+	defer p.release(idx)
+	return fn(s)
+}
+
+func pooledMatchesClient[T interface{ activeClientID() string }](p *scriptSlotPool[T], clientID string) bool {
+	if clientID == "" {
+		return true
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, s := range p.slots {
+		if s.activeClientID() == clientID {
+			return true
+		}
+	}
+	return false
+}
+
+func pooledInterrupt[T interface{ interrupt() }](p *scriptSlotPool[T]) {
+	for _, s := range p.snapshot() {
+		s.interrupt()
+	}
+}
+
 func (p *scriptSlotPool[T]) shutdown(done func(T)) {
 	p.mu.Lock()
 	p.closed.Store(true)

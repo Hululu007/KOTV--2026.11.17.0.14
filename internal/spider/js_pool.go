@@ -46,47 +46,24 @@ func newJsSpiderWorker(key, api, ext, jar string) *jsSpider {
 }
 
 func (p *jsPool) matchesClient(clientID string) bool {
-	if clientID == "" {
-		return true
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for _, s := range p.slots {
-		if s.activeClientID() == clientID {
-			return true
-		}
-	}
-	return false
+	return pooledMatchesClient(&p.scriptSlotPool, clientID)
 }
 
 func (p *jsPool) interrupt() {
-	for _, s := range p.snapshot() {
-		s.interrupt()
-	}
-}
-
-func (p *jsPool) withSlot(fn func(s *jsSpider) (string, error)) (string, error) {
-	s, idx, err := p.acquire()
-	if err != nil {
-		return "", err
-	}
-	defer p.release(idx)
-	return fn(s)
+	pooledInterrupt(&p.scriptSlotPool)
 }
 
 // withStickySlot 同 slot 连续跑多段（如 home→homeVod），避免二次 acquire 冷启新 Runtime。
 func (p *jsPool) withStickySlot(fn func(s *jsSpider) error) error {
-	s, idx, err := p.acquire()
-	if err != nil {
-		return err
-	}
-	defer p.release(idx)
-	return fn(s)
+	_, err := withPooled(&p.scriptSlotPool, func(s *jsSpider) (string, error) {
+		return "", fn(s)
+	})
+	return err
 }
 
 func (p *jsPool) Init(ext string) error {
 	p.ext = ext
-	_, err := p.withSlot(func(s *jsSpider) (string, error) {
+	_, err := withPooled(&p.scriptSlotPool, func(s *jsSpider) (string, error) {
 		s.ext = ext
 		return "", s.Init(ext)
 	})
@@ -108,27 +85,27 @@ func (p *jsPool) HomeBundle(filter bool) (home string, homeVod string, err error
 }
 
 func (p *jsPool) HomeContent(filter bool) (string, error) {
-	return p.withSlot(func(s *jsSpider) (string, error) { return s.HomeContent(filter) })
+	return withPooled(&p.scriptSlotPool, func(s *jsSpider) (string, error) { return s.HomeContent(filter) })
 }
 func (p *jsPool) HomeVideoContent() (string, error) {
-	return p.withSlot(func(s *jsSpider) (string, error) { return s.HomeVideoContent() })
+	return withPooled(&p.scriptSlotPool, func(s *jsSpider) (string, error) { return s.HomeVideoContent() })
 }
 func (p *jsPool) CategoryContent(tid, pg string, filter bool, extend map[string]string) (string, error) {
-	return p.withSlot(func(s *jsSpider) (string, error) {
+	return withPooled(&p.scriptSlotPool, func(s *jsSpider) (string, error) {
 		return s.CategoryContent(tid, pg, filter, extend)
 	})
 }
 func (p *jsPool) DetailContent(ids []string) (string, error) {
-	return p.withSlot(func(s *jsSpider) (string, error) { return s.DetailContent(ids) })
+	return withPooled(&p.scriptSlotPool, func(s *jsSpider) (string, error) { return s.DetailContent(ids) })
 }
 func (p *jsPool) SearchContent(key string, quick bool, pg string) (string, error) {
-	return p.withSlot(func(s *jsSpider) (string, error) { return s.SearchContent(key, quick, pg) })
+	return withPooled(&p.scriptSlotPool, func(s *jsSpider) (string, error) { return s.SearchContent(key, quick, pg) })
 }
 func (p *jsPool) PlayerContent(flag, id string, vipFlags []string) (string, error) {
-	return p.withSlot(func(s *jsSpider) (string, error) { return s.PlayerContent(flag, id, vipFlags) })
+	return withPooled(&p.scriptSlotPool, func(s *jsSpider) (string, error) { return s.PlayerContent(flag, id, vipFlags) })
 }
 func (p *jsPool) LiveContent(url string) (string, error) {
-	return p.withSlot(func(s *jsSpider) (string, error) { return s.LiveContent(url) })
+	return withPooled(&p.scriptSlotPool, func(s *jsSpider) (string, error) { return s.LiveContent(url) })
 }
 func (p *jsPool) Proxy(params map[string]string) (int, string, []byte, map[string]string, error) {
 	s, idx, err := p.acquire()
@@ -139,23 +116,13 @@ func (p *jsPool) Proxy(params map[string]string) (int, string, []byte, map[strin
 	return s.Proxy(params)
 }
 func (p *jsPool) Action(action string) (string, error) {
-	return p.withSlot(func(s *jsSpider) (string, error) { return s.Action(action) })
+	return withPooled(&p.scriptSlotPool, func(s *jsSpider) (string, error) { return s.Action(action) })
 }
 func (p *jsPool) ManualVideoCheck() (bool, error) {
-	s, idx, err := p.acquire()
-	if err != nil {
-		return false, err
-	}
-	defer p.release(idx)
-	return s.ManualVideoCheck()
+	return withPooled(&p.scriptSlotPool, func(s *jsSpider) (bool, error) { return s.ManualVideoCheck() })
 }
 func (p *jsPool) IsVideoFormat(u string) (bool, error) {
-	s, idx, err := p.acquire()
-	if err != nil {
-		return false, err
-	}
-	defer p.release(idx)
-	return s.IsVideoFormat(u)
+	return withPooled(&p.scriptSlotPool, func(s *jsSpider) (bool, error) { return s.IsVideoFormat(u) })
 }
 func (p *jsPool) Destroy() {
 	p.shutdown(func(s *jsSpider) { s.Destroy() })
