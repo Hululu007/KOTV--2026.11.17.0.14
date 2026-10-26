@@ -5,7 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ASSET="$ROOT/flutter/assets/mpv-libs"
-mkdir -p "$ASSET/windows" "$ASSET/linux" "$ASSET/macos"
+mkdir -p "$ASSET"
 
 export KOTV_BUILD_MPV_AV3A="${KOTV_BUILD_MPV_AV3A:-1}"
 
@@ -21,6 +21,7 @@ windows_siblings_ok() {
 }
 
 fetch_windows() {
+  mkdir -p "$ASSET/windows"
   local out="$ASSET/windows/mpv-2.dll"
   local kind_file="$ASSET/windows/.kind"
   local want_kind="av3a-dav1d-vulkan-d3d11-opengl-osc-dovi-lcms-xxhash-v23"
@@ -42,6 +43,7 @@ fetch_windows() {
 }
 
 fetch_linux() {
+  mkdir -p "$ASSET/linux"
   local out="$ASSET/linux/libmpv.so.2"
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
     && grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu' "$out" 2>/dev/null \
@@ -54,6 +56,7 @@ fetch_linux() {
 }
 
 fetch_macos() {
+  mkdir -p "$ASSET/macos"
   local out="$ASSET/macos/libmpv.dylib"
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
     && grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu' "$out" 2>/dev/null \
@@ -114,5 +117,6 @@ KOTV_VERIFY_PLAT="${KOTV_VERIFY_PLAT:-${KOTV_FETCH_DESKTOP_PLAT:-}}" \
 KOTV_EXPECT_MPV_AV3A="${KOTV_EXPECT_MPV_AV3A:-1}" \
 KOTV_MPV_WIN7="${KOTV_MPV_WIN7:-${KOTV_WIN7:-0}}" \
 "$ROOT/scripts/verify-desktop-mpv-libs.sh"
+find "$ASSET" -mindepth 1 -maxdepth 1 -type d -empty -delete
 du -sh "$ASSET"/* 2>/dev/null || true
 echo "==> done"

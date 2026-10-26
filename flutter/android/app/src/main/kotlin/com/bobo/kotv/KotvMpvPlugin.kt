@@ -37,8 +37,7 @@ import org.json.JSONObject
 
 /**
  * 原生 MPV：[MPVLib] + SurfaceView/TextureView（PlayerView.setRender）。
- *
- * native 库从 assets/mpv-libs/{abi}/ 解压加载。
+ * 套件在 jniLibs；assets/mpv-libs 只留 Vulkan stub。
  */
 class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler,
   MPVLib.EventObserver {

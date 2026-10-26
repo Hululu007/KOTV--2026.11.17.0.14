@@ -112,6 +112,7 @@ android {
             // fvp 与 ass-kt 都带 libass.so；Exo ASS 用 peerless2012，取其一即可。
             pickFirsts += "**/libass.so"
             useLegacyPackaging = true
+            excludes += "**/.gitkeep"
             for (abi in kotvAllAbis) {
                 if (!kotvAbiFilters.contains(abi)) {
                     excludes += "**/lib/${abi}/**"
@@ -164,6 +165,8 @@ android {
                 if (!kotvAbiFilters.contains(abi)) {
                     excludes += "lib/${abi}/**"
                     excludes += "**/lib/${abi}/**"
+                    excludes += "assets/mpv-libs/${abi}/**"
+                    excludes += "**/mpv-libs/${abi}/**"
                     excludes += "chaquopy/**/${abi}/**"
                     excludes += "chaquopy/**/*-${abi}*"
                     excludes += "chaquopy/**/*_${abi}*"
@@ -172,6 +175,32 @@ android {
                     excludes += "**/chaquopy/**/*_${abi}*"
                 }
             }
+            // forcetech 的 assets/libmitv.so 是 32 位 ELF，只给 armeabi-v7a 解压。
+            if (!kotvAbiFilters.contains("armeabi-v7a")) {
+                excludes += "assets/libmitv.so"
+            }
+            // 两个 ABI 都不要的构建期/桌面/测试残留。
+            excludes += "**/.gitkeep"
+            excludes += "assets/test_*.js"
+            excludes += "assets/test_*.mjs"
+            excludes += "assets/flutter_assets/assets/engine/**"
+            excludes += "assets/flutter_assets/packages/media_kit/assets/web/**"
+            excludes += "assets/flutter_assets/packages/wakelock_plus/**"
+            excludes += "OSGI-INF/**"
+            excludes += "**/OSGI-INF/**"
+            excludes += "XPP3_*_VERSION"
+            excludes += "kotlin-tooling-metadata.json"
+            excludes += "DebugProbesKt.bin"
+            excludes += "r8-version.properties"
+            excludes += "org/bouncycastle/pqc/crypto/picnic/**"
+            excludes += "google/protobuf/*.proto"
+            excludes += "core/java_features_proto*"
+            excludes += "META-INF/*.version"
+            excludes += "META-INF/version-control-info.textproto"
+            excludes += "META-INF/**/LICENSE*"
+            excludes += "META-INF/**/NOTICE*"
+            excludes += "META-INF/**/DEPENDENCIES*"
+            excludes += "META-INF/com/android/build/gradle/**"
         }
     }
 }
@@ -270,7 +299,7 @@ tasks.register("prepareKotvEngineSo") {
     }
 }
 
-// 页内原生 MPV：assets/mpv-libs + libvulkan/libkotv_dl stub（缺失时拉取/编译）。
+// 页内原生 MPV：套件进 jniLibs，assets/mpv-libs 只留 Vulkan stub。
 tasks.register("prepareKotvMpvNative", Exec) {
     workingDir = repoRoot
     commandLine "bash", "scripts/prepare-android-mpv-native.sh"

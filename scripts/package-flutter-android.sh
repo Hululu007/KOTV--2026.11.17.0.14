@@ -116,6 +116,14 @@ for line in sys.stdin:
     if len(parts) >= 2 and parts[0] == "lib" and parts[1] in others:
         hits.append(p)
         continue
+    # assets/mpv-libs/<abi> 也会整目录打进 APK，单 ABI 包不能留另一套
+    if len(parts) >= 3 and parts[0] == "assets" and parts[1] == "mpv-libs" and parts[2] in others:
+        hits.append(p)
+        continue
+    # 32 位 ForceTech 只在 armv7 包里从 assets 解压
+    if p == "assets/libmitv.so" and want != "armeabi-v7a":
+        hits.append(p)
+        continue
     # Chaquopy：assets 里带 ABI 后缀的 zip/so
     if "chaquopy" in p.lower():
         for a in others:
@@ -135,8 +143,10 @@ if hits:
     exit 1
   fi
   cp -f "$src" "$ROOT/dist/$out_name"
+  "$ROOT/scripts/tidy-android-apk.sh" "$ROOT/dist/$out_name" "$abi_filter"
   ls -lh "$ROOT/dist/$out_name"
   "$ROOT/scripts/verify-android-mpv-apk.sh" "$ROOT/dist/$out_name"
+  "$ROOT/scripts/verify-android-apk-tidy.sh" "$ROOT/dist/$out_name" "$abi_filter"
   # 校验 targetSdk（须为 KOTV_TARGET_SDK，默认 28）
   if command -v aapt >/dev/null 2>&1 || [[ -n "${ANDROID_HOME:-}" ]]; then
     local aapt_bin=""

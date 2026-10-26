@@ -62,7 +62,7 @@ sync_mpv_to_jni() {
   echo "  ok $abi: staging assets → jniLibs"
 }
 
-# assets 只留 Vulkan stub（+ README）；其余 .so 已在 jniLibs，删掉避免 APK 重复。
+# assets 只留 Vulkan stub；其余 .so 已在 jniLibs，删掉避免 APK 重复。
 strip_assets_keep_vulkan_stub() {
   local abi="$1"
   local base="$ROOT/flutter/android/app/src/main/assets/mpv-libs/$abi"

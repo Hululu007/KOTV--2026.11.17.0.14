@@ -46,6 +46,28 @@ if [[ "$missing" != 0 ]]; then
   exit 1
 fi
 
+foreign="$(printf '%s\n' "$listing" | awk -F/ -v have="$(printf '%s' "$abis" | tr '\n' ' ')" '
+  $1=="assets" && $2=="mpv-libs" && $3!="" {
+    abi=$3
+    if (index(" " have " ", " " abi " ")==0) print
+  }
+')"
+if [[ -n "$foreign" ]]; then
+  echo "ERROR: APK contains mpv-libs for an ABI that is not in lib/:" >&2
+  printf '%s\n' "$foreign" >&2
+  exit 1
+fi
+
+if grep -qxF "assets/libmitv.so" <<<"$listing"; then
+  if ! grep -qxF "armeabi-v7a" <<<"$abis"; then
+    echo "ERROR: assets/libmitv.so is 32-bit and must not ship in an APK without armeabi-v7a" >&2
+    exit 1
+  fi
+elif grep -qxF "armeabi-v7a" <<<"$abis"; then
+  echo "ERROR: armeabi-v7a APK missing assets/libmitv.so" >&2
+  exit 1
+fi
+
 while IFS= read -r abi; do
   [[ -n "$abi" ]] || continue
   case "$abi" in arm64-v8a|armeabi-v7a) ;; *) continue ;; esac
