@@ -48,7 +48,7 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
     super.initState();
     FileBrowserScreen._open++;
     _dir = widget.root;
-    _scheduleChromeCover();
+    _chromeCover.holdAfterFrame(context, () => mounted, () => ref.read(detailChromeCoverProvider.notifier));
     _load();
   }
 
@@ -59,18 +59,10 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
     super.dispose();
   }
 
-  void _scheduleChromeCover() {
-    _chromeCover.holdAfterFrame(() {
-      if (!mounted) return false;
-      final route = ModalRoute.of(context);
-      return route == null || route.isActive;
-    }, () => ref.read(detailChromeCoverProvider.notifier));
-  }
-
   @override
   void activate() {
     super.activate();
-    _scheduleChromeCover();
+    _chromeCover.holdAfterFrame(context, () => mounted, () => ref.read(detailChromeCoverProvider.notifier));
   }
 
   bool get _isRoot {

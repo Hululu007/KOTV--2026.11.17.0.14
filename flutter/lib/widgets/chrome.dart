@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -703,7 +702,7 @@ class _TopStatusBarState extends State<TopStatusBar> {
     final topInset = kotvUnconsumedTopInset(context);
     return Container(
       height: h + topInset,
-      color: compact ? Colors.transparent : p.statusBar,
+      color: p.statusBar,
       padding: EdgeInsets.fromLTRB(padH, topInset, padH, 0),
       child: LayoutBuilder(
         builder: (context, c) {
@@ -785,7 +784,6 @@ class _NewsPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = LayoutScale.layoutOf(context);
     final grow = LayoutScale.grow(context);
     final p = KotvPalette.of(context);
     final radius = 16 * grow;
@@ -819,42 +817,6 @@ class _NewsPill extends StatelessWidget {
 /// 壳层 SafeArea 没吃掉的顶部间距。盖页关掉壳层内边距时，顶栏仍要避开状态栏。
 double kotvUnconsumedTopInset(BuildContext context) {
   return MediaQuery.paddingOf(context).top;
-}
-
-/// 手机首页顶栏和底栏。模糊壁纸，罩色透明度亮暗相同，接近系统底栏那种通透。
-class KotvFrostedBar extends StatelessWidget {
-  const KotvFrostedBar({super.key, required this.child, this.topEdge = false});
-
-  final Widget child;
-
-  /// 底栏用上沿细线，顶栏用下沿细线。
-  final bool topEdge;
-
-  static const Color _lightTint = Color(0x33F7F8FC);
-  static const Color _darkTint = Color(0x3312161E);
-  static const Color _lightLine = Color(0x14000000);
-  static const Color _darkLine = Color(0x14FFFFFF);
-
-  @override
-  Widget build(BuildContext context) {
-    final light = KotvPalette.of(context).light;
-    final line = BorderSide(color: light ? _lightLine : _darkLine, width: 0.5);
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 48, sigmaY: 48),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: light ? _lightTint : _darkTint,
-            border: Border(
-              top: topEdge ? line : BorderSide.none,
-              bottom: topEdge ? BorderSide.none : line,
-            ),
-          ),
-          child: child,
-        ),
-      ),
-    );
-  }
 }
 
 class LibraryTopBar extends StatelessWidget {
@@ -1031,7 +993,7 @@ class _CategoryNavBarState extends State<CategoryNavBar> {
     final grow = LayoutScale.grow(context);
     return Container(
       height: (compact ? 40.0 : 48.0) * grow,
-      color: compact ? Colors.transparent : p.catBar,
+      color: p.catBar,
       padding: EdgeInsets.symmetric(
           horizontal: compact ? 10.0 : 24.0 * s, vertical: 6 * grow),
       child: FocusTraversalGroup(

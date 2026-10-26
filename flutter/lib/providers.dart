@@ -128,10 +128,12 @@ class KotvChromeCoverSession {
     held = true;
   }
 
-  /// initState/activate 里不能改 provider。等这一帧画完再盖壳。
-  void holdAfterFrame(bool Function() alive, StateController<bool> Function() read) {
+  /// initState/activate 里不能改 provider。等这一帧画完，页面还在栈上再盖壳。
+  void holdAfterFrame(BuildContext context, bool Function() mounted, StateController<bool> Function() read) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!alive()) return;
+      if (!mounted()) return;
+      final route = ModalRoute.of(context);
+      if (route != null && !route.isActive) return;
       hold(read());
     });
   }

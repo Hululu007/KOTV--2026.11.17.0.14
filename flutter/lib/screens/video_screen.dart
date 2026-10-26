@@ -897,7 +897,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                 orElse: () => '…'));
     final busy = ref.watch(uiBusyProvider);
     final onHome = (_tid ?? '').isEmpty;
-    final compactHeader = KotvLayout.isCompact(context);
     final header = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -953,7 +952,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     );
     return Column(
       children: [
-        compactHeader ? KotvFrostedBar(child: header) : header,
+        header,
         if (ready && !onHome && _filtersExpanded && _filters.isNotEmpty)
           _buildFilters(),
         if (ready && _statusMsg != null)
