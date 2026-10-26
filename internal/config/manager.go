@@ -429,16 +429,9 @@ func (m *Manager) reloadFresh(source string, loadJar bool) error {
 	}
 	lower := strings.ToLower(source)
 	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-		cfg := &database.Config{Type: database.ConfigTypeSite, URL: source}
-		if m.db != nil {
-			found, err := m.db.FindConfig(source, database.ConfigTypeSite)
-			if err != nil {
-				return err
-			}
-			if found != nil {
-				cfg = found
-				cfg.URL = source
-			}
+		cfg, err := m.freshSiteConfig(source)
+		if err != nil {
+			return err
 		}
 		return m.parseConfig(cfg, false, loadJar)
 	}
@@ -452,18 +445,27 @@ func (m *Manager) ReloadJSON(source string) error {
 	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 		return fmt.Errorf("不是 http(s) 仓库")
 	}
-	cfg := &database.Config{Type: database.ConfigTypeSite, URL: source}
-	if m.db != nil {
-		found, err := m.db.FindConfig(source, database.ConfigTypeSite)
-		if err != nil {
-			return err
-		}
-		if found != nil {
-			cfg = found
-			cfg.URL = source
-		}
+	cfg, err := m.freshSiteConfig(source)
+	if err != nil {
+		return err
 	}
 	return m.parseConfig(cfg, false, false)
+}
+
+func (m *Manager) freshSiteConfig(source string) (*database.Config, error) {
+	cfg := &database.Config{Type: database.ConfigTypeSite, URL: source}
+	if m.db == nil {
+		return cfg, nil
+	}
+	found, err := m.db.FindConfig(source, database.ConfigTypeSite)
+	if err != nil {
+		return nil, err
+	}
+	if found != nil {
+		cfg = found
+		cfg.URL = source
+	}
+	return cfg, nil
 }
 
 // SourceDisplayName 无接口名时回落为完整地址（勿截成路径末段）。

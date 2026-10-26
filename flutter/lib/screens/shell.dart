@@ -500,12 +500,7 @@ Future<void> goKotvPage(WidgetRef ref, KotvPage page, {bool recordHistory = true
   // 悬浮小窗开着时不切页：换根路由会卸掉这个唯一还在出声的实例。切到直播仍卸掉。
   if (MiniPlayerWindow.active && page != KotvPage.live) return;
   if (recordHistory && cur != page) {
-    final stack = List<KotvPage>.from(ref.read(kotvPageStackProvider));
-    stack.add(cur);
-    while (stack.length > 24) {
-      stack.removeAt(0);
-    }
-    ref.read(kotvPageStackProvider.notifier).state = stack;
+    kotvRememberPage(ref, cur);
   }
   // 切 Tab 时若有声明式弹窗则关掉，避免遮罩残留挡后续详情
   if (cur != page) {

@@ -23,6 +23,7 @@ import (
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/m3u8"
 	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/util"
 )
 
 // 将带自定义 Header 的远端媒体转成本地可播地址，供 VLC/MPV 无 header 能力时使用。
@@ -536,7 +537,7 @@ func rewritePlaylist(content, base, id string, inject bool) string {
 }
 
 func playlistRef(base, ref, id string, inject bool) string {
-	abs := resolveRef(base, ref)
+	abs := util.AbsHTTPRef(base, ref)
 	if strings.Contains(abs, "/proxy/play?") {
 		return abs
 	}
@@ -657,21 +658,6 @@ func (fw flushWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func resolveRef(base, ref string) string {
-	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
-		return ref
-	}
-	bu, err := url.Parse(base)
-	if err != nil {
-		return ref
-	}
-	ru, err := url.Parse(ref)
-	if err != nil {
-		return ref
-	}
-	return bu.ResolveReference(ru).String()
-}
-
 // errUseHTTPClient 表示这条地址要走 TLS 或跨出回环，改由 http.Client 处理。
 var errUseHTTPClient = errors.New("use http client")
 
@@ -775,7 +761,7 @@ func openRawUpstream(slot *spliceHold, e entry, rangeHdr, ua, ifRange, connectio
 			if loc == "" {
 				return nil, rawHead{}, nil, "", fmt.Errorf("重定向缺少 Location")
 			}
-			current = resolveRef(current, loc)
+			current = util.AbsHTTPRef(current, loc)
 			continue
 		}
 		want := len("#EXTM3U")

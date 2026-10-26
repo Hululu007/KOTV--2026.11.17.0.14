@@ -75,12 +75,7 @@ void searchByName(WidgetRef ref, String name) {
   ref.read(pendingSearchProvider.notifier).state = q;
   final cur = ref.read(kotvPageProvider);
   if (cur != KotvPage.search) {
-    final stack = List<KotvPage>.from(ref.read(kotvPageStackProvider));
-    stack.add(cur);
-    while (stack.length > 24) {
-      stack.removeAt(0);
-    }
-    ref.read(kotvPageStackProvider.notifier).state = stack;
+    kotvRememberPage(ref, cur);
   }
   ref.read(kotvPageProvider.notifier).state = KotvPage.search;
 }

@@ -9,6 +9,15 @@ final kotvPageProvider = StateProvider<KotvPage>((ref) => KotvPage.video);
 /// 主 Tab 返回栈（不含详情 push）；用于设置/我的等返回上一页，而非直接退桌面。
 final kotvPageStackProvider = StateProvider<List<KotvPage>>((ref) => <KotvPage>[]);
 
+void kotvRememberPage(WidgetRef ref, KotvPage page) {
+  final stack = List<KotvPage>.from(ref.read(kotvPageStackProvider));
+  stack.add(page);
+  while (stack.length > 24) {
+    stack.removeAt(0);
+  }
+  ref.read(kotvPageStackProvider.notifier).state = stack;
+}
+
 /// 鼠标右键：与系统返回同一套逻辑（含根栈全屏页）。由 AppShell 注册。
 /// 到根页即止，不弹出「再按一次返回桌面」。
 void Function()? kotvHandleAppBack;

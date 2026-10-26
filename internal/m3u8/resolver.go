@@ -1,11 +1,11 @@
 package m3u8
 
 import (
-	"net/url"
 	"regexp"
 	"strings"
 
 	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/util"
 )
 
 // FilterPlaylist 去广告开着时过滤节目单，相对切片按这一次响应的最终地址补全。
@@ -25,7 +25,7 @@ func absolutizeURIs(content, base string) string {
 		if trim == "" || strings.HasPrefix(trim, "#") {
 			continue
 		}
-		lines[i] = resolveURL(base, trim)
+		lines[i] = util.AbsHTTPRef(base, trim)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -49,22 +49,6 @@ func absolutizeTagURIs(content, base string) string {
 		if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
 			return m
 		}
-		return `URI="` + resolveURL(base, raw) + `"`
+		return `URI="` + util.AbsHTTPRef(base, raw) + `"`
 	})
 }
-
-func resolveURL(base, ref string) string {
-	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
-		return ref
-	}
-	bu, err := url.Parse(base)
-	if err != nil {
-		return ref
-	}
-	ru, err := url.Parse(ref)
-	if err != nil {
-		return ref
-	}
-	return bu.ResolveReference(ru).String()
-}
-

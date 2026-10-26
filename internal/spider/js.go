@@ -1200,7 +1200,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	} else {
 		// network interceptor：跟随重定向时仍记录 302→原 URL 映射
-		client.CheckRedirect = trackJSRedirects
+		client.CheckRedirect = jsRedirects.Track
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1221,7 +1221,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	if encLower == "gzip" || encLower == "deflate" {
 		util.StripDecodedContentHeaders(hdrSrc, enc, true)
 	}
-	if options.Redirect == 0 && isHTTPRedirect(code) {
+	if options.Redirect == 0 && util.IsHTTPRedirect(code) {
 		jsLog("[js-http] no-follow redirect method=%s url=%s code=%d location=%s", options.Method, u, code, hdrSrc.Get("Location"))
 	} else if code == 0 || code >= 400 {
 		jsLog("[js-http] bad status method=%s url=%s code=%d bytes=%d", options.Method, u, code, len(b))

@@ -13,80 +13,21 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 )
 
 var client = &http.Client{Timeout: 30 * time.Second}
 
+// insecureRedirects：302 Location（绝对 URL）→ 发起请求的原始 URL（CMS insecure 客户端）。
+// 必须先于 insecureClient 初始化，CheckRedirect 会绑定这份表。
+var insecureRedirects = NewRedirectOrigins(512)
+
 // insecureClient：爬虫/CMS/jar 下载跳过 TLS 校验；鉴权/更新仍走 client。
 var insecureClient = newInsecureClient(nil)
 
-// insecureRedirectMap：302 Location（绝对 URL）→ 发起请求的原始 URL（CMS insecure 客户端）。
-const insecureRedirectMax = 512
-
-var (
-	insecureRedirectMu  sync.Mutex
-	insecureRedirectMap = map[string]string{}
-	insecureRedirectOrd []string
-)
-
 // ClearInsecureRedirectMap 清空 302 回源映射（清理缓存工具）。
 func ClearInsecureRedirectMap() {
-	insecureRedirectMu.Lock()
-	defer insecureRedirectMu.Unlock()
-	insecureRedirectMap = map[string]string{}
-	insecureRedirectOrd = nil
-}
-
-func rememberInsecureRedirect(from, location string) {
-	from = strings.TrimSpace(from)
-	location = strings.TrimSpace(location)
-	if from == "" || location == "" {
-		return
-	}
-	abs := location
-	if !strings.HasPrefix(location, "http://") && !strings.HasPrefix(location, "https://") {
-		if bu, err := url.Parse(from); err == nil {
-			if ref, err := url.Parse(location); err == nil {
-				abs = bu.ResolveReference(ref).String()
-			}
-		}
-	}
-	insecureRedirectMu.Lock()
-	defer insecureRedirectMu.Unlock()
-	if _, ok := insecureRedirectMap[abs]; !ok {
-		insecureRedirectOrd = append(insecureRedirectOrd, abs)
-	}
-	insecureRedirectMap[abs] = from
-	for len(insecureRedirectMap) > insecureRedirectMax && len(insecureRedirectOrd) > 0 {
-		victim := insecureRedirectOrd[0]
-		insecureRedirectOrd = insecureRedirectOrd[1:]
-		delete(insecureRedirectMap, victim)
-	}
-}
-
-func lookupInsecureRedirectOrigin(requestURL string) (string, bool) {
-	insecureRedirectMu.Lock()
-	defer insecureRedirectMu.Unlock()
-	s, ok := insecureRedirectMap[strings.TrimSpace(requestURL)]
-	if !ok || s == "" {
-		return "", false
-	}
-	return s, true
-}
-
-func trackInsecureRedirects(req *http.Request, via []*http.Request) error {
-	if len(via) >= 10 {
-		return http.ErrUseLastResponse
-	}
-	if len(via) > 0 && req != nil && req.URL != nil {
-		prev := via[len(via)-1]
-		if prev != nil && prev.URL != nil {
-			rememberInsecureRedirect(prev.URL.String(), req.URL.String())
-		}
-	}
-	return nil
+	insecureRedirects.Clear()
 }
 
 // FileURLPath 将 file:// / file: URL 解析为本地路径；非 file URL 返回 false。
@@ -277,13 +218,13 @@ func doRequestCore(c *http.Client, req *http.Request, allowErrorStatus bool) ([]
 	enc := resp.Header.Get("Content-Encoding")
 	b := DecodeContentEncoding(enc, raw)
 	if allowErrorStatus {
-		if isHTTPRedirectStatus(resp.StatusCode) {
+		if IsHTTPRedirect(resp.StatusCode) {
 			if loc := resp.Header.Get("Location"); loc != "" && req.URL != nil {
-				rememberInsecureRedirect(req.URL.String(), loc)
+				insecureRedirects.Remember(req.URL.String(), loc)
 			}
 		}
 		if resp.StatusCode == http.StatusNotAcceptable && req.URL != nil {
-			if origin, ok := lookupInsecureRedirectOrigin(req.URL.String()); ok {
+			if origin, ok := insecureRedirects.Lookup(req.URL.String()); ok {
 				req2, err2 := http.NewRequest(http.MethodGet, origin, nil)
 				if err2 == nil {
 					for k, vv := range req.Header {
@@ -300,15 +241,6 @@ func doRequestCore(c *http.Client, req *http.Request, allowErrorStatus bool) ([]
 		return nil, &HTTPError{Code: resp.StatusCode, Body: string(b)}
 	}
 	return b, nil
-}
-
-func isHTTPRedirectStatus(code int) bool {
-	switch code {
-	case 301, 302, 303, 307, 308:
-		return true
-	default:
-		return false
-	}
 }
 
 // GetClient 返回可配置代理的 HTTP 客户端。
@@ -331,7 +263,7 @@ func newInsecureClient(proxy func(*http.Request) (*url.URL, error)) *http.Client
 	return &http.Client{
 		Timeout:       30 * time.Second,
 		Transport:     transport,
-		CheckRedirect: trackInsecureRedirects,
+		CheckRedirect: insecureRedirects.Track,
 	}
 }
 
