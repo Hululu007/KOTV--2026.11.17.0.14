@@ -170,43 +170,45 @@ func ScopeID() string {
 // - scopeId：已带 u:/c: 原样；裸值按 userId 处理
 // - clientId：已带 u:/c: 原样（JAR 可能传 ScopeID）；裸值 → c:<id>（本机多窗口）
 func ResolveScopeKey(userID, scopeID, clientID string) string {
-	if u := strings.TrimSpace(userID); u != "" {
-		if strings.HasPrefix(u, "u:") || strings.HasPrefix(u, "c:") {
-			return u
-		}
-		return "u:" + u
+	if s, ok := scopeOrPrefix(userID, "u:"); ok {
+		return s
 	}
-	if s := strings.TrimSpace(scopeID); s != "" {
-		if strings.HasPrefix(s, "u:") || strings.HasPrefix(s, "c:") {
-			return s
-		}
-		return "u:" + s
+	if s, ok := scopeOrPrefix(scopeID, "u:"); ok {
+		return s
 	}
-	if c := strings.TrimSpace(clientID); c != "" {
-		if strings.HasPrefix(c, "u:") || strings.HasPrefix(c, "c:") {
-			return c
-		}
-		return "c:" + c
+	if s, ok := scopeOrPrefix(clientID, "c:"); ok {
+		return s
+	}
+	return ""
+}
+
+func scopeOrPrefix(raw, barePrefix string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	if strings.HasPrefix(raw, "u:") || strings.HasPrefix(raw, "c:") {
+		return raw, true
+	}
+	return barePrefix + raw, true
+}
+
+func idFromScope(scope, prefix string) string {
+	scope = strings.TrimSpace(scope)
+	if strings.HasPrefix(scope, prefix) {
+		return strings.TrimPrefix(scope, prefix)
 	}
 	return ""
 }
 
 // UserIDFromScope 从 ScopeID 取出裸 userId；非 u: 前缀返回空。
 func UserIDFromScope(scope string) string {
-	scope = strings.TrimSpace(scope)
-	if strings.HasPrefix(scope, "u:") {
-		return strings.TrimPrefix(scope, "u:")
-	}
-	return ""
+	return idFromScope(scope, "u:")
 }
 
 // ClientIDFromScope 从 ScopeID 取出裸 clientId；非 c: 前缀返回空。
 func ClientIDFromScope(scope string) string {
-	scope = strings.TrimSpace(scope)
-	if strings.HasPrefix(scope, "c:") {
-		return strings.TrimPrefix(scope, "c:")
-	}
-	return ""
+	return idFromScope(scope, "c:")
 }
 
 // RuntimeUserID 用于 JVM/Py/JS 引擎分桶：仅远端租户返回 userId，本机共享返回空。

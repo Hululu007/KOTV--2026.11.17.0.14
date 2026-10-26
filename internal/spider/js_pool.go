@@ -108,11 +108,11 @@ func (p *jsPool) LiveContent(url string) (string, error) {
 	return withPooled(&p.scriptSlotPool, func(s *jsSpider) (string, error) { return s.LiveContent(url) })
 }
 func (p *jsPool) Proxy(params map[string]string) (int, string, []byte, map[string]string, error) {
-	s, idx, err := p.acquire()
+	s, release, err := borrowSlot(&p.scriptSlotPool)
 	if err != nil {
 		return 0, "", nil, nil, err
 	}
-	defer p.release(idx)
+	defer release()
 	return s.Proxy(params)
 }
 func (p *jsPool) Action(action string) (string, error) {

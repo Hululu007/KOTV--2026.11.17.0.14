@@ -90,13 +90,22 @@ func (p *scriptSlotPool[T]) snapshot() []T {
 	return append([]T(nil), p.slots...)
 }
 
+func borrowSlot[T any](p *scriptSlotPool[T]) (T, func(), error) {
+	s, idx, err := p.acquire()
+	if err != nil {
+		var zero T
+		return zero, func() {}, err
+	}
+	return s, func() { p.release(idx) }, nil
+}
+
 func withPooled[T any, R any](p *scriptSlotPool[T], fn func(T) (R, error)) (R, error) {
 	var zero R
-	s, idx, err := p.acquire()
+	s, release, err := borrowSlot(p)
 	if err != nil {
 		return zero, err
 	}
-	defer p.release(idx)
+	defer release()
 	return fn(s)
 }
 
