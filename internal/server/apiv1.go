@@ -146,6 +146,30 @@ func wroteOptions(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+func rejectUnlessPost(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodPost {
+		return false
+	}
+	writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	return true
+}
+
+func rejectNoContent(w http.ResponseWriter, api ContentAPI) bool {
+	if api != nil {
+		return false
+	}
+	writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	return true
+}
+
+func rejectBadGateway(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	writeAPIError(w, http.StatusBadGateway, err.Error())
+	return true
+}
+
 func writeAPIError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"ok": false, "error": msg})
 }
@@ -182,8 +206,7 @@ func (s *Server) handleAPIv1Config(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	switch r.Method {
@@ -225,12 +248,10 @@ func (s *Server) handleAPIv1ConfigRefresh(w http.ResponseWriter, r *http.Request
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return
 	}
 	if err := api.APIRefreshConfig(); err != nil {
@@ -245,8 +266,7 @@ func (s *Server) handleAPIv1Sites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	if r.Method == http.MethodPost {
@@ -281,13 +301,11 @@ func (s *Server) handleAPIv1Home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	out, err := api.APIHome()
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+	if rejectBadGateway(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -298,8 +316,7 @@ func (s *Server) handleAPIv1Category(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	q := r.URL.Query()
@@ -344,8 +361,7 @@ func (s *Server) handleAPIv1Category(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := api.APICategory(tid, pg, extend, siteKey)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+	if rejectBadGateway(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -355,13 +371,11 @@ func (s *Server) handleAPIv1Action(w http.ResponseWriter, r *http.Request) {
 	if wroteOptions(w, r) {
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	var body struct {
@@ -378,8 +392,7 @@ func (s *Server) handleAPIv1Action(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := api.APIAction(strings.TrimSpace(body.Site), action)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+	if rejectBadGateway(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -390,8 +403,7 @@ func (s *Server) handleAPIv1Detail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	siteKey := r.URL.Query().Get("site")
@@ -414,8 +426,7 @@ func (s *Server) handleAPIv1Detail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := api.APIDetail(siteKey, vodID)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+	if rejectBadGateway(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -426,8 +437,7 @@ func (s *Server) handleAPIv1DetailExpand(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	siteKey := r.URL.Query().Get("site")
@@ -453,8 +463,7 @@ func (s *Server) handleAPIv1DetailExpand(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	out, err := api.APIDetailExpand(siteKey, vodID, flags)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+	if rejectBadGateway(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -465,8 +474,7 @@ func (s *Server) handleAPIv1BtProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.APIBtProgress())
@@ -477,8 +485,7 @@ func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	keyword := strings.TrimSpace(r.URL.Query().Get("wd"))
@@ -518,8 +525,7 @@ func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := api.APISearch(keyword, siteKeys, exact, exclude)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+	if rejectBadGateway(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -534,8 +540,7 @@ func (s *Server) handleAPIv1Play(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	siteKey := r.URL.Query().Get("site")
@@ -586,8 +591,7 @@ func (s *Server) handleAPIv1Play(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := api.APIPlay(siteKey, vodID, flag, ep, epIdx, qualIdx)
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+	if rejectBadGateway(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -612,16 +616,14 @@ func (s *Server) handleAPIv1Media(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	if r.Method == http.MethodGet {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "media": remote.SnapshotMediaFromStore()})
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return
 	}
 	var body map[string]string
@@ -635,8 +637,7 @@ func (s *Server) handleAPIv1Repos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	switch r.Method {
@@ -695,8 +696,7 @@ func (s *Server) handleAPIv1Settings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	switch r.Method {
@@ -735,16 +735,14 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	if r.Method == http.MethodGet {
 		writeJSON(w, http.StatusOK, api.APILiveSources())
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return
 	}
 	var body struct {
@@ -767,15 +765,13 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, api.APILiveSources())
 	case "load":
 		out, err := api.APILiveLoad(body.Index, body.URL, body.Force)
-		if err != nil {
-			writeAPIError(w, http.StatusBadGateway, err.Error())
+		if rejectBadGateway(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
 	case "play":
 		out, err := api.APILivePlay(body.Group, body.Channel, body.Line)
-		if err != nil {
-			writeAPIError(w, http.StatusBadGateway, err.Error())
+		if rejectBadGateway(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -787,8 +783,7 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "epg":
 		out, err := api.APILiveEPG(body.Group, body.Channel)
-		if err != nil {
-			writeAPIError(w, http.StatusBadGateway, err.Error())
+		if rejectBadGateway(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -810,8 +805,7 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "catchup":
 		out, err := api.APILiveCatchup(body.Group, body.Channel, body.Day, body.Prog)
-		if err != nil {
-			writeAPIError(w, http.StatusBadGateway, err.Error())
+		if rejectBadGateway(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -825,8 +819,7 @@ func (s *Server) handleAPIv1Player(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	switch r.Method {
@@ -850,14 +843,12 @@ func (s *Server) handleAPIv1Player(w http.ResponseWriter, r *http.Request) {
 		}
 		switch action {
 		case "external":
-			if err := api.APIPlayerExternal(body.URL, body.Player); err != nil {
-				writeAPIError(w, http.StatusBadGateway, err.Error())
+			if err := api.APIPlayerExternal(body.URL, body.Player); rejectBadGateway(w, err) {
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		case "embed", "embed_play":
-			if err := api.APIPlayerEmbed(body.URL, body.Player, body.HistKey); err != nil {
-				writeAPIError(w, http.StatusBadGateway, err.Error())
+			if err := api.APIPlayerEmbed(body.URL, body.Player, body.HistKey); rejectBadGateway(w, err) {
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -867,8 +858,7 @@ func (s *Server) handleAPIv1Player(w http.ResponseWriter, r *http.Request) {
 				writeAPIError(w, http.StatusBadRequest, "missing cmd")
 				return
 			}
-			if err := api.APIPlayerControl(cmd, body.Value, body.Mode); err != nil {
-				writeAPIError(w, http.StatusBadGateway, err.Error())
+			if err := api.APIPlayerControl(cmd, body.Value, body.Mode); rejectBadGateway(w, err) {
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -884,13 +874,11 @@ func (s *Server) handleAPIv1Tools(w http.ResponseWriter, r *http.Request) {
 	if wroteOptions(w, r) {
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	var body struct {
@@ -916,13 +904,11 @@ func (s *Server) handleAPIv1Cancel(w http.ResponseWriter, r *http.Request) {
 	if wroteOptions(w, r) {
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return
 	}
 	opts := map[string]any{}
@@ -952,13 +938,11 @@ func (s *Server) requirePostContent(w http.ResponseWriter, r *http.Request) (Con
 	if wroteOptions(w, r) {
 		return nil, false
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return nil, false
 	}
 	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	if rejectNoContent(w, api) {
 		return nil, false
 	}
 	return api, true
@@ -969,8 +953,7 @@ func (s *Server) handleAPIv1Shutdown(w http.ResponseWriter, r *http.Request) {
 	if wroteOptions(w, r) {
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return
 	}
 	if !isLoopbackAddr(r.RemoteAddr) {

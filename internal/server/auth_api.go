@@ -305,8 +305,7 @@ func readLoginForm(w http.ResponseWriter, r *http.Request) (username, password s
 	if wroteOptions(w, r) {
 		return "", "", false
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return "", "", false
 	}
 	if !remoteAccessAllowed(r) {
@@ -325,8 +324,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if wroteOptions(w, r) {
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return
 	}
 	auth.Logout(auth.BearerFromHeader(r.Header.Get("Authorization")))
@@ -368,8 +366,7 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 	if wroteOptions(w, r) {
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return
 	}
 	u := authUserFrom(r.Context())
@@ -485,8 +482,7 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 	if wroteOptions(w, r) {
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if rejectUnlessPost(w, r) {
 		return
 	}
 	var body struct {
