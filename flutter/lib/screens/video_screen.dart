@@ -59,6 +59,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   List<VodItem> _history = [];
   List<VodItem> _keeps = [];
   final ScrollController _scroll = ScrollController();
+  int? _catPtr;
+  double _catSwipeDx = 0;
+  double _catSwipeDy = 0;
+  Duration _catSwipeStamp = Duration.zero;
   int _loadGen = 0;
 
   /// 首屏 autofill 连续续页计数（触底用户滚动不计入）。
@@ -539,6 +543,43 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       _scroll.jumpTo(0);
     }
     unawaited(_reloadContentOnly());
+  }
+
+  /// 内容区左右滑：向左下一分类，向右上一分类。首页在分类列表左边。
+  void _stepCategory(int delta) {
+    if (delta == 0 || _types.isEmpty) return;
+    final cur = _tid ?? '';
+    final index = cur.isEmpty ? -1 : _types.indexWhere((t) => t.id == cur);
+    if (index < 0 && cur.isNotEmpty) return;
+    final next = index + delta;
+    if (next < -1 || next >= _types.length) return;
+    _switchCategory(next < 0 ? null : _types[next].id);
+  }
+
+  void _catPointerDown(PointerDownEvent e) {
+    if (_catPtr != null) return;
+    _catPtr = e.pointer;
+    _catSwipeDx = 0;
+    _catSwipeDy = 0;
+    _catSwipeStamp = e.timeStamp;
+  }
+
+  void _catPointerMove(PointerMoveEvent e) {
+    if (e.pointer != _catPtr) return;
+    _catSwipeDx += e.delta.dx;
+    _catSwipeDy += e.delta.dy;
+  }
+
+  void _catPointerFinish(Duration stamp, {required bool up}) {
+    final dx = _catSwipeDx;
+    final dy = _catSwipeDy;
+    _catPtr = null;
+    _catSwipeDx = 0;
+    _catSwipeDy = 0;
+    if (!up || dx.abs() < 24 || dy.abs() > dx.abs()) return;
+    final ms = (stamp - _catSwipeStamp).inMilliseconds;
+    final flicked = ms > 0 && ms < 280 && dx.abs() / ms > 0.6;
+    if (dx.abs() >= 56 || flicked) _stepCategory(dx < 0 ? 1 : -1);
   }
 
   void _toggleFilters() {
@@ -1122,7 +1163,19 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     final inset = kotvContentInset(context);
     final s = LayoutScale.of(context);
     final bottomPad = 24.0;
-    return NotificationListener<ScrollNotification>(
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _catPointerDown,
+      onPointerMove: _catPointerMove,
+      onPointerUp: (e) {
+        if (e.pointer != _catPtr) return;
+        _catPointerFinish(e.timeStamp, up: true);
+      },
+      onPointerCancel: (e) {
+        if (e.pointer != _catPtr) return;
+        _catPointerFinish(e.timeStamp, up: false);
+      },
+      child: NotificationListener<ScrollNotification>(
       onNotification: (n) {
         // 短列表 maxScrollExtent≈0 时勿触底连打。
         if (!onHome &&
@@ -1205,6 +1258,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               ),
           ],
         ],
+      ),
       ),
     );
   }
