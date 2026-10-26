@@ -938,7 +938,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           await _exitImmersiveFullscreen();
         } catch (_) {}
       }
-      _lockPhonePortrait();
       try {
         await _stopHard();
       } catch (_) {}
@@ -1173,11 +1172,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   final _chromeCover = KotvChromeCoverSession();
 
-  void _lockPhonePortrait() {
-    if (kIsWeb || kotvIsDesktop() || KotvLayout.television) return;
-    unawaited(kotvLockPortrait());
-  }
-
   void _scheduleChromeCover() {
     _chromeCover.holdAfterFrame(() {
       if (!mounted) return false;
@@ -1208,7 +1202,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
       } catch (_) {}
       _chromeCover.release(ref.read(detailChromeCoverProvider.notifier));
-      _lockPhonePortrait();
+      unawaited(kotvRestorePhoneOrientations());
     }
     super.deactivate();
   }
@@ -3644,6 +3638,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       // 顶栏占位在 Column 内留高；真正可点的顶栏叠在 Stack 最上层，
       // 避免 Hybrid Surface 盖住返回/片名（Flutter Clip 对 PlatformView 不可靠）。
       LibraryTopBar buildTopBar() => LibraryTopBar(
+            glass: false,
             onBack: () => unawaited(_leavePage()),
             onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
             onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
@@ -3766,6 +3761,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             child: Column(
               children: [
                 LibraryTopBar(
+                  glass: false,
                   onBack: () => unawaited(_leavePage()),
                   onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
                   onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),

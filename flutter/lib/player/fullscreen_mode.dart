@@ -55,6 +55,20 @@ Future<void> kotvEnterSystemFullscreen(KotvDesktopFullscreenKind kind) async {
   } catch (_) {}
 }
 
+const _phoneOrientations = <DeviceOrientation>[
+  DeviceOrientation.portraitUp,
+  DeviceOrientation.landscapeLeft,
+  DeviceOrientation.landscapeRight,
+];
+
+/// 手机恢复可横可竖。全屏里临时锁过方向后必须走这里，否则回首页也转不了。
+Future<void> kotvRestorePhoneOrientations() async {
+  if (kIsWeb || kotvIsDesktop() || KotvLayout.television) return;
+  try {
+    await SystemChrome.setPreferredOrientations(_phoneOrientations);
+  } catch (_) {}
+}
+
 Future<void> kotvExitSystemFullscreen({required bool wasDisplayFullscreen}) async {
   try {
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -66,10 +80,7 @@ Future<void> kotvExitSystemFullscreen({required bool wasDisplayFullscreen}) asyn
         DeviceOrientation.landscapeRight,
       ]);
     } else if (!kIsWeb && !kotvIsDesktop()) {
-      // 手机退出全屏回到竖屏，首页底栏按 height > width 才会再出现。
-      await SystemChrome.setPreferredOrientations(const [
-        DeviceOrientation.portraitUp,
-      ]);
+      await kotvRestorePhoneOrientations();
     } else {
       await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     }

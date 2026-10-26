@@ -8,8 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../desktop/mini_player_window.dart';
 import '../models/models.dart';
 import '../nav/kotv_page.dart';
-import '../player/fullscreen_mode.dart';
-import '../player/kotv_platform.dart';
 import '../player/playback_guard.dart';
 import '../providers.dart';
 import '../player/play_headers.dart';
@@ -52,8 +50,6 @@ class _AppShellState extends ConsumerState<AppShell> {
   Timer? _handlingBackReset;
   /// Web：登录完成前不渲染主界面。
   bool _webAuthed = !kIsWeb;
-  /// 刚从详情/文件浏览器回到壳层。横屏时补一次竖屏，底栏才会回来。
-  bool _phoneCoverWasOpen = false;
   /// 稳定 Navigator key：切 Tab 用 pushAndRemoveUntil 换根页，勿用 GlobalObjectKey(page)
   ///（卸树再挂同一 GlobalKey 会在 activate 时 _state! 空指针 →「页面渲染出错」）。
   final GlobalKey<NavigatorState> _shellNavKey = GlobalKey<NavigatorState>();
@@ -306,26 +302,6 @@ class _AppShellState extends ConsumerState<AppShell> {
         }
       });
     }
-    // 详情横屏后回到首页：窗口还是横的，底栏条件不成立。只在离开盖壳页时拉回竖屏。
-    final size = MediaQuery.sizeOf(context);
-    if (coverAlive) {
-      _phoneCoverWasOpen = true;
-    } else if (_phoneCoverWasOpen) {
-      _phoneCoverWasOpen = false;
-      if (!kIsWeb &&
-          !kotvIsDesktop() &&
-          !KotvLayout.television &&
-          !LiveScreen.isImmersive &&
-          size.width > size.height) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          if (DetailScreen.isOpen || FileBrowserScreen.isOpen || LiveScreen.isImmersive) return;
-          final now = MediaQuery.sizeOf(context);
-          if (now.width <= now.height) return;
-          unawaited(kotvLockPortrait());
-        });
-      }
-    }
     final immersiveDetail = coverAlive && (immersiveFlag || DetailScreen.isImmersive);
     final detailCover = coverAlive && coverFlag;
     final bottomNav =
@@ -444,11 +420,11 @@ class _AppShellState extends ConsumerState<AppShell> {
           bottomNavigationBar: bottomNav
               ? Builder(builder: (context) {
                   final p = KotvPalette.of(context);
-                  // Scaffold 透明 + 外层 AppBackdrop：半透明底栏只透壁纸。
-                  final barBg = p.bottomNav.withOpacity(p.light ? 0.72 : 0.55);
-                  return NavigationBarTheme(
+                  return KotvFrostedBar(
+                    topEdge: true,
+                    child: NavigationBarTheme(
                     data: NavigationBarThemeData(
-                      backgroundColor: barBg,
+                      backgroundColor: Colors.transparent,
                       indicatorColor: p.selected.withOpacity(0.92),
                       elevation: 0,
                       shadowColor: Colors.transparent,
@@ -469,7 +445,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                     ),
                     child: NavigationBar(
                       height: 64,
-                      backgroundColor: barBg,
+                      backgroundColor: Colors.transparent,
                       indicatorColor: p.selected.withOpacity(0.92),
                       surfaceTintColor: Colors.transparent,
                       shadowColor: Colors.transparent,
@@ -501,6 +477,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                         ),
                       ],
                     ),
+                  ),
                   );
                 })
               : null,
