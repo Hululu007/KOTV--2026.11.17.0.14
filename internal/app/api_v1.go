@@ -209,8 +209,8 @@ func (a *App) APISetHome(siteKey string) error {
 }
 
 func (a *App) APIHome() (map[string]any, error) {
-	if localCrawlerDisabled() {
-		return nil, fmt.Errorf("请先连接可用后端服务")
+	if err := requireLocalCrawler(); err != nil {
+		return nil, err
 	}
 	cfg, sites, _ := a.scope()
 	res, err := sites.HomeContent()
@@ -228,8 +228,8 @@ func (a *App) APIHome() (map[string]any, error) {
 }
 
 func (a *App) APICategory(tid, pg string, extend map[string]string, siteKey string) (map[string]any, error) {
-	if localCrawlerDisabled() {
-		return nil, fmt.Errorf("请先连接可用后端服务")
+	if err := requireLocalCrawler(); err != nil {
+		return nil, err
 	}
 	cfg, sites, _ := a.scope()
 	res, err := sites.CategoryContentForSite(siteKey, tid, pg, extend)
@@ -255,8 +255,8 @@ func (a *App) APICategory(tid, pg string, extend map[string]string, siteKey stri
 }
 
 func (a *App) APIAction(siteKey, action string) (map[string]any, error) {
-	if localCrawlerDisabled() {
-		return nil, fmt.Errorf("请先连接可用后端服务")
+	if err := requireLocalCrawler(); err != nil {
+		return nil, err
 	}
 	action = strings.TrimSpace(action)
 	if action == "" {
@@ -302,8 +302,8 @@ func (a *App) APIAction(siteKey, action string) (map[string]any, error) {
 }
 
 func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
-	if localCrawlerDisabled() {
-		return nil, fmt.Errorf("请先连接可用后端服务")
+	if err := requireLocalCrawler(); err != nil {
+		return nil, err
 	}
 	cfg, sites, _ := a.scope()
 	vod := model.Vod{VodID: model.FlexString(vodID)}
@@ -341,8 +341,8 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 // APIDetailExpand 展开磁力/种子与 YouTube 播放列表。
 // 优先用客户端传入的 flags / 上次详情缓存，禁止再次 DetailContent（会重跑爬虫并冲掉扫码弹窗）。
 func (a *App) APIDetailExpand(siteKey, vodID string, flagsIn []map[string]any) (map[string]any, error) {
-	if localCrawlerDisabled() {
-		return nil, fmt.Errorf("请先连接可用后端服务")
+	if err := requireLocalCrawler(); err != nil {
+		return nil, err
 	}
 	cfg, sites, _ := a.scope()
 	sk := siteKey
@@ -504,8 +504,8 @@ func (a *App) APISessionLeave() map[string]any {
 }
 
 func (a *App) APISearch(keyword string, siteKeys []string, exact bool, exclude []model.VodKey) (map[string]any, error) {
-	if localCrawlerDisabled() {
-		return nil, fmt.Errorf("请先连接可用后端服务")
+	if err := requireLocalCrawler(); err != nil {
+		return nil, err
 	}
 	_, sites, _ := a.scope()
 	if exact {
@@ -584,8 +584,8 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		return nil, fmt.Errorf("empty episode url")
 	}
 	// iOS 仅支持前端播放链路：允许直链/磁力，不走站点解析。
-	if localCrawlerDisabled() && !(strings.HasPrefix(epURL, "http") && parse.IsVideoFormat(epURL)) && !thunder.Match(epURL) {
-		return nil, fmt.Errorf("请先连接可用后端服务")
+	if err := requireLocalCrawler(); err != nil && !(strings.HasPrefix(epURL, "http") && parse.IsVideoFormat(epURL)) && !thunder.Match(epURL) {
+		return nil, err
 	}
 
 	var playURL string

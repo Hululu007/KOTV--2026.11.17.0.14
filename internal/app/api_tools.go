@@ -276,8 +276,8 @@ func (a *App) toolCheckUpdate() (map[string]any, error) {
 }
 
 func (a *App) toolCheckSpider() (map[string]any, error) {
-	if localCrawlerDisabled() {
-		return nil, fmt.Errorf("请先连接可用后端服务")
+	if err := requireLocalCrawler(); err != nil {
+		return nil, err
 	}
 	cfg, _, sess := a.scope()
 	ready := a.Ready

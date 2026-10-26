@@ -170,6 +170,14 @@ func rejectBadGateway(w http.ResponseWriter, err error) bool {
 	return true
 }
 
+func rejectInternal(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	writeAPIError(w, http.StatusInternalServerError, err.Error())
+	return true
+}
+
 func writeAPIError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"ok": false, "error": msg})
 }

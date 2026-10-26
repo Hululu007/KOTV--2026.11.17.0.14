@@ -47,8 +47,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	switch typ {
 	case "history":
 		items, err := db.ListHistory(owner, limit)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if rejectInternal(w, err) {
 			return
 		}
 		out := make([]map[string]any, 0, len(items))
@@ -80,8 +79,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": typ, "owner": owner, "items": out})
 	case "keep":
 		items, err := db.ListKeep(owner, database.KeepTypeVod, limit)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if rejectInternal(w, err) {
 			return
 		}
 		out := make([]map[string]any, 0, len(items))
@@ -106,8 +104,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": typ, "owner": owner, "items": out})
 	case "liveKeep", "livefav":
 		items, err := db.ListKeepLive(owner)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if rejectInternal(w, err) {
 			return
 		}
 		names := make([]string, 0, len(items))
@@ -149,8 +146,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing item"})
 			return
 		}
-		if err := db.SaveHistory(owner, *body.Item); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if err := db.SaveHistory(owner, *body.Item); rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -164,8 +160,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			return
 		}
 		h, err := db.GetHistory(owner, key)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if rejectInternal(w, err) {
 			return
 		}
 		if h == nil {
@@ -179,8 +174,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
 			return
 		}
-		if err := db.UpdateHistoryOffsets(owner, key, body.Opening, body.Ending); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if err := db.UpdateHistoryOffsets(owner, key, body.Opening, body.Ending); rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -199,14 +193,12 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		case string:
 			rev = strings.EqualFold(strings.TrimSpace(v), "true") || v == "1"
 		}
-		if err := db.UpdateHistoryRevSort(owner, key, rev); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if err := db.UpdateHistoryRevSort(owner, key, rev); rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "clearhistory":
-		if err := db.ClearHistory(owner); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if err := db.ClearHistory(owner); rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -215,8 +207,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		if key == "" && body.Item != nil {
 			key = body.Item.Key
 		}
-		if err := db.DeleteHistory(owner, key); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if err := db.DeleteHistory(owner, key); rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -227,8 +218,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
 			return
 		}
-		if err := db.RenameHistory(owner, oldKey, newKey); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if err := db.RenameHistory(owner, oldKey, newKey); rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -239,8 +229,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
 			return
 		}
-		if err := db.RenameKeep(owner, oldKey, newKey); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if err := db.RenameKeep(owner, oldKey, newKey); rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -253,8 +242,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		if k.Type == 0 && (typ == "livekeep" || typ == "livefav") {
 			k.Type = database.KeepTypeLive
 		}
-		if err := db.SaveKeep(owner, k); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if err := db.SaveKeep(owner, k); rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -268,8 +256,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			k.Type = database.KeepTypeLive
 		}
 		kept, err := db.ToggleKeep(owner, k)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "kept": kept})
@@ -280,20 +267,17 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		} else {
 			err = db.ImportKeep(owner, nil, 2)
 		}
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "deletekeep":
-		if err := db.DeleteKeep(owner, strings.TrimSpace(body.Key)); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if err := db.DeleteKeep(owner, strings.TrimSpace(body.Key)); rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "replacelivefav":
-		if err := db.ReplaceKeepLive(owner, body.Names); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		if err := db.ReplaceKeepLive(owner, body.Names); rejectInternal(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
