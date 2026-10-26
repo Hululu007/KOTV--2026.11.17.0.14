@@ -817,11 +817,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   void _onRemoteLiveDanmaku(String text) {
-    if (!mounted || text.trim().isEmpty) return;
+    final content = text.trim();
+    if (!mounted || content.isEmpty) return;
     final sec = _playback.position.inMilliseconds / 1000.0;
-    final next = List<DanmakuItem>.of(_danmakuItems.value)
-      ..add(DanmakuItem(time: sec, content: text.trim()));
-    _danmakuItems.value = next;
+    _danmakuItems.value = kotvAppendDanmaku(_danmakuItems.value, time: sec, content: content);
     if (!_danmakuOn) setState(() => _danmakuOn = true);
   }
 

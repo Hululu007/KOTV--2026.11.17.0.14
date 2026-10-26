@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../api/kotv_api.dart';
+import '../player/kotv_traffic.dart';
 
 Future<Map<String, dynamic>?> kotvEngineHealth(String base) async {
   try {
@@ -14,4 +15,11 @@ Future<Map<String, dynamic>?> kotvEngineHealth(String base) async {
 Future<bool> kotvEnginePing(String base) async {
   final h = await kotvEngineHealth(base);
   return h != null && h['ok'] == true;
+}
+
+KotvApi kotvEngineClient(KotvApi? current, String baseUrl) {
+  final api = current ?? KotvApi(baseUrl: baseUrl);
+  api.baseUrl = baseUrl;
+  KotvTraffic.engineBaseUrl = baseUrl;
+  return api;
 }

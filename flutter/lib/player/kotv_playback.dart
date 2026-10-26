@@ -390,6 +390,18 @@ bool kotvSettingsMapFlag(Map<String, dynamic> settings, String key, {bool def = 
   return kotvSettingsFlag(settings[key], def: def);
 }
 
+void kotvDisposePlaybackStreams({
+  required Future<void> Function() stop,
+  required StreamController<Duration> position,
+  required StreamController<Duration> buffered,
+  required StreamController<bool> completed,
+}) {
+  unawaited(stop());
+  position.close();
+  buffered.close();
+  completed.close();
+}
+
 /// MPV / FVP / Exo 开播后长时间无视频尺寸（有声无画或 Texture 0×0）。
 class KotvSilentVideoException implements Exception {
   const KotvSilentVideoException([this.message = '播放器无画面']);

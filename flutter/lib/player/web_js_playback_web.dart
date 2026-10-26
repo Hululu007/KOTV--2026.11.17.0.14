@@ -490,10 +490,12 @@ class WebJsPlayback extends KotvPlayback {
 
   @override
   void dispose() {
-    unawaited(stop());
-    _posCtrl.close();
-    _bufCtrl.close();
-    _doneCtrl.close();
+    kotvDisposePlaybackStreams(
+      stop: stop,
+      position: _posCtrl,
+      buffered: _bufCtrl,
+      completed: _doneCtrl,
+    );
     super.dispose();
   }
 }

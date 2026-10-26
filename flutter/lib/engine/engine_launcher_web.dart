@@ -16,9 +16,7 @@ class EngineLauncher {
   bool takeFellBackToLocal() => false;
 
   KotvApi client() {
-    _api ??= KotvApi(baseUrl: baseUrl);
-    _api!.baseUrl = baseUrl;
-    KotvTraffic.engineBaseUrl = baseUrl;
+    _api = kotvEngineClient(_api, baseUrl);
     return _api!;
   }
 

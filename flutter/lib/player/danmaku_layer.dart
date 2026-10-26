@@ -32,6 +32,10 @@ class DanmakuItem {
   final int color;
 }
 
+List<DanmakuItem> kotvAppendDanmaku(List<DanmakuItem> items, {required double time, required String content}) {
+  return List<DanmakuItem>.of(items)..add(DanmakuItem(time: time, content: content));
+}
+
 class DanmakuParser {
   static List<DanmakuItem> parse(String body) {
     final t = body.trim();

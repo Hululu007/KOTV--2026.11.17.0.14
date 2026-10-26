@@ -16,6 +16,7 @@ import (
 const (
 	ConfigTypeSite = 0
 	ConfigTypeLive = 1
+	configSelect   = `SELECT id, type, time, COALESCE(url,''), COALESCE(json,''), COALESCE(name,''), COALESCE(home,''), COALESCE(parse,'') FROM config `
 )
 
 type DB struct {
@@ -161,7 +162,7 @@ func (db *DB) migrate() error {
 	return nil
 }
 
-// migrateOwnerBuckets 旧库无 owner 列时重建为 (owner, key) 主键；已有数据归入 owner=''。
+// migrateOwnerBuckets 旧库无 owner 列时重建为 (owner, key) 主键；已有数据归入 owner=”。
 func (db *DB) migrateOwnerBuckets() error {
 	hasOwner := func(table string) bool {
 		rows, err := db.conn.Query(`PRAGMA table_info(` + table + `)`)
@@ -245,8 +246,7 @@ type Config struct {
 
 func (db *DB) FindConfig(url string, typ int64) (*Config, error) {
 	row := db.conn.QueryRow(
-		`SELECT id, type, time, COALESCE(url,''), COALESCE(json,''), COALESCE(name,''), COALESCE(home,''), COALESCE(parse,'')
-		 FROM config WHERE (url = ? OR json = ?) AND type = ? ORDER BY time DESC LIMIT 1`,
+		configSelect+`WHERE (url = ? OR json = ?) AND type = ? ORDER BY time DESC LIMIT 1`,
 		url, url, typ,
 	)
 	return scanConfig(row)
@@ -254,15 +254,14 @@ func (db *DB) FindConfig(url string, typ int64) (*Config, error) {
 
 func (db *DB) FindConfigByType(typ int64) (*Config, error) {
 	row := db.conn.QueryRow(
-		`SELECT id, type, time, COALESCE(url,''), COALESCE(json,''), COALESCE(name,''), COALESCE(home,''), COALESCE(parse,'')
-		 FROM config WHERE type = ? ORDER BY time DESC LIMIT 1`, typ,
+		configSelect+`WHERE type = ? ORDER BY time DESC LIMIT 1`, typ,
 	)
 	return scanConfig(row)
 }
 
 func scanConfig(row *sql.Row) (*Config, error) {
 	var c Config
-	err := row.Scan(&c.ID, &c.Type, &c.Time, &c.URL, &c.JSON, &c.Name, &c.Home, &c.Parse)
+	err := scanConfigValues(row, &c)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -272,11 +271,14 @@ func scanConfig(row *sql.Row) (*Config, error) {
 	return &c, nil
 }
 
+func scanConfigValues(sc interface{ Scan(dest ...any) error }, c *Config) error {
+	return sc.Scan(&c.ID, &c.Type, &c.Time, &c.URL, &c.JSON, &c.Name, &c.Home, &c.Parse)
+}
+
 // ListConfigs 列出某类型的全部历史配置（多仓/线路）。
 func (db *DB) ListConfigs(typ int64) ([]Config, error) {
 	rows, err := db.conn.Query(
-		`SELECT id, type, time, COALESCE(url,''), COALESCE(json,''), COALESCE(name,''), COALESCE(home,''), COALESCE(parse,'')
-		 FROM config WHERE type = ? ORDER BY time DESC`, typ)
+		configSelect+`WHERE type = ? ORDER BY time DESC`, typ)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +286,7 @@ func (db *DB) ListConfigs(typ int64) ([]Config, error) {
 	var out []Config
 	for rows.Next() {
 		var c Config
-		if err := rows.Scan(&c.ID, &c.Type, &c.Time, &c.URL, &c.JSON, &c.Name, &c.Home, &c.Parse); err != nil {
+		if err := scanConfigValues(rows, &c); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

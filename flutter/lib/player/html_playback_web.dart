@@ -463,10 +463,12 @@ class HtmlPlayback extends KotvPlayback {
     if (_pipLeaveListener != null) {
       _video.removeEventListener('leavepictureinpicture', _pipLeaveListener!);
     }
-    unawaited(stop());
-    _posCtrl.close();
-    _bufCtrl.close();
-    _doneCtrl.close();
+    kotvDisposePlaybackStreams(
+      stop: stop,
+      position: _posCtrl,
+      buffered: _bufCtrl,
+      completed: _doneCtrl,
+    );
     super.dispose();
   }
 }
