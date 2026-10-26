@@ -25,6 +25,7 @@ import '../player/disc_play.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
+import '../player/mini_playback.dart';
 import '../player/video_eq.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/media_kit_playback.dart';
@@ -3376,58 +3377,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
   }
 
-  Future<void> _enterMini() async {
-    if (_playUrl.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先播放内容')));
-      }
-      return;
-    }
-    if (kIsWeb) {
-      _playback.onPictureInPictureChanged = (inPip) {
-        if (!mounted) return;
-        setState(() => _miniDesktop = inPip);
-      };
-      final ok = await _playback.enterPictureInPicture();
-      if (!mounted) return;
-      if (ok) {
-        setState(() => _miniDesktop = true);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('无法进入画中画，请检查浏览器是否支持')),
-        );
-      }
-      return;
-    }
-    if (!MiniPlayerWindow.supported) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('当前平台不支持迷你桌面播放')));
-      }
-      return;
-    }
-    MiniPlayerWindow.onAndroidPipChanged = (inPip) {
-      if (!mounted) return;
-      setState(() => _miniDesktop = inPip);
-    };
-    await MiniPlayerWindow.enter();
-    if (!mounted) return;
-    if (MiniPlayerWindow.active) {
-      setState(() => _miniDesktop = true);
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法进入小窗，请检查系统是否支持画中画')));
-    }
+  Future<void> _enterMini() {
+    return kotvEnterMiniPlayback(
+      context: context,
+      isMounted: () => mounted,
+      hasMedia: _playUrl.isNotEmpty,
+      playback: _playback,
+      setState: setState,
+      onPip: (inPip) => _miniDesktop = inPip,
+      onEntered: () => _miniDesktop = true,
+    );
   }
 
-  Future<void> _exitMini() async {
-    if (kIsWeb) {
-      await _playback.exitPictureInPicture();
-      if (!mounted) return;
-      setState(() => _miniDesktop = false);
-      return;
-    }
-    await MiniPlayerWindow.exit();
-    if (!mounted) return;
-    setState(() => _miniDesktop = false);
+  Future<void> _exitMini() {
+    return kotvExitMiniPlayback(
+      isMounted: () => mounted,
+      playback: _playback,
+      setState: setState,
+      onExited: () => _miniDesktop = false,
+    );
   }
 
   Widget _videoStage({required bool interactive}) {
