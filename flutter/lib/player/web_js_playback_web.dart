@@ -188,24 +188,17 @@ class WebJsPlayback extends KotvPlayback {
   }
 
   @override
-  Future<bool> enterPictureInPicture() async {
-    if (!supportsPictureInPicture) return false;
+  Future<bool> enterPictureInPicture() {
+    if (!supportsPictureInPicture) return Future.value(false);
     final v = _video;
-    if (v == null) return false;
+    if (v == null) return Future.value(false);
     _ensurePipListeners();
-    try {
-      if (web.document.pictureInPictureElement == v) {
-        _pipActive = true;
-        return true;
-      }
-      await v.requestPictureInPicture().toDart;
-      _pipActive = true;
-      onPictureInPictureChanged?.call(true);
-      notifyListeners();
-      return true;
-    } catch (_) {
-      return false;
-    }
+    return kotvEnterWebPictureInPicture(
+      video: v,
+      setActive: (active) => _pipActive = active,
+      onChanged: onPictureInPictureChanged,
+      notify: notifyListeners,
+    );
   }
 
   @override

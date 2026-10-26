@@ -130,21 +130,14 @@ class HtmlPlayback extends KotvPlayback {
   bool get pictureInPictureActive => _pipActive;
 
   @override
-  Future<bool> enterPictureInPicture() async {
-    if (!supportsPictureInPicture) return false;
-    try {
-      if (web.document.pictureInPictureElement == _video) {
-        _pipActive = true;
-        return true;
-      }
-      await _video.requestPictureInPicture().toDart;
-      _pipActive = true;
-      onPictureInPictureChanged?.call(true);
-      notifyListeners();
-      return true;
-    } catch (_) {
-      return false;
-    }
+  Future<bool> enterPictureInPicture() {
+    if (!supportsPictureInPicture) return Future.value(false);
+    return kotvEnterWebPictureInPicture(
+      video: _video,
+      setActive: (active) => _pipActive = active,
+      onChanged: onPictureInPictureChanged,
+      notify: notifyListeners,
+    );
   }
 
   @override

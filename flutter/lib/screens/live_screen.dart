@@ -734,7 +734,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _liveInvert = invert == 'true' || invert == '1' || invert == 'on';
     final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
     _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
-    _liveAspect = _liveAspectFromScale(_liveScale);
+    _liveAspect = kotvAspectFromScale(_liveScale);
     final bg = '${settings['playerBackground'] ?? 'pip'}'.trim().toLowerCase();
     _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip';
     kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
@@ -1544,7 +1544,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       // across/invert/change 仅在 bootstrap / 面板切换时更新，避免每次开播覆盖用户刚改的开关。
       final scaleLive = '${playSettings['playerScaleLive'] ?? playSettings['playerScale'] ?? 'default'}'.trim();
       _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
-      _liveAspect = _liveAspectFromScale(_liveScale);
+      _liveAspect = kotvAspectFromScale(_liveScale);
       _exo?.applyPlayerOptions(playSettings);
       _fvp?.applyPlayerOptions(playSettings);
     }
@@ -1929,21 +1929,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     );
   }
 
-  AspectSpec _liveAspectFromScale(String scale) {
-    switch (scale) {
-      case 'fill':
-        return const AspectSpec(key: 'fill', fit: BoxFit.fill);
-      case 'zoom':
-        return const AspectSpec(key: 'zoom', fit: BoxFit.cover);
-      case '16:9':
-        return const AspectSpec(key: '16:9', fit: BoxFit.fill, ratio: 16 / 9);
-      case '4:3':
-        return const AspectSpec(key: '4:3', fit: BoxFit.fill, ratio: 4 / 3);
-      default:
-        return const AspectSpec(key: 'default', fit: BoxFit.contain);
-    }
-  }
-
   String _liveScaleLabel(String key) {
     return switch (key) {
       'fill' => '拉伸',
@@ -1964,7 +1949,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final next = keys[(i < 0 ? 0 : i + 1) % keys.length];
     setState(() {
       _liveScale = next;
-      _liveAspect = _liveAspectFromScale(next);
+      _liveAspect = kotvAspectFromScale(next);
     });
     unawaited(_playback.setVideoScale(next));
     try {

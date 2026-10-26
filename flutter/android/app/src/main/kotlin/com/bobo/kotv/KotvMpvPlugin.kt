@@ -1632,12 +1632,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun emit(payload: Map<String, Any?>) {
-    main.post {
-      try {
-        eventSink?.success(payload)
-      } catch (_: Throwable) {
-      }
-    }
+    emitOnMain(main, eventSink, payload)
   }
 
   override fun eventProperty(property: String) {}

@@ -1331,7 +1331,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _syncAndroidAutoPip();
     _applyDanmakuPrefsFromSettings(settings, applyOffset: true);
     final scale = '${settings['playerScale'] ?? 'default'}';
-    _aspect = _aspectFromScale(scale);
+    _aspect = kotvAspectFromScale(scale);
     unawaited(_playback.setVideoScale(_aspect.key));
     var playerVal = '${settings['player'] ?? kotvDefaultVodPlayer()}'.trim();
     if (playerVal.isEmpty) {
@@ -1671,21 +1671,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _status = '已切换线路: ${d.flags[i].show}';
     });
     if (autoPlay && idx >= 0) unawaited(_playAt(idx));
-  }
-
-  AspectSpec _aspectFromScale(String scale) {
-    switch (scale) {
-      case 'fill':
-        return const AspectSpec(key: 'fill', fit: BoxFit.fill);
-      case 'zoom':
-        return const AspectSpec(key: 'zoom', fit: BoxFit.cover);
-      case '16:9':
-        return const AspectSpec(key: '16:9', fit: BoxFit.fill, ratio: 16 / 9);
-      case '4:3':
-        return const AspectSpec(key: '4:3', fit: BoxFit.fill, ratio: 4 / 3);
-      default:
-        return const AspectSpec(key: 'default', fit: BoxFit.contain);
-    }
   }
 
   Future<void> _applyStableVolume(KotvPlayback p, bool on) async {
@@ -3094,7 +3079,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           await KotvSettingsCache.set(api, k, v);
           if (!mounted) return;
           if (k == 'playerScale') {
-            setState(() => _aspect = _aspectFromScale(v));
+            setState(() => _aspect = kotvAspectFromScale(v));
             unawaited(_playback.setVideoScale(v));
           }
           if (k == 'playerAmbient') {

@@ -196,6 +196,21 @@ class AspectSpec {
   final double? ratio;
 }
 
+AspectSpec kotvAspectFromScale(String scale) {
+  switch (scale) {
+    case 'fill':
+      return const AspectSpec(key: 'fill', fit: BoxFit.fill);
+    case 'zoom':
+      return const AspectSpec(key: 'zoom', fit: BoxFit.cover);
+    case '16:9':
+      return const AspectSpec(key: '16:9', fit: BoxFit.fill, ratio: 16 / 9);
+    case '4:3':
+      return const AspectSpec(key: '4:3', fit: BoxFit.fill, ratio: 4 / 3);
+    default:
+      return const AspectSpec(key: 'default', fit: BoxFit.contain);
+  }
+}
+
 String fmtPlayerTime(Duration d) {
   final h = d.inHours;
   final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');

@@ -2,6 +2,7 @@ import '../api/kotv_api.dart';
 import '../api/kotv_client_id.dart';
 import '../api/kotv_engine_url.dart';
 import '../player/kotv_traffic.dart';
+import 'engine_probe.dart';
 
 /// Web：不拉起本机进程，只探测 / 会话离开。
 class EngineLauncher {
@@ -57,19 +58,9 @@ class EngineLauncher {
     return _ping(baseUrl);
   }
 
-  Future<Map<String, dynamic>?> _health(String base) async {
-    try {
-      final h = await KotvApi(baseUrl: base).health().timeout(const Duration(seconds: 2));
-      return Map<String, dynamic>.from(h);
-    } catch (_) {
-      return null;
-    }
-  }
+  Future<Map<String, dynamic>?> _health(String base) => kotvEngineHealth(base);
 
-  Future<bool> _ping(String base) async {
-    final h = await _health(base);
-    return h != null && h['ok'] == true;
-  }
+  Future<bool> _ping(String base) => kotvEnginePing(base);
 
   Future<void> shutdown() async {
     _shuttingDown = true;

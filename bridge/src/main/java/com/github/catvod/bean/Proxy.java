@@ -3,12 +3,9 @@ package com.github.catvod.bean;
 import android.net.Uri;
 import android.text.TextUtils;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.annotations.SerializedName;
-import com.google.gson.reflect.TypeToken;
 
-import java.lang.reflect.Type;
 import java.net.InetSocketAddress;
 import java.util.Collections;
 import java.util.List;
@@ -28,13 +25,7 @@ public class Proxy implements Comparable<Proxy> {
     private boolean wildcard;
 
     public static List<Proxy> arrayFrom(JsonElement element) {
-        try {
-            Type listType = TypeToken.getParameterized(List.class, Proxy.class).getType();
-            List<Proxy> items = new Gson().fromJson(element, listType);
-            return items == null ? Collections.emptyList() : items;
-        } catch (Exception e) {
-            return Collections.emptyList();
-        }
+        return JsonLists.arrayFrom(element, Proxy.class);
     }
 
     public void init() {

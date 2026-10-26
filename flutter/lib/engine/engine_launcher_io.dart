@@ -10,6 +10,7 @@ import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_id.dart';
 import '../api/kotv_client_store.dart';
 import '../api/kotv_engine_url.dart';
+import 'engine_probe.dart';
 import '../player/kotv_traffic.dart';
 import '../util/kotv_app_dirs.dart';
 
@@ -208,19 +209,9 @@ class EngineLauncher {
     } catch (_) {}
   }
 
-  Future<Map<String, dynamic>?> _health(String base) async {
-    try {
-      final h = await KotvApi(baseUrl: base).health().timeout(const Duration(seconds: 2));
-      return Map<String, dynamic>.from(h);
-    } catch (_) {
-      return null;
-    }
-  }
+  Future<Map<String, dynamic>?> _health(String base) => kotvEngineHealth(base);
 
-  Future<bool> _ping(String base) async {
-    final h = await _health(base);
-    return h != null && h['ok'] == true;
-  }
+  Future<bool> _ping(String base) => kotvEnginePing(base);
 
   static bool _looksLikeNoSource(String err) {
     if (err.trim().isEmpty) return true; // 源字段空且无错误：视为未配源
