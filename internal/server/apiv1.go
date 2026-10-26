@@ -138,13 +138,20 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func wroteOptions(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodOptions {
+		return false
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return true
+}
+
 func writeAPIError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"ok": false, "error": msg})
 }
 
 func (s *Server) handleAPIv1Health(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -157,8 +164,7 @@ func (s *Server) handleAPIv1Health(w http.ResponseWriter, r *http.Request) {
 
 // handleAPIv1Net 缓冲浮层测速：代理累计下行字节（与播放器解耦，Traffic 思路）。
 func (s *Server) handleAPIv1Net(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -172,8 +178,7 @@ func (s *Server) handleAPIv1Net(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Config(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -216,8 +221,7 @@ func (s *Server) handleAPIv1Config(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1ConfigRefresh(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -237,8 +241,7 @@ func (s *Server) handleAPIv1ConfigRefresh(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleAPIv1Sites(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -274,8 +277,7 @@ func (s *Server) handleAPIv1Sites(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Home(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -292,8 +294,7 @@ func (s *Server) handleAPIv1Home(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Category(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -351,8 +352,7 @@ func (s *Server) handleAPIv1Category(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Action(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -386,8 +386,7 @@ func (s *Server) handleAPIv1Action(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Detail(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -423,8 +422,7 @@ func (s *Server) handleAPIv1Detail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1DetailExpand(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -463,8 +461,7 @@ func (s *Server) handleAPIv1DetailExpand(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleAPIv1BtProgress(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -476,8 +473,7 @@ func (s *Server) handleAPIv1BtProgress(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -530,8 +526,7 @@ func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Play(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	if r.Method != http.MethodPost && r.Method != http.MethodGet {
@@ -599,8 +594,7 @@ func (s *Server) handleAPIv1Play(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1RemotePoll(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -614,8 +608,7 @@ func (s *Server) handleAPIv1RemotePoll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Media(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -638,8 +631,7 @@ func (s *Server) handleAPIv1Media(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Repos(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -699,8 +691,7 @@ func (s *Server) handleAPIv1Repos(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Settings(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -740,8 +731,7 @@ func (s *Server) handleAPIv1Settings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -831,8 +821,7 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Player(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	api := s.content()
@@ -892,8 +881,7 @@ func (s *Server) handleAPIv1Player(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIv1Tools(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -925,8 +913,7 @@ func (s *Server) handleAPIv1Tools(w http.ResponseWriter, r *http.Request) {
 // handleAPIv1Cancel 打断进行中的详情/分类等 spider 请求（网盘扫码卡住后离开详情页）。
 // body 可选：{"hard":bool,"thunder":bool}；缺省 soft + 停磁力。
 func (s *Server) handleAPIv1Cancel(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -962,8 +949,7 @@ func (s *Server) handleSessionLeave(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) requirePostContent(w http.ResponseWriter, r *http.Request) (ContentAPI, bool) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return nil, false
 	}
 	if r.Method != http.MethodPost {
@@ -980,8 +966,7 @@ func (s *Server) requirePostContent(w http.ResponseWriter, r *http.Request) (Con
 
 // handleAPIv1Shutdown 仅本机可调用：优雅停引擎（会顺带杀 Java/Python）。
 func (s *Server) handleAPIv1Shutdown(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	if r.Method != http.MethodPost {

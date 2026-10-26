@@ -92,8 +92,7 @@ func publicAuthPath(path string) bool {
 // - 非本机 PC/安卓：须开 remoteAuth 且 Bearer，会话用 u:<userId>
 func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		if wroteOptions(w, r) {
 			return
 		}
 		loopback := isLoopbackRequest(r)
@@ -258,8 +257,7 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -304,8 +302,7 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 }
 
 func readLoginForm(w http.ResponseWriter, r *http.Request) (username, password string, ok bool) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return "", "", false
 	}
 	if r.Method != http.MethodPost {
@@ -325,8 +322,7 @@ func readLoginForm(w http.ResponseWriter, r *http.Request) (username, password s
 }
 
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -338,8 +334,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	u := authUserFrom(r.Context())
@@ -370,8 +365,7 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -401,8 +395,7 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	switch r.Method {
@@ -437,8 +430,7 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminUserAction(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/admin/users/")
@@ -490,8 +482,7 @@ func (s *Server) handleAdminUserAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if wroteOptions(w, r) {
 		return
 	}
 	if r.Method != http.MethodPost {
