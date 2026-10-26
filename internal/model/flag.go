@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -149,4 +150,36 @@ func (f *Flag) Find(remarks string, strict bool) *Episode {
 		return nil
 	}
 	return &f.Episodes[0]
+}
+
+// ExpandEpisodes 按 match 展开剧集。取消或展开失败时保留原链，避免列表变空；一条都没展开则不改原列表。
+func (f *Flag) ExpandEpisodes(ctx context.Context, match func(string) bool, expand func(context.Context, string) ([]Episode, error), onFail func(Episode, error)) {
+	if f == nil {
+		return
+	}
+	var kept []Episode
+	var expanded []Episode
+	for _, ep := range f.Episodes {
+		if ctx.Err() != nil {
+			kept = append(kept, ep)
+			continue
+		}
+		if !match(ep.URL) {
+			kept = append(kept, ep)
+			continue
+		}
+		eps, err := expand(ctx, ep.URL)
+		if err != nil || len(eps) == 0 {
+			if onFail != nil && ctx.Err() == nil {
+				onFail(ep, err)
+			}
+			kept = append(kept, ep)
+			continue
+		}
+		expanded = append(expanded, eps...)
+	}
+	if len(expanded) == 0 {
+		return
+	}
+	f.Episodes = append(kept, expanded...)
 }

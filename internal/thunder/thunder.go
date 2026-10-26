@@ -1,4 +1,5 @@
 // Package thunder 磁力/种子两阶段播放：
+//
 //	详情：magnet/thunder/.torrent 展开为媒体剧集
 //	起播：转成本地 HTTP 给播放器边下边播
 //
@@ -165,32 +166,9 @@ func CloneFlags(src []model.Flag) []model.Flag {
 }
 
 func parseFlag(ctx context.Context, f *model.Flag) {
-	var kept []model.Episode
-	var expanded []model.Episode
-	for _, ep := range f.Episodes {
-		if ctx.Err() != nil {
-			// 未处理完的原链保留，避免取消后剧集列表变空
-			kept = append(kept, ep)
-			continue
-		}
-		if !Match(ep.URL) {
-			kept = append(kept, ep)
-			continue
-		}
-		eps, err := ParseContext(ctx, ep.URL)
-		if err != nil || len(eps) == 0 {
-			if ctx.Err() == nil {
-				log.Printf("thunder: parse fail url=%q err=%v", shorten(ep.URL), err)
-			}
-			kept = append(kept, ep) // 保留原链，起播时再试
-			continue
-		}
-		expanded = append(expanded, eps...)
-	}
-	if len(expanded) == 0 {
-		return
-	}
-	f.Episodes = append(kept, expanded...)
+	f.ExpandEpisodes(ctx, Match, ParseContext, func(ep model.Episode, err error) {
+		log.Printf("thunder: parse fail url=%q err=%v", shorten(ep.URL), err)
+	})
 }
 
 // Parse 返回可播媒体剧集。

@@ -44,29 +44,5 @@ func ParseVodPlaylists(ctx context.Context, vod *model.Vod) {
 }
 
 func parsePlaylistFlag(ctx context.Context, f *model.Flag) {
-	if f == nil {
-		return
-	}
-	var kept []model.Episode
-	var expanded []model.Episode
-	for _, ep := range f.Episodes {
-		if ctx.Err() != nil {
-			kept = append(kept, ep)
-			continue
-		}
-		if !MatchPlaylist(ep.URL) {
-			kept = append(kept, ep)
-			continue
-		}
-		eps, err := fetchPlaylistPlatform(ctx, ep.URL)
-		if err != nil || len(eps) == 0 {
-			kept = append(kept, ep)
-			continue
-		}
-		expanded = append(expanded, eps...)
-	}
-	if len(expanded) == 0 {
-		return
-	}
-	f.Episodes = append(kept, expanded...)
+	f.ExpandEpisodes(ctx, MatchPlaylist, fetchPlaylistPlatform, nil)
 }
