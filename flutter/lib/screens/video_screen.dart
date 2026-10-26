@@ -953,12 +953,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     );
     return Column(
       children: [
-        compactHeader
-            ? ColoredBox(
-                color: KotvPalette.of(context).catBar,
-                child: header,
-              )
-            : header,
+        compactHeader ? KotvFrostedBar(child: header) : header,
         if (ready && !onHome && _filtersExpanded && _filters.isNotEmpty)
           _buildFilters(),
         if (ready && _statusMsg != null)
