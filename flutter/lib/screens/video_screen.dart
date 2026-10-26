@@ -1069,7 +1069,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                       child: Text(
                         f.name,
                         style: TextStyle(
-                          color: p.fg.withOpacity(p.light ? 0.72 : 0.78),
+                          color: p.fg.withOpacity(0.78),
                           fontSize: compact ? 12 : 14,
                           fontWeight: FontWeight.w600,
                         ),

@@ -346,8 +346,8 @@ class _AppShellState extends ConsumerState<AppShell> {
           // 详情沉浸全屏：铺满含刘海/手势条，否则画面缩在 SafeArea 里不像全屏。
           extendBody: immersiveDetail,
           body: SafeArea(
-            // 详情盖壳：顶也不留白，页内顶栏伸到状态栏下。
-            top: !immersiveDetail && !detailCover,
+            // 首页顶栏自己垫状态栏，颜色铺到系统时间那一行；详情盖壳同样不留白。
+            top: !immersiveDetail && !detailCover && page != KotvPage.video,
             left: !immersiveDetail,
             right: !immersiveDetail,
             // 有底栏时由 Scaffold 占位；沉浸/详情盖壳不留底边；平板无底栏时仍避让手势条。
@@ -419,11 +419,9 @@ class _AppShellState extends ConsumerState<AppShell> {
           bottomNavigationBar: bottomNav
               ? Builder(builder: (context) {
                   final p = KotvPalette.of(context);
-                  // Scaffold 透明 + 外层 AppBackdrop：半透明底栏只透壁纸。
-                  final barBg = p.bottomNav.withOpacity(p.light ? 0.72 : 0.55);
                   return NavigationBarTheme(
                     data: NavigationBarThemeData(
-                      backgroundColor: barBg,
+                      backgroundColor: p.bottomNav,
                       indicatorColor: p.selected.withOpacity(0.92),
                       elevation: 0,
                       shadowColor: Colors.transparent,
@@ -444,7 +442,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                     ),
                     child: NavigationBar(
                       height: 64,
-                      backgroundColor: barBg,
+                      backgroundColor: p.bottomNav,
                       indicatorColor: p.selected.withOpacity(0.92),
                       surfaceTintColor: Colors.transparent,
                       shadowColor: Colors.transparent,

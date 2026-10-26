@@ -94,7 +94,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
     pillBorder: Color(0x994A4855),
     statusBar: Color(0x60121218),
     catBar: Color(0xB318181E),
-    bottomNav: Color(0xB30E0E14),
+    bottomNav: Color(0x8C0E0E14),
     dialogBg: Color(0xE0121218),
     posterBar: Color(0xE618181E),
     posterPh: Color(0xFF1A1A22),
@@ -113,41 +113,54 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
 
   static Color _c(int argb) => Color(argb);
 
+  /// 半透明层亮暗共用这些透明度。底栏 0x8C 即实际画出的 55%。
+  static const int _aStatus = 0x60;
+  static const int _aCat = 0xB3;
+  static const int _aNav = 0x8C;
+  static const int _aDialog = 0xE0;
+  static const int _aPoster = 0xE6;
+  static const int _aPill = 0xA6;
+  static const int _aInput = 0xCC;
+  static const int _aMuted = 0xD8;
+  static const int _aOutline = 0x99;
+  static const int _aWall = 0x55;
+
+  static Color _a(int alpha, int rgb) => Color((alpha << 24) | (rgb & 0x00FFFFFF));
+
   /// 按 wallMode + 深/浅 本地生成完整色板（跟随系统时不依赖引擎写死的 light=false）。
   static KotvPalette resolve(String mode, bool light) {
     mode = mode.trim().isEmpty ? 'gradient' : mode.trim();
     final name = kotvWallModeNames[mode] ?? '极光紫';
 
-    // 默认极光紫 / 配置墙纸 / 网络 / 本地：同一套 UI 色
-    // 浅色：顶栏/分类栏高不透明，海报底栏用浅霜白底 + 深色字，避免壁纸透底导致发灰看不清
+    // 默认极光紫 / 配置墙纸 / 网络 / 本地：同一套 UI 色。亮暗透明度相同，只换底色。
     var p = light
-        ? const KotvPalette(
+        ? KotvPalette(
             mode: 'gradient',
             name: '极光紫',
             light: true,
-            primary: Color(0xFF1A2A6C),
-            surface: Color(0xFFE9EEFB),
-            variant: Color(0xFFB994F5),
-            fg: Color(0xFF14141C),
-            muted: Color(0xFF3A3B48),
-            outline: Color(0x99767680),
-            input: Color(0xCCDDE2FF),
-            pillBg: Color(0xA6FFFFFF),
-            pillBorder: Color(0x99767680),
-            statusBar: Color(0xD0F4F6FC),
-            catBar: Color(0xC8EEF0F8),
-            bottomNav: Color(0xB3FCF8FF),
-            dialogBg: Color(0xE0FCF8FF),
-            posterBar: Color(0xE6FFFFFF),
-            posterPh: Color(0xFFD0C8E8),
-            selected: Color(0xD9C73C62),
-            focus: Color(0xFFC73C62),
-            gradStart: Color(0xFFE9EEFB),
-            gradEnd: Color(0xFFF3E7F8),
-            glowTop: Color(0x2EFF8AC8),
-            glowBottom: Color(0x2A7AC8FF),
-            glowMid: Color(0x24B994F5),
-            wallTint: Color(0x66FFFFFF),
+            primary: const Color(0xFF1A2A6C),
+            surface: const Color(0xFFE9EEFB),
+            variant: const Color(0xFFB994F5),
+            fg: const Color(0xFF14141C),
+            muted: _a(_aMuted, 0x3A3B48),
+            outline: _a(_aOutline, 0x767680),
+            input: _a(_aInput, 0xDDE2FF),
+            pillBg: _a(_aPill, 0xFFFFFF),
+            pillBorder: _a(_aOutline, 0x767680),
+            statusBar: _a(_aStatus, 0xF4F6FC),
+            catBar: _a(_aCat, 0xEEF0F8),
+            bottomNav: _a(_aNav, 0xFCF8FF),
+            dialogBg: _a(_aDialog, 0xFCF8FF),
+            posterBar: _a(_aPoster, 0xFFFFFF),
+            posterPh: const Color(0xFFD0C8E8),
+            selected: const Color(0xD9C73C62),
+            focus: const Color(0xFFC73C62),
+            gradStart: const Color(0xFFE9EEFB),
+            gradEnd: const Color(0xFFF3E7F8),
+            glowTop: const Color(0x2EFF8AC8),
+            glowBottom: const Color(0x2A7AC8FF),
+            glowMid: const Color(0x24B994F5),
+            wallTint: _a(_aWall, 0xFFFFFF),
           )
         : defaults;
 
@@ -162,16 +175,16 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 surface: _c(0xFFC8E0F2),
                 variant: _c(0xFF4FC3F7),
                 fg: _c(0xFF0A2A40),
-                muted: _c(0xE00E3A5C),
-                outline: _c(0x99156B8A),
-                input: _c(0xCCE8F4FC),
-                pillBg: _c(0xA6FFFFFF),
-                pillBorder: _c(0x992E86AB),
-                statusBar: _c(0xF0E8F4FC),
-                catBar: _c(0xE8D8ECF5),
-                bottomNav: _c(0xB3F2F8FC),
-                dialogBg: _c(0xE0E8F4FC),
-                posterBar: _c(0xF2FFFFFF),
+                muted: _a(_aMuted, 0x0E3A5C),
+                outline: _a(_aOutline, 0x156B8A),
+                input: _a(_aInput, 0xE8F4FC),
+                pillBg: _a(_aPill, 0xFFFFFF),
+                pillBorder: _c(0x882E86AB),
+                statusBar: _a(_aStatus, 0xE8F4FC),
+                catBar: _a(_aCat, 0xD8ECF5),
+                bottomNav: _a(_aNav, 0xF2F8FC),
+                dialogBg: _a(_aDialog, 0xE8F4FC),
+                posterBar: _a(_aPoster, 0xFFFFFF),
                 posterPh: _c(0xFFB0D4E8),
                 selected: _c(0xD92E86AB),
                 focus: _c(0xFFC73C62),
@@ -180,7 +193,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 glowTop: _c(0x304FC3F7),
                 glowBottom: _c(0x28156B8A),
                 glowMid: _c(0x252E86AB),
-                wallTint: _c(0x66FFFFFF),
+                wallTint: _a(_aWall, 0xFFFFFF),
               )
             : p.copyWith(
                 mode: mode,
@@ -190,16 +203,16 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 surface: _c(0xFF14141C),
                 variant: _c(0xFF2E86AB),
                 fg: _c(0xFFFFFFFF),
-                muted: _c(0xD8FFFFFF),
-                outline: _c(0x99767680),
-                input: _c(0xCC14141C),
-                pillBg: _c(0xA6121218),
+                muted: _a(_aMuted, 0xFFFFFF),
+                outline: _a(_aOutline, 0x767680),
+                input: _a(_aInput, 0x14141C),
+                pillBg: _a(_aPill, 0x121218),
                 pillBorder: _c(0x884FC3F7),
-                statusBar: _c(0x60121218),
-                catBar: _c(0xB318181E),
-                bottomNav: _c(0xB30E0E14),
-                dialogBg: _c(0xE0121218),
-                posterBar: _c(0xE618181E),
+                statusBar: _a(_aStatus, 0x121218),
+                catBar: _a(_aCat, 0x18181E),
+                bottomNav: _a(_aNav, 0x0E0E14),
+                dialogBg: _a(_aDialog, 0x121218),
+                posterBar: _a(_aPoster, 0x18181E),
                 posterPh: _c(0xFF0E3A5C),
                 selected: _c(0xD92E86AB),
                 focus: _c(0xFF4FC3F7),
@@ -208,7 +221,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 glowTop: _c(0x304FC3F7),
                 glowBottom: _c(0x28156B8A),
                 glowMid: _c(0x252E86AB),
-                wallTint: _c(0x55120832),
+                wallTint: _a(_aWall, 0x120832),
               );
       case 'builtin2':
         p = light
@@ -220,16 +233,16 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 surface: _c(0xFFF7E3F2),
                 variant: _c(0xFFE86A83),
                 fg: _c(0xFF3A1028),
-                muted: _c(0xE05A1A3A),
-                outline: _c(0x99C73C62),
-                input: _c(0xCCFFF0F5),
-                pillBg: _c(0xA6FFFFFF),
-                pillBorder: _c(0x99E86A83),
-                statusBar: _c(0xF0FFF0F5),
-                catBar: _c(0xE8F5E0EA),
-                bottomNav: _c(0xB3FFF5F8),
-                dialogBg: _c(0xE0FFF0F5),
-                posterBar: _c(0xF2FFFFFF),
+                muted: _a(_aMuted, 0x5A1A3A),
+                outline: _a(_aOutline, 0xC73C62),
+                input: _a(_aInput, 0xFFF0F5),
+                pillBg: _a(_aPill, 0xFFFFFF),
+                pillBorder: _c(0xC8E86A83),
+                statusBar: _a(_aStatus, 0xFFF0F5),
+                catBar: _a(_aCat, 0xF5E0EA),
+                bottomNav: _a(_aNav, 0xFFF5F8),
+                dialogBg: _a(_aDialog, 0xFFF0F5),
+                posterBar: _a(_aPoster, 0xFFFFFF),
                 posterPh: _c(0xFFE8B0C0),
                 selected: _c(0xD9C73C62),
                 focus: _c(0xFFC73C62),
@@ -238,7 +251,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 glowTop: _c(0x32FF8A65),
                 glowBottom: _c(0x28E91E63),
                 glowMid: _c(0x22FF6F91),
-                wallTint: _c(0x66FFFFFF),
+                wallTint: _a(_aWall, 0xFFFFFF),
               )
             : p.copyWith(
                 mode: mode,
@@ -248,16 +261,16 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 surface: _c(0xFF14141C),
                 variant: _c(0xFFC73C62),
                 fg: _c(0xFFFFFFFF),
-                muted: _c(0xD8FFFFFF),
-                outline: _c(0x99767680),
-                input: _c(0xCC14141C),
-                pillBg: _c(0xA6121218),
+                muted: _a(_aMuted, 0xFFFFFF),
+                outline: _a(_aOutline, 0x767680),
+                input: _a(_aInput, 0x14141C),
+                pillBg: _a(_aPill, 0x121218),
                 pillBorder: _c(0xC8E86A83),
-                statusBar: _c(0x60121218),
-                catBar: _c(0xB318181E),
-                bottomNav: _c(0xB30E0E14),
-                dialogBg: _c(0xE0121218),
-                posterBar: _c(0xE618181E),
+                statusBar: _a(_aStatus, 0x121218),
+                catBar: _a(_aCat, 0x18181E),
+                bottomNav: _a(_aNav, 0x0E0E14),
+                dialogBg: _a(_aDialog, 0x121218),
+                posterBar: _a(_aPoster, 0x18181E),
                 posterPh: _c(0xFF4A1848),
                 selected: _c(0xD9C73C62),
                 focus: _c(0xFFFF8A65),
@@ -266,7 +279,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 glowTop: _c(0x32FF8A65),
                 glowBottom: _c(0x28E91E63),
                 glowMid: _c(0x22FF6F91),
-                wallTint: _c(0x55120832),
+                wallTint: _a(_aWall, 0x120832),
               );
       case 'builtin3':
         p = light
@@ -278,16 +291,16 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 surface: _c(0xFFD5E4E8),
                 variant: _c(0xFF4DA8DA),
                 fg: _c(0xFF0A1822),
-                muted: _c(0xE00F202E),
-                outline: _c(0x99266E8C),
-                input: _c(0xCCE8F0F2),
-                pillBg: _c(0xA6FFFFFF),
-                pillBorder: _c(0x994DA8DA),
-                statusBar: _c(0xF0E8F0F2),
-                catBar: _c(0xE8D8E6EA),
-                bottomNav: _c(0xB3F0F4F6),
-                dialogBg: _c(0xE0E8F0F2),
-                posterBar: _c(0xF2FFFFFF),
+                muted: _a(_aMuted, 0x0F202E),
+                outline: _a(_aOutline, 0x266E8C),
+                input: _a(_aInput, 0xE8F0F2),
+                pillBg: _a(_aPill, 0xFFFFFF),
+                pillBorder: _c(0x884DA8DA),
+                statusBar: _a(_aStatus, 0xE8F0F2),
+                catBar: _a(_aCat, 0xD8E6EA),
+                bottomNav: _a(_aNav, 0xF0F4F6),
+                dialogBg: _a(_aDialog, 0xE8F0F2),
+                posterBar: _a(_aPoster, 0xFFFFFF),
                 posterPh: _c(0xFFB0C8D0),
                 selected: _c(0xD94DA8DA),
                 focus: _c(0xFFC73C62),
@@ -296,7 +309,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 glowTop: _c(0x2880CBC4),
                 glowBottom: _c(0x224DA8DA),
                 glowMid: _c(0x20266E8C),
-                wallTint: _c(0x66FFFFFF),
+                wallTint: _a(_aWall, 0xFFFFFF),
               )
             : p.copyWith(
                 mode: mode,
@@ -306,16 +319,16 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 surface: _c(0xFF14141C),
                 variant: _c(0xFF4DA8DA),
                 fg: _c(0xFFFFFFFF),
-                muted: _c(0xD8FFFFFF),
-                outline: _c(0x99767680),
-                input: _c(0xCC14141C),
-                pillBg: _c(0xA6121218),
+                muted: _a(_aMuted, 0xFFFFFF),
+                outline: _a(_aOutline, 0x767680),
+                input: _a(_aInput, 0x14141C),
+                pillBg: _a(_aPill, 0x121218),
                 pillBorder: _c(0x884DA8DA),
-                statusBar: _c(0x60121218),
-                catBar: _c(0xB318181E),
-                bottomNav: _c(0xB30E0E14),
-                dialogBg: _c(0xE0121218),
-                posterBar: _c(0xE618181E),
+                statusBar: _a(_aStatus, 0x121218),
+                catBar: _a(_aCat, 0x18181E),
+                bottomNav: _a(_aNav, 0x0E0E14),
+                dialogBg: _a(_aDialog, 0x121218),
+                posterBar: _a(_aPoster, 0x18181E),
                 posterPh: _c(0xFF0F202E),
                 selected: _c(0xD94DA8DA),
                 focus: _c(0xFF80CBC4),
@@ -324,7 +337,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 glowTop: _c(0x2880CBC4),
                 glowBottom: _c(0x224DA8DA),
                 glowMid: _c(0x20266E8C),
-                wallTint: _c(0x55120832),
+                wallTint: _a(_aWall, 0x120832),
               );
       default:
         p = p.copyWith(mode: mode, name: name, light: light);

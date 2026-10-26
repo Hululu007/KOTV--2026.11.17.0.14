@@ -294,8 +294,6 @@ class _TvFocusState extends State<TvFocus> with KotvKeyHighlightState {
   Widget build(BuildContext context) {
     final pal = KotvPalette.of(context);
     final ring = kotvFocusRingColor(pal);
-    final fill = pal.light ? 0.16 : 0.22;
-    final lightBorderOnly = pal.light;
     return FocusableActionDetector(
       focusNode: widget.focusNode,
       autofocus: widget.autofocus,
@@ -338,12 +336,12 @@ class _TvFocusState extends State<TvFocus> with KotvKeyHighlightState {
               duration: const Duration(milliseconds: 120),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(widget.borderRadius),
-                color: kotvRing(_highlight) && !lightBorderOnly ? ring.withOpacity(fill) : null,
+                color: kotvRing(_highlight) ? ring.withOpacity(0.22) : null,
                 border: Border.all(
                   color: kotvRing(_highlight) ? ring : Colors.transparent,
                   width: kotvRing(_highlight) ? 3 : 0,
                 ),
-                boxShadow: kotvRing(_highlight) && !lightBorderOnly
+                boxShadow: kotvRing(_highlight)
                     ? [
                         BoxShadow(
                           color: ring.withOpacity(0.55),

@@ -217,7 +217,7 @@ class _KotvSeekSliderState extends State<KotvSeekSlider> with KotvKeyHighlightSt
         padding: const EdgeInsets.symmetric(vertical: 2),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          color: kotvRing(_highlight) ? ring.withOpacity(pal.light ? 0.22 : 0.18) : null,
+          color: kotvRing(_highlight) ? ring.withOpacity(0.18) : null,
           border: Border.all(
             color: kotvRing(_highlight) ? ring : Colors.transparent,
             width: kotvRing(_highlight) ? ringWidth : 0,
