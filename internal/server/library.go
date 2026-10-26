@@ -24,7 +24,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	db := s.libraryDB
 	s.mu.RUnlock()
 	if db == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "库未就绪"})
+		writeAPIError(w, http.StatusServiceUnavailable, "库未就绪")
 		return
 	}
 	owner := libraryOwnerFromRequest(r)
@@ -119,7 +119,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": "liveKeep", "owner": owner, "names": names, "items": items})
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "type 仅支持 history / keep / liveKeep"})
+		writeAPIError(w, http.StatusBadRequest, "type 仅支持 history / keep / liveKeep")
 	}
 }
 
@@ -143,7 +143,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 	switch action {
 	case "savehistory":
 		if body.Item == nil || strings.TrimSpace(body.Item.Key) == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing item"})
+			writeAPIError(w, http.StatusBadRequest, "missing item")
 			return
 		}
 		if err := db.SaveHistory(owner, *body.Item); rejectInternal(w, err) {
@@ -156,7 +156,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			key = body.Item.Key
 		}
 		if key == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
+			writeAPIError(w, http.StatusBadRequest, "missing key")
 			return
 		}
 		h, err := db.GetHistory(owner, key)
@@ -171,7 +171,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 	case "updateoffsets":
 		key := strings.TrimSpace(body.Key)
 		if key == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
+			writeAPIError(w, http.StatusBadRequest, "missing key")
 			return
 		}
 		if err := db.UpdateHistoryOffsets(owner, key, body.Opening, body.Ending); rejectInternal(w, err) {
@@ -181,7 +181,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 	case "setrevsort":
 		key := strings.TrimSpace(body.Key)
 		if key == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
+			writeAPIError(w, http.StatusBadRequest, "missing key")
 			return
 		}
 		rev := false
@@ -215,7 +215,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		oldKey := strings.TrimSpace(body.Key)
 		newKey := strings.TrimSpace(body.NewKey)
 		if oldKey == "" || newKey == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
+			writeAPIError(w, http.StatusBadRequest, "missing key")
 			return
 		}
 		if err := db.RenameHistory(owner, oldKey, newKey); rejectInternal(w, err) {
@@ -226,7 +226,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		oldKey := strings.TrimSpace(body.Key)
 		newKey := strings.TrimSpace(body.NewKey)
 		if oldKey == "" || newKey == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
+			writeAPIError(w, http.StatusBadRequest, "missing key")
 			return
 		}
 		if err := db.RenameKeep(owner, oldKey, newKey); rejectInternal(w, err) {
@@ -235,7 +235,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "savekeep":
 		if body.Keep == nil || strings.TrimSpace(body.Keep.Key) == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing keep"})
+			writeAPIError(w, http.StatusBadRequest, "missing keep")
 			return
 		}
 		k := *body.Keep
@@ -248,7 +248,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "togglekeep":
 		if body.Keep == nil || strings.TrimSpace(body.Keep.Key) == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing keep"})
+			writeAPIError(w, http.StatusBadRequest, "missing keep")
 			return
 		}
 		k := *body.Keep
@@ -282,7 +282,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "unknown action"})
+		writeAPIError(w, http.StatusBadRequest, "unknown action")
 	}
 }
 

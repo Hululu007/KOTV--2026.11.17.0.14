@@ -144,7 +144,7 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 	switch site.TypeID() {
 	case 3: // Spider：api 为 csp_/脚本路径，靠 jar+key 加载，勿按 HTTP 空址早拒。
 		if !spider.RunnableAPI(site.API) {
-			return model.Result{Success: false}, fmt.Errorf("站点「%s」没有可用爬虫", siteLabel(site))
+			return failed(fmt.Errorf("站点「%s」没有可用爬虫", siteLabel(site)))
 		}
 		sp := s.cfg.Spider(site)
 		type homeBundler interface {
@@ -161,11 +161,11 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 			}
 		}
 		if herr != nil {
-			return model.Result{Success: false}, herr
+			return failed(herr)
 		}
 		result, err = decodeResult(home)
 		if err != nil {
-			return model.Result{Success: false}, err
+			return failed(err)
 		}
 		extra, _ := decodeResult(hv)
 		if len(extra.List) > 0 {
@@ -174,7 +174,7 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		applyTypes(site, &result)
 	case 4:
 		if strings.TrimSpace(site.API) == "" {
-			return model.Result{Success: false}, fmt.Errorf("站点「%s」无接口地址，请换源或换站", siteLabel(site))
+			return failed(fmt.Errorf("站点「%s」无接口地址，请换源或换站", siteLabel(site)))
 		}
 		if fetched, ferr := fetchExt(site); ferr == nil {
 			after := strings.TrimSpace(fetched.Ext.String())
@@ -187,40 +187,44 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		var body string
 		body, err = siteCall(site, map[string]string{"filter": "true"})
 		if err != nil {
-			return model.Result{Success: false}, err
+			return failed(err)
 		}
 		result, err = fromType(4, body)
 		if err != nil {
-			return model.Result{Success: false}, err
+			return failed(err)
 		}
 		applyTypes(site, &result)
 	case 0, 1, 2:
 		if strings.TrimSpace(site.API) == "" {
-			return model.Result{Success: false}, fmt.Errorf("站点「%s」无接口地址，请换源或换站", siteLabel(site))
+			return failed(fmt.Errorf("站点「%s」无接口地址，请换源或换站", siteLabel(site)))
 		}
 		// type2：非 spider 分支，JSON 解析（FromType≠0→JSON）。
 		var body string
 		body, err = util.HTTPGetParamsInsecure(site.API, map[string]string(site.Header), nil)
 		if err != nil {
-			return model.Result{Success: false}, err
+			return failed(err)
 		}
 		result, err = fromType(site.TypeID(), body)
 		if err != nil {
-			return model.Result{Success: false}, err
+			return failed(err)
 		}
 		result, err = fetchPic(site, result)
 		if err != nil {
-			return model.Result{Success: false}, err
+			return failed(err)
 		}
 		applyTypes(site, &result)
 	default:
-		return model.Result{Success: false}, fmt.Errorf("不支持的站源类型: %d", site.TypeID())
+		return failed(fmt.Errorf("不支持的站源类型: %d", site.TypeID()))
 	}
 
 	for i := range result.List {
 		result.List[i].Site = &site
 	}
 	return result, nil
+}
+
+func failed(err error) (model.Result, error) {
+	return model.Result{Success: false}, err
 }
 
 func siteLabel(site model.Site) string {
@@ -267,7 +271,7 @@ func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map
 			var raw string
 			raw, err = sp.CategoryContent(tid, pg, true, extend)
 			if err != nil {
-				return model.Result{Success: false}, err
+				return failed(err)
 			}
 			result, err = decodeResult(raw)
 		}
@@ -288,14 +292,14 @@ func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map
 		var body string
 		body, err = siteCall(site, params)
 		if err != nil {
-			return model.Result{Success: false}, err
+			return failed(err)
 		}
 		result, err = fromType(site.TypeID(), body)
 	default:
-		return model.Result{Success: false}, fmt.Errorf("不支持的站源类型: %d", site.TypeID())
+		return failed(fmt.Errorf("不支持的站源类型: %d", site.TypeID()))
 	}
 	if err != nil {
-		return model.Result{Success: false}, err
+		return failed(err)
 	}
 	for i := range result.List {
 		result.List[i].Site = &site
@@ -459,11 +463,11 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 			// 此处保持 id 原样（不 normalize）
 			raw, err = sp.PlayerContent(flag, id, vipFlags)
 			if err != nil {
-				return model.Result{Success: false}, err
+				return failed(err)
 			}
 			result, err = decodeResult(raw)
 			if err != nil {
-				return model.Result{Success: false}, err
+				return failed(err)
 			}
 			result.Key = site.Key
 			applySourceFetch(&result)
@@ -475,11 +479,11 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 			var body string
 			body, err = siteCall(site, params)
 			if err != nil {
-				return model.Result{Success: false}, err
+				return failed(err)
 			}
 			result, err = fromType(4, body)
 			if err != nil {
-				return model.Result{Success: false}, err
+				return failed(err)
 			}
 			result.Key = site.Key
 			applySourceFetch(&result)
@@ -505,7 +509,7 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 			}
 			applySourceFetch(&result)
 		default:
-			return model.Result{Success: false}, fmt.Errorf("不支持的站源类型: %d", site.TypeID())
+			return failed(fmt.Errorf("不支持的站源类型: %d", site.TypeID()))
 		}
 	}
 
@@ -516,7 +520,7 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 	}
 	// 起播：磁力转本地 HTTP
 	if err := applyThunderFetch(&result); err != nil {
-		return model.Result{Success: false}, err
+		return failed(err)
 	}
 	s.mu.Lock()
 	s.PlayerResult = result
