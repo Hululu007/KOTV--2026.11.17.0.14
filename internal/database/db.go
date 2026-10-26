@@ -17,6 +17,8 @@ const (
 	ConfigTypeSite = 0
 	ConfigTypeLive = 1
 	configSelect   = `SELECT id, type, time, COALESCE(url,''), COALESCE(json,''), COALESCE(name,''), COALESCE(home,''), COALESCE(parse,'') FROM config `
+	historySelect  = `SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''), COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_play,0), COALESCE(rev_sort,0), COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1), COALESCE(opening,0), COALESCE(ending,0) FROM history `
+	keepSelect     = `SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''), COALESCE(create_time,0), COALESCE(type,0), COALESCE(cid,0), COALESCE(site_name,'') FROM keep `
 )
 
 type DB struct {
@@ -544,10 +546,7 @@ func StartPositionMs(h *History) int64 {
 
 func (db *DB) ListHistory(owner string, limit int) ([]History, error) {
 	rows, err := db.conn.Query(
-		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
-		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_play,0), COALESCE(rev_sort,0),
-		        COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1), COALESCE(opening,0), COALESCE(ending,0)
-		 FROM history WHERE owner = ? ORDER BY rev_play DESC, create_time DESC LIMIT ?`, owner, limit)
+		historySelect+`WHERE owner = ? ORDER BY rev_play DESC, create_time DESC LIMIT ?`, owner, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -555,8 +554,7 @@ func (db *DB) ListHistory(owner string, limit int) ([]History, error) {
 	var out []History
 	for rows.Next() {
 		var h History
-		if err := rows.Scan(&h.Key, &h.VodPic, &h.VodName, &h.VodFlag, &h.VodRemarks, &h.EpisodeURL,
-			&h.CreateTime, &h.RevPlay, &h.RevSort, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending); err != nil {
+		if err := scanHistory(rows, &h); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -764,14 +762,9 @@ func (db *DB) ReplaceKeepLive(owner string, names []string) error {
 
 // GetHistory 按 owner+key 读取历史。
 func (db *DB) GetHistory(owner, key string) (*History, error) {
-	row := db.conn.QueryRow(
-		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
-		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_play,0), COALESCE(rev_sort,0),
-		        COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1), COALESCE(opening,0), COALESCE(ending,0)
-		 FROM history WHERE owner = ? AND key = ?`, owner, key)
+	row := db.conn.QueryRow(historySelect+`WHERE owner = ? AND key = ?`, owner, key)
 	var h History
-	err := row.Scan(&h.Key, &h.VodPic, &h.VodName, &h.VodFlag, &h.VodRemarks, &h.EpisodeURL,
-		&h.CreateTime, &h.RevPlay, &h.RevSort, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending)
+	err := scanHistory(row, &h)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -784,9 +777,8 @@ func (db *DB) GetHistory(owner, key string) (*History, error) {
 // RenameHistory 迁移历史键，保留 opening/ending/rev_sort/rev_play 等字段。
 // 若新键已存在则只删旧键。单事务，避免删后插失败丢行。
 func (db *DB) RenameHistory(owner, oldKey, newKey string) error {
-	oldKey = strings.TrimSpace(oldKey)
-	newKey = strings.TrimSpace(newKey)
-	if oldKey == "" || newKey == "" || oldKey == newKey {
+	oldKey, newKey, ok := renameKeys(oldKey, newKey)
+	if !ok {
 		return nil
 	}
 	tx, err := db.conn.Begin()
@@ -796,13 +788,7 @@ func (db *DB) RenameHistory(owner, oldKey, newKey string) error {
 	defer tx.Rollback()
 
 	var old History
-	err = tx.QueryRow(
-		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
-		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_play,0), COALESCE(rev_sort,0),
-		        COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1), COALESCE(opening,0), COALESCE(ending,0)
-		 FROM history WHERE owner = ? AND key = ?`, owner, oldKey,
-	).Scan(&old.Key, &old.VodPic, &old.VodName, &old.VodFlag, &old.VodRemarks, &old.EpisodeURL,
-		&old.CreateTime, &old.RevPlay, &old.RevSort, &old.Position, &old.Duration, &old.Speed, &old.Opening, &old.Ending)
+	err = scanHistory(tx.QueryRow(historySelect+`WHERE owner = ? AND key = ?`, owner, oldKey), &old)
 	if err == sql.ErrNoRows {
 		return nil
 	}
@@ -810,18 +796,9 @@ func (db *DB) RenameHistory(owner, oldKey, newKey string) error {
 		return err
 	}
 
-	var existKey string
-	err = tx.QueryRow(`SELECT key FROM history WHERE owner = ? AND key = ?`, owner, newKey).Scan(&existKey)
-	newExists := err == nil
-	if err != nil && err != sql.ErrNoRows {
+	done, err := dropRenamedOld(tx, "history", owner, oldKey, newKey)
+	if err != nil || done {
 		return err
-	}
-
-	if newExists {
-		if _, err := tx.Exec(`DELETE FROM history WHERE owner = ? AND key = ?`, owner, oldKey); err != nil {
-			return err
-		}
-		return tx.Commit()
 	}
 
 	now := time.Now().UnixMilli()
@@ -905,13 +882,9 @@ func (db *DB) IsKept(owner, key string) (bool, error) {
 
 // GetKeep 按 owner+key 读取收藏。
 func (db *DB) GetKeep(owner, key string) (*Keep, error) {
-	row := db.conn.QueryRow(
-		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
-		        COALESCE(create_time,0), COALESCE(type,0), COALESCE(cid,0), COALESCE(site_name,'')
-		 FROM keep WHERE owner = ? AND key = ?`, owner, key)
+	row := db.conn.QueryRow(keepSelect+`WHERE owner = ? AND key = ?`, owner, key)
 	var k Keep
-	err := row.Scan(&k.Key, &k.VodPic, &k.VodName, &k.VodFlag, &k.VodRemarks,
-		&k.CreateTime, &k.Type, &k.CID, &k.SiteName)
+	err := scanKeep(row, &k)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -939,9 +912,7 @@ func (db *DB) ToggleKeep(owner string, k Keep) (bool, error) {
 
 func (db *DB) ListKeep(owner string, typ int64, limit int) ([]Keep, error) {
 	rows, err := db.conn.Query(
-		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
-		        COALESCE(create_time,0), COALESCE(type,0), COALESCE(cid,0), COALESCE(site_name,'')
-		 FROM keep WHERE owner = ? AND type = ? ORDER BY create_time DESC LIMIT ?`, owner, typ, limit)
+		keepSelect+`WHERE owner = ? AND type = ? ORDER BY create_time DESC LIMIT ?`, owner, typ, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -949,8 +920,7 @@ func (db *DB) ListKeep(owner string, typ int64, limit int) ([]Keep, error) {
 	var out []Keep
 	for rows.Next() {
 		var k Keep
-		if err := rows.Scan(&k.Key, &k.VodPic, &k.VodName, &k.VodFlag, &k.VodRemarks,
-			&k.CreateTime, &k.Type, &k.CID, &k.SiteName); err != nil {
+		if err := scanKeep(rows, &k); err != nil {
 			return nil, err
 		}
 		out = append(out, k)
@@ -964,9 +934,8 @@ func (db *DB) ListKeepLive(owner string) ([]Keep, error) {
 
 // RenameKeep 迁移收藏键；若新键已存在则只删旧键。单事务。
 func (db *DB) RenameKeep(owner, oldKey, newKey string) error {
-	oldKey = strings.TrimSpace(oldKey)
-	newKey = strings.TrimSpace(newKey)
-	if oldKey == "" || newKey == "" || oldKey == newKey {
+	oldKey, newKey, ok := renameKeys(oldKey, newKey)
+	if !ok {
 		return nil
 	}
 	tx, err := db.conn.Begin()
@@ -976,12 +945,7 @@ func (db *DB) RenameKeep(owner, oldKey, newKey string) error {
 	defer tx.Rollback()
 
 	var old Keep
-	err = tx.QueryRow(
-		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
-		        COALESCE(create_time,0), COALESCE(type,0), COALESCE(cid,0), COALESCE(site_name,'')
-		 FROM keep WHERE owner = ? AND key = ?`, owner, oldKey,
-	).Scan(&old.Key, &old.VodPic, &old.VodName, &old.VodFlag, &old.VodRemarks,
-		&old.CreateTime, &old.Type, &old.CID, &old.SiteName)
+	err = scanKeep(tx.QueryRow(keepSelect+`WHERE owner = ? AND key = ?`, owner, oldKey), &old)
 	if err == sql.ErrNoRows {
 		return nil
 	}
@@ -989,18 +953,9 @@ func (db *DB) RenameKeep(owner, oldKey, newKey string) error {
 		return err
 	}
 
-	var existKey string
-	err = tx.QueryRow(`SELECT key FROM keep WHERE owner = ? AND key = ?`, owner, newKey).Scan(&existKey)
-	newExists := err == nil
-	if err != nil && err != sql.ErrNoRows {
+	done, err := dropRenamedOld(tx, "keep", owner, oldKey, newKey)
+	if err != nil || done {
 		return err
-	}
-
-	if newExists {
-		if _, err := tx.Exec(`DELETE FROM keep WHERE owner = ? AND key = ?`, owner, oldKey); err != nil {
-			return err
-		}
-		return tx.Commit()
 	}
 
 	ct := old.CreateTime
@@ -1016,6 +971,43 @@ func (db *DB) RenameKeep(owner, oldKey, newKey string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func renameKeys(oldKey, newKey string) (string, string, bool) {
+	oldKey = strings.TrimSpace(oldKey)
+	newKey = strings.TrimSpace(newKey)
+	if oldKey == "" || newKey == "" || oldKey == newKey {
+		return "", "", false
+	}
+	return oldKey, newKey, true
+}
+
+func dropRenamedOld(tx *sql.Tx, table, owner, oldKey, newKey string) (bool, error) {
+	if table != "history" && table != "keep" {
+		return false, fmt.Errorf("unknown table")
+	}
+	var existKey string
+	err := tx.QueryRow(`SELECT key FROM `+table+` WHERE owner = ? AND key = ?`, owner, newKey).Scan(&existKey)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(`DELETE FROM `+table+` WHERE owner = ? AND key = ?`, owner, oldKey); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+func scanHistory(sc interface{ Scan(dest ...any) error }, h *History) error {
+	return sc.Scan(&h.Key, &h.VodPic, &h.VodName, &h.VodFlag, &h.VodRemarks, &h.EpisodeURL,
+		&h.CreateTime, &h.RevPlay, &h.RevSort, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending)
+}
+
+func scanKeep(sc interface{ Scan(dest ...any) error }, k *Keep) error {
+	return sc.Scan(&k.Key, &k.VodPic, &k.VodName, &k.VodFlag, &k.VodRemarks,
+		&k.CreateTime, &k.Type, &k.CID, &k.SiteName)
 }
 
 func nullStr(s string) interface{} {
