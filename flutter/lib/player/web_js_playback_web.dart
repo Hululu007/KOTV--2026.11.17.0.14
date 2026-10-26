@@ -397,11 +397,7 @@ class WebJsPlayback extends KotvPlayback {
   @override
   Future<void> playOrPause() async {
     _pullState();
-    if (_playing) {
-      await pause();
-    } else {
-      await play();
-    }
+    await kotvTogglePlayback(playing: _playing, play: play, pause: pause);
   }
 
   @override

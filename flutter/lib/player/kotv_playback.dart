@@ -397,3 +397,16 @@ class KotvSilentVideoException implements Exception {
   @override
   String toString() => message;
 }
+
+/// 正在播就暂停，否则播放。调用方的 play/pause 自己负责刷新界面。
+Future<void> kotvTogglePlayback({
+  required bool playing,
+  required Future<void> Function() play,
+  required Future<void> Function() pause,
+}) async {
+  if (playing) {
+    await pause();
+  } else {
+    await play();
+  }
+}

@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
+import 'video_player_toggle.dart';
 import 'mpv_hls_timeline.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
@@ -237,16 +238,7 @@ class HtmlPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> playOrPause() async {
-    final c = _c;
-    if (c == null) return;
-    if (c.value.isPlaying) {
-      await c.pause();
-    } else {
-      await c.play();
-    }
-    notifyListeners();
-  }
+  Future<void> playOrPause() => kotvToggleVideoPlayer(_c, notifyListeners);
 
   @override
   Future<void> play() async {

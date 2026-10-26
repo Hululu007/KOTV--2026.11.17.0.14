@@ -612,12 +612,8 @@ class ExoPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> playOrPause() async {
-    if (_playing) {
-      await pause();
-    } else {
-      await play();
-    }
+  Future<void> playOrPause() {
+    return kotvTogglePlayback(playing: _playing, play: play, pause: pause);
   }
 
   @override

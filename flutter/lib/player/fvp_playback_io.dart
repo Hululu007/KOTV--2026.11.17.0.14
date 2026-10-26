@@ -10,6 +10,7 @@ import 'fvp_decoders.dart';
 import 'drm_opts.dart';
 import 'fvp_register.dart';
 import 'kotv_playback.dart';
+import 'video_player_toggle.dart';
 import 'mpv_hls_timeline.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
@@ -583,16 +584,7 @@ class FvpPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> playOrPause() async {
-    final c = _c;
-    if (c == null) return;
-    if (c.value.isPlaying) {
-      await c.pause();
-    } else {
-      await c.play();
-    }
-    notifyListeners();
-  }
+  Future<void> playOrPause() => kotvToggleVideoPlayer(_c, notifyListeners);
 
   @override
   Future<void> play() async {
