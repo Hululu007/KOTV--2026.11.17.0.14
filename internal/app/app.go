@@ -533,6 +533,15 @@ func (a *App) applyRemoteSetting(name, value string) {
 }
 
 func (a *App) ReloadConfig() error {
+	return a.reloadConfig(func() error { return a.Config.LoadSettings(false) })
+}
+
+// LoadVodSource 从 URL 或 JSON 正文加载点播配置。
+func (a *App) LoadVodSource(source string) error {
+	return a.reloadConfig(func() error { return a.Config.LoadVod(source, false) })
+}
+
+func (a *App) reloadConfig(load func() error) error {
 	util.SetProxy(settings.Get(settings.Proxy))
 	spider.SetUserProxy(settings.Get(settings.Proxy))
 	// 换仓前先不可用，避免 Clear 窗口内仍 Ready 去 Get ""。
@@ -540,28 +549,7 @@ func (a *App) ReloadConfig() error {
 	a.ErrMsg = ""
 	a.Sites.DropContentCache()
 	a.Config.Clear()
-	if err := a.Config.LoadSettings(false); err != nil {
-		a.ErrMsg = err.Error()
-		a.switchConfigJars(model.Api{})
-		return err
-	}
-	a.switchConfigJars(a.Config.API())
-	a.Ready = true
-	a.ErrMsg = ""
-	a.Live.SyncFromConfig()
-	a.syncSessionsFromGlobal()
-	return nil
-}
-
-// LoadVodSource 从 URL 或 JSON 正文加载点播配置。
-func (a *App) LoadVodSource(source string) error {
-	util.SetProxy(settings.Get(settings.Proxy))
-	spider.SetUserProxy(settings.Get(settings.Proxy))
-	a.Ready = false
-	a.ErrMsg = ""
-	a.Sites.DropContentCache()
-	a.Config.Clear()
-	if err := a.Config.LoadVod(source, false); err != nil {
+	if err := load(); err != nil {
 		a.ErrMsg = err.Error()
 		a.switchConfigJars(model.Api{})
 		return err

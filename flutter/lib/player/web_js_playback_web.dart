@@ -10,6 +10,7 @@ import 'kotv_playback.dart';
 import 'mpv_hls_timeline.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
+import 'web_pip.dart';
 
 /// Web 端 JS 播放器种类（Art / 西瓜 / ZW 全能）。
 enum KotvWebJsKind { art, xg, zw }
@@ -208,15 +209,12 @@ class WebJsPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> exitPictureInPicture() async {
-    try {
-      if (web.document.pictureInPictureElement != null) {
-        await web.document.exitPictureInPicture().toDart;
-      }
-    } catch (_) {}
-    _pipActive = false;
-    onPictureInPictureChanged?.call(false);
-    notifyListeners();
+  Future<void> exitPictureInPicture() {
+    return kotvExitWebPictureInPicture(
+      setActive: (active) => _pipActive = active,
+      onChanged: onPictureInPictureChanged,
+      notify: notifyListeners,
+    );
   }
 
   @override

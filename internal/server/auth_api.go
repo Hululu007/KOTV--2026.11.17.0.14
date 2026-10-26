@@ -274,24 +274,11 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	username, password, ok := readLoginForm(w, r)
+	if !ok {
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	if !remoteAccessAllowed(r) {
-		writeAPIError(w, http.StatusForbidden, "未开启远端鉴权")
-		return
-	}
-	var body struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
-	tok, user, err := auth.Login(body.Username, body.Password)
+	tok, user, err := auth.Login(username, password)
 	if err != nil {
 		writeAPIError(w, http.StatusUnauthorized, err.Error())
 		return
@@ -304,29 +291,37 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
+	username, password, ok := readLoginForm(w, r)
+	if !ok {
+		return
+	}
+	user, err := auth.Register(username, password)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": user.Public()})
+}
+
+func readLoginForm(w http.ResponseWriter, r *http.Request) (username, password string, ok bool) {
 	if r.Method == http.MethodOptions {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-		return
+		return "", "", false
 	}
 	if r.Method != http.MethodPost {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
+		return "", "", false
 	}
 	if !remoteAccessAllowed(r) {
 		writeAPIError(w, http.StatusForbidden, "未开启远端鉴权")
-		return
+		return "", "", false
 	}
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
-	user, err := auth.Register(body.Username, body.Password)
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": user.Public()})
+	return body.Username, body.Password, true
 }
 
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {

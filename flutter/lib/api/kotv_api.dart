@@ -67,14 +67,18 @@ class KotvApi {
     return _decode(res);
   }
 
-  Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> _post(
+    String path,
+    Map<String, dynamic> body, {
+    Duration timeout = const Duration(seconds: 120),
+  }) async {
     final res = await http
         .post(
           _u(path),
           headers: await _headers({'Content-Type': 'application/json'}),
           body: jsonEncode(body),
         )
-        .timeout(const Duration(seconds: 120));
+        .timeout(timeout);
     return _decode(res);
   }
 
@@ -205,16 +209,8 @@ class KotvApi {
   }
 
   /// 本机优雅停引擎（会杀 Java/Python）；仅 loopback 可用。
-  Future<Map<String, dynamic>> requestShutdown() async {
-    final res = await http
-        .post(
-          _u('/api/v1/shutdown'),
-          headers: await _headers({'Content-Type': 'application/json'}),
-          body: '{}',
-        )
-        .timeout(const Duration(seconds: 3));
-    return _decode(res);
-  }
+  Future<Map<String, dynamic>> requestShutdown() =>
+      _post('/api/v1/shutdown', const {}, timeout: const Duration(seconds: 3));
 
   Future<Map<String, dynamic>> getConfig() => _get('/api/v1/config');
 
@@ -487,30 +483,19 @@ class KotvApi {
   Future<Map<String, dynamic>> library(String type, {int limit = 200}) =>
       _get('/library', {'type': type, 'limit': '$limit'});
 
-  Future<Map<String, dynamic>> libraryAction(Map<String, dynamic> body) async {
-    final res = await http
-        .post(
-          _u('/library'),
-          headers: await _headers({'Content-Type': 'application/json'}),
-          body: jsonEncode(body),
-        )
-        .timeout(const Duration(seconds: 30));
-    return _decode(res);
-  }
+  Future<Map<String, dynamic>> libraryAction(Map<String, dynamic> body) =>
+      _post('/library', body, timeout: const Duration(seconds: 30));
 
   /// 打断进行中的详情/分类等爬虫请求。
   /// [hard] 硬杀所属 JVM/Py/JS；换集默认 false（软取消）。
   /// [thunder] 停磁力 Fetch / 专用源；默认 false（离开详情不停；磁力起播显式 true）。
   Future<Map<String, dynamic>> cancelPending({bool hard = false, bool thunder = false}) async {
     try {
-      final res = await http
-          .post(
-            _u('/api/v1/cancel'),
-            headers: await _headers({'Content-Type': 'application/json'}),
-            body: jsonEncode({'hard': hard, 'thunder': thunder}),
-          )
-          .timeout(const Duration(seconds: 5));
-      return _decode(res);
+      return await _post(
+        '/api/v1/cancel',
+        {'hard': hard, 'thunder': thunder},
+        timeout: const Duration(seconds: 5),
+      );
     } catch (_) {
       return {'ok': false};
     }

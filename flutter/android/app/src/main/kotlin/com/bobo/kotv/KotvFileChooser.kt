@@ -262,21 +262,15 @@ object KotvFileChooser {
     }
   }
 
-  private fun getDataColumn(context: Context, uri: Uri?): String? {
-    if (uri == null) return null
-    val projection = arrayOf(MediaStore.MediaColumns.DATA)
-    return try {
-      context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-        if (!cursor.moveToFirst()) return null
-        cursor.getString(cursor.getColumnIndexOrThrow(projection[0]))
-      }
-    } catch (_: Throwable) {
-      null
-    }
-  }
+  private fun getDataColumn(context: Context, uri: Uri?): String? =
+    queryColumn(context, uri, MediaStore.MediaColumns.DATA)
 
-  private fun getNameColumn(context: Context, uri: Uri): String? {
-    val projection = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME)
+  private fun getNameColumn(context: Context, uri: Uri): String? =
+    queryColumn(context, uri, MediaStore.MediaColumns.DISPLAY_NAME)
+
+  private fun queryColumn(context: Context, uri: Uri?, column: String): String? {
+    if (uri == null) return null
+    val projection = arrayOf(column)
     return try {
       context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
         if (!cursor.moveToFirst()) return null
