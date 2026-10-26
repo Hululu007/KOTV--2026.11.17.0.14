@@ -1,5 +1,3 @@
-import 'dart:ui' show PointerDeviceKind;
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -27,7 +25,8 @@ class KotvScrollBehavior extends MaterialScrollBehavior {
 }
 
 /// 横向列表：鼠标拖动 + 滚轮（上下也映射为左右）。
-/// 打开时停在 [scrollToIndex]。[itemStride] 已知则首帧就在该项；宽度随文字变化时，先按布局量出起点再跳过去。
+/// 打开时停在 [scrollToIndex]。之后选中项被裁出视口时再拉回来，已经完整露出则不动。
+/// [itemStride] 已知则按步长计算；宽度随文字变化时按子组件布局定位。
 class HScrollList extends StatefulWidget {
   const HScrollList({
     super.key,
@@ -60,6 +59,10 @@ class _HScrollListState extends State<HScrollList> {
   var _hideUntilPlaced = false;
   var _placeTries = 0;
   var _placed = false;
+  int? _keepIndex;
+  var _keepTries = 0;
+  var _keepScheduled = false;
+  final Map<int, BuildContext> _itemCtx = {};
 
   bool get _measure =>
       !_placed && widget.itemStride == null && widget.scrollToIndex != null && widget.scrollToIndex! > 0;
@@ -78,7 +81,6 @@ class _HScrollListState extends State<HScrollList> {
       _hideUntilPlaced = true;
       _queuePlace(index);
     } else {
-      // 打开时没有待定位的项。之后的点选只改高亮，不再把该项拉到前缘。
       _placed = true;
     }
   }
@@ -86,9 +88,12 @@ class _HScrollListState extends State<HScrollList> {
   @override
   void didUpdateWidget(HScrollList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 打开时把正在用的项放进视口。点选之后不再改滚动位置。
-    if (_placed) return;
     final index = widget.scrollToIndex;
+    if (_placed) {
+      if (index != oldWidget.scrollToIndex) _scheduleKeepVisible(index);
+      return;
+    }
+    // 打开时把正在用的项放进视口。
     if (index == null || index <= 0) return;
     if (widget.itemStride != null) {
       _pendingIndex = null;
@@ -98,6 +103,99 @@ class _HScrollListState extends State<HScrollList> {
       return;
     }
     _queuePlace(index);
+  }
+
+  void _scheduleKeepVisible(int? index, {bool reset = true}) {
+    if (reset) {
+      _keepIndex = index;
+      _keepTries = 0;
+    }
+    final target = _keepIndex;
+    if (target == null || target < 0 || target >= widget.itemCount) return;
+    if (_keepScheduled) return;
+    _keepScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _keepScheduled = false;
+      _keepVisible();
+    });
+  }
+
+  void _keepVisible() {
+    final index = _keepIndex;
+    if (!mounted || index == null || index != widget.scrollToIndex) return;
+    if (index < 0 || index >= widget.itemCount) {
+      _keepIndex = null;
+      return;
+    }
+    if (_keepByStride(index)) {
+      _keepIndex = null;
+      return;
+    }
+    final ctx = _itemCtx[index];
+    if (ctx != null && ctx.mounted && kotvJumpIntoViewIfClipped(ctx)) {
+      _keepIndex = null;
+      return;
+    }
+    if (_keepTries++ > 40 || !_sc.hasClients || !_sc.position.hasContentDimensions) {
+      if (_keepTries > 40) {
+        _keepIndex = null;
+      } else {
+        _scheduleKeepVisible(index, reset: false);
+      }
+      return;
+    }
+    final pos = _sc.position;
+    final lo = _ctxEdge(low: true);
+    final hi = _ctxEdge(low: false);
+    final view = pos.viewportDimension;
+    if (lo == null || hi == null || view <= 0 || (index >= lo && index <= hi)) {
+      if (_keepTries > 40) {
+        _keepIndex = null;
+      } else {
+        _scheduleKeepVisible(index, reset: false);
+      }
+      return;
+    }
+    final dir = index < lo ? -1.0 : 1.0;
+    final target = (pos.pixels + dir * view * 0.85).clamp(pos.minScrollExtent, pos.maxScrollExtent).toDouble();
+    if ((target - pos.pixels).abs() < 1) {
+      _keepIndex = null;
+      return;
+    }
+    pos.jumpTo(target);
+    _scheduleKeepVisible(index, reset: false);
+  }
+
+  int? _ctxEdge({required bool low}) {
+    if (_itemCtx.isEmpty) return null;
+    var v = _itemCtx.keys.first;
+    for (final i in _itemCtx.keys) {
+      if (low ? i < v : i > v) v = i;
+    }
+    return v;
+  }
+
+  /// 已知每项步长时，只在该项超出视口时平移。返回 false 表示还不能按步长判断。
+  bool _keepByStride(int index) {
+    final stride = widget.itemStride;
+    if (stride == null || stride <= 0) return false;
+    if (!_sc.hasClients || !_sc.position.hasContentDimensions) return false;
+    final pos = _sc.position;
+    final start = index * stride;
+    final end = start + stride;
+    final lead = pos.pixels;
+    final trail = lead + pos.viewportDimension;
+    final double target;
+    if (start < lead) {
+      target = start;
+    } else if (end > trail) {
+      target = end - pos.viewportDimension;
+    } else {
+      return true;
+    }
+    final clamped = target.clamp(pos.minScrollExtent, pos.maxScrollExtent).toDouble();
+    if ((pos.pixels - clamped).abs() >= 0.5) pos.jumpTo(clamped);
+    return true;
   }
 
   void _queuePlace(int? index) {
@@ -143,9 +241,12 @@ class _HScrollListState extends State<HScrollList> {
 
   Widget? _buildItem(BuildContext context, int i) {
     final child = widget.itemBuilder(context, i);
-    // 定位完成后不再套 GlobalKey。选中项一变，这把钥匙会跟着挪，焦点就被带到新下标上。
-    if (child == null || !_measure || _placed || i != widget.scrollToIndex) return child;
-    return KeyedSubtree(key: _selKey, child: child);
+    if (child == null) return null;
+    // 初次定位才套一把钥匙，量完即拆。钥匙跟着选中项挪会把焦点一起带走。
+    final body = (!_measure || _placed || i != widget.scrollToIndex)
+        ? child
+        : KeyedSubtree(key: _selKey, child: child);
+    return _HItemAnchor(index: i, host: this, child: body);
   }
 
   void _onWheel(PointerSignalEvent e) {
@@ -192,6 +293,71 @@ class _HScrollListState extends State<HScrollList> {
         ),
       ),
     );
+  }
+}
+
+class _HItemAnchor extends StatefulWidget {
+  const _HItemAnchor({required this.index, required this.host, required this.child});
+
+  final int index;
+  final _HScrollListState host;
+  final Widget child;
+
+  @override
+  State<_HItemAnchor> createState() => _HItemAnchorState();
+}
+
+class _HItemAnchorState extends State<_HItemAnchor> {
+  @override
+  void initState() {
+    super.initState();
+    widget.host._itemCtx[widget.index] = context;
+  }
+
+  @override
+  void didUpdateWidget(_HItemAnchor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.host == widget.host && oldWidget.index == widget.index) return;
+    if (oldWidget.host._itemCtx[oldWidget.index] == context) {
+      oldWidget.host._itemCtx.remove(oldWidget.index);
+    }
+    widget.host._itemCtx[widget.index] = context;
+  }
+
+  @override
+  void dispose() {
+    if (widget.host._itemCtx[widget.index] == context) {
+      widget.host._itemCtx.remove(widget.index);
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// 最近一层滚动区里已经完整露出就不动；被裁切时立刻跳到刚好露出。
+/// 不带动外层滚动，也不做一段滚动动画。
+bool kotvJumpIntoViewIfClipped(BuildContext context) {
+  final object = context.findRenderObject();
+  if (object is! RenderBox || !object.attached || !object.hasSize) return false;
+  final viewport = RenderAbstractViewport.maybeOf(object);
+  final scrollable = Scrollable.maybeOf(context);
+  if (viewport == null || scrollable == null) return false;
+  final position = scrollable.position;
+  if (!position.hasContentDimensions) return false;
+  try {
+    final revealed = RevealedOffset.clampOffset(
+      leadingEdgeOffset: viewport.getOffsetToReveal(object, 0.0, axis: position.axis),
+      trailingEdgeOffset: viewport.getOffsetToReveal(object, 1.0, axis: position.axis),
+      currentOffset: position.pixels,
+    );
+    if (revealed == null) return true;
+    final target = revealed.offset.clamp(position.minScrollExtent, position.maxScrollExtent).toDouble();
+    if (target != position.pixels) position.jumpTo(target);
+    return true;
+  } catch (_) {
+    return false;
   }
 }
 

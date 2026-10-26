@@ -3,8 +3,9 @@ import '../util/kotv_io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+
+import '../widgets/h_scroll.dart';
 
 import '../player/kotv_platform.dart';
 import '../widgets/marquee_text.dart';
@@ -304,7 +305,7 @@ class _TvFocusState extends State<TvFocus> with KotvKeyHighlightState {
           final ctx = context;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!ctx.mounted) return;
-            _jumpNearestScrollableIfClipped(ctx);
+            kotvJumpIntoViewIfClipped(ctx);
           });
         }
         if (_highlight == v) return;
@@ -358,27 +359,4 @@ class _TvFocusState extends State<TvFocus> with KotvKeyHighlightState {
       ),
     );
   }
-}
-
-/// 最近一层滚动区里已经完整露出就不动；被裁切时立刻跳到刚好露出。
-/// 不带动外层滚动，也不做一段滚动动画。
-void _jumpNearestScrollableIfClipped(BuildContext context) {
-  final object = context.findRenderObject();
-  if (object == null || !object.attached) return;
-  final viewport = RenderAbstractViewport.maybeOf(object);
-  final scrollable = Scrollable.maybeOf(context);
-  if (viewport == null || scrollable == null) return;
-  final position = scrollable.position;
-  if (!position.hasContentDimensions) return;
-  try {
-    final revealed = RevealedOffset.clampOffset(
-      leadingEdgeOffset: viewport.getOffsetToReveal(object, 0.0, axis: position.axis),
-      trailingEdgeOffset: viewport.getOffsetToReveal(object, 1.0, axis: position.axis),
-      currentOffset: position.pixels,
-    );
-    if (revealed == null) return;
-    final target = revealed.offset.clamp(position.minScrollExtent, position.maxScrollExtent).toDouble();
-    if (target == position.pixels) return;
-    position.jumpTo(target);
-  } catch (_) {}
 }
