@@ -304,8 +304,8 @@ class _AppShellState extends ConsumerState<AppShell> {
     }
     final immersiveDetail = coverAlive && (immersiveFlag || DetailScreen.isImmersive);
     final detailCover = coverAlive && coverFlag;
-    final bottomNav =
-        KotvLayout.useBottomNav(context) && !immersiveDetail && !detailCover;
+    // 详情/文件浏览器在栈上就不要底栏，不看盖层标志。转屏会重建壳，标志若被清掉也会把底栏露出来。
+    final bottomNav = KotvLayout.useBottomNav(context) && !coverAlive;
 
     // 切主 Tab：原地换根路由，Navigator 元素不卸树，避免 GlobalKey reactivate 崩溃。
     ref.listen<KotvPage>(kotvPageProvider, (prev, next) {

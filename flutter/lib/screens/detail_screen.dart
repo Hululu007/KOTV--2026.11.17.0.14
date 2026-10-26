@@ -1189,25 +1189,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   @override
-  void deactivate() {
-    // dispose 不能用 ref。转场或转屏会 deactivate 仍在栈上的详情，
-    // 这时不能清盖层，否则壳层底栏会露出来。
-    // 路由已经弹出（isActive == false）时必须清，否则回首页后顶栏仍画进状态栏。
-    final route = ModalRoute.of(context);
-    final popped = route == null || !route.isActive;
-    if (popped) {
-      if (_active == this) _active = null;
-      if (detailImmersiveBack == _handleImmersiveBack) detailImmersiveBack = null;
-      try {
-        ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
-      } catch (_) {}
-      _chromeCover.release(ref.read(detailChromeCoverProvider.notifier));
-      unawaited(kotvRestorePhoneOrientations());
-    }
-    super.deactivate();
-  }
-
-  @override
   void dispose() {
     // 勿在此处 ref.read：会抛 Bad state，打断后面的 FVP/播放器 stop。
     WidgetsBinding.instance.removeObserver(this);
@@ -3638,7 +3619,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       // 顶栏占位在 Column 内留高；真正可点的顶栏叠在 Stack 最上层，
       // 避免 Hybrid Surface 盖住返回/片名（Flutter Clip 对 PlatformView 不可靠）。
       LibraryTopBar buildTopBar() => LibraryTopBar(
-            glass: false,
             onBack: () => unawaited(_leavePage()),
             onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
             onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
@@ -3761,7 +3741,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             child: Column(
               children: [
                 LibraryTopBar(
-                  glass: false,
                   onBack: () => unawaited(_leavePage()),
                   onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
                   onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
@@ -4109,27 +4088,35 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            d.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: fg,
-                              fontSize: 28,
-                              fontWeight: FontWeight.w700,
-                              height: 1.25,
-                              letterSpacing: 0.3,
+                          Expanded(
+                            child: SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    d.name,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: fg,
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.25,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 20,
+                                    runSpacing: 6,
+                                    children: _remarksMetaChips(siteKey),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  metaBlock(),
+                                ],
+                              ),
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 20,
-                            runSpacing: 6,
-                            children: _remarksMetaChips(siteKey),
-                          ),
-                          const SizedBox(height: 8),
-                          metaBlock(),
-                          const Spacer(),
                           Text(
                             _status,
                             maxLines: 2,

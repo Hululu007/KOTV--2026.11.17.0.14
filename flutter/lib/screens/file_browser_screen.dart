@@ -73,16 +73,6 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
     _scheduleChromeCover();
   }
 
-  @override
-  void deactivate() {
-    final route = ModalRoute.of(context);
-    final popped = route == null || !route.isActive;
-    if (popped) {
-      _chromeCover.release(ref.read(detailChromeCoverProvider.notifier));
-    }
-    super.deactivate();
-  }
-
   bool get _isRoot {
     final a = _dir.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
     final b = widget.root.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
@@ -177,7 +167,11 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
     return PopScope(
       canPop: _isRoot,
       onPopInvoked: (didPop) {
-        if (!didPop) _goUp();
+        if (didPop) {
+          _chromeCover.release(ref.read(detailChromeCoverProvider.notifier));
+          return;
+        }
+        _goUp();
       },
       child: Scaffold(
         backgroundColor: p.surface,

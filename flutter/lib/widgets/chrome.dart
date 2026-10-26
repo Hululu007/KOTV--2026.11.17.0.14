@@ -821,7 +821,7 @@ double kotvUnconsumedTopInset(BuildContext context) {
   return MediaQuery.paddingOf(context).top;
 }
 
-/// 手机工具栏：模糊壁纸后罩同一透明度。亮色和暗色只用色相区分，透明度都是 0x73。
+/// 手机首页顶栏和底栏。模糊壁纸，罩色透明度亮暗相同，接近系统底栏那种通透。
 class KotvFrostedBar extends StatelessWidget {
   const KotvFrostedBar({super.key, required this.child, this.topEdge = false});
 
@@ -830,8 +830,8 @@ class KotvFrostedBar extends StatelessWidget {
   /// 底栏用上沿细线，顶栏用下沿细线。
   final bool topEdge;
 
-  static const Color _lightTint = Color(0x73F7F8FC);
-  static const Color _darkTint = Color(0x7312161E);
+  static const Color _lightTint = Color(0x33F7F8FC);
+  static const Color _darkTint = Color(0x3312161E);
   static const Color _lightLine = Color(0x14000000);
   static const Color _darkLine = Color(0x14FFFFFF);
 
@@ -841,7 +841,7 @@ class KotvFrostedBar extends StatelessWidget {
     final line = BorderSide(color: light ? _lightLine : _darkLine, width: 0.5);
     return ClipRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 36, sigmaY: 36),
+        filter: ImageFilter.blur(sigmaX: 48, sigmaY: 48),
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: light ? _lightTint : _darkTint,
@@ -866,7 +866,6 @@ class LibraryTopBar extends StatelessWidget {
     required this.onNews,
     this.trailing,
     this.title,
-    this.glass = true,
   });
 
   final VoidCallback onBack;
@@ -875,9 +874,6 @@ class LibraryTopBar extends StatelessWidget {
   final VoidCallback onNews;
   final Widget? trailing;
   final String? title;
-
-  /// 手机顶栏铺玻璃。详情盖在画面上，不要这层。
-  final bool glass;
 
   @override
   Widget build(BuildContext context) {
@@ -893,16 +889,12 @@ class LibraryTopBar extends StatelessWidget {
     final pillH = land ? 30.0 : (compact ? 36.0 : 40.0);
     final pillW = land ? 72.0 : (compact ? 88.0 : 104.0);
     final pillFs = land ? 12.0 : 15.0;
-    Widget finish(Widget child) {
-      if (!glass || !(bottomNav || compact)) return child;
-      return KotvFrostedBar(child: child);
-    }
     // 竖屏底栏已有搜索/我的：顶栏只留返回（+可选标题/操作）
     if (bottomNav) {
       final backW = 72.0;
       final backH = land ? 30.0 : 32.0;
       final backFs = land ? 12.0 : 13.0;
-      return finish(Padding(
+      return Padding(
         padding: pad,
         child: Row(
           children: [
@@ -940,9 +932,9 @@ class LibraryTopBar extends StatelessWidget {
             ],
           ],
         ),
-      ));
+      );
     }
-    return finish(Padding(
+    return Padding(
       padding: pad,
       child: Row(
         children: [
@@ -959,7 +951,7 @@ class LibraryTopBar extends StatelessWidget {
           if (trailing != null) trailing!,
         ],
       ),
-    ));
+    );
   }
 }
 
