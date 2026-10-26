@@ -169,7 +169,30 @@ kotv_ios_prepare_app() {
   done
   echo "==> iOS app frameworks:"
   find "$app/Frameworks" -maxdepth 1 -type d -name '*.framework' -exec basename {} \; | sort
+  kotv_ios_strip_unused_assets "$app"
   du -sh "$app" "$app/Frameworks"
+}
+
+# iOS 没有本地引擎。assets/engine 只剩占位说明；网页脚本在 iOS 上也不加载。
+# 删掉文件后再清因此变空的目录，避免包里留下空文件夹。
+kotv_ios_strip_unused_assets() {
+  local app="$1"
+  local assets="$app/Frameworks/App.framework/flutter_assets"
+  [[ -d "$assets" ]] || return 0
+  rm -rf \
+    "$assets/assets/engine" \
+    "$assets/packages/media_kit" \
+    "$assets/packages/wakelock_plus"
+  python3 - "$assets" <<'PY'
+import os, sys
+root = sys.argv[1]
+for dirpath, dirnames, filenames in os.walk(root, topdown=False):
+    if dirpath == root:
+        continue
+    if not os.listdir(dirpath):
+        os.rmdir(dirpath)
+        print("removed empty", os.path.relpath(dirpath, root), flush=True)
+PY
 }
 
 kotv_ios_require_ipa_entry() {
@@ -214,7 +237,8 @@ main() {
   ditto "$ROOT/flutter/$app" "$stage/Payload/Runner.app"
   out="$ROOT/dist/KO影视-${ver}-ios.ipa"
   rm -f "$out"
-  (cd "$stage" && zip -r -y -q "$out" Payload)
+  # -D：不把目录本身写进 zip。文件还在，空目录项不会再出现。
+  (cd "$stage" && zip -r -y -D -q "$out" Payload)
   cp -f "$out" "$ROOT/KO影视-${ver}-ios.ipa"
   ls -lh "$out"
   kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/App.framework/App" 5000000
@@ -224,6 +248,30 @@ main() {
   kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/fvp.framework/fvp" 50000
   kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/Avcodec.framework/Avcodec" 500000
   kotv_flutter_asset_engines_reject "$out"
+  kotv_ios_reject_asset_clutter "$out"
+}
+
+kotv_ios_reject_asset_clutter() {
+  local ipa="$1"
+  python3 - "$ipa" <<'PY'
+import sys, zipfile
+ipa = sys.argv[1]
+bad = []
+with zipfile.ZipFile(ipa) as z:
+    for info in z.infolist():
+        name = info.filename
+        if name.endswith("/") or info.is_dir():
+            bad.append("dir " + name)
+            continue
+        if "flutter_assets/assets/engine/" in name:
+            bad.append(name)
+        elif name.endswith("/hls1.4.10.js") or name.endswith("/no_sleep.js"):
+            bad.append(name)
+if bad:
+    print("\n".join(bad[:40]), file=sys.stderr)
+    sys.exit(1)
+print(f"ok: {ipa} has no engine dir, web assets, or empty directory entries")
+PY
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
