@@ -25,7 +25,8 @@ class KotvScrollBehavior extends MaterialScrollBehavior {
 }
 
 /// 横向列表：鼠标拖动 + 滚轮（上下也映射为左右）。
-/// 打开时停在 [scrollToIndex]。之后选中项被裁出视口时再拉回来，已经完整露出则不动。
+/// 打开时停在 [scrollToIndex]。选中项变化且落在视口外时拉进来。
+/// 用户自己滑动之后，选中项可以离开视口，直到下一次选中变化。
 /// [itemStride] 已知则按步长计算；宽度随文字变化时按子组件布局定位。
 class HScrollList extends StatefulWidget {
   const HScrollList({
@@ -62,6 +63,7 @@ class _HScrollListState extends State<HScrollList> {
   int? _keepIndex;
   var _keepTries = 0;
   var _keepScheduled = false;
+  var _userOwnsOffset = false;
   final Map<int, BuildContext> _itemCtx = {};
 
   bool get _measure =>
@@ -90,7 +92,10 @@ class _HScrollListState extends State<HScrollList> {
     super.didUpdateWidget(oldWidget);
     final index = widget.scrollToIndex;
     if (_placed) {
-      if (index != oldWidget.scrollToIndex) _scheduleKeepVisible(index);
+      if (index != oldWidget.scrollToIndex) {
+        _userOwnsOffset = false;
+        _scheduleKeepVisible(index);
+      }
       return;
     }
     // 打开时把正在用的项放进视口。
@@ -120,9 +125,18 @@ class _HScrollListState extends State<HScrollList> {
     });
   }
 
+  void _releaseToUser() {
+    _userOwnsOffset = true;
+    _keepIndex = null;
+  }
+
   void _keepVisible() {
     final index = _keepIndex;
-    if (!mounted || index == null || index != widget.scrollToIndex) return;
+    if (!mounted || _userOwnsOffset || index == null || index != widget.scrollToIndex) return;
+    if (_sc.hasClients && _sc.position.activity is DragScrollActivity) {
+      _releaseToUser();
+      return;
+    }
     if (index < 0 || index >= widget.itemCount) {
       _keepIndex = null;
       return;
@@ -249,10 +263,22 @@ class _HScrollListState extends State<HScrollList> {
     return _HItemAnchor(index: i, host: this, child: body);
   }
 
+  bool _onUserScroll(ScrollNotification n) {
+    if (n.metrics.axis != Axis.horizontal) return false;
+    final dragged = n is ScrollStartNotification
+        ? n.dragDetails != null
+        : n is ScrollUpdateNotification
+            ? n.dragDetails != null
+            : n is OverscrollNotification && n.dragDetails != null;
+    if (dragged) _releaseToUser();
+    return false;
+  }
+
   void _onWheel(PointerSignalEvent e) {
     if (e is! PointerScrollEvent || !_sc.hasClients) return;
     final delta = e.scrollDelta.dx != 0 ? e.scrollDelta.dx : e.scrollDelta.dy;
     if (delta == 0) return;
+    _releaseToUser();
     final pos = _sc.position;
     _sc.jumpTo((_sc.offset + delta).clamp(pos.minScrollExtent, pos.maxScrollExtent));
   }
@@ -282,7 +308,9 @@ class _HScrollListState extends State<HScrollList> {
 
     return ScrollConfiguration(
       behavior: const KotvScrollBehavior(showScrollbar: false),
-      child: Listener(
+      child: NotificationListener<ScrollNotification>(
+        onNotification: _onUserScroll,
+        child: Listener(
         onPointerSignal: _onWheel,
         child: IgnorePointer(
           ignoring: _hideUntilPlaced,
@@ -291,6 +319,7 @@ class _HScrollListState extends State<HScrollList> {
             child: list,
           ),
         ),
+      ),
       ),
     );
   }

@@ -1032,7 +1032,6 @@ class _CategoryNavBarState extends State<CategoryNavBar> {
                       key: ValueKey('nav-cat-${c.id}'),
                       label: c.name,
                       selected: selected,
-                      scrollIntoView: true,
                       trailingIcon: filterIcon,
                       onFocusChange: (v) => _onPillFocus('cat:${c.id}', v),
                       onTap: () {

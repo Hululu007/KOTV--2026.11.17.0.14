@@ -23,6 +23,12 @@ void main() {
     final view = tester.getRect(find.byType(HScrollList));
     expect(rect.left, greaterThanOrEqualTo(view.left - 1));
     expect(rect.right, lessThanOrEqualTo(view.right + 1));
+
+    await tester.drag(find.byType(ListView), const Offset(1200, 0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    final pixels = tester.state<ScrollableState>(find.byType(Scrollable)).position.pixels;
+    expect(pixels, lessThan(40));
   });
 
   testWidgets('固定步长的选中项一帧内进入视口', (tester) async {
