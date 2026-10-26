@@ -171,6 +171,8 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<bool> enterPictureInPicture() async => false;
   Future<void> exitPictureInPicture() async {}
 
+  bool _notifierGone = false;
+
   /// 播放或缓冲中保持屏幕常亮；暂停/停止/销毁时释放。
   void _syncKeepAwake() {
     final want = playing || stalling;
@@ -181,12 +183,14 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   @override
   void notifyListeners() {
+    if (_notifierGone) return;
     _syncKeepAwake();
     super.notifyListeners();
   }
 
   @override
   void dispose() {
+    _notifierGone = true;
     if (_keepAwakeWant == true) {
       _keepAwakeWant = false;
       KotvKeepAwake.setHolding(this, false);

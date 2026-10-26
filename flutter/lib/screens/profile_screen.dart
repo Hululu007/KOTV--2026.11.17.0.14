@@ -311,11 +311,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
           )
         else
-          Padding(
-            padding: EdgeInsets.fromLTRB(sidePad, 14 * s, sidePad, 0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('我的', style: TextStyle(color: p.fg, fontSize: 22, fontWeight: FontWeight.w700)),
+          ColoredBox(
+            color: p.catBar,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(sidePad, 14 * s + kotvUnconsumedTopInset(context), sidePad, 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('我的', style: TextStyle(color: p.fg, fontSize: 22, fontWeight: FontWeight.w700)),
+              ),
             ),
           ),
         if (_status.isNotEmpty)

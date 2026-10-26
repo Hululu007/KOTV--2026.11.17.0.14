@@ -636,7 +636,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _api = ref.read(apiProvider);
     _active = this;
     detailImmersiveBack = _handleImmersiveBack;
-    _chromeCover.hold(ref.read(detailChromeCoverProvider.notifier));
+    _scheduleChromeCover();
     kotvRegisterQuitHook(_prepareQuit);
     MiniPlayerWindow.onAndroidPipChanged = (inPip) {
       if (!mounted) return;
@@ -1178,12 +1178,20 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     unawaited(kotvLockPortrait());
   }
 
+  void _scheduleChromeCover() {
+    _chromeCover.holdAfterFrame(() {
+      if (!mounted) return false;
+      final route = ModalRoute.of(context);
+      return route == null || route.isActive;
+    }, () => ref.read(detailChromeCoverProvider.notifier));
+  }
+
   @override
   void activate() {
     super.activate();
     _active = this;
     detailImmersiveBack = _handleImmersiveBack;
-    _chromeCover.hold(ref.read(detailChromeCoverProvider.notifier));
+    _scheduleChromeCover();
   }
 
   @override

@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'api/kotv_api.dart';
@@ -99,8 +100,8 @@ int _detailChromeCoverDepth = 0;
 
 /// 进盖壳页时调用；可嵌套（详情上再开文件浏览器）。
 void kotvPushChromeCover(StateController<bool> notifier) {
-  _detailChromeCoverDepth++;
   if (!notifier.state) notifier.state = true;
+  _detailChromeCoverDepth++;
 }
 
 /// 离盖壳页时调用；深度归零才关掉 provider。
@@ -123,12 +124,16 @@ class KotvChromeCoverSession {
 
   void hold(StateController<bool> notifier) {
     if (held) return;
+    kotvPushChromeCover(notifier);
     held = true;
-    try {
-      kotvPushChromeCover(notifier);
-    } catch (_) {
-      held = false;
-    }
+  }
+
+  /// initState/activate 里不能改 provider。等这一帧画完再盖壳。
+  void holdAfterFrame(bool Function() alive, StateController<bool> Function() read) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!alive()) return;
+      hold(read());
+    });
   }
 
   void release(StateController<bool> notifier) {

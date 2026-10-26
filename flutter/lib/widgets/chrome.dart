@@ -853,11 +853,16 @@ class LibraryTopBar extends StatelessWidget {
     final pillW = land ? 72.0 : (compact ? 88.0 : 104.0);
     final pillFs = land ? 12.0 : 15.0;
     // 竖屏底栏已有搜索/我的：顶栏只留返回（+可选标题/操作）
+    final phoneChrome = bottomNav || compact;
+    Widget paint(Widget child) {
+      if (!phoneChrome) return child;
+      return ColoredBox(color: KotvPalette.of(context).catBar, child: child);
+    }
     if (bottomNav) {
       final backW = 72.0;
       final backH = land ? 30.0 : 32.0;
       final backFs = land ? 12.0 : 13.0;
-      return Padding(
+      return paint(Padding(
         padding: pad,
         child: Row(
           children: [
@@ -895,9 +900,9 @@ class LibraryTopBar extends StatelessWidget {
             ],
           ],
         ),
-      );
+      ));
     }
-    return Padding(
+    return paint(Padding(
       padding: pad,
       child: Row(
         children: [
@@ -914,7 +919,7 @@ class LibraryTopBar extends StatelessWidget {
           if (trailing != null) trailing!,
         ],
       ),
-    );
+    ));
   }
 }
 
