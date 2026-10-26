@@ -1859,9 +1859,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       edgeType = "none"
     }
     if (force || useSystem) {
-      color = applyOpacityHex(color, subtitleTextOpacity)
-      borderColor = applyOpacityHex(borderColor, subtitleEdgeOpacity)
-      bgColor = applyOpacityHex(bgColor, subtitleBgOpacity)
+      color = applySubtitleOpacity(color, subtitleTextOpacity)
+      borderColor = applySubtitleOpacity(borderColor, subtitleEdgeOpacity)
+      bgColor = applySubtitleOpacity(bgColor, subtitleBgOpacity)
     }
     overlay.setStyle(
       fontScale = scale,
@@ -1876,22 +1876,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       fontName = if (force || useSystem) subtitleFont else "default",
       fontPath = if (force || useSystem) subtitleFontPath else "",
     )
-  }
-
-  private fun applyOpacityHex(raw: String, opacityPct: Double): String {
-    val s = raw.trim()
-    if (s.isEmpty()) return s
-    return try {
-      val parsed = android.graphics.Color.parseColor(if (s.startsWith("#")) s else "#$s")
-      val rgb = parsed and 0x00FFFFFF
-      val origA = android.graphics.Color.alpha(parsed)
-      // 乘在原 alpha 上：透明底 × 任意透明度仍透明，避免 #00000000→实心黑。
-      val a =
-        ((origA * opacityPct.coerceIn(0.0, 100.0) / 100.0).toInt()).coerceIn(0, 255)
-      String.format("#%02X%06X", a, rgb)
-    } catch (_: Throwable) {
-      s
-    }
   }
 
   /** BassBoost / Equalizer / PCM 音效；直通时跳过以免破 SPDIF。 */

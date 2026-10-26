@@ -358,27 +358,18 @@ object ThunderBridge {
     loader = ThunderXunleiLoader.create()
   }
 
-  fun parse(body: JSONObject): JSONObject {
-    return try {
-      val url = body.optString("url", "").trim()
-      if (url.isEmpty()) return JSONObject().put("ok", false).put("error", "empty url")
-      if (Init.context() == null) {
-        return JSONObject().put("ok", false).put("error", "Init.context null; call ThunderBridge.start first")
-      }
-      loader.parse(url)
-    } catch (t: Throwable) {
-      JSONObject().put("ok", false).put("error", t.message ?: t.toString())
-    }
-  }
+  fun parse(body: JSONObject): JSONObject = withUrl(body) { loader.parse(it) }
 
-  fun fetch(body: JSONObject): JSONObject {
+  fun fetch(body: JSONObject): JSONObject = withUrl(body) { loader.fetch(it) }
+
+  private fun withUrl(body: JSONObject, op: (String) -> JSONObject): JSONObject {
     return try {
       val url = body.optString("url", "").trim()
       if (url.isEmpty()) return JSONObject().put("ok", false).put("error", "empty url")
       if (Init.context() == null) {
         return JSONObject().put("ok", false).put("error", "Init.context null; call ThunderBridge.start first")
       }
-      loader.fetch(url)
+      op(url)
     } catch (t: Throwable) {
       JSONObject().put("ok", false).put("error", t.message ?: t.toString())
     }

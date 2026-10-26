@@ -18,6 +18,7 @@ import '../player/zw_playback.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
+import '../player/background_playback.dart';
 import '../player/kotv_playback.dart';
 import '../player/mini_playback.dart';
 import '../player/video_eq.dart';
@@ -393,17 +394,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      if (_playerBackground == 'off' && _playback.playing) {
-        unawaited(_playback.pause());
-      } else if (_playerBackground == 'audio' && _playUrl.isNotEmpty) {
-        unawaited(_playback.setVideoOutputEnabled(false));
-      }
-    } else if (state == AppLifecycleState.resumed) {
-      if (_playerBackground == 'audio' && _playUrl.isNotEmpty) {
-        unawaited(_playback.setVideoOutputEnabled(true));
-      }
-    }
+    kotvApplyPlayerBackground(
+      state,
+      mode: _playerBackground,
+      playing: _playback.playing,
+      hasMedia: _playUrl.isNotEmpty,
+      pause: _playback.pause,
+      setVideo: _playback.setVideoOutputEnabled,
+    );
   }
 
   void _syncAndroidAutoPip() {

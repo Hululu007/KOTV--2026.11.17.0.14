@@ -1581,48 +1581,54 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  Future<void> _openSpeedSheet() async {
-    await _showPlayerSubSheet(
+  Future<void> _openSpeedSheet() {
+    return _openSpeedSlider(
       title: '默认倍速',
-      buildChildren: (setSheet) {
-        final v =
-            (double.tryParse(g('playerSpeed', '1.0')) ?? 1.0).clamp(0.1, 5.0);
-        return [
-          _sheetSlider(
-            label: '倍速',
-            value: v,
-            min: 0.1,
-            max: 5.0,
-            divisions: 49,
-            format: (x) => '${x.toStringAsFixed(1)}×',
-            onChanging: (x) =>
-                setSheet(() => _s['playerSpeed'] = x.toStringAsFixed(1)),
-            onCommit: (x) =>
-                _set('playerSpeed', x.toStringAsFixed(1), msg: '默认倍速已更新'),
-          ),
-        ];
-      },
+      key: 'playerSpeed',
+      fallback: 1.0,
+      min: 0.1,
+      max: 5.0,
+      divisions: 49,
+      saved: '默认倍速已更新',
     );
   }
 
-  Future<void> _openHoldSpeedSheet() async {
-    await _showPlayerSubSheet(
+  Future<void> _openHoldSpeedSheet() {
+    return _openSpeedSlider(
       title: '长按临时倍速',
+      key: 'playerSpeedLongPress',
+      fallback: 2.0,
+      min: 2.0,
+      max: 5.0,
+      divisions: 30,
+      saved: '长按倍速已更新',
+    );
+  }
+
+  Future<void> _openSpeedSlider({
+    required String title,
+    required String key,
+    required double fallback,
+    required double min,
+    required double max,
+    required int divisions,
+    required String saved,
+  }) {
+    final fallbackText = fallback.toStringAsFixed(1);
+    return _showPlayerSubSheet(
+      title: title,
       buildChildren: (setSheet) {
-        final v = (double.tryParse(g('playerSpeedLongPress', '2.0')) ?? 2.0)
-            .clamp(2.0, 5.0);
+        final v = (double.tryParse(g(key, fallbackText)) ?? fallback).clamp(min, max);
         return [
           _sheetSlider(
             label: '倍速',
             value: v,
-            min: 2.0,
-            max: 5.0,
-            divisions: 30,
+            min: min,
+            max: max,
+            divisions: divisions,
             format: (x) => '${x.toStringAsFixed(1)}×',
-            onChanging: (x) => setSheet(
-                () => _s['playerSpeedLongPress'] = x.toStringAsFixed(1)),
-            onCommit: (x) => _set('playerSpeedLongPress', x.toStringAsFixed(1),
-                msg: '长按倍速已更新'),
+            onChanging: (x) => setSheet(() => _s[key] = x.toStringAsFixed(1)),
+            onCommit: (x) => _set(key, x.toStringAsFixed(1), msg: saved),
           ),
         ];
       },

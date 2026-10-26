@@ -946,37 +946,36 @@ func (s *Server) handleAPIv1Cancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSessionPing(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-		return
-	}
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	api := s.content()
-	if api == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+	api, ok := s.requirePostContent(w, r)
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.APISessionPing())
 }
 
 func (s *Server) handleSessionLeave(w http.ResponseWriter, r *http.Request) {
+	api, ok := s.requirePostContent(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, api.APISessionLeave())
+}
+
+func (s *Server) requirePostContent(w http.ResponseWriter, r *http.Request) (ContentAPI, bool) {
 	if r.Method == http.MethodOptions {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-		return
+		return nil, false
 	}
 	if r.Method != http.MethodPost {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
+		return nil, false
 	}
 	api := s.content()
 	if api == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
-		return
+		return nil, false
 	}
-	writeJSON(w, http.StatusOK, api.APISessionLeave())
+	return api, true
 }
 
 // handleAPIv1Shutdown 仅本机可调用：优雅停引擎（会顺带杀 Java/Python）。

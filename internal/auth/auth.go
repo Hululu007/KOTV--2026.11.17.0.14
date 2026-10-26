@@ -208,33 +208,7 @@ func Register(username, password string) (User, error) {
 	if len(password) < 6 {
 		return User{}, fmt.Errorf("密码至少 6 位")
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return User{}, err
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	db, err := requireDB()
-	if err != nil {
-		return User{}, err
-	}
-	if existing, err := db.GetAuthUserByName(username); err != nil {
-		return User{}, err
-	} else if existing != nil {
-		return User{}, fmt.Errorf("用户名已存在")
-	}
-	u := User{
-		ID:        newID(),
-		Username:  username,
-		PassHash:  string(hash),
-		Role:      RoleUser,
-		Enabled:   true,
-		CreatedAt: time.Now().UTC(),
-	}
-	if err := db.UpsertAuthUser(toRow(u)); err != nil {
-		return User{}, err
-	}
-	return u, nil
+	return insertUser(username, password, RoleUser)
 }
 
 // Logout 作废 token。
@@ -319,6 +293,10 @@ func CreateUser(username, password, role string) (User, error) {
 	if len(password) < 6 {
 		return User{}, fmt.Errorf("密码至少 6 位")
 	}
+	return insertUser(username, password, role)
+}
+
+func insertUser(username, password, role string) (User, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return User{}, err
