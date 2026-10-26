@@ -36,6 +36,7 @@
         android:label="KO影视"
         android:name="com.fongmi.android.tv.App"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:banner="@mipmap/ic_launcher"
         android:extractNativeLibs="true"
         android:requestLegacyExternalStorage="true"

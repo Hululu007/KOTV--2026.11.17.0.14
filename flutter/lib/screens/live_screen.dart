@@ -1670,7 +1670,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           waitReady: false,
         );
         if (stale()) {
-          await _dropStalePlayback(pb);
+          await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
           return;
         }
         unawaited(pb.setVideoScale(_liveScale));
@@ -1703,7 +1703,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         if (!failover.enabled) rethrow;
       }
       if (stale()) {
-        await _dropStalePlayback(pb);
+        await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
         return;
       }
       final step = failover.nextStep();
@@ -1800,25 +1800,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (mounted && serial == _playSerial) {
       setState(() => _status = '播放超时');
     }
-  }
-
-  /// 起播途中已作废：实例仍归本页（换台）交给新一次起播；
-  /// 已被 [_releaseAllBackends] / dispose 摘掉并释放（离开直播）则再停一次，防止打开晚到后出声。
-  Future<void> _dropStalePlayback(KotvPlayback pb) async {
-    final owned = identical(pb, _mk) ||
-        identical(pb, _fvp) ||
-        identical(pb, _exo) ||
-        identical(pb, _html) ||
-        identical(pb, _art) ||
-        identical(pb, _xg) ||
-        identical(pb, _zw);
-    if (owned) return;
-    try {
-      await pb.pause();
-    } catch (_) {}
-    try {
-      await pb.stop();
-    } catch (_) {}
   }
 
   void _unwireLivePlaybackErrors() {

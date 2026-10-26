@@ -282,6 +282,19 @@ Future<void> kotvHardReleasePlayers(
   await Future.wait<void>(rest).timeout(othersTimeout, onTimeout: () => <void>[]);
 }
 
+/// 起播作废后，播放器还在 [owned] 里就留给下一次起播；已经摘掉的再停一次，避免打开晚到后出声。
+Future<void> kotvStopIfUnowned(KotvPlayback pb, Iterable<KotvPlayback?> owned) async {
+  for (final current in owned) {
+    if (identical(pb, current)) return;
+  }
+  try {
+    await pb.pause();
+  } catch (_) {}
+  try {
+    await pb.stop();
+  } catch (_) {}
+}
+
 /// [KotvPlayback.release] 之后销毁 Dart 包装类（勿在 release 前调用）。
 void kotvDisposePlaybackWrappers(Iterable<KotvPlayback?> players) {
   for (final p in players) {
