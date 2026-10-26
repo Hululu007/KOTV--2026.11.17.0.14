@@ -63,6 +63,17 @@ const _liveIdleStatus = '确定键打开频道列表 · 菜单键打开底栏 ·
 /// 回看快进快退步长（10s）。
 const _liveCatchupSeekStep = Duration(seconds: 10);
 
+/// 节目条：选中和未选中的透明度亮暗相同。
+Color _liveProgramColor(KotvPalette p, {required bool sel, required bool playing}) {
+  if (!sel) return p.pillBg.withOpacity(0.7);
+  return p.selected.withOpacity(playing ? 0.95 : 0.75);
+}
+
+/// 频道行：选中和未选中的透明度亮暗相同。
+Color _liveChannelColor(KotvPalette p, {required bool sel}) {
+  return sel ? p.selected.withOpacity(0.28) : p.pillBg.withOpacity(0.55);
+}
+
 class LiveScreen extends ConsumerStatefulWidget {
   const LiveScreen({super.key});
 
@@ -3065,9 +3076,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           borderRadius: 8,
           onPressed: canCatchup ? activate : null,
           child: Material(
-              color: sel
-                  ? p.selected.withOpacity(playing ? 0.95 : 0.75)
-                  : p.pillBg.withOpacity(0.7),
+              color: _liveProgramColor(p, sel: sel, playing: playing),
               borderRadius: BorderRadius.circular(8),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -3121,9 +3130,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         borderRadius: 6 * ui,
         onPressed: canCatchup ? activate : null,
         child: Material(
-            color: sel
-                ? p.selected.withOpacity(playing ? 0.95 : 0.75)
-                : p.pillBg.withOpacity(0.7),
+            color: _liveProgramColor(p, sel: sel, playing: playing),
             borderRadius: BorderRadius.circular(6 * ui),
             child: Padding(
               padding: EdgeInsets.symmetric(
@@ -3720,9 +3727,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                             onPressed: () => _selectChannelFromList(i),
                                             onLongPress: () => unawaited(_toggleChannelFav(i)),
                                             child: Material(
-                                              color: sel
-                                                  ? p.selected.withOpacity(0.28)
-                                                  : p.pillBg.withOpacity(0.55),
+                                              color: _liveChannelColor(p, sel: sel),
                                               borderRadius: BorderRadius.circular(8 * ui),
                                               child: SizedBox(
                                                 height: chH,
@@ -4521,7 +4526,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   onPressed: () => _selectChannelFromList(i),
                   onLongPress: () => unawaited(_toggleChannelFav(i)),
                   child: Material(
-                    color: sel ? p.selected.withOpacity(0.28) : p.pillBg.withOpacity(0.55),
+                    color: _liveChannelColor(p, sel: sel),
                     borderRadius: BorderRadius.circular(6),
                     child: SizedBox(
                       height: 36,

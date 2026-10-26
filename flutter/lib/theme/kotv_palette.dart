@@ -157,9 +157,9 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
             focus: const Color(0xFFC73C62),
             gradStart: const Color(0xFFE9EEFB),
             gradEnd: const Color(0xFFF3E7F8),
-            glowTop: const Color(0x2EFF8AC8),
-            glowBottom: const Color(0x2A7AC8FF),
-            glowMid: const Color(0x24B994F5),
+            glowTop: const Color(0x35FF8AC8),
+            glowBottom: const Color(0x307AC8FF),
+            glowMid: const Color(0x28B994F5),
             wallTint: _a(_aWall, 0xFFFFFF),
           )
         : defaults;
