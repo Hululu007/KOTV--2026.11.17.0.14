@@ -178,7 +178,7 @@ class DetailScreen extends ConsumerStatefulWidget {
         _DetailScreenState._active = null;
       }
       try {
-        active._clearChromeCover();
+        active._chromeCover.release(active.ref.read(detailChromeCoverProvider.notifier));
       } catch (_) {}
       try {
         await active._flushWatchProgress(force: true);
@@ -634,7 +634,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _api = ref.read(apiProvider);
     _active = this;
     detailImmersiveBack = _handleImmersiveBack;
-    _holdChromeCover();
+    _chromeCover.hold(ref.read(detailChromeCoverProvider.notifier));
     kotvRegisterQuitHook(_prepareQuit);
     MiniPlayerWindow.onAndroidPipChanged = (inPip) {
       if (!mounted) return;
@@ -949,7 +949,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _leaving = true;
     // 立刻清 _active：否则 goKotvPage→prepareLeave 仍会 await 本页硬停，切 Tab 像点不动。
     if (_active == this) _active = null;
-    _clearChromeCover();
+    _chromeCover.release(ref.read(detailChromeCoverProvider.notifier));
     try {
       try {
         await _flushWatchProgress(force: true);
@@ -960,6 +960,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           await _exitImmersiveFullscreen();
         } catch (_) {}
       }
+      _lockPhonePortrait();
       try {
         await _stopHard();
       } catch (_) {}
@@ -1192,40 +1193,37 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await _advanceToNextEpisode();
   }
 
-  bool _chromeCoverHeld = false;
+  final _chromeCover = KotvChromeCoverSession();
 
-  void _holdChromeCover() {
-    if (_chromeCoverHeld) return;
-    _chromeCoverHeld = true;
-    try {
-      kotvPushChromeCover(ref.read(detailChromeCoverProvider.notifier));
-    } catch (_) {
-      _chromeCoverHeld = false;
-    }
+  void _lockPhonePortrait() {
+    if (kIsWeb || kotvIsDesktop() || KotvLayout.television) return;
+    unawaited(kotvLockPortrait());
   }
 
-  void _clearChromeCover() {
-    if (!_chromeCoverHeld) return;
-    _chromeCoverHeld = false;
-    try {
-      kotvPopChromeCover(ref.read(detailChromeCoverProvider.notifier));
-    } catch (_) {}
+  @override
+  void activate() {
+    super.activate();
+    _active = this;
+    detailImmersiveBack = _handleImmersiveBack;
+    _chromeCover.hold(ref.read(detailChromeCoverProvider.notifier));
   }
 
   @override
   void deactivate() {
-    // dispose 不能用 ref。详情还在树上的沉浸全屏不能清壳层标志，
-    // 否则底栏/SafeArea 立刻回来，竖屏全屏会按整屏高居中偏下。
+    // dispose 不能用 ref。转场或转屏会 deactivate 仍在栈上的详情，
+    // 这时不能清盖层，否则壳层底栏会露出来。
     // 路由已经弹出（isActive == false）时必须清，否则回首页后顶栏仍画进状态栏。
     final route = ModalRoute.of(context);
     final popped = route == null || !route.isActive;
-    if (popped || !_immersiveFullscreen) {
+    if (popped) {
+      if (_active == this) _active = null;
+      if (detailImmersiveBack == _handleImmersiveBack) detailImmersiveBack = null;
       try {
         ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
       } catch (_) {}
+      _chromeCover.release(ref.read(detailChromeCoverProvider.notifier));
+      _lockPhonePortrait();
     }
-    // 出详情栈：恢复壳层底栏与顶 SafeArea。
-    _clearChromeCover();
     super.deactivate();
   }
 

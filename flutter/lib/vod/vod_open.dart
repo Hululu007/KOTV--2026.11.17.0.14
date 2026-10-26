@@ -254,6 +254,8 @@ Future<void> _openVodItemBody(
   await kotvStopBackgroundPlayback();
   if (!context.mounted) return;
   release();
+  final refreshHome =
+      siteNeedsSharedWrite(ref, siteKey) || wantSource.isNotEmpty;
   await Navigator.of(context).push(
     kotvDetailRoute(
       builder: (_) => DetailScreen(
@@ -264,6 +266,8 @@ Future<void> _openVodItemBody(
       ),
     ),
   );
-  // 配置站 detail（网盘授权 / 模式切换等）返回后刷首页。
-  ref.read(vodContentEpochProvider.notifier).state++;
+  // 配置站 detail（网盘授权 / 模式切换等）返回后刷首页。普通影片不重刷。
+  if (refreshHome) {
+    ref.read(vodContentEpochProvider.notifier).state++;
+  }
 }

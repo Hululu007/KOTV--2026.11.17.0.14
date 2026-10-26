@@ -73,6 +73,10 @@ chmod +x "$ROOT/scripts/prepare-android-mpv-native.sh"
 
 OUT_DIR="$ROOT/flutter/build/app/outputs/flutter-apk"
 mkdir -p "$ROOT/dist"
+# shellcheck source=kotv-flutter-asset-engines.sh
+source "$ROOT/scripts/kotv-flutter-asset-engines.sh"
+kotv_flutter_asset_engines_hide
+trap kotv_flutter_asset_engines_restore EXIT
 
 # Chaquopy 强制要 ndk.abiFilters，不能与 --split-per-abi 并用；分两次单 ABI 构建。
 # Flutter 3.35+ 默认会塞 armv7+arm64+x86_64：须 -Pdisable-abi-filtering，再靠 KOTV_ABI_FILTERS。
@@ -93,6 +97,7 @@ build_one_abi() {
   listing="$(unzip -l "$src" | awk 'NR>3 {print $4}')"
   libs="$(printf '%s\n' "$listing" | awk -F/ '/^lib\//{print $2}' | sort -u | tr '\n' ' ')"
   echo "  lib ABIs in apk: $libs"
+  kotv_flutter_asset_engines_reject "$src"
   case " $libs " in
     *" ${abi_filter} "*) ;;
     *) echo "ERROR: apk missing lib/$abi_filter" >&2; exit 1 ;;

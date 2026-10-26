@@ -674,7 +674,7 @@ jobs:
           if-no-files-found: error
 
   build-ios:
-    runs-on: macos-14
+    runs-on: macos-26
     needs: [set-tag]
     timeout-minutes: 90
     steps:
@@ -692,32 +692,8 @@ jobs:
           LC_ALL: en_US.UTF-8
           KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
         run: |
-          set -euo pipefail
-          repo="$(pwd)"
-          if ! command -v pod >/dev/null 2>&1; then
-            brew install cocoapods
-          fi
           chmod +x scripts/*.sh
-          # shellcheck source=scripts/kotv-fvp-deps.sh
-          source scripts/kotv-fvp-deps.sh
-          kotv_ensure_mdk_apple_pod
-          export KOTV_MDK_POD_PATH
-          flutter config --no-enable-swift-package-manager || true
-          ./scripts/flutter-pub-get.sh
-          cd flutter
-          flutter build ipa --no-codesign
-          app="build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app"
-          test -d "$app"
-          stage="$(mktemp -d)"
-          mkdir -p "$stage/Payload"
-          ditto "$app" "$stage/Payload/Runner.app"
-          ver="${KOTV_VERSION#v}"
-          mkdir -p "$repo/dist"
-          out="$repo/dist/KO影视-${ver}-ios.ipa"
-          rm -f "$out"
-          (cd "$stage" && zip -r -y -q "$out" Payload)
-          cp -f "$out" "$repo/KO影视-${ver}-ios.ipa"
-          ls -lh "$repo/KO影视-${ver}-ios.ipa"
+          ./scripts/package-flutter-ios.sh
 
       - uses: actions/upload-artifact@v4
         with:

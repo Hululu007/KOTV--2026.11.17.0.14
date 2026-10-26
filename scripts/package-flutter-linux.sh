@@ -37,9 +37,11 @@ done
 chmod +x "$ENGINE_OUT"
 
 echo "==> flutter build linux --release"
+# shellcheck source=kotv-flutter-asset-engines.sh
+source "$ROOT/scripts/kotv-flutter-asset-engines.sh"
+kotv_flutter_asset_engines_hide
+trap kotv_flutter_asset_engines_restore EXIT
 cd "$ROOT/flutter"
-# 资产里若有 Windows .exe / 错架构二进制，清掉无害；Linux 引擎由下方 CMake/拷贝处理
-rm -f assets/engine/kotv-engine.exe
 # shellcheck source=kotv-fvp-deps.sh
 source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
@@ -55,6 +57,7 @@ if ! flutter build linux --release; then
 fi
 
 [[ -x "$BUNDLE/kotv" ]] || { echo "missing $BUNDLE/kotv" >&2; exit 1; }
+kotv_flutter_asset_engines_restore
 cp -f "$ENGINE_OUT" "$BUNDLE/kotv-engine"
 chmod +x "$BUNDLE/kotv-engine"
 chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
@@ -71,6 +74,8 @@ if [[ -f "$ROOT/cmd/updater/updater" ]]; then
   chmod +x "$BUNDLE/updater"
 fi
 "$ROOT/scripts/verify-runtime.sh" "$BUNDLE/runtime" linux-x64
+[[ -x "$BUNDLE/kotv-engine" ]] || { echo "missing $BUNDLE/kotv-engine" >&2; exit 1; }
+kotv_flutter_asset_engines_reject "$BUNDLE"
 
 mkdir -p "$ROOT/dist"
 rm -f "$OUT_ZIP"

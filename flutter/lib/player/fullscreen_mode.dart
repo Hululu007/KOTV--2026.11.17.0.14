@@ -65,6 +65,11 @@ Future<void> kotvExitSystemFullscreen({required bool wasDisplayFullscreen}) asyn
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ]);
+    } else if (!kIsWeb && !kotvIsDesktop()) {
+      // 手机退出全屏回到竖屏，首页底栏按 height > width 才会再出现。
+      await SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.portraitUp,
+      ]);
     } else {
       await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     }

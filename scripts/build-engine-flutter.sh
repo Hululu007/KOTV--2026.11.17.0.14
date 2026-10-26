@@ -74,10 +74,6 @@ build_android_abi() {
     "$prebuilt/bin/llvm-readelf" -d "$jni_dir/libkotv_engine.so" >&2 || true
     exit 1
   fi
-  # arm64 再拷一份到 assets 便于校验；v7 只进 jniLibs。
-  if [[ "$abi" == "arm64-v8a" ]]; then
-    cp -f "$jni_dir/libkotv_engine.so" "$OUT_DIR/libkotv_engine.so"
-  fi
   echo "built $jni_dir/libkotv_engine.so"
 }
 

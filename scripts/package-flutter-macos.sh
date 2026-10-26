@@ -72,6 +72,10 @@ if ! echo "$ENG_FILE_ARCH" | grep -q "$WANT_ENGINE_ARCH"; then
 fi
 
 echo "==> flutter build macos --release (KOTV_MACOS_NO_FVP=$KOTV_MACOS_NO_FVP)"
+# shellcheck source=kotv-flutter-asset-engines.sh
+source "$ROOT/scripts/kotv-flutter-asset-engines.sh"
+kotv_flutter_asset_engines_hide
+trap kotv_flutter_asset_engines_restore EXIT
 cd "$ROOT/flutter"
 rm -rf \
   "$ROOT/flutter/build/macos/Build/Products/Release/KO影视.app" \
@@ -106,6 +110,7 @@ do
   fi
 done
 [[ -n "$APP_SRC" ]] || { echo "missing Release .app under build/macos/..." >&2; exit 1; }
+kotv_flutter_asset_engines_restore
 
 STAGE="$ROOT/dist/_macos_dmg_stage"
 OUT_APP="$ROOT/dist/KO影视.app"
@@ -141,6 +146,7 @@ test -x "$OUT_APP/Contents/Resources/runtime/jre/bin/java"
 test -e "$OUT_APP/Contents/Resources/runtime/bridge/spider-bridge.jar" \
   || test -e "$OUT_APP/Contents/Resources/runtime/bridge"
 test -x "$OUT_APP/Contents/Resources/engine/kotv-engine"
+kotv_flutter_asset_engines_reject "$OUT_APP"
 # 禁止再出现双引擎；MacOS 下不应有 kotv-engine
 if [[ -e "$OUT_APP/Contents/MacOS/kotv-engine" || -e "$OUT_APP/Contents/MacOS/kotv-engine.exe" ]]; then
   echo "ERROR: duplicate engine under Contents/MacOS (keep only Resources/engine)" >&2

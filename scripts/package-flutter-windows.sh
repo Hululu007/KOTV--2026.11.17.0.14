@@ -18,7 +18,6 @@ OUT_ZIP="${ROOT}/KO影视-${VERSION}-${ARCH}${SUFFIX}.zip"
 ENGINE_DIR="$ROOT/dist/_win_engine"
 ENGINE_OUT="$ENGINE_DIR/kotv-engine.exe"
 RELEASE_DIR="$ROOT/flutter/build/windows/x64/runner/Release"
-ASSETS_ENG="$ROOT/flutter/assets/engine"
 
 echo "==> Flutter Windows package version=$VERSION arch=$ARCH suffix=${SUFFIX:-<none>}"
 
@@ -58,16 +57,11 @@ if [[ "${KOTV_WIN7:-}" == "1" ]] && command -v pwsh >/dev/null 2>&1; then
   pwsh -File "$ROOT/scripts/check-win7-deps.ps1" -Exe "$ENGINE_OUT"
 fi
 
-# Git Bash 下 `rm kotv-engine` 可能误删 kotv-engine.exe；用 PowerShell -LiteralPath。
-# 打包前清空 assets 里的引擎，避免错误架构二进制进 flutter_assets；安装旁路拷贝到 Release。
-echo "==> clear assets/engine binaries (LiteralPath)"
-pwsh -NoProfile -Command "
-  \$dir = '${ASSETS_ENG}' -replace '/', '\'
-  foreach (\$n in @('kotv-engine', 'kotv-engine.exe')) {
-    \$p = Join-Path \$dir \$n
-    if (Test-Path -LiteralPath \$p) { Remove-Item -LiteralPath \$p -Force; Write-Host \"removed \$p\" }
-  }
-"
+# 打包前把 assets 里的引擎挪走，避免错误架构二进制进 flutter_assets。打完放回。
+# shellcheck source=kotv-flutter-asset-engines.sh
+source "$ROOT/scripts/kotv-flutter-asset-engines.sh"
+kotv_flutter_asset_engines_hide
+trap kotv_flutter_asset_engines_restore EXIT
 
 echo "==> flutter build windows --release"
 cd "$ROOT/flutter"
@@ -80,12 +74,16 @@ kotv_ensure_mdk_windows_sdk
 flutter build windows --release
 
 [[ -f "$RELEASE_DIR/kotv.exe" ]] || { echo "missing $RELEASE_DIR/kotv.exe" >&2; exit 1; }
+kotv_flutter_asset_engines_restore
 cp -f "$ENGINE_OUT" "$RELEASE_DIR/kotv-engine.exe"
-# 清掉可能误进 assets 的无后缀文件（LiteralPath）
+kotv_flutter_asset_engines_reject "$RELEASE_DIR"
+# Git Bash 下按前缀删 kotv-engine 可能连带删掉 kotv-engine.exe，用精确路径。
 pwsh -NoProfile -Command "
   \$paths = @(
     '${RELEASE_DIR}/kotv-engine',
-    '${RELEASE_DIR}/data/flutter_assets/assets/engine/kotv-engine'
+    '${RELEASE_DIR}/data/flutter_assets/assets/engine/kotv-engine',
+    '${RELEASE_DIR}/data/flutter_assets/assets/engine/kotv-engine.exe',
+    '${RELEASE_DIR}/data/flutter_assets/assets/engine/libkotv_engine.so'
   )
   foreach (\$raw in \$paths) {
     \$p = \$raw -replace '/', '\'

@@ -116,3 +116,26 @@ void kotvResetChromeCover(StateController<bool> notifier) {
   _detailChromeCoverDepth = 0;
   if (notifier.state) notifier.state = false;
 }
+
+/// 详情和文件浏览共用：同一页只 push 一次，release 才 pop。
+class KotvChromeCoverSession {
+  bool held = false;
+
+  void hold(StateController<bool> notifier) {
+    if (held) return;
+    held = true;
+    try {
+      kotvPushChromeCover(notifier);
+    } catch (_) {
+      held = false;
+    }
+  }
+
+  void release(StateController<bool> notifier) {
+    if (!held) return;
+    held = false;
+    try {
+      kotvPopChromeCover(notifier);
+    } catch (_) {}
+  }
+}

@@ -702,7 +702,7 @@ class _TopStatusBarState extends State<TopStatusBar> {
     final topInset = kotvUnconsumedTopInset(context);
     return Container(
       height: h + topInset,
-      color: p.statusBar,
+      color: compact ? Colors.transparent : p.statusBar,
       padding: EdgeInsets.fromLTRB(padH, topInset, padH, 0),
       child: LayoutBuilder(
         builder: (context, c) {
@@ -994,7 +994,7 @@ class _CategoryNavBarState extends State<CategoryNavBar> {
     final grow = LayoutScale.grow(context);
     return Container(
       height: (compact ? 40.0 : 48.0) * grow,
-      color: p.catBar,
+      color: compact ? Colors.transparent : p.catBar,
       padding: EdgeInsets.symmetric(
           horizontal: compact ? 10.0 : 24.0 * s, vertical: 6 * grow),
       child: FocusTraversalGroup(

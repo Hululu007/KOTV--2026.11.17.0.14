@@ -311,6 +311,21 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final cfg = await _waitConfigReady();
       if (!mounted || gen != _loadGen) return;
       final ready = cfg['ready'] == true;
+      if (!ready && !clearContent && _items.isNotEmpty) {
+        final source = '${cfg['source'] ?? ''}'.trim();
+        final err = '${cfg['error'] ?? ''}'.trim();
+        if (_needsRemoteLogin(err)) {
+          await _promptRemoteLogin(gen);
+          return;
+        }
+        setState(() {
+          _loading = false;
+          _statusMsg = err.isNotEmpty
+              ? err
+              : (source.isEmpty ? '点播源未就绪，请重试' : '点播源加载超时，请重试');
+        });
+        return;
+      }
       setState(() => _ready = ready);
 
       if (!ready) {
@@ -633,13 +648,16 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final pc = (pcRaw is num) ? pcRaw.toInt() : 0;
       final home = replace && (_tid == null || _tid!.isEmpty);
       final emptyHome = home && types.isEmpty && list.isEmpty;
+      final keepGrid = home && list.isEmpty && _items.isNotEmpty;
       final pageStyle = KotvGridStyle.parse(data['style']);
       setState(() {
-        if (replace) {
+        if (replace && !keepGrid) {
           _listStyle = pageStyle.isList;
           _gridStyle = pageStyle;
         }
-        _statusMsg = emptyHome ? '首页没有返回分类和推荐，请重试' : null;
+        _statusMsg = emptyHome
+            ? '首页没有返回分类和推荐，请重试'
+            : (keepGrid ? '首页没有返回推荐，请重试' : null);
         if (types.isNotEmpty) {
           _types = types;
         }
@@ -665,7 +683,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         if (replace) {
           _page = 1;
           _pageCount = pc < 0 ? 0 : pc;
-          if (!emptyHome || _items.isEmpty) {
+          if (!keepGrid) {
             _items
               ..clear()
               ..addAll(list);
@@ -879,8 +897,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                 orElse: () => '…'));
     final busy = ref.watch(uiBusyProvider);
     final onHome = (_tid ?? '').isEmpty;
-
-    return Column(
+    final compactHeader = KotvLayout.isCompact(context);
+    final header = Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         TopStatusBar(
           siteName: siteName,
@@ -930,6 +949,16 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             onToggleFilter: _toggleFilters,
             onLive: () => goKotvPage(ref, KotvPage.live),
           ),
+      ],
+    );
+    return Column(
+      children: [
+        compactHeader
+            ? ColoredBox(
+                color: KotvPalette.of(context).catBar,
+                child: header,
+              )
+            : header,
         if (ready && !onHome && _filtersExpanded && _filters.isNotEmpty)
           _buildFilters(),
         if (ready && _statusMsg != null)

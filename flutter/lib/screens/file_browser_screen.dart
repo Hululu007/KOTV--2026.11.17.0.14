@@ -41,14 +41,14 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   late String _dir;
   List<_FsItem> _items = [];
   String? _error;
-  bool _chromeCoverHeld = false;
+  final _chromeCover = KotvChromeCoverSession();
 
   @override
   void initState() {
     super.initState();
     FileBrowserScreen._open++;
     _dir = widget.root;
-    _holdChromeCover();
+    _chromeCover.hold(ref.read(detailChromeCoverProvider.notifier));
     _load();
   }
 
@@ -59,27 +59,19 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
     super.dispose();
   }
 
-  void _holdChromeCover() {
-    if (_chromeCoverHeld) return;
-    _chromeCoverHeld = true;
-    try {
-      kotvPushChromeCover(ref.read(detailChromeCoverProvider.notifier));
-    } catch (_) {
-      _chromeCoverHeld = false;
-    }
-  }
-
-  void _clearChromeCover() {
-    if (!_chromeCoverHeld) return;
-    _chromeCoverHeld = false;
-    try {
-      kotvPopChromeCover(ref.read(detailChromeCoverProvider.notifier));
-    } catch (_) {}
+  @override
+  void activate() {
+    super.activate();
+    _chromeCover.hold(ref.read(detailChromeCoverProvider.notifier));
   }
 
   @override
   void deactivate() {
-    _clearChromeCover();
+    final route = ModalRoute.of(context);
+    final popped = route == null || !route.isActive;
+    if (popped) {
+      _chromeCover.release(ref.read(detailChromeCoverProvider.notifier));
+    }
     super.deactivate();
   }
 
