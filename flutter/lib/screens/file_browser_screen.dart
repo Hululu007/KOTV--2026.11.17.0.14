@@ -317,7 +317,7 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
                     child: Material(
                       color: _canConfirmDir
                           ? p.primary
-                          : p.primary.withValues(alpha: 0.35),
+                          : p.primary.withOpacity(0.35),
                       borderRadius: BorderRadius.circular(10),
                       child: InkWell(
                         onTap: _canConfirmDir

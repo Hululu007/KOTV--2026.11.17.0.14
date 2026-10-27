@@ -388,8 +388,8 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                                             child: LinearProgressIndicator(
                                               value: prog > 0 ? prog : null,
                                               minHeight: 3,
-                                              backgroundColor: p.fg
-                                                  .withValues(alpha: 0.08),
+                                              backgroundColor:
+                                                  p.fg.withOpacity(0.08),
                                               color: p.primary,
                                             ),
                                           ),
