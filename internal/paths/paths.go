@@ -70,6 +70,8 @@ func JarPath(md5 string) string {
 	return filepath.Join(JarCache(), md5+".jar")
 }
 
+// Downloads 引擎默认下载目录（设置 downloadDir 为空时使用）。
+// Android 用公共 Download（文件管理器可见）；不可写再回落到应用私有目录。
 func Downloads() string {
 	home, _ := os.UserHomeDir()
 	switch runtime.GOOS {
@@ -79,6 +81,15 @@ func Downloads() string {
 		}
 	case "darwin", "linux":
 		return ensure(filepath.Join(home, "Downloads"))
+	case "android":
+		if ext := externalStorageRoot(); ext != "" {
+			// DIRECTORY_DOWNLOADS 在安卓上是 Download（单数）。
+			pub := filepath.Join(ext, "Download")
+			if err := os.MkdirAll(pub, 0o755); err == nil {
+				return pub
+			}
+		}
+		return ensure(filepath.Join(Root(), "downloads"))
 	}
 	return ensure(filepath.Join(Root(), "downloads"))
 }

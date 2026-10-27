@@ -1777,7 +1777,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       title: '下载目录',
       current: cur.trim().isEmpty ? 'default' : 'custom',
       options: const [
-        ('引擎默认 Downloads', 'default'),
+        ('引擎默认下载目录', 'default'),
         ('浏览引擎目录…', 'pick'),
       ],
     );

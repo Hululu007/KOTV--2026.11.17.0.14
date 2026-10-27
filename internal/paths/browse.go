@@ -58,6 +58,7 @@ func BrowseRoots() []BrowseRoot {
 		for _, d := range androidVolumeRoots() {
 			add(d.Name, d.Path)
 		}
+		add("下载", Downloads())
 		add("应用数据", Data())
 	default:
 		add("下载", Downloads())
