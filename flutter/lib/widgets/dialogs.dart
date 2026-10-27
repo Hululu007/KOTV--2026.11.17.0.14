@@ -30,7 +30,7 @@ Future<void> _prepareLeavePlayback() async {
 
 /// 弹窗尺寸：窄屏用满宽减边距。大于 720p 时上限跟窗口倍数走，仍不超过屏幕。
 ({double width, double height, EdgeInsets inset, bool compact, double ui})
-    _dialogMetrics(BuildContext context) {
+    kotvDialogMetrics(BuildContext context) {
   final sz = MediaQuery.sizeOf(context);
   final compact = KotvLayout.isCompact(context);
   final ui = LayoutScale.grow(context);
@@ -186,7 +186,7 @@ Future<void> showSitePicker(
     builder: (ctx) {
       var all = List<SiteInfo>.from(sites);
       var filter = '';
-      final m = _dialogMetrics(ctx);
+      final m = kotvDialogMetrics(ctx);
       return StatefulBuilder(
         builder: (ctx, setLocal) {
           Future<void> reload() async {
@@ -496,7 +496,7 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
           }
 
           final p = KotvPalette.of(ctx);
-          final m = _dialogMetrics(ctx);
+          final m = kotvDialogMetrics(ctx);
           return Dialog(
             backgroundColor: Colors.transparent,
             insetPadding: m.inset,
@@ -746,7 +746,7 @@ Future<({String url, String name})?> _showEditSourceDialog(
           }
 
           final p = KotvPalette.of(ctx);
-          final m = _dialogMetrics(ctx);
+          final m = kotvDialogMetrics(ctx);
           return Dialog(
             backgroundColor: Colors.transparent,
             insetPadding: m.inset,
@@ -852,7 +852,7 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
     context: context,
     builder: (ctx) {
       final p = KotvPalette.of(ctx);
-      final m = _dialogMetrics(ctx);
+      final m = kotvDialogMetrics(ctx);
       Future<void> pick() async {
         final picked = await _pickConfigFile(ctx);
         if (picked != null && ctx.mounted) {
@@ -1297,7 +1297,7 @@ class _SourceListDialogState extends State<_SourceListDialog> {
         });
       }
     }
-    final m = _dialogMetrics(context);
+    final m = kotvDialogMetrics(context);
     final p = KotvPalette.of(context);
     final bg = p.dialogBg;
     final border = p.outline;

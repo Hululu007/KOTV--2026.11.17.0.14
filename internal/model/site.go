@@ -23,6 +23,8 @@ type Site struct {
 	Header      FlexHeader `json:"header"`
 	Click       string     `json:"click"`
 	ID          int        `json:"-"`
+	// Disabled 用户在「检测爬虫」里禁用：不进换源列表与搜索，存于本地库 site.disabled。
+	Disabled bool `json:"-"`
 }
 
 func (s Site) TypeID() int {

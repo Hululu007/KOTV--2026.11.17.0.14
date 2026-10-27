@@ -40,6 +40,7 @@ import '../util/runtime_info.dart';
 import '../vod/grid_style.dart';
 import '../widgets/auth_gate.dart';
 import '../widgets/cast_flow.dart';
+import '../widgets/spider_check_dialog.dart';
 import '../widgets/chrome.dart';
 import '../widgets/danmaku_settings_sheet.dart';
 import '../widgets/dialogs.dart';
@@ -1923,14 +1924,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     showAppNews(context, msg);
   }
 
-  Future<void> _checkSpider() async {
-    final data = await _runTool(
-        '检测爬虫中', () => ref.read(apiProvider).tools('checkSpider'));
-    if (data == null || !mounted) return;
-    final text = kotvFormatCheckSpiderResult(data);
-    setState(() => _status = text.split('\n').first);
-    showAppNews(context, text);
-  }
+  Future<void> _checkSpider() => showSpiderCheckDialog(context, ref);
 
   Future<void> _clearCache() async {
     final choice = await pickChoice(context,

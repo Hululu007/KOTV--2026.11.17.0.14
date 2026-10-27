@@ -155,6 +155,7 @@ func (db *DB) migrate() error {
 		`ALTER TABLE keep ADD COLUMN type INTEGER DEFAULT 0`,
 		`ALTER TABLE keep ADD COLUMN cid INTEGER DEFAULT 0`,
 		`ALTER TABLE keep ADD COLUMN site_name TEXT`,
+		`ALTER TABLE site ADD COLUMN disabled INTEGER DEFAULT 0`,
 	}
 	for _, s := range alterCols {
 		_, _ = db.conn.Exec(s)
@@ -430,26 +431,25 @@ func (db *DB) SyncSites(configID int64, sites []model.Site) error {
 	}
 	defer tx.Rollback()
 
-	rows, err := tx.Query(`SELECT id, key, searchable, changeable FROM site WHERE config_id = ?`, configID)
+	rows, err := tx.Query(`SELECT id, key, searchable, changeable, disabled FROM site WHERE config_id = ?`, configID)
 	if err != nil {
 		return err
 	}
-	existing := map[string]struct {
+	type siteRow struct {
 		id                     int
 		searchable, changeable *int
-	}{}
+		disabled               bool
+	}
+	existing := map[string]siteRow{}
 	for rows.Next() {
 		var key string
 		var id int
-		var s, c sql.NullInt64
-		if err := rows.Scan(&id, &key, &s, &c); err != nil {
+		var s, c, d sql.NullInt64
+		if err := rows.Scan(&id, &key, &s, &c, &d); err != nil {
 			rows.Close()
 			return err
 		}
-		e := struct {
-			id                     int
-			searchable, changeable *int
-		}{id: id}
+		e := siteRow{id: id, disabled: d.Valid && d.Int64 == 1}
 		if s.Valid {
 			v := int(s.Int64)
 			e.searchable = &v
@@ -466,6 +466,7 @@ func (db *DB) SyncSites(configID int64, sites []model.Site) error {
 		site := &sites[i]
 		if ex, ok := existing[site.Key]; ok {
 			site.ID = ex.id
+			site.Disabled = ex.disabled
 			if ex.searchable != nil {
 				site.Searchable = model.FlexInt{Valid: true, Value: *ex.searchable}
 			}
@@ -490,28 +491,35 @@ func (db *DB) SyncSites(configID int64, sites []model.Site) error {
 	return tx.Commit()
 }
 
-// UpdateSiteFlags 持久化站源 searchable/changeable（站源配置）。
-func (db *DB) UpdateSiteFlags(siteID int, searchable, changeable model.FlexInt) error {
-	if siteID <= 0 {
+// UpdateSiteFlags 持久化站源 searchable/changeable/disabled（按 site.ID）。
+func (db *DB) UpdateSiteFlags(site model.Site) error {
+	if site.ID <= 0 {
 		return fmt.Errorf("invalid site id")
 	}
 	db.mu.Lock()
 	defer db.mu.Unlock()
-	_, err := db.conn.Exec(`UPDATE site SET searchable=?, changeable=? WHERE id=?`,
-		flexIntPtr(searchable), flexIntPtr(changeable), siteID)
+	_, err := db.conn.Exec(`UPDATE site SET searchable=?, changeable=?, disabled=? WHERE id=?`,
+		flexIntPtr(site.Searchable), flexIntPtr(site.Changeable), boolInt(site.Disabled), site.ID)
 	return err
 }
 
 // UpdateSiteFlagsByKey 按 config + key 更新（无 site.ID 时的回退）。
-func (db *DB) UpdateSiteFlagsByKey(configID int64, key string, searchable, changeable model.FlexInt) error {
-	if configID <= 0 || key == "" {
+func (db *DB) UpdateSiteFlagsByKey(configID int64, site model.Site) error {
+	if configID <= 0 || site.Key == "" {
 		return fmt.Errorf("invalid site key")
 	}
 	db.mu.Lock()
 	defer db.mu.Unlock()
-	_, err := db.conn.Exec(`UPDATE site SET searchable=?, changeable=? WHERE config_id=? AND key=?`,
-		flexIntPtr(searchable), flexIntPtr(changeable), configID, key)
+	_, err := db.conn.Exec(`UPDATE site SET searchable=?, changeable=?, disabled=? WHERE config_id=? AND key=?`,
+		flexIntPtr(site.Searchable), flexIntPtr(site.Changeable), boolInt(site.Disabled), configID, site.Key)
 	return err
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 type History struct {

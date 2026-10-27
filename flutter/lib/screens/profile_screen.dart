@@ -16,6 +16,7 @@ import '../util/runtime_info.dart';
 import '../widgets/chrome.dart';
 import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/spider_check_dialog.dart';
 import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
 import '../widgets/poster_card.dart';
@@ -81,20 +82,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  Future<void> _checkSpider() async {
-    setState(() => _status = '检测爬虫中…');
-    try {
-      final data = await ref.read(apiProvider).tools('checkSpider');
-      if (!mounted) return;
-      final text = kotvFormatCheckSpiderResult(data);
-      setState(() => _status = text.split('\n').first);
-      showAppNews(context, text);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _status = '检测失败: $e');
-      showAppNews(context, '检测失败: $e');
-    }
-  }
+  Future<void> _checkSpider() => showSpiderCheckDialog(context, ref);
 
   Future<void> _showAbout() async {
     try {

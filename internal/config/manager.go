@@ -133,16 +133,53 @@ func (m *Manager) CloneEphemeral() *Manager {
 	}
 }
 
+// Sites 可用站源（换源列表、搜索）：不含配置隐藏的站，也不含用户禁用的站。
 func (m *Manager) Sites() []model.Site {
+	return m.visibleSites(false)
+}
+
+// SitesWithDisabled 含用户禁用的站（检测爬虫弹窗里查看与恢复）。
+func (m *Manager) SitesWithDisabled() []model.Site {
+	return m.visibleSites(true)
+}
+
+func (m *Manager) visibleSites(withDisabled bool) []model.Site {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]model.Site, 0, len(m.api.Sites))
 	for _, s := range m.api.Sites {
-		if !s.IsHide() {
-			out = append(out, s)
+		if s.IsHide() || (s.Disabled && !withDisabled) {
+			continue
 		}
+		out = append(out, s)
 	}
 	return out
+}
+
+// SetSitesDisabled 批量禁用/恢复站源并持久化；未知 key 忽略。
+func (m *Manager) SetSitesDisabled(keys []string, disabled bool) error {
+	want := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		if k = strings.TrimSpace(k); k != "" {
+			want[k] = struct{}{}
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.api.Sites {
+		site := &m.api.Sites[i]
+		if _, ok := want[site.Key]; !ok || site.Disabled == disabled {
+			continue
+		}
+		site.Disabled = disabled
+		if err := m.persistSiteFlagsLocked(*site); err != nil {
+			return err
+		}
+		if m.home.Key == site.Key {
+			m.home = *site
+		}
+	}
+	return nil
 }
 
 func (m *Manager) GetSite(key string) *model.Site {
@@ -268,7 +305,7 @@ func (m *Manager) persistSiteFlagsLocked(site model.Site) error {
 		return nil
 	}
 	if site.ID > 0 {
-		return m.db.UpdateSiteFlags(site.ID, site.Searchable, site.Changeable)
+		return m.db.UpdateSiteFlags(site)
 	}
 	cfg, err := m.db.FindConfig(m.api.URL, database.ConfigTypeSite)
 	if err != nil {
@@ -277,7 +314,7 @@ func (m *Manager) persistSiteFlagsLocked(site model.Site) error {
 	if cfg == nil || cfg.ID == 0 {
 		return fmt.Errorf("config not found")
 	}
-	return m.db.UpdateSiteFlagsByKey(cfg.ID, site.Key, site.Searchable, site.Changeable)
+	return m.db.UpdateSiteFlagsByKey(cfg.ID, site)
 }
 
 func (m *Manager) Clear() {

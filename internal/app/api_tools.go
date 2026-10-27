@@ -17,6 +17,7 @@ import (
 	"github.com/bobo/KOTV/internal/cast"
 	"github.com/bobo/KOTV/internal/clientsession"
 	"github.com/bobo/KOTV/internal/danmaku"
+	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/dlna"
 	"github.com/bobo/KOTV/internal/hostclient"
@@ -43,8 +44,12 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 	switch action {
 	case "checkupdate":
 		return a.toolCheckUpdate()
+	case "spiderlist":
+		return a.toolSpiderList()
 	case "checkspider":
-		return a.toolCheckSpider()
+		return a.toolCheckSpider(strParam(params, "key"))
+	case "setspidersdisabled":
+		return a.toolSetSpidersDisabled(strListParam(params, "keys"), boolParam(params, "disabled", true))
 	case "resetpair":
 		if hostclient.DataOwner() != "" {
 			return nil, fmt.Errorf("远端会话不能重置配对码")
@@ -275,10 +280,8 @@ func (a *App) toolCheckUpdate() (map[string]any, error) {
 	return out, nil
 }
 
-func (a *App) toolCheckSpider() (map[string]any, error) {
-	if err := requireLocalCrawler(); err != nil {
-		return nil, err
-	}
+// spiderScope 当前会话的配置；未就绪时报错。
+func (a *App) spiderScope() (*config.Manager, error) {
 	cfg, _, sess := a.scope()
 	ready := a.Ready
 	if sess != nil {
@@ -287,35 +290,63 @@ func (a *App) toolCheckSpider() (map[string]any, error) {
 	if !ready {
 		return nil, fmt.Errorf("配置未就绪")
 	}
-	sites := cfg.Sites()
-	ok, fail := 0, 0
-	results := make([]map[string]any, 0, len(sites))
-	for _, site := range sites {
-		sp := cfg.Spider(site)
-		_, err := sp.HomeContent(true)
-		msg := "ok"
-		st := 1
-		if err != nil {
-			st = 0
-			msg = err.Error()
-			fail++
-		} else {
-			ok++
-		}
-		results = append(results, map[string]any{
-			"key":     site.Key,
-			"name":    site.Name,
-			"ok":      st == 1,
-			"message": msg,
+	return cfg, nil
+}
+
+// toolSpiderList 检测爬虫弹窗的站源列表（含已禁用）。
+func (a *App) toolSpiderList() (map[string]any, error) {
+	cfg, err := a.spiderScope()
+	if err != nil {
+		return nil, err
+	}
+	sites := cfg.SitesWithDisabled()
+	out := make([]map[string]any, 0, len(sites))
+	for _, s := range sites {
+		out = append(out, map[string]any{
+			"key":      s.Key,
+			"name":     s.Name,
+			"disabled": s.Disabled,
 		})
 	}
-	return map[string]any{
-		"ok":      true,
-		"success": ok,
-		"fail":    fail,
-		"results": results,
-		"message": fmt.Sprintf("检测完成: 成功 %d / 失败 %d", ok, fail),
-	}, nil
+	return map[string]any{"ok": true, "sites": out, "checkable": requireLocalCrawler() == nil}, nil
+}
+
+// toolCheckSpider 检测单个站源：首页能取到即通过。
+func (a *App) toolCheckSpider(key string) (map[string]any, error) {
+	if err := requireLocalCrawler(); err != nil {
+		return nil, err
+	}
+	cfg, err := a.spiderScope()
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, fmt.Errorf("missing key")
+	}
+	site := cfg.GetSite(key)
+	if site == nil {
+		return nil, fmt.Errorf("站源不存在: %s", key)
+	}
+	out := map[string]any{"ok": true, "key": site.Key, "pass": true, "message": ""}
+	if _, err := cfg.Spider(*site).HomeContent(true); err != nil {
+		out["pass"] = false
+		out["message"] = err.Error()
+	}
+	return out, nil
+}
+
+func (a *App) toolSetSpidersDisabled(keys []string, disabled bool) (map[string]any, error) {
+	cfg, err := a.spiderScope()
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("missing keys")
+	}
+	if err := cfg.SetSitesDisabled(keys, disabled); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true}, nil
 }
 
 func (a *App) toolSyncSend(host, pair, syncType string) (map[string]any, error) {
@@ -627,6 +658,21 @@ func strParam(m map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprint(v))
+}
+
+// strListParam JSON 数组参数转字符串列表（去空）。
+func strListParam(m map[string]any, key string) []string {
+	raw, _ := m[key].([]any)
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if v == nil {
+			continue
+		}
+		if s := strings.TrimSpace(fmt.Sprint(v)); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func intParam(m map[string]any, key string, def int) int {
