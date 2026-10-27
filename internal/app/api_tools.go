@@ -328,7 +328,9 @@ func (a *App) toolCheckSpider(key string) (map[string]any, error) {
 		return nil, fmt.Errorf("站源不存在: %s", key)
 	}
 	out := map[string]any{"ok": true, "key": site.Key, "pass": true, "message": ""}
-	if _, err := cfg.Spider(*site).HomeContent(true); err != nil {
+	// 用 SpiderOnly：检测是多站并发，Spider() 会把本站记为当前站并关掉其它 js/py 实例，
+	// 导致并发检测互相中断，还会顶掉首页正在用的脚本站。
+	if _, err := cfg.SpiderOnly(*site).HomeContent(true); err != nil {
 		out["pass"] = false
 		out["message"] = err.Error()
 	}
