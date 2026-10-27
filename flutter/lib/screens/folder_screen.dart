@@ -9,6 +9,7 @@ import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
+import '../widgets/kotv_refresh.dart';
 import '../widgets/poster_card.dart';
 
 /// `vod_tag=folder` 用 categoryContent(tid=vod_id) 进目录。
@@ -175,7 +176,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
                         }
                         return false;
                       },
-                      child: RefreshIndicator(
+                      child: KotvPullRefresh(
                         onRefresh: () => _load(replace: true),
                         child: _style.isList ? _list(s, p) : _grid(),
                       ),
@@ -197,6 +198,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
   Widget _list(double s, KotvPalette p) {
     return ListView.separated(
       controller: _scroll,
+      physics: kotvPullRefreshPhysics,
       padding: EdgeInsets.symmetric(horizontal: 16 * s, vertical: 8 * s),
       itemCount: _items.length + (_loadingMore ? 1 : 0),
       separatorBuilder: (_, __) => Divider(height: 1, color: p.outline),
@@ -232,6 +234,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
         );
         return GridView.builder(
           controller: _scroll,
+          physics: kotvPullRefreshPhysics,
           padding: EdgeInsets.all(pad),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: m.columns,

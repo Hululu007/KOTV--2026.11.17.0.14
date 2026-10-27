@@ -19,6 +19,7 @@ import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
+import '../widgets/kotv_refresh.dart';
 import '../widgets/poster_card.dart';
 import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
@@ -1286,8 +1287,12 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         }
         return false;
       },
-      child: CustomScrollView(
+      child: KotvPullRefresh(
+        // 首页/分类均重拉第一页（不清仓、不 invalidate 配置）。
+        onRefresh: () => _reloadContentOnly(),
+        child: CustomScrollView(
         controller: _scroll,
+        physics: kotvPullRefreshPhysics,
         cacheExtent: 800,
         slivers: [
           if (onHome) ...[
@@ -1359,6 +1364,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               ),
           ],
         ],
+      ),
       ),
       ),
     );

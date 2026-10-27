@@ -7,6 +7,7 @@ import '../theme/layout_scale.dart';
 import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
 import '../widgets/chrome.dart';
+import '../widgets/kotv_refresh.dart';
 import '../widgets/poster_card.dart';
 import 'shell.dart';
 
@@ -32,6 +33,7 @@ class LibraryShelf extends ConsumerWidget {
     required this.onToggleDelete,
     required this.onClear,
     required this.onRemove,
+    this.onRefresh,
     this.extraTrailing,
     this.gridPadding,
   });
@@ -46,6 +48,7 @@ class LibraryShelf extends ConsumerWidget {
   final VoidCallback onToggleDelete;
   final Future<void> Function() onClear;
   final Future<void> Function(VodItem item) onRemove;
+  final Future<void> Function()? onRefresh;
   final LibraryShelfExtras? extraTrailing;
   final EdgeInsets? gridPadding;
 
@@ -106,32 +109,96 @@ class LibraryShelf extends ConsumerWidget {
             child: Text('删除模式：点击海报即可移除', style: TextStyle(color: p.primary, fontSize: 14)),
           ),
         Expanded(
-          child: loading
-              ? Center(child: CircularProgressIndicator(color: p.primary))
-              : items.isEmpty
-                  ? Center(child: Text(emptyText, style: TextStyle(color: p.muted, fontSize: 18)))
-                  : PosterFlow(
-                      items: items,
-                      size: kotvWatchPosterSize(ref),
-                      style: kotvGridStyleOfItems(items),
-                      padding: gridPadding,
-                      onOpen: (it) async {
-                        if (deleting) {
-                          await onRemove(it);
-                          return;
-                        }
-                        if (!context.mounted) return;
-                        await openVodItem(
-                          context,
-                          ref,
-                          it,
-                          site: it.site,
-                          searchIfIndex: false,
-                        );
-                      },
-                    ),
+          child: _LibraryShelfBody(
+            loading: loading,
+            items: items,
+            emptyText: emptyText,
+            deleting: deleting,
+            gridPadding: gridPadding,
+            onRefresh: onRefresh,
+            onRemove: onRemove,
+            primary: p.primary,
+            muted: p.muted,
+          ),
         ),
       ],
     );
+  }
+}
+
+class _LibraryShelfBody extends ConsumerWidget {
+  const _LibraryShelfBody({
+    required this.loading,
+    required this.items,
+    required this.emptyText,
+    required this.deleting,
+    required this.onRemove,
+    required this.primary,
+    required this.muted,
+    this.onRefresh,
+    this.gridPadding,
+  });
+
+  final bool loading;
+  final List<VodItem> items;
+  final String emptyText;
+  final bool deleting;
+  final Future<void> Function(VodItem item) onRemove;
+  final Future<void> Function()? onRefresh;
+  final EdgeInsets? gridPadding;
+  final Color primary;
+  final Color muted;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    Widget content;
+    if (loading) {
+      content = ListView(
+        physics: kotvPullRefreshPhysics,
+        children: [
+          SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.45,
+            child: Center(child: CircularProgressIndicator(color: primary)),
+          ),
+        ],
+      );
+    } else if (items.isEmpty) {
+      content = ListView(
+        physics: kotvPullRefreshPhysics,
+        children: [
+          SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.45,
+            child: Center(
+              child: Text(emptyText, style: TextStyle(color: muted, fontSize: 18)),
+            ),
+          ),
+        ],
+      );
+    } else {
+      content = PosterFlow(
+        items: items,
+        size: kotvWatchPosterSize(ref),
+        style: kotvGridStyleOfItems(items),
+        padding: gridPadding,
+        physics: onRefresh == null ? null : kotvPullRefreshPhysics,
+        onOpen: (it) async {
+          if (deleting) {
+            await onRemove(it);
+            return;
+          }
+          if (!context.mounted) return;
+          await openVodItem(
+            context,
+            ref,
+            it,
+            site: it.site,
+            searchIfIndex: false,
+          );
+        },
+      );
+    }
+    final refresh = onRefresh;
+    if (refresh == null) return content;
+    return KotvPullRefresh(onRefresh: refresh, child: content);
   }
 }

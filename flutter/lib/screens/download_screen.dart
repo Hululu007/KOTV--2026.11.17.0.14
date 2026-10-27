@@ -10,6 +10,7 @@ import '../theme/layout_scale.dart';
 import '../widgets/chrome.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
+import '../widgets/kotv_refresh.dart';
 import 'shell.dart';
 
 /// 我的下载：状态筛选 → 任务列表；多选时才出批量栏；单项用右侧图标。
@@ -289,13 +290,33 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
             ),
           ),
         Expanded(
-          child: _loading && _tasks.isEmpty
-              ? const Center(child: CircularProgressIndicator())
+          child: KotvPullRefresh(
+            onRefresh: () => _reload(),
+            child: _loading && _tasks.isEmpty
+              ? ListView(
+                  physics: kotvPullRefreshPhysics,
+                  children: const [
+                    SizedBox(
+                      height: 280,
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                  ],
+                )
               : visible.isEmpty
-                  ? Center(
-                      child: Text('暂无下载任务', style: TextStyle(color: p.muted)),
+                  ? ListView(
+                      physics: kotvPullRefreshPhysics,
+                      children: [
+                        SizedBox(
+                          height: 280,
+                          child: Center(
+                            child: Text('暂无下载任务',
+                                style: TextStyle(color: p.muted)),
+                          ),
+                        ),
+                      ],
                     )
                   : ListView.separated(
+                      physics: kotvPullRefreshPhysics,
                       padding: EdgeInsets.fromLTRB(hPad, 12 * s, hPad, 20 * s),
                       itemCount: visible.length,
                       separatorBuilder: (_, __) => SizedBox(height: 10 * s),
@@ -438,6 +459,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                         );
                       },
                     ),
+          ),
         ),
         if (_selectMode) _bulkBar(p, s, visible),
       ],

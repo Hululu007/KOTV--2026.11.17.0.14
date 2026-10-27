@@ -62,6 +62,7 @@ class _CollectScreenState extends ConsumerState<CollectScreen> {
         await LocalCollect.remove(it);
         await _reload();
       },
+      onRefresh: _reload,
       gridPadding: const EdgeInsets.fromLTRB(60, 10, 60, 24),
     );
   }

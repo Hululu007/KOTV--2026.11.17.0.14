@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import '../remote/remote_bridge.dart';
-import '../widgets/chrome.dart';
 import 'library_shelf.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
@@ -53,26 +52,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         await LocalHistory.remove(it);
         await _reload();
       },
-      extraTrailing: ({
-        required bool compact,
-        required bool land,
-        required double pillH,
-        required double pillFs,
-        required double gap,
-      }) {
-        if (compact) return const <Widget>[];
-        final refreshW = land ? 56.0 : 104.0;
-        return [
-          SizedBox(width: gap),
-          AppPill(
-            label: '刷新',
-            width: refreshW,
-            height: pillH,
-            fontSize: pillFs,
-            onTap: _reload,
-          ),
-        ];
-      },
+      onRefresh: _reload,
     );
   }
 }

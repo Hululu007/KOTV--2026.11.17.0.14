@@ -258,6 +258,7 @@ class PosterFlow extends StatelessWidget {
     this.padding,
     this.size = 2,
     this.style = const KotvGridStyle(),
+    this.physics,
   });
 
   final List<VodItem> items;
@@ -266,6 +267,7 @@ class PosterFlow extends StatelessWidget {
   final EdgeInsets? padding;
   final int size;
   final KotvGridStyle style;
+  final ScrollPhysics? physics;
 
   @override
   Widget build(BuildContext context) {
@@ -280,6 +282,7 @@ class PosterFlow extends StatelessWidget {
         if (style.isList) {
           return ListView.builder(
             padding: pad,
+            physics: physics,
             addAutomaticKeepAlives: false,
             cacheExtent: 800,
             itemCount: items.length,
@@ -296,6 +299,7 @@ class PosterFlow extends StatelessWidget {
         }
         return GridView.builder(
           padding: pad,
+          physics: physics,
           addAutomaticKeepAlives: false,
           cacheExtent: 800,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
