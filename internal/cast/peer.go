@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bobo/KOTV/internal/localproxy"
@@ -24,23 +25,22 @@ type peerInfo struct {
 	UUID string `json:"uuid"`
 }
 
-// discoverAppPeers 扫描本机网段引擎端口 /device，发现其它 KOTV / 兼容端。
-func discoverAppPeers(timeout time.Duration) ([]Device, error) {
+// discoverAppPeers 扫描本机网段引擎端口 /device，发现其它 KOTV / 兼容端；每探到一台就 emit。
+func discoverAppPeers(timeout time.Duration, emit func(Device)) error {
 	if timeout <= 0 {
 		timeout = 4 * time.Second
 	}
 	bases := peerScanBases()
 	if len(bases) == 0 {
-		return nil, nil
+		return nil
 	}
 	selfUUID := strings.TrimSpace(settings.EnsureDeviceUUID())
 	selfIP := strings.TrimSpace(util.LanIP())
 
 	client := &http.Client{Timeout: 900 * time.Millisecond}
 	var (
-		mu  sync.Mutex
-		out []Device
-		wg  sync.WaitGroup
+		wg      sync.WaitGroup
+		expired atomic.Bool
 	)
 	sem := make(chan struct{}, 64)
 	for _, base := range bases {
@@ -51,12 +51,11 @@ func discoverAppPeers(timeout time.Duration) ([]Device, error) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			d, ok := probeAppPeer(client, base, selfUUID, selfIP)
-			if !ok {
+			// 超时后到达的结果不再上报，与搜索窗口一致。
+			if !ok || expired.Load() {
 				return
 			}
-			mu.Lock()
-			out = append(out, d)
-			mu.Unlock()
+			emit(d)
 		}()
 	}
 	done := make(chan struct{})
@@ -67,8 +66,9 @@ func discoverAppPeers(timeout time.Duration) ([]Device, error) {
 	select {
 	case <-done:
 	case <-time.After(timeout):
+		expired.Store(true)
 	}
-	return out, nil
+	return nil
 }
 
 func peerScanBases() []string {

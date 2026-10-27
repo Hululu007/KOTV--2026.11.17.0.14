@@ -16,8 +16,8 @@ import (
 	"github.com/bobo/KOTV/internal/cacheclean"
 	"github.com/bobo/KOTV/internal/cast"
 	"github.com/bobo/KOTV/internal/clientsession"
-	"github.com/bobo/KOTV/internal/danmaku"
 	"github.com/bobo/KOTV/internal/config"
+	"github.com/bobo/KOTV/internal/danmaku"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/dlna"
 	"github.com/bobo/KOTV/internal/hostclient"
@@ -69,6 +69,8 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 		return a.toolBackupImport(strParam(params, "path"))
 	case "castdiscover":
 		return a.toolCastDiscover()
+	case "castdevices":
+		return a.toolCastDevices()
 	case "cast":
 		idx := intParam(params, "index", -1)
 		return a.toolCast(idx, params)
@@ -433,14 +435,43 @@ func (a *App) toolBackupImport(path string) (map[string]any, error) {
 	}, nil
 }
 
+// toolCastDiscover 后台开始搜索投屏设备并立即返回；结果用 castDevices 轮询（搜到一台出一台）。
+// 再次调用会作废上一轮搜索。真正投送时再校验 MediaURL。
 func (a *App) toolCastDiscover() (map[string]any, error) {
-	// 允许先搜设备；真正投送时再校验 MediaURL
-	devs, err := cast.Discover(4 * time.Second)
-	if err != nil {
-		return nil, err
-	}
 	a.castMu.Lock()
-	a.castDevs = devs
+	a.castGen++
+	gen := a.castGen
+	a.castDevs = nil
+	a.castErr = ""
+	a.castSearching = true
+	a.castMu.Unlock()
+	go func() {
+		_, err := cast.DiscoverEach(4*time.Second, func(d cast.Device) {
+			a.castMu.Lock()
+			if a.castGen == gen {
+				a.castDevs = append(a.castDevs, d)
+			}
+			a.castMu.Unlock()
+		})
+		a.castMu.Lock()
+		if a.castGen == gen {
+			a.castSearching = false
+			if err != nil {
+				a.castErr = err.Error()
+			}
+		}
+		a.castMu.Unlock()
+	}()
+	return map[string]any{"ok": true}, nil
+}
+
+// toolCastDevices 当前已发现的设备；searching 为假表示本轮搜索已结束，
+// 一台没搜到且出错时 error 带原因。
+func (a *App) toolCastDevices() (map[string]any, error) {
+	a.castMu.Lock()
+	devs := append([]cast.Device(nil), a.castDevs...)
+	searching := a.castSearching
+	searchErr := a.castErr
 	a.castMu.Unlock()
 	list := make([]map[string]any, 0, len(devs))
 	for i, d := range devs {
@@ -452,12 +483,7 @@ func (a *App) toolCastDiscover() (map[string]any, error) {
 			"label":    d.Label(),
 		})
 	}
-	return map[string]any{
-		"ok":      true,
-		"devices": list,
-		"count":   len(list),
-		"message": fmt.Sprintf("发现 %d 台设备", len(list)),
-	}, nil
+	return map[string]any{"ok": true, "devices": list, "searching": searching, "searchError": searchErr}, nil
 }
 
 func (a *App) toolCast(index int, params map[string]any) (map[string]any, error) {

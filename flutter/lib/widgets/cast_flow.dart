@@ -100,10 +100,15 @@ class _CastDeviceDialog extends StatefulWidget {
   State<_CastDeviceDialog> createState() => _CastDeviceDialogState();
 }
 
+/// 搜索期间拉取已发现设备的间隔。
+const _kCastPollInterval = Duration(milliseconds: 400);
+
 class _CastDeviceDialogState extends State<_CastDeviceDialog> {
   List<Map<String, dynamic>> _devices = const [];
   bool _searching = true;
   String? _searchError;
+  // 每次（重新）搜索加一，旧的轮询发现不一致就退出。
+  int _searchGen = 0;
   String _activeKey = '';
   String _activeLabel = '';
   int? _busyIndex;
@@ -119,8 +124,12 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
     unawaited(_discover());
   }
 
+  /// 后台开始搜索，随后轮询已发现设备：搜到一台显示一台，直到本轮搜索结束。
   Future<void> _discover() async {
+    final gen = ++_searchGen;
+    bool stale() => !mounted || gen != _searchGen;
     setState(() {
+      _devices = const [];
       _searching = true;
       _searchError = null;
       _statusIndex = null;
@@ -134,22 +143,34 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
             .tools('castStatus')
             .catchError((_) => <String, dynamic>{'ok': true, 'active': false}),
       ]);
-      if (!mounted) return;
+      if (stale()) return;
       final session = results[1];
       final active = session['active'] == true;
       setState(() {
-        _searching = false;
-        _devices = ((results[0]['devices'] as List?) ?? const [])
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
         _activeKey = active ? '${session['key'] ?? ''}'.trim() : '';
         _activeLabel =
             active ? '${session['label'] ?? session['name'] ?? ''}'.trim() : '';
       });
+      var searching = true;
+      while (searching) {
+        await Future<void>.delayed(_kCastPollInterval);
+        if (stale()) return;
+        final r = await widget.api.tools('castDevices');
+        if (stale()) return;
+        searching = r['searching'] == true;
+        final err = '${r['searchError'] ?? ''}'.trim();
+        setState(() {
+          _devices = ((r['devices'] as List?) ?? const [])
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+          _searching = searching;
+          if (!searching && _devices.isEmpty && err.isNotEmpty) _searchError = err;
+        });
+      }
       widget.onStatus(_devices.isEmpty ? '未发现投屏设备' : '发现 ${_devices.length} 个设备');
     } catch (e) {
-      if (!mounted) return;
+      if (stale()) return;
       setState(() {
         _searching = false;
         _searchError = '$e';
@@ -269,6 +290,17 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
         backgroundColor: p.dialogBg,
         title: Text('投屏到', style: TextStyle(color: p.fg)),
         children: [
+          if (hasActive) ...[
+            _note(activeInList ? '当前投屏：$_activeLabel' : '当前投屏：$_activeLabel（未在列表中）', p),
+            _action(
+              _stopping ? '断开中…' : '断开投屏',
+              _blockPop ? null : () => unawaited(_stopCast()),
+              p,
+              autofocus: _devices.isEmpty,
+            ),
+            const Divider(height: 12),
+          ],
+          for (var i = 0; i < _devices.length; i++) _deviceRow(i, p, hasActive),
           if (_searching)
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
@@ -285,21 +317,10 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
               ),
             )
           else ...[
-            if (hasActive) ...[
-              _note(activeInList ? '当前投屏：$_activeLabel' : '当前投屏：$_activeLabel（未在列表中）', p),
-              _action(
-                _stopping ? '断开中…' : '断开投屏',
-                _blockPop ? null : () => unawaited(_stopCast()),
-                p,
-                autofocus: _devices.isEmpty,
-              ),
-              const Divider(height: 12),
-            ],
             if (_searchError != null)
               _note('搜索失败：$_searchError', p)
             else if (_devices.isEmpty)
               _note('未发现设备。已搜索 DLNA / Chromecast / 局域网 App，\n请确认设备与本机在同一局域网。', p),
-            for (var i = 0; i < _devices.length; i++) _deviceRow(i, p, hasActive),
             _action(
               '重新搜索',
               _blockPop ? null : () => unawaited(_discover()),

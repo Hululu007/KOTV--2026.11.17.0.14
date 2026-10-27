@@ -56,8 +56,12 @@ type App struct {
 	mediaTitle string
 	mediaURL   string
 
-	castMu   sync.Mutex
-	castDevs []cast.Device
+	// castDevs 按发现顺序追加，toolCast 用下标选设备；castGen 区分新旧搜索。
+	castMu        sync.Mutex
+	castDevs      []cast.Device
+	castGen       uint64
+	castSearching bool
+	castErr       string
 
 	// APILiveLoad 序列化缓存：按直播源 URL 键复用已建 DTO。
 	liveLoadMu        sync.Mutex

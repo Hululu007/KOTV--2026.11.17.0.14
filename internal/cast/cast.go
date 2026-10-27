@@ -8,7 +8,6 @@ import (
 	"log"
 	"net"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -39,97 +38,71 @@ type Device struct {
 	appBase  string
 }
 
-// Discover 并行搜索 DLNA、Chromecast 与局域网 App（/device）。
-// 结果优先 DLNA（多数国产电视/盒子的 Chromecast 广播不可靠）。
-func Discover(timeout time.Duration) ([]Device, error) {
+// deviceKey 同一设备的去重键（协议 + 地址）。
+func (d Device) deviceKey() string {
+	return string(d.Protocol) + "|" + d.Detail
+}
+
+// DiscoverEach 并行搜索 DLNA、Chromecast 与局域网 App（/device）。
+// 每发现一台新设备立即回调 onFound（同一设备只回调一次），返回全部设备（按发现顺序）。
+// Chromecast 与 App 逐台回调；DLNA 由底层库在搜索窗口结束后一并返回。
+func DiscoverEach(timeout time.Duration, onFound func(Device)) ([]Device, error) {
 	if timeout <= 0 {
 		timeout = 4 * time.Second
 	}
 	var (
 		mu   sync.Mutex
 		out  []Device
+		seen = map[string]bool{}
 		errs []error
 		wg   sync.WaitGroup
 	)
-	addErr := func(err error) {
-		if err == nil {
+	emit := func(d Device) {
+		mu.Lock()
+		k := d.deviceKey()
+		if seen[k] {
+			mu.Unlock()
 			return
 		}
-		mu.Lock()
-		errs = append(errs, err)
+		seen[k] = true
+		out = append(out, d)
 		mu.Unlock()
+		if onFound != nil {
+			onFound(d)
+		}
 	}
-	wg.Add(3)
-	go func() {
-		defer wg.Done()
+	run := func(label string, discover func(emit func(Device)) error) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := discover(emit); err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("%s: %w", label, err))
+				mu.Unlock()
+			}
+		}()
+	}
+	run("DLNA", func(emit func(Device)) error {
 		devs, err := dlna.Discover(timeout)
-		if err != nil {
-			addErr(fmt.Errorf("DLNA: %w", err))
-			return
-		}
-		mu.Lock()
 		for _, d := range devs {
-			out = append(out, Device{
-				Name:     d.Name,
-				Protocol: ProtocolDLNA,
-				Detail:   d.Location,
-				dlna:     d,
-			})
+			emit(Device{Name: d.Name, Protocol: ProtocolDLNA, Detail: d.Location, dlna: d})
 		}
-		mu.Unlock()
-	}()
-	go func() {
-		defer wg.Done()
-		devs, err := discoverChromecast(timeout)
-		if err != nil {
-			addErr(fmt.Errorf("Chromecast: %w", err))
-			return
-		}
-		mu.Lock()
-		out = append(out, devs...)
-		mu.Unlock()
-	}()
-	go func() {
-		defer wg.Done()
-		devs, err := discoverAppPeers(timeout)
-		if err != nil {
-			addErr(fmt.Errorf("App: %w", err))
-			return
-		}
-		mu.Lock()
-		out = append(out, devs...)
-		mu.Unlock()
-	}()
+		return err
+	})
+	run("Chromecast", func(emit func(Device)) error { return discoverChromecast(timeout, emit) })
+	run("App", func(emit func(Device)) error { return discoverAppPeers(timeout, emit) })
 	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
 	if len(out) == 0 && len(errs) > 0 {
 		return nil, errs[0]
 	}
 	for _, e := range errs {
 		log.Printf("cast discover: %v", e)
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		pi, pj := out[i].Protocol, out[j].Protocol
-		if pi == pj {
-			return out[i].Name < out[j].Name
-		}
-		rank := func(p Protocol) int {
-			switch p {
-			case ProtocolDLNA:
-				return 0
-			case ProtocolApp:
-				return 1
-			default:
-				return 2
-			}
-		}
-		ri, rj := rank(pi), rank(pj)
-		if ri != rj {
-			return ri < rj
-		}
-		return pi < pj
-	})
 	rememberDiscover(out)
-	return out, nil
+	return append([]Device(nil), out...), nil
 }
 
 var (
@@ -143,7 +116,8 @@ func rememberDiscover(devs []Device) {
 	lastDiscoverMu.Unlock()
 }
 
-func discoverChromecast(timeout time.Duration) ([]Device, error) {
+// discoverChromecast mDNS 每收到一台设备就 emit（去重由 DiscoverEach 负责）。
+func discoverChromecast(timeout time.Duration, emit func(Device)) error {
 	// Android：Go net.Interfaces 常因 netlinkrib 失败；有 KOTV_LAN_IP 时仍尝试发现。
 	if runtime.GOOS == "android" {
 		lan := util.LanIP()
@@ -152,7 +126,7 @@ func discoverChromecast(timeout time.Duration) ([]Device, error) {
 		if err != nil {
 			if lan == "" {
 				log.Printf("cast: skip Chromecast on Android (interfaces: %v)", err)
-				return nil, nil
+				return nil
 			}
 			log.Printf("cast: Android interfaces failed (%v); try discover with LanIP=%s", err, lan)
 		} else {
@@ -164,7 +138,7 @@ func discoverChromecast(timeout time.Duration) ([]Device, error) {
 			}
 			if usable == 0 && lan == "" {
 				log.Printf("cast: skip Chromecast on Android (no multicast interfaces)")
-				return nil, nil
+				return nil
 			}
 		}
 	}
@@ -175,21 +149,19 @@ func discoverChromecast(timeout time.Duration) ([]Device, error) {
 		msg := err.Error()
 		if runtime.GOOS == "android" && (strings.Contains(msg, "interfaces: []") || strings.Contains(msg, "failed to join")) {
 			log.Printf("cast: Chromecast discover soft-fail on Android: %v", err)
-			return nil, nil
+			return nil
 		}
-		return nil, err
+		return err
 	}
-	seen := map[string]bool{}
-	var out []Device
+	// 同一台设备可能从多个地址广播，按 UUID 去重。
+	seenUUID := map[string]bool{}
 	for e := range ch {
-		key := e.UUID
-		if key == "" {
-			key = fmt.Sprintf("%s:%d", e.GetAddr(), e.GetPort())
+		if e.UUID != "" {
+			if seenUUID[e.UUID] {
+				continue
+			}
+			seenUUID[e.UUID] = true
 		}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
 		name := strings.TrimSpace(e.DeviceName)
 		if name == "" {
 			name = strings.TrimSpace(e.Device)
@@ -197,7 +169,7 @@ func discoverChromecast(timeout time.Duration) ([]Device, error) {
 		if name == "" {
 			name = e.GetAddr()
 		}
-		out = append(out, Device{
+		emit(Device{
 			Name:     name,
 			Protocol: ProtocolChromecast,
 			Detail:   fmt.Sprintf("%s:%d", e.GetAddr(), e.GetPort()),
@@ -205,7 +177,7 @@ func discoverChromecast(timeout time.Duration) ([]Device, error) {
 			castPort: e.GetPort(),
 		})
 	}
-	return out, nil
+	return nil
 }
 
 // CastOptions 投送附加参数（App 协议需要 config/device/history）。
