@@ -263,7 +263,6 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
     final p = KotvPalette.of(context);
     final compact = KotvLayout.isCompact(context);
     final s = LayoutScale.of(context);
-    final layout = LayoutScale.layoutOf(context);
     final hPad = 20 * s;
     const filterH = 34.0;
     final visible = _visible;
@@ -287,18 +286,19 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
         Padding(
           padding: EdgeInsets.fromLTRB(hPad, 8 * s, hPad, 0),
           child: SizedBox(
-            // AppPill 内部会再乘 layoutOf，外框同步缩放以免竖屏裁切。
-            height: filterH * layout + 4,
+            // 跟窗口 design scale：拉宽变大、竖屏变小（勿用 layoutOf，小窗会锁 1.0 反着长）。
+            height: filterH * s + 4,
             child: HScrollList(
               scrollToIndex: filterIdx >= 0 ? filterIdx : 0,
               itemCount: DownloadSettings.filterOptions.length,
-              separatorBuilder: (_, __) => SizedBox(width: 8 * layout),
+              separatorBuilder: (_, __) => SizedBox(width: 8 * s),
               itemBuilder: (_, i) {
                 final e = DownloadSettings.filterOptions[i];
                 return AppPill(
                   label: e.$1,
                   height: filterH,
                   fontSize: 14,
+                  followWindowScale: true,
                   selected: _filter == e.$2,
                   onTap: () => setState(() => _filter = e.$2),
                 );

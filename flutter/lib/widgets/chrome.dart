@@ -334,6 +334,7 @@ class AppPill extends StatelessWidget {
     this.focusNode,
     this.suffix,
     this.marqueeWhenSelected = false,
+    this.followWindowScale = false,
   });
 
   final String label;
@@ -351,11 +352,21 @@ class AppPill extends StatelessWidget {
   final String? suffix;
   /// 选中时对过长 label 跑马灯（直播分组等）。
   final bool marqueeWhenSelected;
+  /// true：严格跟窗口设计缩放（竖屏缩小、拉宽放大）；默认 layoutOf 避免小窗字撑破胶囊。
+  final bool followWindowScale;
 
   @override
   Widget build(BuildContext context) {
-    // 文字可能保持 1.0，控件尺寸不能再按更小的 design scale 缩，否则字撑破胶囊
-    final s = LayoutScale.layoutOf(context);
+    // 默认 layoutOf：小窗文字锁 1.0 时控件不跟着 design scale 再缩。
+    // followWindowScale：跟 LayoutScale.of，适合筛选条要随窗口收放。
+    final design = LayoutScale.of(context);
+    final layout = LayoutScale.layoutOf(context);
+    final s = followWindowScale ? design : layout;
+    final textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    // 抵消 TextScaler，使最终字号≈ fontSize * s（跟窗口一致）。
+    final resolvedFont = followWindowScale && textScale > 0
+        ? fontSize * s / textScale
+        : fontSize;
     final p = KotvPalette.of(context);
     final bg = selected ? p.selected : p.pillBg;
     final border = selected ? p.primary.withOpacity(0.9) : p.pillBorder;
@@ -365,7 +376,7 @@ class AppPill extends StatelessWidget {
     final fallbacks = kotvFontFallbacks();
     final style = TextStyle(
       color: selected ? Colors.white : p.fg,
-      fontSize: fontSize,
+      fontSize: resolvedFont,
       fontWeight: FontWeight.w700,
       height: 1.2,
       fontFamilyFallback: fallbacks.isEmpty ? null : fallbacks,
