@@ -71,27 +71,45 @@ func JarPath(md5 string) string {
 }
 
 // Downloads 引擎默认下载目录（设置 downloadDir 为空时使用）。
-// Android 用公共 Download（文件管理器可见）；不可写再回落到应用私有目录。
+// 各平台一律优先系统「下载」文件夹（资源管理器 / Finder / 文件管理器可见）：
+// Windows/macOS/Linux → ~/Downloads；Android → …/Download。
+// 只有没有公共下载或建目录失败时，才落到应用私有 Root()/downloads（如 iOS）。
 func Downloads() string {
-	home, _ := os.UserHomeDir()
+	if p := publicDownloadsDir(); p != "" {
+		return p
+	}
+	return ensure(filepath.Join(Root(), "downloads"))
+}
+
+func publicDownloadsDir() string {
 	switch runtime.GOOS {
 	case "windows":
-		if p := os.Getenv("USERPROFILE"); p != "" {
-			return ensure(filepath.Join(p, "Downloads"))
+		base := strings.TrimSpace(os.Getenv("USERPROFILE"))
+		if base == "" {
+			base, _ = os.UserHomeDir()
 		}
+		if base == "" {
+			return ""
+		}
+		return ensure(filepath.Join(base, "Downloads"))
 	case "darwin", "linux":
+		home, err := os.UserHomeDir()
+		if err != nil || strings.TrimSpace(home) == "" {
+			return ""
+		}
 		return ensure(filepath.Join(home, "Downloads"))
 	case "android":
 		if ext := externalStorageRoot(); ext != "" {
-			// DIRECTORY_DOWNLOADS 在安卓上是 Download（单数）。
+			// DIRECTORY_DOWNLOADS：安卓是 Download（单数）。
 			pub := filepath.Join(ext, "Download")
 			if err := os.MkdirAll(pub, 0o755); err == nil {
 				return pub
 			}
 		}
-		return ensure(filepath.Join(Root(), "downloads"))
+		return ""
+	default:
+		return ""
 	}
-	return ensure(filepath.Join(Root(), "downloads"))
 }
 
 func ensure(p string) string {
