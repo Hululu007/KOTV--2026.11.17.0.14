@@ -12,6 +12,7 @@ import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
 import 'shell.dart';
 
+/// 我的下载：状态筛选 → 任务列表；多选时才出批量栏；单项用右侧图标。
 class DownloadScreen extends ConsumerStatefulWidget {
   const DownloadScreen({super.key});
 
@@ -25,7 +26,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
   String _filter = 'all';
   bool _loading = true;
   bool _selectMode = false;
-  String? _status;
+  String? _toast;
   Timer? _poll;
 
   @override
@@ -57,15 +58,32 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
       setState(() {
         _tasks = list;
         _loading = false;
-        if (!silent) _status = null;
+        if (!silent) _toast = null;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        if (!silent) _status = '$e';
+        if (!silent) _toast = '$e';
       });
     }
+  }
+
+  void _setSelectMode(bool on) {
+    setState(() {
+      _selectMode = on;
+      if (!on) _selected.clear();
+    });
+  }
+
+  void _toggleSelect(String id) {
+    setState(() {
+      if (_selected.contains(id)) {
+        _selected.remove(id);
+      } else {
+        _selected.add(id);
+      }
+    });
   }
 
   String _label(Map<String, dynamic> t) {
@@ -105,13 +123,12 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
     }
   }
 
-  Future<void> _actSelected(
-      Future<void> Function(String id) fn, String doneMsg) async {
-    final ids = _selected.toList();
-    if (ids.isEmpty) {
-      setState(() => _status = '请先勾选任务');
-      return;
-    }
+  Future<void> _runOnIds(
+    Iterable<String> ids,
+    Future<void> Function(String id) fn, {
+    String? okMsg,
+    bool leaveSelect = true,
+  }) async {
     for (final id in ids) {
       try {
         await fn(id);
@@ -119,11 +136,32 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
     }
     if (!mounted) return;
     setState(() {
-      _status = doneMsg;
-      _selected.clear();
-      _selectMode = false;
+      if (okMsg != null) _toast = okMsg;
+      if (leaveSelect) {
+        _selected.clear();
+        _selectMode = false;
+      }
     });
     await _reload();
+  }
+
+  Future<void> _actSelected(
+      Future<void> Function(String id) fn, String okMsg) async {
+    if (_selected.isEmpty) {
+      setState(() => _toast = '请先勾选任务');
+      return;
+    }
+    await _runOnIds(_selected.toList(), fn, okMsg: okMsg);
+  }
+
+  Future<void> _primaryAction(String id, String status) async {
+    if (status == 'running' || status == 'queued') {
+      await _runOnIds([id], LocalDownload.pause, leaveSelect: false);
+      return;
+    }
+    if (status == 'paused' || status == 'error' || status == 'cancelled') {
+      await _runOnIds([id], LocalDownload.resume, leaveSelect: false);
+    }
   }
 
   Widget _poster(Map<String, dynamic> t, KotvPalette p) {
@@ -131,12 +169,12 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: SizedBox(
-        width: 56,
-        height: 78,
+        width: 52,
+        height: 72,
         child: pic.isEmpty
             ? ColoredBox(
                 color: p.posterPh,
-                child: Icon(Icons.movie_outlined, color: p.muted, size: 28),
+                child: Icon(Icons.movie_outlined, color: p.muted, size: 26),
               )
             : KotvNetworkImage(
                 pic,
@@ -144,9 +182,78 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                 errorBuilder: (_, __, ___) => ColoredBox(
                   color: p.posterPh,
                   child: Icon(Icons.broken_image_outlined,
-                      color: p.muted, size: 24),
+                      color: p.muted, size: 22),
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _iconBtn({
+    required IconData icon,
+    required String tip,
+    required VoidCallback onTap,
+    required Color color,
+  }) {
+    return IconButton(
+      tooltip: tip,
+      onPressed: onTap,
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      icon: Icon(icon, size: 22, color: color),
+    );
+  }
+
+  Widget _bulkBar(KotvPalette p, double s, List<Map<String, dynamic>> visible) {
+    return Material(
+      color: p.pillBg,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(8 * s, 6, 8 * s, 8),
+          child: Row(
+            children: [
+              TextButton(
+                onPressed: () => setState(() {
+                  if (_selected.length == visible.length) {
+                    _selected.clear();
+                  } else {
+                    _selected
+                      ..clear()
+                      ..addAll(visible.map((e) => '${e['id']}'));
+                  }
+                }),
+                child: Text(
+                  _selected.length == visible.length && visible.isNotEmpty
+                      ? '取消全选'
+                      : '全选',
+                ),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () =>
+                    _actSelected(LocalDownload.resume, '已开始所选任务'),
+                child: const Text('开始'),
+              ),
+              TextButton(
+                onPressed: () =>
+                    _actSelected(LocalDownload.pause, '已暂停所选任务'),
+                child: const Text('暂停'),
+              ),
+              TextButton(
+                onPressed: () =>
+                    _actSelected(LocalDownload.cancel, '已取消所选任务'),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () => _actSelected(
+                    (id) => LocalDownload.remove(id), '已删除所选任务'),
+                child: Text('删除', style: TextStyle(color: p.primary)),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -171,10 +278,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
             label: _selectMode ? '完成' : '多选',
             height: compact ? 34 : 36,
             selected: _selectMode,
-            onTap: () => setState(() {
-              _selectMode = !_selectMode;
-              if (!_selectMode) _selected.clear();
-            }),
+            onTap: () => _setSelectMode(!_selectMode),
           ),
         ),
         Padding(
@@ -197,89 +301,13 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
             ),
           ),
         ),
-        Padding(
-          padding: EdgeInsets.fromLTRB(12 * s, 8, 12 * s, 0),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                AppPill(
-                  label: '全选',
-                  height: 32,
-                  onTap: () => setState(() {
-                    _selectMode = true;
-                    _selected
-                      ..clear()
-                      ..addAll(visible.map((e) => '${e['id']}'));
-                  }),
-                ),
-                const SizedBox(width: 6),
-                AppPill(
-                  label: '开始',
-                  height: 32,
-                  onTap: () async {
-                    if (_selectMode && _selected.isNotEmpty) {
-                      await _actSelected(LocalDownload.resume, '已开始所选任务');
-                    } else {
-                      await LocalDownload.resumeAll();
-                      if (mounted) setState(() => _status = '已开始全部可恢复任务');
-                      await _reload();
-                    }
-                  },
-                ),
-                const SizedBox(width: 6),
-                AppPill(
-                  label: '暂停',
-                  height: 32,
-                  onTap: () async {
-                    if (_selectMode && _selected.isNotEmpty) {
-                      await _actSelected(LocalDownload.pause, '已暂停所选任务');
-                    } else {
-                      await LocalDownload.pauseAll();
-                      if (mounted) setState(() => _status = '已暂停全部');
-                      await _reload();
-                    }
-                  },
-                ),
-                const SizedBox(width: 6),
-                AppPill(
-                  label: '取消',
-                  height: 32,
-                  onTap: () async {
-                    if (_selectMode && _selected.isNotEmpty) {
-                      await _actSelected(LocalDownload.cancel, '已取消所选任务');
-                    } else {
-                      setState(() => _status = '请先多选任务再取消');
-                    }
-                  },
-                ),
-                const SizedBox(width: 6),
-                AppPill(
-                  label: '删除',
-                  height: 32,
-                  onTap: () async {
-                    if (_selectMode && _selected.isNotEmpty) {
-                      await _actSelected(
-                          (id) => LocalDownload.remove(id), '已删除所选任务');
-                    } else {
-                      final n = await LocalDownload.clearFinished();
-                      if (!mounted) return;
-                      setState(() =>
-                          _status = n > 0 ? '已清理 $n 条完成/失败' : '没有可清理项');
-                      await _reload();
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (_status != null && _status!.isNotEmpty)
+        if (_toast != null && _toast!.isNotEmpty)
           Padding(
             padding: EdgeInsets.fromLTRB(16 * s, 8, 16 * s, 0),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text(_status!, style: TextStyle(color: p.muted, fontSize: 13)),
+              child: Text(_toast!,
+                  style: TextStyle(color: p.muted, fontSize: 13)),
             ),
           ),
         Expanded(
@@ -290,7 +318,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                       child: Text('暂无下载任务', style: TextStyle(color: p.muted)),
                     )
                   : ListView.separated(
-                      padding: EdgeInsets.fromLTRB(16 * s, 12, 16 * s, 24),
+                      padding: EdgeInsets.fromLTRB(12 * s, 10, 12 * s, 16),
                       itemCount: visible.length,
                       separatorBuilder: (_, __) => SizedBox(height: 8 * s),
                       itemBuilder: (_, i) {
@@ -301,6 +329,10 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                             ? (t['progress'] as num).toDouble().clamp(0.0, 1.0)
                             : 0.0;
                         final on = _selected.contains(id);
+                        final canPause = st == 'running' || st == 'queued';
+                        final canResume = st == 'paused' ||
+                            st == 'error' ||
+                            st == 'cancelled';
                         return DecoratedBox(
                           decoration: BoxDecoration(
                             color: p.pillBg,
@@ -312,35 +344,27 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(12),
                             onTap: _selectMode
-                                ? () => setState(() {
-                                      if (on) {
-                                        _selected.remove(id);
-                                      } else {
-                                        _selected.add(id);
-                                      }
-                                    })
+                                ? () => _toggleSelect(id)
                                 : null,
-                            onLongPress: () => setState(() {
-                              _selectMode = true;
+                            onLongPress: () {
+                              _setSelectMode(true);
                               _selected.add(id);
-                            }),
+                              setState(() {});
+                            },
                             child: Padding(
-                              padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
+                              padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
                               child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
                                   if (_selectMode) ...[
-                                    Padding(
-                                      padding: const EdgeInsets.only(
-                                          top: 24, right: 6),
-                                      child: Icon(
-                                        on
-                                            ? Icons.check_circle
-                                            : Icons.circle_outlined,
-                                        color: on ? p.primary : p.muted,
-                                        size: 22,
-                                      ),
+                                    Icon(
+                                      on
+                                          ? Icons.check_circle
+                                          : Icons.circle_outlined,
+                                      color: on ? p.primary : p.muted,
+                                      size: 22,
                                     ),
+                                    const SizedBox(width: 8),
                                   ],
                                   _poster(t, p),
                                   const SizedBox(width: 10),
@@ -362,6 +386,8 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                                         const SizedBox(height: 4),
                                         Text(
                                           _statusText(t),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                               color: p.muted, fontSize: 12),
                                         ),
@@ -373,72 +399,59 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                                                 BorderRadius.circular(4),
                                             child: LinearProgressIndicator(
                                               value: prog > 0 ? prog : null,
-                                              minHeight: 4,
-                                              backgroundColor:
-                                                  p.fg.withValues(alpha: 0.08),
+                                              minHeight: 3,
+                                              backgroundColor: p.fg
+                                                  .withValues(alpha: 0.08),
                                               color: p.primary,
                                             ),
-                                          ),
-                                        ],
-                                        if (!_selectMode) ...[
-                                          const SizedBox(height: 8),
-                                          Wrap(
-                                            spacing: 6,
-                                            runSpacing: 6,
-                                            children: [
-                                              if (st == 'running' ||
-                                                  st == 'queued')
-                                                AppPill(
-                                                  label: '暂停',
-                                                  height: 30,
-                                                  width: 56,
-                                                  onTap: () async {
-                                                    await LocalDownload.pause(
-                                                        id);
-                                                    await _reload();
-                                                  },
-                                                ),
-                                              if (st == 'paused' ||
-                                                  st == 'error' ||
-                                                  st == 'cancelled')
-                                                AppPill(
-                                                  label: '开始',
-                                                  height: 30,
-                                                  width: 56,
-                                                  onTap: () async {
-                                                    await LocalDownload.resume(
-                                                        id);
-                                                    await _reload();
-                                                  },
-                                                ),
-                                              if (st == 'running' ||
-                                                  st == 'queued' ||
-                                                  st == 'paused')
-                                                AppPill(
-                                                  label: '取消',
-                                                  height: 30,
-                                                  width: 56,
-                                                  onTap: () async {
-                                                    await LocalDownload.cancel(
-                                                        id);
-                                                    await _reload();
-                                                  },
-                                                ),
-                                              AppPill(
-                                                label: '删除',
-                                                height: 30,
-                                                width: 56,
-                                                onTap: () async {
-                                                  await LocalDownload.remove(id);
-                                                  await _reload();
-                                                },
-                                              ),
-                                            ],
                                           ),
                                         ],
                                       ],
                                     ),
                                   ),
+                                  if (!_selectMode) ...[
+                                    if (canPause || canResume)
+                                      _iconBtn(
+                                        icon: canPause
+                                            ? Icons.pause_circle_outline
+                                            : Icons.play_circle_outline,
+                                        tip: canPause ? '暂停' : '开始',
+                                        color: p.fg,
+                                        onTap: () =>
+                                            _primaryAction(id, st),
+                                      ),
+                                    PopupMenuButton<String>(
+                                      tooltip: '更多',
+                                      padding: EdgeInsets.zero,
+                                      icon: Icon(Icons.more_vert,
+                                          color: p.muted, size: 22),
+                                      onSelected: (v) async {
+                                        if (v == 'cancel') {
+                                          await _runOnIds([id],
+                                              LocalDownload.cancel,
+                                              leaveSelect: false);
+                                        } else if (v == 'delete') {
+                                          await _runOnIds(
+                                              [id],
+                                              (x) => LocalDownload.remove(x),
+                                              leaveSelect: false);
+                                        }
+                                      },
+                                      itemBuilder: (_) => [
+                                        if (st == 'running' ||
+                                            st == 'queued' ||
+                                            st == 'paused')
+                                          const PopupMenuItem(
+                                            value: 'cancel',
+                                            child: Text('取消任务'),
+                                          ),
+                                        const PopupMenuItem(
+                                          value: 'delete',
+                                          child: Text('删除记录'),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -447,6 +460,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                       },
                     ),
         ),
+        if (_selectMode) _bulkBar(p, s, visible),
       ],
     );
   }
