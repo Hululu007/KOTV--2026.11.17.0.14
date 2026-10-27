@@ -102,7 +102,7 @@ class DownloadSettings {
 
   static String dirLabel(String dir) {
     final d = dir.trim();
-    if (d.isEmpty) return '系统默认 Downloads';
+    if (d.isEmpty) return '引擎默认 Downloads';
     if (d.length <= 28) return d;
     return '…${d.substring(d.length - 26)}';
   }

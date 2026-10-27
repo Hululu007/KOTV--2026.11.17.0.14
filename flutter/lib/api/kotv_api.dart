@@ -312,6 +312,16 @@ class KotvApi {
   Future<Map<String, dynamic>> downloadClearFinished() =>
       _post('/api/v1/download', {'action': 'clearFinished'});
 
+  /// 引擎本机可浏览根目录（下载目录等）。
+  Future<Map<String, dynamic>> fsRoots() =>
+      _get('/api/v1/fs', {'roots': '1'});
+
+  /// 列出引擎本机目录；path 空则返回浏览根。
+  Future<Map<String, dynamic>> fsList([String path = '']) =>
+      _get('/api/v1/fs', {
+        if (path.trim().isNotEmpty) 'path': path.trim(),
+      });
+
   Future<Map<String, dynamic>> search(
     String keyword, {
     List<String>? sites,

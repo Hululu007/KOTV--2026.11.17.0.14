@@ -62,6 +62,8 @@ type ContentAPI interface {
 	APIDownloadResumeAll() map[string]any
 	APIDownloadRemove(id string, deleteFile bool) map[string]any
 	APIDownloadClearFinished() map[string]any
+	APIFsRoots() map[string]any
+	APIFsList(path string) (map[string]any, error)
 	PurgeUserData(userID string)
 }
 
@@ -130,6 +132,7 @@ func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/tools", wrap(s.handleAPIv1Tools))
 	mux.HandleFunc("/api/v1/cancel", wrap(s.handleAPIv1Cancel))
 	mux.HandleFunc("/api/v1/download", wrap(s.handleAPIv1Download))
+	mux.HandleFunc("/api/v1/fs", wrap(s.handleAPIv1Fs))
 	mux.HandleFunc("/api/v1/shutdown", wrap(s.handleAPIv1Shutdown))
 }
 
@@ -497,6 +500,31 @@ func (s *Server) handleAPIv1BtProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.APIBtProgress())
+}
+
+func (s *Server) handleAPIv1Fs(w http.ResponseWriter, r *http.Request) {
+	if wroteOptions(w, r) {
+		return
+	}
+	api := s.content()
+	if rejectNoContent(w, api) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("roots")), "1") ||
+		strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("roots")), "true") {
+		writeJSON(w, http.StatusOK, api.APIFsRoots())
+		return
+	}
+	path := strings.TrimSpace(r.URL.Query().Get("path"))
+	out, err := api.APIFsList(path)
+	if rejectBadGateway(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleAPIv1Download(w http.ResponseWriter, r *http.Request) {

@@ -187,7 +187,9 @@ func BindDB(db *database.DB) { storeDB = db }
 
 func isHostOnly(t Type) bool {
 	switch t {
-	case RemoteAuth, AllowRegister, DeviceUUID, SyncPairCode, UpdateURL, LOG, DLNARenderer:
+	case RemoteAuth, AllowRegister, DeviceUUID, SyncPairCode, UpdateURL, LOG, DLNARenderer,
+		DownloadDir, DownloadNameRule, DownloadClassify, DownloadConcurrency, DownloadThreads:
+		// 下载落盘在引擎主机，远端租户不可改主机路径/并发。
 		return true
 	default:
 		return false

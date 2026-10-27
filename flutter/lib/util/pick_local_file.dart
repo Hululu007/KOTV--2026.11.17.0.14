@@ -2,9 +2,9 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../player/kotv_platform.dart';
+import '../remote/engine_api.dart';
 import '../screens/file_browser_screen.dart';
 
 String? kotvLocalFilePath(String? raw) {
@@ -59,46 +59,38 @@ Future<String?> kotvPickLocalFile(
   return file.path;
 }
 
-/// 选本机目录：桌面系统对话框；Android/iOS 仓内目录浏览器。
-Future<String?> kotvPickLocalDirectory(
+/// 选引擎本机目录（下载落盘在后端设备，须浏览引擎侧路径，而非前端沙盒）。
+Future<String?> kotvPickEngineDirectory(
   BuildContext context, {
   String title = '选择目录',
 }) async {
   if (kIsWeb) return null;
-  if (kotvIsAndroid()) {
-    try {
-      const ch = MethodChannel('kotv_android');
-      try {
-        await ch.invokeMethod<bool>('ensureStoragePermission');
-      } catch (_) {}
-      if (!context.mounted) return null;
-      final root = await _androidStorageRoot();
-      if (!context.mounted) return null;
-      return kotvLocalFilePath(
-        await FileBrowserScreen.pickFolder(context, root: root, title: title),
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-  if (kotvIsIOS()) {
-    try {
-      final docs = await getApplicationDocumentsDirectory();
-      if (!context.mounted) return null;
-      return kotvLocalFilePath(
-        await FileBrowserScreen.pickFolder(
-          context,
-          root: docs.path,
-          title: title,
-        ),
-      );
-    } catch (_) {
-      return null;
-    }
-  }
   try {
+    final api = await kotvEngineApi();
+    if (!context.mounted) return null;
     return kotvLocalFilePath(
-      await getDirectoryPath(confirmButtonText: '选择'),
+      await FileBrowserScreen.pickFolder(
+        context,
+        root: '',
+        title: title,
+        listDir: (dir) async {
+          final data = await api.fsList(dir);
+          final raw = (data['entries'] as List?) ?? const [];
+          final items = <KotvFsEntry>[
+            for (final e in raw)
+              if (e is Map)
+                KotvFsEntry(
+                  path: '${e['path'] ?? ''}'.trim(),
+                  name: '${e['name'] ?? ''}'.trim(),
+                  isDir: e['dir'] == true || e['isDir'] == true,
+                ),
+          ].where((e) => e.path.isNotEmpty && e.name.isNotEmpty).toList();
+          return KotvFsListResult(
+            items: items,
+            parent: '${data['parent'] ?? ''}',
+          );
+        },
+      ),
     );
   } catch (_) {
     return null;

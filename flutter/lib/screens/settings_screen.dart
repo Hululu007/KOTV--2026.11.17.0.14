@@ -1773,22 +1773,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       title: '下载目录',
       current: cur.trim().isEmpty ? 'default' : 'custom',
       options: const [
-        ('系统默认 Downloads', 'default'),
-        ('选择文件夹…', 'pick'),
+        ('引擎默认 Downloads', 'default'),
+        ('浏览引擎目录…', 'pick'),
       ],
     );
     if (mode == null || !mounted) return;
     if (mode == 'default') {
-      await _set('downloadDir', '', msg: '已恢复系统默认下载目录');
+      await _set('downloadDir', '', msg: '已恢复引擎默认下载目录');
       return;
     }
-    final path = await kotvPickLocalDirectory(context, title: '选择下载目录');
+    final path = await kotvPickEngineDirectory(context, title: '选择引擎下载目录');
     if (!mounted) return;
     if (path == null || path.trim().isEmpty) {
       setState(() => _status = '未选择目录');
       return;
     }
-    await _set('downloadDir', path.trim(), msg: '下载目录已保存');
+    await _set('downloadDir', path.trim(), msg: '引擎下载目录已保存');
   }
 
   Future<void> _pickDownloadNameRule() async {
