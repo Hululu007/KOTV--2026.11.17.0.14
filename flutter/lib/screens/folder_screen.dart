@@ -156,31 +156,37 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
         backgroundColor: p.surface,
         foregroundColor: p.fg,
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24 * s),
-                    child: Text(_error!, textAlign: TextAlign.center),
-                  ),
-                )
-              : _items.isEmpty
-                  ? const Center(child: Text('空目录'))
-                  : NotificationListener<ScrollNotification>(
-                      onNotification: (n) {
-                        if (n.metrics.maxScrollExtent > 80 &&
-                            n.metrics.pixels >=
-                                n.metrics.maxScrollExtent - 80) {
-                          _load(replace: false);
-                        }
-                        return false;
-                      },
-                      child: KotvPullRefresh(
-                        onRefresh: () => _load(replace: true),
-                        child: _style.isList ? _list(s, p) : _grid(),
+      body: KotvPullRefresh(
+        onRefresh: () => _load(replace: true),
+        child: _loading
+            ? kotvPullRefreshFill(
+                const Center(child: CircularProgressIndicator()),
+              )
+            : _error != null
+                ? kotvPullRefreshFill(
+                    Padding(
+                      padding: EdgeInsets.all(24 * s),
+                      child: Center(
+                        child: Text(_error!, textAlign: TextAlign.center),
                       ),
                     ),
+                  )
+                : _items.isEmpty
+                    ? kotvPullRefreshFill(
+                        const Center(child: Text('空目录')),
+                      )
+                    : NotificationListener<ScrollNotification>(
+                        onNotification: (n) {
+                          if (n.metrics.maxScrollExtent > 80 &&
+                              n.metrics.pixels >=
+                                  n.metrics.maxScrollExtent - 80) {
+                            _load(replace: false);
+                          }
+                          return false;
+                        },
+                        child: _style.isList ? _list(s, p) : _grid(),
+                      ),
+      ),
     );
   }
 

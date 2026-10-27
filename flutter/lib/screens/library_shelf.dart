@@ -151,28 +151,16 @@ class _LibraryShelfBody extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    Widget content;
+    final Widget content;
     if (loading) {
-      content = ListView(
-        physics: kotvPullRefreshPhysics,
-        children: [
-          SizedBox(
-            height: MediaQuery.sizeOf(context).height * 0.45,
-            child: Center(child: CircularProgressIndicator(color: primary)),
-          ),
-        ],
+      content = kotvPullRefreshFill(
+        Center(child: CircularProgressIndicator(color: primary)),
       );
     } else if (items.isEmpty) {
-      content = ListView(
-        physics: kotvPullRefreshPhysics,
-        children: [
-          SizedBox(
-            height: MediaQuery.sizeOf(context).height * 0.45,
-            child: Center(
-              child: Text(emptyText, style: TextStyle(color: muted, fontSize: 18)),
-            ),
-          ),
-        ],
+      content = kotvPullRefreshFill(
+        Center(
+          child: Text(emptyText, style: TextStyle(color: muted, fontSize: 18)),
+        ),
       );
     } else {
       content = PosterFlow(

@@ -293,27 +293,15 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
           child: KotvPullRefresh(
             onRefresh: () => _reload(),
             child: _loading && _tasks.isEmpty
-              ? ListView(
-                  physics: kotvPullRefreshPhysics,
-                  children: const [
-                    SizedBox(
-                      height: 280,
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                  ],
+              ? kotvPullRefreshFill(
+                  const Center(child: CircularProgressIndicator()),
                 )
               : visible.isEmpty
-                  ? ListView(
-                      physics: kotvPullRefreshPhysics,
-                      children: [
-                        SizedBox(
-                          height: 280,
-                          child: Center(
-                            child: Text('暂无下载任务',
-                                style: TextStyle(color: p.muted)),
-                          ),
-                        ),
-                      ],
+                  ? kotvPullRefreshFill(
+                      Center(
+                        child: Text('暂无下载任务',
+                            style: TextStyle(color: p.muted)),
+                      ),
                     )
                   : ListView.separated(
                       physics: kotvPullRefreshPhysics,
