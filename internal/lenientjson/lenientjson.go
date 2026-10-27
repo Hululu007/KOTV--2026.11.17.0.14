@@ -59,13 +59,6 @@ type state struct {
 	stack []byte // 未闭合的 { [ 记录
 }
 
-func (st *state) last() byte {
-	if n := len(st.stack); n > 0 {
-		return st.stack[n-1]
-	}
-	return 0
-}
-
 // sanitize 字符级扫描：引号外把单引号换成双引号、给无引号 key/value 补引号、删对象/数组尾逗号。
 // value=true 表示当前位置期望一个值（补引号用）；返回 false 表示修复失败。
 func sanitize(src []byte, depth int) ([]byte, bool) {

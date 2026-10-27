@@ -1999,9 +1999,6 @@ func (a *App) APIPlayerEmbed(playURL, playerVal, histKey string) error {
 func (a *App) APIPlayerControl(cmd string, value float64, mode string) error {
 	cmd = strings.ToLower(strings.TrimSpace(cmd))
 	eng := embed.Active()
-	if eng == nil {
-		return fmt.Errorf("页内播放器未启动")
-	}
 	switch cmd {
 	case "toggle", "playpause":
 		eng.TogglePause()

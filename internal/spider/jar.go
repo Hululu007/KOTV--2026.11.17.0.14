@@ -998,13 +998,6 @@ func JsParse(jar, op, html, rule, url, texts, urls string) (value string, list [
 	return resp.Value, resp.List, nil
 }
 
-func unloadBridgeJar(jarPath string) error {
-	parseJarNotified.Delete(jarRunKey(jarPath))
-	dropJarRecent(jarPath)
-	jarWireGen.Add(1)
-	return callBridgeJar(jarPath, "unloadJar", jarWireGen.Load())
-}
-
 // reloadBridgeJar 磁盘包刷新后让 bridge 丢弃该 jar 的旧 ClassLoader+爬虫并重载。
 func reloadBridgeJar(jarPath string, gen uint64) error {
 	parseJarNotified.Delete(jarRunKey(jarPath))

@@ -241,17 +241,6 @@ func firstNonEmpty(ss ...string) string {
 	return ""
 }
 
-func looksLikeHTMLPlayPage(u string) bool {
-	lower := strings.ToLower(strings.TrimSpace(u))
-	if i := strings.IndexByte(lower, '?'); i >= 0 {
-		lower = lower[:i]
-	}
-	if strings.HasSuffix(lower, ".html") || strings.HasSuffix(lower, ".htm") {
-		return true
-	}
-	return strings.Contains(lower, "/vod/play/") || strings.Contains(lower, "/index.php/vod/")
-}
-
 // matchVideo 优先走站点自定义 isVideo；否则走规则嗅探。
 func matchVideo(u string, rules []model.Rule, check func(string) bool) bool {
 	if check != nil {

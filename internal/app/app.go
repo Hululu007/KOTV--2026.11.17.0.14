@@ -745,9 +745,6 @@ func (a *App) startDLNARenderer() {
 		State: func() dlna.MediaState {
 			st := dlna.MediaState{URI: a.MediaURL(), State: "NO_MEDIA_PRESENT"}
 			eng := embed.Active()
-			if eng == nil {
-				return st
-			}
 			st.PosMs = eng.PositionMs()
 			st.DurMs = eng.DurationMs()
 			switch {

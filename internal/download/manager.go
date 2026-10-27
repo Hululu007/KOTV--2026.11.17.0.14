@@ -92,12 +92,6 @@ func (m *Manager) signalLocked() {
 	}
 }
 
-func (m *Manager) signal() {
-	m.mu.Lock()
-	m.signalLocked()
-	m.mu.Unlock()
-}
-
 func (m *Manager) dispatcher() {
 	for range m.wake {
 		for m.tryStartOne() {

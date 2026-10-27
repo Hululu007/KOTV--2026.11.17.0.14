@@ -445,9 +445,7 @@ func (a *App) toolCast(index int, params map[string]any) (map[string]any, error)
 	// Flutter 播放器进度优先；其次 embed；再读本机媒体快照。
 	posMs := int64(intParam(params, "positionMs", 0))
 	if posMs <= 0 {
-		if eng := embed.Active(); eng != nil {
-			posMs = eng.PositionMs()
-		}
+		posMs = embed.Active().PositionMs()
 	}
 	if posMs <= 0 {
 		if snap := remote.SnapshotMediaFromStore(); snap != nil {

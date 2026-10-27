@@ -115,7 +115,7 @@ func Play(url string, histKey string) error {
 		Stop() // 停掉旁路进程
 		eng := embed.Controller(embed.EnsureMPV())
 		// 切内核时只停另一个；同内核换台/回看由 Play 内部 stop+load，勿 StopAll。
-		if prev := embed.Active(); prev != nil && prev != eng {
+		if prev := embed.Active(); prev != eng {
 			prev.Stop()
 		}
 		embed.SetActive(eng)

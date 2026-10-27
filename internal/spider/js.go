@@ -561,7 +561,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 			dynamic = args[0].ToBool()
 		}
 		if len(args) > 1 {
-			siteType = int(args[1].Int32())
+			siteType = int(args[1].ToInt32())
 		}
 		if len(args) > 2 {
 			siteKey = args[2].String()
@@ -639,7 +639,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		}
 		delay := 0
 		if len(args) > 1 {
-			delay = int(args[1].Int32())
+			delay = int(args[1].ToInt32())
 		}
 		id := s.timerID.Add(1)
 		// 用 JS 对象存回调（SetIdx 会 Dup），避免 args 返回后被释放
@@ -702,7 +702,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 	}))
 	g.Set("clearTimeout", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		if len(args) > 0 {
-			id := args[0].Int32()
+			id := args[0].ToInt32()
 			s.timerMu.Lock()
 			if cancel, ok := s.timers[id]; ok {
 				cancel()

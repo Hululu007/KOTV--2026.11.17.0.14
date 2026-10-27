@@ -13,13 +13,9 @@ import (
 // FrameHandler 收到新帧时回调（通常在非 UI 线程；UI 侧需自行切回主线程刷新）。
 type FrameHandler func(img *image.RGBA)
 
-// ErrorHandler 播放异常/状态提示回调（非 UI 线程）。
-type ErrorHandler func(msg string)
-
 var (
-	sinkMu  sync.Mutex
-	sink    FrameHandler
-	errSink ErrorHandler
+	sinkMu sync.Mutex
+	sink   FrameHandler
 )
 
 // SetFrameSink 由 UI VideoSurface 注册；Play 时若已注册则走内嵌。
@@ -29,24 +25,11 @@ func SetFrameSink(fn FrameHandler) {
 	sinkMu.Unlock()
 }
 
-// SetErrorSink 注册异常/状态提示回调。
-func SetErrorSink(fn ErrorHandler) {
-	sinkMu.Lock()
-	errSink = fn
-	sinkMu.Unlock()
-}
-
 // FrameSink 当前帧回调。
 func FrameSink() FrameHandler {
 	sinkMu.Lock()
 	defer sinkMu.Unlock()
 	return sink
-}
-
-func errorSink() ErrorHandler {
-	sinkMu.Lock()
-	defer sinkMu.Unlock()
-	return errSink
 }
 
 // HasSink 是否已挂载页内画面。

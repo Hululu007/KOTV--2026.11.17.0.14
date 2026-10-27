@@ -80,8 +80,6 @@ Future<Directory> kotvUiDir() async {
   return _ensureDir(p.join((await kotvDataRoot()).path, 'ui'));
 }
 
-Directory kotvUiDirSync() => _ensureDir(p.join(kotvDataRootSync().path, 'ui'));
-
 /// 日志目录：与引擎 `paths.LogDir` 相同 → `{Root}/data/log`。
 Future<Directory> kotvLogDir() async {
   return _ensureDir(p.join((await kotvDataRoot()).path, 'data', 'log'));

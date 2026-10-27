@@ -732,10 +732,6 @@ func filterProxyEnv(env []string) []string {
 	return out
 }
 
-func bytesTrimSpace(b []byte) []byte {
-	return []byte(strings.TrimSpace(string(b)))
-}
-
 // trimCString 去掉残留的 \0（TrimSpace 不会去掉）。
 func trimCString(s string) string {
 	if i := strings.IndexByte(s, 0); i >= 0 {
