@@ -7,6 +7,7 @@ import '../api/kotv_engine_url.dart';
 import '../models/models.dart';
 import '../nav/kotv_page.dart';
 import '../providers.dart';
+import '../remote/engine_tools.dart';
 import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
@@ -75,6 +76,19 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       if (mounted) showAppNews(context, msg);
     } catch (e) {
       setState(() => _status = '检查失败: $e');
+    }
+  }
+
+  Future<void> _checkSpider() async {
+    setState(() => _status = '检测爬虫中…');
+    try {
+      final data = await ref.read(apiProvider).tools('checkSpider');
+      final text = kotvFormatCheckSpiderResult(data);
+      setState(() => _status = text.split('\n').first);
+      if (mounted) showAppNews(context, text);
+    } catch (e) {
+      setState(() => _status = '检测失败: $e');
+      if (mounted) showAppNews(context, '检测失败: $e');
     }
   }
 
@@ -354,12 +368,19 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ('我的收藏', KotvPage.collect),
                       if (!bottomNav) ('直播', KotvPage.live),
                       ('我的下载', KotvPage.download),
-                      ('检测爬虫', KotvPage.settings),
                     ])
                       SizedBox(
                         width: (MediaQuery.sizeOf(context).width - sidePad * 2 - 10 * s) / 2,
                         child: AppPill(label: e.$1, height: 42, onTap: () => goKotvPage(ref, e.$2)),
                       ),
+                    SizedBox(
+                      width: (MediaQuery.sizeOf(context).width - sidePad * 2 - 10 * s) / 2,
+                      child: AppPill(
+                        label: '检测爬虫',
+                        height: 42,
+                        onTap: () => unawaited(_checkSpider()),
+                      ),
+                    ),
                     SizedBox(
                       width: (MediaQuery.sizeOf(context).width - sidePad * 2 - 10 * s) / 2,
                       child: AppPill(
@@ -392,9 +413,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         child: AppPill(
                           label: '检测爬虫',
                           height: 46,
-                          onTap: () {
-                            goKotvPage(ref, KotvPage.settings);
-                          },
+                          onTap: () => unawaited(_checkSpider()),
                         ),
                       ),
                       SizedBox(width: 14 * s),

@@ -14,6 +14,29 @@ class LocalDownload {
         .toList();
   }
 
+  /// 某片某线路下已有任务的集序号（引擎 epIndex；删除记录后才可再入队）。
+  static Set<int> claimedEpIndexes(
+    List<Map<String, dynamic>> tasks, {
+    required String site,
+    required String vodId,
+    required String flag,
+  }) {
+    final out = <int>{};
+    for (final t in tasks) {
+      if ('${t['site'] ?? ''}' != site) continue;
+      if ('${t['vodId'] ?? ''}' != vodId) continue;
+      if ('${t['flag'] ?? ''}' != flag) continue;
+      final raw = t['epIndex'];
+      if (raw is int) {
+        out.add(raw);
+      } else {
+        final n = int.tryParse('${raw ?? ''}');
+        if (n != null) out.add(n);
+      }
+    }
+    return out;
+  }
+
   static Future<Map<String, dynamic>> enqueue({
     required String site,
     required String vodId,

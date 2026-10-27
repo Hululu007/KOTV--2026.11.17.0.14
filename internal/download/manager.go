@@ -295,7 +295,19 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 	return nil
 }
 
-// Enqueue 批量入队。
+func (m *Manager) hasEpisodeLocked(site, vodID, flag string, epIndex int) bool {
+	for _, t := range m.tasks {
+		if t == nil {
+			continue
+		}
+		if t.Site == site && t.VodID == vodID && t.Flag == flag && t.EpIndex == epIndex {
+			return true
+		}
+	}
+	return false
+}
+
+// Enqueue 批量入队；同站同片同线路同集若已有任务则跳过（删记录后才可再入队）。
 func Enqueue(req EnqueueReq) ([]*Task, error) {
 	m := defaultMgr
 	m.start()
@@ -306,11 +318,16 @@ func Enqueue(req EnqueueReq) ([]*Task, error) {
 	if title == "" {
 		title = "未命名"
 	}
+	site := strings.TrimSpace(req.Site)
+	vodID := strings.TrimSpace(req.VodID)
 	flag := strings.TrimSpace(req.Flag)
 	out := make([]*Task, 0, len(req.Episodes))
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, ep := range req.Episodes {
+		if m.hasEpisodeLocked(site, vodID, flag, ep.Index) {
+			continue
+		}
 		name := strings.TrimSpace(ep.Name)
 		if name == "" {
 			name = fmt.Sprintf("%d", ep.Index+1)
@@ -321,8 +338,8 @@ func Enqueue(req EnqueueReq) ([]*Task, error) {
 		}
 		t := &Task{
 			ID:        newID(),
-			Site:      req.Site,
-			VodID:     req.VodID,
+			Site:      site,
+			VodID:     vodID,
 			Title:     title,
 			Flag:      flag,
 			EpIndex:   ep.Index,
@@ -338,6 +355,9 @@ func Enqueue(req EnqueueReq) ([]*Task, error) {
 		m.tasks = append(m.tasks, t)
 		m.byID[t.ID] = t
 		out = append(out, cloneTask(t))
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("所选剧集已在下载列表中")
 	}
 	m.persistLocked()
 	m.signalLocked()

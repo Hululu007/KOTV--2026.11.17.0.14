@@ -12,11 +12,25 @@ Route<T> kotvDetailRoute<T>({required WidgetBuilder builder}) {
   return MaterialPageRoute<T>(builder: builder);
 }
 
-/// 主 Tab 换页：短淡入，避免 Material 侧滑 + 整页重建显得拖沓。
+/// 主 Tab 换页。
+/// 桌面：Material 默认转场；安卓：无动画（整页重建时淡入更卡）；其它：短淡入。
 Route<T> kotvTabRoute<T>({
   required WidgetBuilder builder,
   RouteSettings? settings,
 }) {
+  if (!kIsWeb &&
+      (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
+    return MaterialPageRoute<T>(settings: settings, builder: builder);
+  }
+  if (!kIsWeb && Platform.isAndroid) {
+    return PageRouteBuilder<T>(
+      settings: settings,
+      pageBuilder: (context, animation, secondaryAnimation) =>
+          builder(context),
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+    );
+  }
   return PageRouteBuilder<T>(
     settings: settings,
     pageBuilder: (context, animation, secondaryAnimation) => builder(context),

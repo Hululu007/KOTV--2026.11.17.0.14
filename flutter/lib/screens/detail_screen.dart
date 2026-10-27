@@ -4149,10 +4149,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final flag = d.flags.isEmpty
         ? ''
         : d.flags[_flagIdx.clamp(0, d.flags.length - 1)].flag;
+    final site = _detailSite();
+    final vodId = _detailId();
+    final nEps = eps.length;
+    int rawOf(int display) => _reversed ? (nEps - 1 - display) : display;
+    Set<int> claimed = {};
+    try {
+      claimed = LocalDownload.claimedEpIndexes(
+        await LocalDownload.list(),
+        site: site,
+        vodId: vodId,
+        flag: flag,
+      );
+    } catch (_) {}
+    bool free(int display) => !claimed.contains(rawOf(display));
     final selected = <int>{};
-    if (_epIdx >= 0 && _epIdx < eps.length) {
+    if (_epIdx >= 0 && _epIdx < eps.length && free(_epIdx)) {
       selected.add(_epIdx);
     }
+    final freeCount = List.generate(eps.length, (i) => i).where(free).length;
     final ok = await showDialog<bool>(
       context: context,
       useRootNavigator: true,
@@ -4176,6 +4191,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                               color: pal.fg,
                               fontSize: 18,
                               fontWeight: FontWeight.w700)),
+                      if (claimed.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text('灰色为已添加，删除下载记录后可再选',
+                            style: TextStyle(color: pal.muted, fontSize: 12)),
+                      ],
                       const SizedBox(height: 8),
                       Row(
                         children: [
@@ -4185,7 +4205,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                             onTap: () => setLocal(() {
                               selected
                                 ..clear()
-                                ..addAll(List.generate(eps.length, (i) => i));
+                                ..addAll(List.generate(eps.length, (i) => i)
+                                    .where(free));
                             }),
                           ),
                           const SizedBox(width: 8),
@@ -4195,6 +4216,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                             onTap: () => setLocal(() {
                               final next = <int>{};
                               for (var i = 0; i < eps.length; i++) {
+                                if (!free(i)) continue;
                                 if (!selected.contains(i)) next.add(i);
                               }
                               selected
@@ -4203,7 +4225,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                             }),
                           ),
                           const Spacer(),
-                          Text('${selected.length}/${eps.length}',
+                          Text('${selected.length}/$freeCount',
                               style: TextStyle(color: pal.muted)),
                         ],
                       ),
@@ -4219,21 +4241,26 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                           ),
                           itemCount: eps.length,
                           itemBuilder: (_, i) {
+                            final taken = !free(i);
                             final on = selected.contains(i);
-                            return AppPill(
+                            final pill = AppPill(
                               label: eps[i].name.isEmpty
                                   ? '${i + 1}'
                                   : eps[i].name,
-                              selected: on,
+                              selected: on && !taken,
                               height: 36,
-                              onTap: () => setLocal(() {
-                                if (on) {
-                                  selected.remove(i);
-                                } else {
-                                  selected.add(i);
-                                }
-                              }),
+                              onTap: taken
+                                  ? () {}
+                                  : () => setLocal(() {
+                                        if (on) {
+                                          selected.remove(i);
+                                        } else {
+                                          selected.add(i);
+                                        }
+                                      }),
                             );
+                            if (!taken) return pill;
+                            return Opacity(opacity: 0.38, child: pill);
                           },
                         ),
                       ),
@@ -4268,25 +4295,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       },
     );
     if (ok != true || !mounted) return;
+    selected.removeWhere((i) => !free(i));
     if (selected.isEmpty) {
-      setState(() => _status = '请先勾选集数');
+      setState(() => _status =
+          freeCount == 0 ? '所选剧集已在下载列表中' : '请先勾选集数');
       return;
     }
     final episodes = selected.toList()..sort();
-    final n = eps.length;
     final payload = episodes.map((i) {
       final ep = eps[i];
-      final rawIndex = _reversed ? (n - 1 - i) : i;
       return {
-        'index': rawIndex,
+        'index': rawOf(i),
         'name': ep.name,
         'url': ep.url,
       };
     }).toList();
     try {
       final res = await LocalDownload.enqueue(
-        site: _detailSite(),
-        vodId: _detailId(),
+        site: site,
+        vodId: vodId,
         title: (d.name).trim().isEmpty ? _routeTitle : d.name.trim(),
         flag: flag,
         pic: d.pic,

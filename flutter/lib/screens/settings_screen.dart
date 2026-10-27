@@ -22,6 +22,7 @@ import '../player/video_eq.dart';
 import '../providers.dart';
 import '../api/kotv_settings_cache.dart';
 import '../remote/download_settings.dart';
+import '../remote/engine_tools.dart';
 import '../remote/remote_bridge.dart';
 import '../util/pick_local_file.dart';
 import '../theme/kotv_palette.dart';
@@ -1922,19 +1923,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final data = await _runTool(
         '检测爬虫中', () => ref.read(apiProvider).tools('checkSpider'));
     if (data == null || !mounted) return;
-    final msg = '${data['message'] ?? ''}';
-    setState(() => _status = msg);
-    final results =
-        ((data['results'] as List?) ?? []).whereType<Map>().toList();
-    if (results.isEmpty) {
-      showAppNews(context, msg);
-      return;
-    }
-    final lines = results.take(20).map((e) {
-      final ok = e['ok'] == true;
-      return '${ok ? '✓' : '✗'} ${e['name'] ?? e['key']}${ok ? '' : ' — ${e['message']}'}';
-    });
-    showAppNews(context, '$msg\n\n${lines.join('\n')}');
+    final text = kotvFormatCheckSpiderResult(data);
+    setState(() => _status = text.split('\n').first);
+    showAppNews(context, text);
   }
 
   Future<void> _clearCache() async {
