@@ -60,7 +60,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Map<String, String> _runtime = {};
   List<Map<String, dynamic>> _parses = [];
   String _port = '$kotvDefaultEnginePort';
-  String _version = '0.2.2';
+  String _version = kotvFallbackAppVersion;
   String _status = '';
   String _pairCode = '';
   String _remoteUser = '';
@@ -107,7 +107,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
       _port = '${data['port'] ?? kotvDefaultEnginePort}';
-      _version = '${data['version'] ?? '0.2.2'}';
+      _version = '${data['version'] ?? kotvFallbackAppVersion}';
       _pairCode = '${data['pairCode'] ?? g('syncPairCode')}';
       _vodDesc = '${data['vodDesc'] ?? ''}';
       _liveDesc = '${data['liveDesc'] ?? ''}';

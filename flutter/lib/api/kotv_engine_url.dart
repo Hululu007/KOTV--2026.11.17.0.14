@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 /// 本机引擎默认端口（与 Go `localproxy.DefaultPort` 一致）。
 const kotvDefaultEnginePort = 9978;
 
+/// 引擎/设置尚未返回 version 时的回退（与 `update.CurrentVersion`、pubspec 同步）。
+const kotvFallbackAppVersion = '0.2.2';
+
 /// 安卓 Spider 侧车端口（与 Go `localproxy.DefaultBridgePort` 一致；≠ 引擎端口）。
 const kotvDefaultSpiderBridgePort = 9979;
 

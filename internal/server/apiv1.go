@@ -62,7 +62,6 @@ type ContentAPI interface {
 	APIDownloadResumeAll() map[string]any
 	APIDownloadRemove(id string, deleteFile bool) map[string]any
 	APIDownloadClearFinished() map[string]any
-	APIFsRoots() map[string]any
 	APIFsList(path string) (map[string]any, error)
 	PurgeUserData(userID string)
 }
@@ -512,11 +511,6 @@ func (s *Server) handleAPIv1Fs(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodGet {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("roots")), "1") ||
-		strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("roots")), "true") {
-		writeJSON(w, http.StatusOK, api.APIFsRoots())
 		return
 	}
 	path := strings.TrimSpace(r.URL.Query().Get("path"))
