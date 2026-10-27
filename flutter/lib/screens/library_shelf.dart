@@ -11,14 +11,6 @@ import '../widgets/kotv_refresh.dart';
 import '../widgets/poster_card.dart';
 import 'shell.dart';
 
-typedef LibraryShelfExtras = List<Widget> Function({
-  required bool compact,
-  required bool land,
-  required double pillH,
-  required double pillFs,
-  required double gap,
-});
-
 /// 收藏、历史共用的海报库：顶栏、删除模式和空列表。
 class LibraryShelf extends ConsumerWidget {
   const LibraryShelf({
@@ -34,7 +26,6 @@ class LibraryShelf extends ConsumerWidget {
     required this.onClear,
     required this.onRemove,
     this.onRefresh,
-    this.extraTrailing,
     this.gridPadding,
   });
 
@@ -49,27 +40,16 @@ class LibraryShelf extends ConsumerWidget {
   final Future<void> Function() onClear;
   final Future<void> Function(VodItem item) onRemove;
   final Future<void> Function()? onRefresh;
-  final LibraryShelfExtras? extraTrailing;
   final EdgeInsets? gridPadding;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final compact = KotvLayout.isCompact(context) || KotvLayout.useBottomNav(context);
     final land = KotvLayout.isLandscapeCompact(context);
-    final pillH = land ? 30.0 : (compact ? 32.0 : 40.0);
-    final pillFs = land ? 12.0 : (compact ? 13.0 : 15.0);
-    final delW = land ? 72.0 : (compact ? 88.0 : 120.0);
-    final clearW = land ? 72.0 : (compact ? 88.0 : 120.0);
-    final gap = land ? 6.0 : (compact ? 6.0 : 8.0);
+    final m = LibraryTopBar.actionMetrics(context);
+    final pillW = land ? 72.0 : (compact ? 88.0 : 120.0);
+    final gap = land || compact ? 6.0 : 8.0;
     final p = KotvPalette.of(context);
-    final extras = extraTrailing?.call(
-          compact: compact,
-          land: land,
-          pillH: pillH,
-          pillFs: pillFs,
-          gap: gap,
-        ) ??
-        const <Widget>[];
     return Column(
       children: [
         LibraryTopBar(
@@ -83,23 +63,20 @@ class LibraryShelf extends ConsumerWidget {
             children: [
               AppPill(
                 label: deleting ? '完成' : (compact ? '删除' : '删除记录'),
-                width: delW,
-                height: pillH,
-                fontSize: pillFs,
+                width: pillW,
+                height: m.h,
+                fontSize: m.fs,
                 selected: deleting,
                 onTap: onToggleDelete,
               ),
               SizedBox(width: gap),
               AppPill(
                 label: compact ? clearShort : clearFull,
-                width: clearW,
-                height: pillH,
-                fontSize: pillFs,
-                onTap: () async {
-                  await onClear();
-                },
+                width: pillW,
+                height: m.h,
+                fontSize: m.fs,
+                onTap: onClear,
               ),
-              ...extras,
             ],
           ),
         ),

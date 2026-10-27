@@ -848,6 +848,20 @@ class LibraryTopBar extends StatelessWidget {
   final Widget? trailing;
   final String? title;
 
+  /// 顶栏胶囊尺寸（返回 / trailing 共用，避免左右高度不一致）。
+  static ({double h, double fs, double w}) actionMetrics(BuildContext context) {
+    final compact = KotvLayout.isCompact(context);
+    final land = KotvLayout.isLandscapeCompact(context);
+    if (KotvLayout.useBottomNav(context)) {
+      return (h: land ? 30.0 : 32.0, fs: land ? 12.0 : 13.0, w: 72.0);
+    }
+    return (
+      h: land ? 30.0 : (compact ? 36.0 : 40.0),
+      fs: land ? 12.0 : 15.0,
+      w: land ? 72.0 : (compact ? 88.0 : 104.0),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final compact = KotvLayout.isCompact(context);
@@ -859,19 +873,20 @@ class LibraryTopBar extends StatelessWidget {
       land ? 16 : (compact ? 12 : 28),
       land ? 6 : 10,
     );
-    final pillH = land ? 30.0 : (compact ? 36.0 : 40.0);
-    final pillW = land ? 72.0 : (compact ? 88.0 : 104.0);
-    final pillFs = land ? 12.0 : 15.0;
+    final m = actionMetrics(context);
     // 竖屏底栏已有搜索/我的：顶栏只留返回（+可选标题/操作）
     if (bottomNav) {
-      final backW = 72.0;
-      final backH = land ? 30.0 : 32.0;
-      final backFs = land ? 12.0 : 13.0;
       return Padding(
         padding: pad,
         child: Row(
           children: [
-            AppPill(label: '返回', width: backW, height: backH, fontSize: backFs, onTap: onBack),
+            AppPill(
+              label: '返回',
+              width: m.w,
+              height: m.h,
+              fontSize: m.fs,
+              onTap: onBack,
+            ),
             // 有 trailing 时优先保证操作按钮可缩，标题可省略
             if (title != null && title!.isNotEmpty) ...[
               SizedBox(width: land ? 6 : 8),
@@ -911,11 +926,29 @@ class LibraryTopBar extends StatelessWidget {
       padding: pad,
       child: Row(
         children: [
-          AppPill(label: '返回', width: pillW, height: pillH, fontSize: pillFs, onTap: onBack),
+          AppPill(
+            label: '返回',
+            width: m.w,
+            height: m.h,
+            fontSize: m.fs,
+            onTap: onBack,
+          ),
           SizedBox(width: land ? 6 : 10),
-          AppPill(label: '搜索', width: pillW, height: pillH, fontSize: pillFs, onTap: onSearch),
+          AppPill(
+            label: '搜索',
+            width: m.w,
+            height: m.h,
+            fontSize: m.fs,
+            onTap: onSearch,
+          ),
           SizedBox(width: land ? 6 : 10),
-          AppPill(label: '我的', width: pillW, height: pillH, fontSize: pillFs, onTap: onProfile),
+          AppPill(
+            label: '我的',
+            width: m.w,
+            height: m.h,
+            fontSize: m.fs,
+            onTap: onProfile,
+          ),
           if (!compact && !land) ...[
             const SizedBox(width: 10),
             _NewsPill(onTap: onNews),

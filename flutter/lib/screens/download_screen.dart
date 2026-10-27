@@ -235,10 +235,10 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
-    final compact = KotvLayout.isCompact(context);
     final s = LayoutScale.of(context);
     final hPad = kotvContentInset(context);
     const filterH = 34.0;
+    final topAction = LibraryTopBar.actionMetrics(context);
     final visible = _visible;
     final filterIdx =
         DownloadSettings.filterOptions.indexWhere((e) => e.$2 == _filter);
@@ -252,7 +252,9 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
           onNews: () {},
           trailing: AppPill(
             label: _selectMode ? '完成' : '多选',
-            height: compact ? 34 : 36,
+            width: topAction.w,
+            height: topAction.h,
+            fontSize: topAction.fs,
             selected: _selectMode,
             onTap: () => _setSelectMode(!_selectMode),
           ),

@@ -71,10 +71,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() => _status = '正在检查更新…');
     try {
       final data = await ref.read(apiProvider).tools('checkUpdate');
+      if (!mounted) return;
       final msg = kotvFormatCheckUpdateResult(data);
       setState(() => _status = msg);
-      if (mounted) showAppNews(context, msg);
+      showAppNews(context, msg);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _status = '检查失败: $e');
     }
   }
@@ -83,12 +85,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() => _status = '检测爬虫中…');
     try {
       final data = await ref.read(apiProvider).tools('checkSpider');
+      if (!mounted) return;
       final text = kotvFormatCheckSpiderResult(data);
       setState(() => _status = text.split('\n').first);
-      if (mounted) showAppNews(context, text);
+      showAppNews(context, text);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _status = '检测失败: $e');
-      if (mounted) showAppNews(context, '检测失败: $e');
+      showAppNews(context, '检测失败: $e');
     }
   }
 

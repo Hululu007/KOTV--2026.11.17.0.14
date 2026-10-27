@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CI：macos-14 默认仍是 Xcode 15.4；video_player_avfoundation 新版等需要更新的 Swift。
-# 与 package-flutter-ios.sh 同一套选型：优先 Xcode_26*，否则镜像里最新的 Xcode_*。
+# iOS / macOS 打包共用：优先 Xcode_26*，否则镜像里最新的 Xcode_*。
 # shellcheck shell=bash
 
 kotv_select_newest_xcode() {
