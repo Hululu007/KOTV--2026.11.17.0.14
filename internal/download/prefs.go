@@ -23,8 +23,12 @@ func threadLimit() int {
 	if n < 1 {
 		n = 4
 	}
+	return snapThreadOption(n)
+}
+
+// snapThreadOption 收成界面可选值 1/2/4/8（先钳到硬上限）。
+func snapThreadOption(n int) int {
 	n = clampThreads(n)
-	// 与界面选项一致：仅 1/2/4/8。
 	switch n {
 	case 1, 2, 4, 8:
 		return n

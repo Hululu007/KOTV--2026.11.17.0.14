@@ -24,6 +24,7 @@ import '../api/kotv_settings_cache.dart';
 import '../remote/download_settings.dart';
 import '../remote/engine_tools.dart';
 import '../remote/remote_bridge.dart';
+import '../nav/kotv_routes.dart';
 import '../util/pick_local_file.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
@@ -1914,9 +1915,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final data = await _runTool(
         '检查更新中', () => ref.read(apiProvider).tools('checkUpdate'));
     if (data == null || !mounted) return;
-    final msg = '${data['message'] ?? ''}';
+    final msg = kotvFormatCheckUpdateResult(data);
     setState(() => _status = msg);
-    showAppNews(context, msg.isEmpty ? '检查完成' : msg);
+    showAppNews(context, msg);
   }
 
   Future<void> _checkSpider() async {
@@ -2905,7 +2906,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           value: '管理员',
                           onTap: () {
                             Navigator.of(context).push(
-                              MaterialPageRoute<void>(
+                              kotvDetailRoute(
                                   builder: (_) => const UserAdminScreen()),
                             );
                           },

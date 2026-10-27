@@ -41,13 +41,22 @@ class DownloadSettings {
     ('已失败', 'error'),
   ];
 
-  static String nameRuleLabel(String id) {
-    final key = normalizeNameRule(id);
-    for (final e in nameRuleOptions) {
-      if (e.$2 == key) return e.$1;
+  static String _optionLabel(
+    List<(String, String)> options,
+    String id,
+    String fallback,
+  ) {
+    for (final e in options) {
+      if (e.$2 == id) return e.$1;
     }
-    return nameRuleOptions.first.$1;
+    return fallback;
   }
+
+  static String nameRuleLabel(String id) => _optionLabel(
+        nameRuleOptions,
+        normalizeNameRule(id),
+        nameRuleOptions.first.$1,
+      );
 
   static String normalizeNameRule(String raw) {
     final v = raw.trim();
@@ -68,20 +77,13 @@ class DownloadSettings {
   }
 
   static String concurrencyLabel(String raw) {
-    final v = _clampInt(raw, 2, 1, 5).toString();
-    for (final e in concurrencyOptions) {
-      if (e.$2 == v) return e.$1;
-    }
-    return '$v 个任务';
+    final v = normalizeConcurrency(raw);
+    return _optionLabel(concurrencyOptions, v, '$v 个任务');
   }
 
   static String threadsLabel(String raw) {
-    final n = _clampInt(raw, 4, 1, 8);
-    final v = n == 3 || n == 5 || n == 6 || n == 7 ? '4' : n.toString();
-    for (final e in threadOptions) {
-      if (e.$2 == v) return e.$1;
-    }
-    return '$v 线程';
+    final v = normalizeThreads(raw);
+    return _optionLabel(threadOptions, v, '$v 线程');
   }
 
   static String normalizeConcurrency(String raw) =>

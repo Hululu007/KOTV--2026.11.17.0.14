@@ -71,7 +71,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() => _status = '正在检查更新…');
     try {
       final data = await ref.read(apiProvider).tools('checkUpdate');
-      final msg = '${data['message'] ?? '检查完成'}';
+      final msg = kotvFormatCheckUpdateResult(data);
       setState(() => _status = msg);
       if (mounted) showAppNews(context, msg);
     } catch (e) {
