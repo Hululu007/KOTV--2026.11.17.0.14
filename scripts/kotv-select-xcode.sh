@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# CI：macos-14 默认仍是 Xcode 15.4；video_player_avfoundation 新版等需要更新的 Swift。
-# iOS / macOS 打包共用：优先 Xcode_26*，否则镜像里最新的 Xcode_*。
+# CI：video_player_avfoundation 2.12.x 用到 macOS/iOS 26 SDK 的 AVFoundation 接口，须 Xcode 26。
+# iOS / macOS 打包共用：优先 Xcode_26*，否则镜像里最新的 Xcode_*（不跟预览版默认值走）。
 # shellcheck shell=bash
 
 kotv_select_newest_xcode() {

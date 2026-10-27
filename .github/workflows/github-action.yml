@@ -334,7 +334,7 @@ jobs:
           if-no-files-found: error
 
   build-mac-arm64:
-    runs-on: macos-14
+    runs-on: macos-26
     needs: [set-tag, build-updater]
     timeout-minutes: 180
     steps:
@@ -399,7 +399,7 @@ jobs:
           if-no-files-found: error
 
   build-mac-amd64:
-    runs-on: macos-14
+    runs-on: macos-26
     needs: [set-tag, build-updater]
     timeout-minutes: 210
     steps:
