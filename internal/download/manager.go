@@ -92,6 +92,13 @@ func (m *Manager) signalLocked() {
 	}
 }
 
+// Wake 让调度器按当前「同时下载数」重新补位（调高并发后排队任务立即开始）。
+func (m *Manager) Wake() {
+	m.mu.Lock()
+	m.signalLocked()
+	m.mu.Unlock()
+}
+
 func (m *Manager) dispatcher() {
 	for range m.wake {
 		for m.tryStartOne() {

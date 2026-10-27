@@ -16,6 +16,7 @@ import (
 	"github.com/bobo/KOTV/internal/clientsession"
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/download"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
 	"github.com/bobo/KOTV/internal/localproxy"
@@ -1482,6 +1483,7 @@ func (a *App) APISetSettings(kv map[string]string) error {
 	needProxy := false
 	needLive := false
 	needDLNA := false
+	needDownload := false
 	remoteUser := hostclient.DataOwner() != ""
 	admin := currentRequestIsAdmin()
 	kv = settings.SetClientProfileKeys(kv, hostclient.CurrentPlatform())
@@ -1512,9 +1514,15 @@ func (a *App) APISetSettings(kv map[string]string) error {
 		if t == settings.DLNARenderer {
 			needDLNA = true
 		}
+		if t == settings.DownloadConcurrency {
+			needDownload = true
+		}
 	}
 	if err := settings.Save(); err != nil {
 		return err
+	}
+	if needDownload {
+		download.Default().Wake()
 	}
 	if needProxy {
 		p := settings.Get(settings.Proxy)

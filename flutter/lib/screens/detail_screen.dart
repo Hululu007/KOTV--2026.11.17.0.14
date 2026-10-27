@@ -4259,14 +4259,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                           itemBuilder: (_, i) {
                             final taken = !free(i);
                             final on = selected.contains(i);
-                            final pill = EpisodeChip(
+                            // 给定宽度时 AppPill 左右内边距更窄，格子里放得下集名。
+                            final pill = AppPill(
                               label: eps[i].name.isEmpty
                                   ? '${i + 1}'
                                   : eps[i].name,
                               selected: on && !taken,
+                              width: double.infinity,
                               height: epM.h,
                               fontSize: epM.fs,
-                              outlined: true,
                               onTap: taken
                                   ? () {}
                                   : () => setLocal(() {

@@ -605,7 +605,6 @@ class EpisodeChip extends StatelessWidget {
     this.autofocus = false,
     this.height = 40,
     this.fontSize = 14,
-    this.outlined = false,
   });
 
   final String label;
@@ -614,8 +613,6 @@ class EpisodeChip extends StatelessWidget {
   final bool autofocus;
   final double height;
   final double fontSize;
-  /// 弹窗底色与格子底色相近时加描边。
-  final bool outlined;
 
   /// 选集格子设计尺寸（详情选集与下载选集共用）；实际高度再乘 [LayoutScale.grow]。
   static ({double h, double fs}) metrics(BuildContext context) =>
@@ -642,9 +639,6 @@ class EpisodeChip extends StatelessWidget {
             decoration: BoxDecoration(
               color: bg,
               borderRadius: BorderRadius.circular(8),
-              border: outlined
-                  ? Border.all(color: selected ? p.primary : p.pillBorder)
-                  : null,
             ),
             child: Text(
               label,
