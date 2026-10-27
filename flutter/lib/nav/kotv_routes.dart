@@ -11,3 +11,22 @@ Route<T> kotvDetailRoute<T>({required WidgetBuilder builder}) {
   }
   return MaterialPageRoute<T>(builder: builder);
 }
+
+/// 主 Tab 换页：短淡入，避免 Material 侧滑 + 整页重建显得拖沓。
+Route<T> kotvTabRoute<T>({
+  required WidgetBuilder builder,
+  RouteSettings? settings,
+}) {
+  return PageRouteBuilder<T>(
+    settings: settings,
+    pageBuilder: (context, animation, secondaryAnimation) => builder(context),
+    transitionDuration: const Duration(milliseconds: 160),
+    reverseTransitionDuration: const Duration(milliseconds: 120),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      return FadeTransition(
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+        child: child,
+      );
+    },
+  );
+}

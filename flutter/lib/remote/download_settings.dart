@@ -125,4 +125,42 @@ class DownloadSettings {
         return true;
     }
   }
+
+  static String taskLabel(Map<String, dynamic> t) {
+    final title = '${t['title'] ?? ''}'.trim();
+    final ep = '${t['epName'] ?? ''}'.trim();
+    final flag = '${t['flag'] ?? ''}'.trim();
+    final parts = <String>[
+      if (title.isNotEmpty) title,
+      if (flag.isNotEmpty) flag,
+      if (ep.isNotEmpty) ep,
+    ];
+    return parts.isEmpty ? '${t['id'] ?? ''}' : parts.join(' · ');
+  }
+
+  /// 任务列表状态行文案（进度/错误优先用引擎 message、error）。
+  static String statusLabel(Map<String, dynamic> t) {
+    final st = '${t['status'] ?? ''}';
+    final msg = '${t['message'] ?? ''}'.trim();
+    final err = '${t['error'] ?? ''}'.trim();
+    switch (st) {
+      case 'queued':
+        return msg.isEmpty ? '等待中' : msg;
+      case 'running':
+        final p =
+            (t['progress'] is num) ? (t['progress'] as num).toDouble() : 0.0;
+        final pct = (p * 100).clamp(0, 100).toStringAsFixed(0);
+        return msg.isEmpty ? '下载中 $pct%' : '$msg · $pct%';
+      case 'paused':
+        return msg.isEmpty ? '已暂停' : msg;
+      case 'done':
+        return '已完成';
+      case 'cancelled':
+        return '已取消';
+      case 'error':
+        return err.isNotEmpty ? err : (msg.isEmpty ? '失败' : msg);
+      default:
+        return st;
+    }
+  }
 }

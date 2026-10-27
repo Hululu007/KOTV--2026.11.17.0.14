@@ -86,43 +86,6 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
     });
   }
 
-  String _label(Map<String, dynamic> t) {
-    final title = '${t['title'] ?? ''}'.trim();
-    final ep = '${t['epName'] ?? ''}'.trim();
-    final flag = '${t['flag'] ?? ''}'.trim();
-    final parts = <String>[
-      if (title.isNotEmpty) title,
-      if (flag.isNotEmpty) flag,
-      if (ep.isNotEmpty) ep,
-    ];
-    return parts.isEmpty ? '${t['id'] ?? ''}' : parts.join(' · ');
-  }
-
-  String _statusText(Map<String, dynamic> t) {
-    final st = '${t['status'] ?? ''}';
-    final msg = '${t['message'] ?? ''}'.trim();
-    final err = '${t['error'] ?? ''}'.trim();
-    switch (st) {
-      case 'queued':
-        return msg.isEmpty ? '等待中' : msg;
-      case 'running':
-        final p =
-            (t['progress'] is num) ? (t['progress'] as num).toDouble() : 0.0;
-        final pct = (p * 100).clamp(0, 100).toStringAsFixed(0);
-        return msg.isEmpty ? '下载中 $pct%' : '$msg · $pct%';
-      case 'paused':
-        return msg.isEmpty ? '已暂停' : msg;
-      case 'done':
-        return '已完成';
-      case 'cancelled':
-        return '已取消';
-      case 'error':
-        return err.isNotEmpty ? err : (msg.isEmpty ? '失败' : msg);
-      default:
-        return st;
-    }
-  }
-
   Future<void> _runOnIds(
     Iterable<String> ids,
     Future<void> Function(String id) fn, {
@@ -258,12 +221,22 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
     );
   }
 
+  void _onBack() {
+    // 从播放详情叠进来：pop 回详情；从主导航进下载：按 Tab 栈返回。
+    final nav = Navigator.of(context);
+    if (nav.canPop()) {
+      nav.pop();
+      return;
+    }
+    kotvPageBack(ref);
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
     final compact = KotvLayout.isCompact(context);
     final s = LayoutScale.of(context);
-    final hPad = 20 * s;
+    final hPad = kotvContentInset(context);
     const filterH = 34.0;
     final visible = _visible;
     final filterIdx =
@@ -272,7 +245,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
       children: [
         LibraryTopBar(
           title: '我的下载',
-          onBack: () => kotvPageBack(ref),
+          onBack: _onBack,
           onSearch: () => goKotvPage(ref, KotvPage.search),
           onProfile: () => goKotvPage(ref, KotvPage.profile),
           onNews: () {},
@@ -380,7 +353,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                                           CrossAxisAlignment.stretch,
                                       children: [
                                         Text(
-                                          _label(t),
+                                          DownloadSettings.taskLabel(t),
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
@@ -391,7 +364,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
-                                          _statusText(t),
+                                          DownloadSettings.statusLabel(t),
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(

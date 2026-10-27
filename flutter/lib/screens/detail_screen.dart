@@ -61,6 +61,7 @@ import '../widgets/kotv_network_image.dart';
 import '../widgets/mini_hover_shell.dart';
 import '../widgets/vod_player_chrome.dart';
 import 'detail_fullscreen.dart';
+import 'download_screen.dart';
 import 'folder_screen.dart';
 import 'shell.dart';
 
@@ -4318,7 +4319,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         },
       );
       if (go == true && mounted) {
-        unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.download)));
+        // 叠在详情上打开下载，返回仍回到正在播放的详情（勿 _leavePage 卸掉播放栈）。
+        unawaited(Navigator.of(context).push<void>(
+          kotvDetailRoute(builder: (_) => const DownloadScreen()),
+        ));
       }
     } catch (e) {
       if (mounted) setState(() => _status = '下载入队失败: $e');

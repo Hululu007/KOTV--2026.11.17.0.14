@@ -10,20 +10,28 @@ import (
 	"github.com/bobo/KOTV/internal/paths"
 )
 
+func browseRootMaps(asEntries bool) []any {
+	roots := paths.BrowseRoots()
+	items := make([]any, 0, len(roots))
+	for _, r := range roots {
+		m := map[string]any{
+			"name": r.Name,
+			"path": r.Path,
+		}
+		if asEntries {
+			m["dir"] = true
+		}
+		items = append(items, m)
+	}
+	return items
+}
+
 // APIFsRoots 引擎本机可浏览根（下载目录等）。
 func (a *App) APIFsRoots() map[string]any {
 	if !canBrowseEngineFS() {
 		return map[string]any{"ok": false, "error": "需要管理员", "roots": []any{}}
 	}
-	roots := paths.BrowseRoots()
-	items := make([]any, 0, len(roots))
-	for _, r := range roots {
-		items = append(items, map[string]any{
-			"name": r.Name,
-			"path": r.Path,
-		})
-	}
-	return map[string]any{"ok": true, "roots": items}
+	return map[string]any{"ok": true, "roots": browseRootMaps(false)}
 }
 
 // APIFsList 列出引擎本机目录。path 空则返回浏览根列表。
@@ -33,20 +41,11 @@ func (a *App) APIFsList(raw string) (map[string]any, error) {
 	}
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		roots := paths.BrowseRoots()
-		entries := make([]any, 0, len(roots))
-		for _, r := range roots {
-			entries = append(entries, map[string]any{
-				"name": r.Name,
-				"path": r.Path,
-				"dir":  true,
-			})
-		}
 		return map[string]any{
 			"ok":      true,
 			"path":    "",
 			"parent":  "",
-			"entries": entries,
+			"entries": browseRootMaps(true),
 		}, nil
 	}
 

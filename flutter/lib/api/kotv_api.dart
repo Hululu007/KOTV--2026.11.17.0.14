@@ -295,12 +295,6 @@ class KotvApi {
   Future<Map<String, dynamic>> downloadResume(String id) =>
       _post('/api/v1/download', {'action': 'resume', 'id': id});
 
-  Future<Map<String, dynamic>> downloadPauseAll() =>
-      _post('/api/v1/download', {'action': 'pauseAll'});
-
-  Future<Map<String, dynamic>> downloadResumeAll() =>
-      _post('/api/v1/download', {'action': 'resumeAll'});
-
   Future<Map<String, dynamic>> downloadRemove(String id,
           {bool deleteFile = false}) =>
       _post('/api/v1/download', {
@@ -308,13 +302,6 @@ class KotvApi {
         'id': id,
         'deleteFile': deleteFile,
       });
-
-  Future<Map<String, dynamic>> downloadClearFinished() =>
-      _post('/api/v1/download', {'action': 'clearFinished'});
-
-  /// 引擎本机可浏览根目录（下载目录等）。
-  Future<Map<String, dynamic>> fsRoots() =>
-      _get('/api/v1/fs', {'roots': '1'});
 
   /// 列出引擎本机目录；path 空则返回浏览根。
   Future<Map<String, dynamic>> fsList([String path = '']) =>

@@ -185,11 +185,22 @@ var (
 // BindDB 设置持久化到 SQLite（须在 Load 前调用）。
 func BindDB(db *database.DB) { storeDB = db }
 
-func isHostOnly(t Type) bool {
+func isDownloadHost(t Type) bool {
 	switch t {
-	case RemoteAuth, AllowRegister, DeviceUUID, SyncPairCode, UpdateURL, LOG, DLNARenderer,
-		DownloadDir, DownloadNameRule, DownloadClassify, DownloadConcurrency, DownloadThreads:
+	case DownloadDir, DownloadNameRule, DownloadClassify, DownloadConcurrency, DownloadThreads:
+		return true
+	default:
+		return false
+	}
+}
+
+func isHostOnly(t Type) bool {
+	if isDownloadHost(t) {
 		// 落在引擎主机：普通远端租户不可改；管理员可读改下载相关键。
+		return true
+	}
+	switch t {
+	case RemoteAuth, AllowRegister, DeviceUUID, SyncPairCode, UpdateURL, LOG, DLNARenderer:
 		return true
 	default:
 		return false
@@ -204,12 +215,7 @@ func IsHostOnlyID(id string) bool { return isHostOnly(Type(strings.TrimSpace(id)
 
 // IsDownloadHostID 主机下载相关设置（远端管理员可读写）。
 func IsDownloadHostID(id string) bool {
-	switch Type(strings.TrimSpace(id)) {
-	case DownloadDir, DownloadNameRule, DownloadClassify, DownloadConcurrency, DownloadThreads:
-		return true
-	default:
-		return false
-	}
+	return isDownloadHost(Type(strings.TrimSpace(id)))
 }
 
 // resolveOwner 本机/宿主机键 → ''；远端用户偏好 → userId。

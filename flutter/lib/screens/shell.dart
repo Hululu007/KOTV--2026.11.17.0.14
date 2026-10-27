@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../desktop/mini_player_window.dart';
 import '../models/models.dart';
 import '../nav/kotv_page.dart';
+import '../nav/kotv_routes.dart';
 import '../player/playback_guard.dart';
 import '../providers.dart';
 import '../player/play_headers.dart';
@@ -327,7 +328,7 @@ class _AppShellState extends ConsumerState<AppShell> {
         final nav = _shellNavKey.currentState;
         if (nav == null) return;
         nav.pushAndRemoveUntil(
-          MaterialPageRoute<void>(
+          kotvTabRoute<void>(
             settings: RouteSettings(name: next.name),
             builder: (_) => _pageOf(next),
           ),
@@ -370,7 +371,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                     child: Navigator(
                       key: _shellNavKey,
                       onGenerateRoute: (settings) {
-                        return MaterialPageRoute<void>(
+                        return kotvTabRoute<void>(
                           settings: settings,
                           builder: (_) => _pageOf(page),
                         );

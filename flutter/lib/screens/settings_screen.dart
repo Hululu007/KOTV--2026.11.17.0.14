@@ -60,7 +60,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Map<String, String> _runtime = {};
   List<Map<String, dynamic>> _parses = [];
   String _port = '$kotvDefaultEnginePort';
-  String _version = '0.2.1';
+  String _version = '0.2.2';
   String _status = '';
   String _pairCode = '';
   String _remoteUser = '';
@@ -107,7 +107,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
       _port = '${data['port'] ?? kotvDefaultEnginePort}';
-      _version = '${data['version'] ?? '0.2.1'}';
+      _version = '${data['version'] ?? '0.2.2'}';
       _pairCode = '${data['pairCode'] ?? g('syncPairCode')}';
       _vodDesc = '${data['vodDesc'] ?? ''}';
       _liveDesc = '${data['liveDesc'] ?? ''}';
@@ -258,8 +258,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     List<(String, String)> options, {
     String? msg,
     String? defaultValue,
+    String Function(String raw)? normalize,
   }) async {
-    final cur = g(key, defaultValue ?? '');
+    final raw = g(key, defaultValue ?? '');
+    final cur = normalize != null ? normalize(raw) : raw;
     final v =
         await pickChoice(context, title: title, current: cur, options: options);
     if (v != null) await _set(key, v, msg: msg);
@@ -1791,17 +1793,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _set('downloadDir', path.trim(), msg: '引擎下载目录已保存');
   }
 
-  Future<void> _pickDownloadNameRule() async {
-    final cur = DownloadSettings.normalizeNameRule(g('downloadNameRule'));
-    final v = await pickChoice(
-      context,
-      title: '文件命名',
-      current: cur,
-      options: DownloadSettings.nameRuleOptions,
-    );
-    if (v == null) return;
-    await _set('downloadNameRule', v, msg: '命名规则已保存');
-  }
+  Future<void> _pickDownloadNameRule() => _pick(
+        '文件命名',
+        'downloadNameRule',
+        DownloadSettings.nameRuleOptions,
+        msg: '命名规则已保存',
+        normalize: DownloadSettings.normalizeNameRule,
+      );
 
   Future<void> _pickDownloadClassify() async {
     final cur = g('downloadClassify', 'true');
@@ -1817,29 +1815,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         msg: v == 'true' ? '已按片名建子目录' : '已全部放在下载根目录');
   }
 
-  Future<void> _pickDownloadConcurrency() async {
-    final cur = DownloadSettings.normalizeConcurrency(g('downloadConcurrency', '2'));
-    final v = await pickChoice(
-      context,
-      title: '同时进行的任务数',
-      current: cur,
-      options: DownloadSettings.concurrencyOptions,
-    );
-    if (v == null) return;
-    await _set('downloadConcurrency', v, msg: '同时下载数已保存');
-  }
+  Future<void> _pickDownloadConcurrency() => _pick(
+        '同时进行的任务数',
+        'downloadConcurrency',
+        DownloadSettings.concurrencyOptions,
+        defaultValue: '2',
+        msg: '同时下载数已保存',
+        normalize: DownloadSettings.normalizeConcurrency,
+      );
 
-  Future<void> _pickDownloadThreads() async {
-    final cur = DownloadSettings.normalizeThreads(g('downloadThreads', '4'));
-    final v = await pickChoice(
-      context,
-      title: '每个任务的线程数',
-      current: cur,
-      options: DownloadSettings.threadOptions,
-    );
-    if (v == null) return;
-    await _set('downloadThreads', v, msg: '每任务线程数已保存');
-  }
+  Future<void> _pickDownloadThreads() => _pick(
+        '每个任务的线程数',
+        'downloadThreads',
+        DownloadSettings.threadOptions,
+        defaultValue: '4',
+        msg: '每任务线程数已保存',
+        normalize: DownloadSettings.normalizeThreads,
+      );
 
   Future<void> _openDownloadSheet() async {
     await _showPlayerSubSheet(
