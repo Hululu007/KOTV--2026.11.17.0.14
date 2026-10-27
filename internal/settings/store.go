@@ -581,9 +581,14 @@ func Get(t Type) string {
 		if v, ok, err := storeDB.GetSetting(owner, id); err == nil && ok {
 			return v
 		}
-		// 远端用户缺键：用内置缺省，不读宿主已选 vod/live。
+		// 远端用户缺键：仓/站/直播不读宿主已选；其它键用内置缺省。
 		if owner != "" && !isHostOnly(t) {
-			return defaultValue(id)
+			switch t {
+			case VOD, Home, LIVE:
+				return ""
+			default:
+				return defaultValue(id)
+			}
 		}
 	}
 	mu.RLock()

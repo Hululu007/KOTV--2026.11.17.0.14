@@ -102,9 +102,10 @@ bool siteIsIndex(WidgetRef ref, String siteKey) {
 
 Future<void>? _vodOpenSerial;
 
-/// 打开列表项：action → 站点 action；folder → 进目录；索引站 → 搜索；否则进详情。
+/// 打开列表项：action → 站点 action；folder → 进目录；索引站可搜；否则进详情。
 /// [fromFolder] 带 mark 以便详情按文件名选中那一集。
 /// [extend] 父级分类筛选，嵌套目录继续带上。
+/// [searchIfIndex] 为 false 时（历史/收藏/继续观看）始终进详情，由详情空结果再精确查找。
 ///
 /// 串行到路由压上为止。正在看的同一部直接返回；另一部在当前详情里换片。
 Future<void> openVodItem(
@@ -113,6 +114,7 @@ Future<void> openVodItem(
   VodItem item, {
   String? site,
   bool fromFolder = false,
+  bool searchIfIndex = true,
   Map<String, String>? extend,
 }) {
   final prev = _vodOpenSerial ?? Future<void>.value();
@@ -131,6 +133,7 @@ Future<void> openVodItem(
         item,
         site: site,
         fromFolder: fromFolder,
+        searchIfIndex: searchIfIndex,
         extend: extend,
         release: release,
       );
@@ -146,6 +149,7 @@ Future<void> _openVodItemBody(
   VodItem item, {
   String? site,
   bool fromFolder = false,
+  bool searchIfIndex = true,
   Map<String, String>? extend,
   required void Function() release,
 }) async {
@@ -196,7 +200,7 @@ Future<void> _openVodItemBody(
     );
     return;
   }
-  if (siteIsIndex(ref, siteKey)) {
+  if (searchIfIndex && siteIsIndex(ref, siteKey)) {
     await kotvStopBackgroundPlayback(keepMini: true);
     if (!context.mounted) return;
     if (MiniPlayerWindow.active) return;

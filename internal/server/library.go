@@ -74,6 +74,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 				"duration":   h.Duration,
 				"kind":       kind,
 				"createTime": h.CreateTime,
+				"siteName":   h.SiteName,
 			})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": typ, "owner": owner, "items": out})

@@ -17,7 +17,7 @@ const (
 	ConfigTypeSite = 0
 	ConfigTypeLive = 1
 	configSelect   = `SELECT id, type, time, COALESCE(url,''), COALESCE(json,''), COALESCE(name,''), COALESCE(home,''), COALESCE(parse,'') FROM config `
-	historySelect  = `SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''), COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_play,0), COALESCE(rev_sort,0), COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1), COALESCE(opening,0), COALESCE(ending,0) FROM history `
+	historySelect  = `SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''), COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_play,0), COALESCE(rev_sort,0), COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1), COALESCE(opening,0), COALESCE(ending,0), COALESCE(site_name,'') FROM history `
 	keepSelect     = `SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''), COALESCE(create_time,0), COALESCE(type,0), COALESCE(cid,0), COALESCE(site_name,'') FROM keep `
 )
 
@@ -106,6 +106,7 @@ func (db *DB) migrate() error {
 			player INTEGER,
 			scale INTEGER,
 			cid INTEGER,
+			site_name TEXT,
 			PRIMARY KEY (owner, key)
 		)`,
 		`CREATE TABLE IF NOT EXISTS keep (
@@ -149,7 +150,7 @@ func (db *DB) migrate() error {
 		}
 	}
 	_, _ = db.conn.Exec(`DROP TABLE IF EXISTS track`)
-	// 兼容旧 keep 表：补列
+	// 兼容旧表：补列（site_name 在 owner 迁移后再加，避免 mig 表丢掉该列）
 	alterCols := []string{
 		`ALTER TABLE keep ADD COLUMN type INTEGER DEFAULT 0`,
 		`ALTER TABLE keep ADD COLUMN cid INTEGER DEFAULT 0`,
@@ -161,6 +162,7 @@ func (db *DB) migrate() error {
 	if err := db.migrateOwnerBuckets(); err != nil {
 		return err
 	}
+	_, _ = db.conn.Exec(`ALTER TABLE history ADD COLUMN site_name TEXT`)
 	return nil
 }
 
@@ -527,6 +529,7 @@ type History struct {
 	Speed      float64 `json:"speed"`
 	Opening    int64   `json:"opening"`
 	Ending     int64   `json:"ending"`
+	SiteName   string  `json:"siteName"`
 }
 
 // StartPositionMs max(opening, position)。
@@ -569,9 +572,10 @@ func (db *DB) SaveHistory(owner string, h History) error {
 		speed = 1
 	}
 	// UPSERT：保留已有 rev_sort；opening/ending 仅在本次显式传入非 0 时覆盖。
+	// site_name 空串不覆盖已有仓库来源。
 	_, err := db.conn.Exec(`INSERT INTO history
-		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, position, duration, speed, opening, ending)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, position, duration, speed, opening, ending, site_name)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(owner, key) DO UPDATE SET
 			vod_pic=excluded.vod_pic,
 			vod_name=excluded.vod_name,
@@ -584,9 +588,10 @@ func (db *DB) SaveHistory(owner string, h History) error {
 			duration=excluded.duration,
 			speed=excluded.speed,
 			opening=CASE WHEN excluded.opening != 0 THEN excluded.opening ELSE history.opening END,
-			ending=CASE WHEN excluded.ending != 0 THEN excluded.ending ELSE history.ending END`,
+			ending=CASE WHEN excluded.ending != 0 THEN excluded.ending ELSE history.ending END,
+			site_name=CASE WHEN excluded.site_name != '' THEN excluded.site_name ELSE history.site_name END`,
 		owner, h.Key, h.VodPic, h.VodName, h.VodFlag, h.VodRemarks, h.EpisodeURL, now, now,
-		h.Position, h.Duration, speed, h.Opening, h.Ending)
+		h.Position, h.Duration, speed, h.Opening, h.Ending, h.SiteName)
 	return err
 }
 
@@ -670,8 +675,8 @@ func (db *DB) ImportHistory(owner string, items []History, mode int) error {
 		}
 	}
 	stmt := `INSERT OR REPLACE INTO history
-		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, rev_sort, position, duration, speed, opening, ending)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, rev_sort, position, duration, speed, opening, ending, site_name)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 	for _, h := range items {
 		ct := h.CreateTime
 		if ct == 0 {
@@ -686,7 +691,7 @@ func (db *DB) ImportHistory(owner string, items []History, mode int) error {
 			speed = 1
 		}
 		if _, err := tx.Exec(stmt, owner, h.Key, h.VodPic, h.VodName, h.VodFlag, h.VodRemarks, h.EpisodeURL,
-			ct, rp, h.RevSort, h.Position, h.Duration, speed, h.Opening, h.Ending); err != nil {
+			ct, rp, h.RevSort, h.Position, h.Duration, speed, h.Opening, h.Ending, h.SiteName); err != nil {
 			return err
 		}
 	}
@@ -815,10 +820,10 @@ func (db *DB) RenameHistory(owner, oldKey, newKey string) error {
 		ct = now
 	}
 	if _, err := tx.Exec(`INSERT INTO history
-		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, rev_sort, position, duration, speed, opening, ending)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, rev_sort, position, duration, speed, opening, ending, site_name)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		owner, newKey, old.VodPic, old.VodName, old.VodFlag, old.VodRemarks, old.EpisodeURL,
-		ct, rp, old.RevSort, old.Position, old.Duration, speed, old.Opening, old.Ending); err != nil {
+		ct, rp, old.RevSort, old.Position, old.Duration, speed, old.Opening, old.Ending, old.SiteName); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM history WHERE owner = ? AND key = ?`, owner, oldKey); err != nil {
@@ -1002,7 +1007,7 @@ func dropRenamedOld(tx *sql.Tx, table, owner, oldKey, newKey string) (bool, erro
 
 func scanHistory(sc interface{ Scan(dest ...any) error }, h *History) error {
 	return sc.Scan(&h.Key, &h.VodPic, &h.VodName, &h.VodFlag, &h.VodRemarks, &h.EpisodeURL,
-		&h.CreateTime, &h.RevPlay, &h.RevSort, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending)
+		&h.CreateTime, &h.RevPlay, &h.RevSort, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending, &h.SiteName)
 }
 
 func scanKeep(sc interface{ Scan(dest ...any) error }, k *Keep) error {

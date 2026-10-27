@@ -50,7 +50,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       _recent = hist.take(15).map((e) {
         final r = e.remarks.trim();
         if (r.isNotEmpty && r != '继续观看') return e;
-        return VodItem(id: e.id, name: e.name, pic: e.pic, remarks: '继续观看', site: e.site, typeName: e.typeName);
+        return VodItem(
+          id: e.id,
+          name: e.name,
+          pic: e.pic,
+          remarks: '继续观看',
+          site: e.site,
+          typeName: e.typeName,
+          flag: e.flag,
+          configSource: e.configSource,
+          positionMs: e.positionMs,
+          durationMs: e.durationMs,
+        );
       }).toList();
     });
   }
@@ -428,7 +439,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         child: PosterCard(
                           item: it,
                           onTap: () =>
-                              openVodItem(context, ref, it, site: it.site),
+                              openVodItem(
+                                context,
+                                ref,
+                                it,
+                                site: it.site,
+                                searchIfIndex: false,
+                              ),
                         ),
                       );
                     },

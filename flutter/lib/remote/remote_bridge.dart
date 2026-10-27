@@ -161,6 +161,7 @@ class LocalHistory {
         remarks: '${m['remarks'] ?? ''}',
         site: site,
         flag: '${m['flag'] ?? ''}',
+        configSource: '${m['siteName'] ?? ''}'.trim(),
         positionMs: (m['position'] as num?)?.toInt() ?? 0,
         durationMs: (m['duration'] as num?)?.toInt() ?? 0,
       ));
@@ -197,6 +198,7 @@ class LocalHistory {
         }
       } catch (_) {}
     }
+    final siteName = item.configSource.trim();
     await api.libraryAction({
       'action': 'saveHistory',
       'item': {
@@ -209,6 +211,7 @@ class LocalHistory {
         'position': positionMs,
         'duration': durationMs,
         'speed': 1.0,
+        if (siteName.isNotEmpty) 'siteName': siteName,
       },
     });
   }
@@ -221,6 +224,7 @@ class LocalHistory {
     required String remarks,
     required String flag,
     String typeName = '',
+    String configSource = '',
   }) async {
     if (id.isEmpty) return;
     final api = await _engineApi();
@@ -237,6 +241,7 @@ class LocalHistory {
         break;
       }
     } catch (_) {}
+    final siteName = configSource.trim();
     await api.libraryAction({
       'action': 'saveHistory',
       'item': {
@@ -248,6 +253,7 @@ class LocalHistory {
         'position': positionMs,
         'duration': durationMs,
         'speed': 1.0,
+        if (siteName.isNotEmpty) 'siteName': siteName,
       },
     });
   }

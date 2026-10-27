@@ -1147,6 +1147,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         site: _detailSite(),
         remarks: epName,
         flag: flag,
+        configSource: _configSource,
         positionMs: positionMs,
         durationMs: durationMs,
       ));
@@ -2014,6 +2015,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       remarks: ep.name,
       flag: flag.flag,
       typeName: d.typeName,
+      configSource: _configSource,
     ));
     try {
       Map<String, dynamic> data;

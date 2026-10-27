@@ -121,7 +121,13 @@ class LibraryShelf extends ConsumerWidget {
                           return;
                         }
                         if (!context.mounted) return;
-                        await openVodItem(context, ref, it, site: it.site);
+                        await openVodItem(
+                          context,
+                          ref,
+                          it,
+                          site: it.site,
+                          searchIfIndex: false,
+                        );
                       },
                     ),
         ),

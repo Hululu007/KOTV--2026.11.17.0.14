@@ -72,6 +72,12 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   Future<void>? _reloadFlight;
   RemoteBridge? _boundRemote;
 
+  /// 切走过的分类页短缓存，回来可立刻还原列表与滚动。
+  final _catPageCache = _CatPageLru(max: 6);
+  String? _cachedHomeName;
+  String? _cachedHomeKey;
+  List<SiteInfo>? _cachedSites;
+
   @override
   void initState() {
     super.initState();
@@ -282,6 +288,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         _types = [];
         _filters = [];
         _filtersExpanded = false;
+        _catPageCache.clear();
       }
     });
     try {
@@ -300,6 +307,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           _items.clear();
           _types = [];
           _filters = [];
+          _catPageCache.clear();
           _statusMsg = '远端不可达，已切回本机引擎';
         });
       }
@@ -510,8 +518,60 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     } catch (_) {}
   }
 
-  /// loadCategory：先切导航/清空列表，再异步加载。
+  String _catCacheKey(String? tid) => (tid ?? '').trim();
+
+  void _stashCurrentCategory() {
+    final key = _catCacheKey(_tid);
+    _catPageCache.put(
+      key,
+      _CatPageSnap(
+        items: List<VodItem>.from(_items),
+        page: _page,
+        pageCount: _pageCount,
+        hasMore: _hasMore,
+        listStyle: _listStyle,
+        gridStyle: _gridStyle,
+        scrollOffset: _scroll.hasClients ? _scroll.offset : 0,
+        filters: List<CategoryFilter>.from(_filters),
+        extend: Map<String, String>.from(_extend),
+        filtersExpanded: _filtersExpanded,
+      ),
+    );
+  }
+
+  /// loadCategory：先切导航；有缓存则还原，否则清空再拉。
   void _switchCategory(String? tid) {
+    _stashCurrentCategory();
+    final hit = _catPageCache.get(_catCacheKey(tid));
+    if (hit != null) {
+      setState(() {
+        _tid = tid;
+        _items
+          ..clear()
+          ..addAll(hit.items);
+        _page = hit.page;
+        _pageCount = hit.pageCount;
+        _hasMore = hit.hasMore;
+        _listStyle = hit.listStyle;
+        _gridStyle = hit.gridStyle;
+        _filters = List<CategoryFilter>.from(hit.filters);
+        _extend
+          ..clear()
+          ..addAll(hit.extend);
+        _filtersExpanded = hit.filtersExpanded;
+        _autofillStreak = 0;
+        _loading = false;
+        _loadingMore = false;
+        _statusMsg = null;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scroll.hasClients) return;
+        final max = _scroll.position.maxScrollExtent;
+        _scroll.jumpTo(hit.scrollOffset.clamp(0.0, max));
+      });
+      unawaited(_reloadContentOnly(soft: true));
+      return;
+    }
     final filters = <CategoryFilter>[];
     if (tid != null && tid.isNotEmpty) {
       for (final t in _types) {
@@ -590,6 +650,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   /// 筛选 chip：先更新选中态并清空瀑布流，再加载。
   void _switchFilter(String key, String value) {
     if ((_extend[key] ?? '') == value) return;
+    _catPageCache.remove(_catCacheKey(_tid));
     setState(() {
       _extend[key] = value;
       _items.clear();
@@ -608,19 +669,25 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   /// 分类/筛选：只拉内容，不等 ready、不 refresh、不 invalidate 配置。
-  Future<void> _reloadContentOnly() async {
+  /// [soft] 有缓存展示时后台刷新，失败不抹掉现有列表。
+  Future<void> _reloadContentOnly({bool soft = false}) async {
     final gen = ++_loadGen;
     try {
       final data = await _fetchFirstPage(gen);
       if (!mounted || gen != _loadGen) return;
-      _applyPage(data, replace: true);
+      _applyPage(data, replace: true, clearLoading: true);
       unawaited(_fillHomeRecommendIfEmpty(gen));
       _scheduleAutofill();
     } catch (e) {
       if (!mounted || gen != _loadGen) return;
-      setState(() => _statusMsg = '$e');
-    } finally {
-      if (mounted && gen == _loadGen) setState(() => _loading = false);
+      if (soft && _items.isNotEmpty) {
+        setState(() => _loading = false);
+        return;
+      }
+      setState(() {
+        _statusMsg = '$e';
+        _loading = false;
+      });
     }
   }
 
@@ -665,8 +732,17 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     });
   }
 
+  bool _sameTypeNav(List<CategoryType> a, List<CategoryType> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id || a[i].name != b[i].name) return false;
+      if (a[i].filters.isEmpty != b[i].filters.isEmpty) return false;
+    }
+    return true;
+  }
+
   void _applyPage(Map<String, dynamic> data,
-      {required bool replace, int? requestedPage}) {
+      {required bool replace, int? requestedPage, bool clearLoading = false}) {
     try {
       final list = ((data['list'] as List?) ?? [])
           .whereType<Map>()
@@ -692,6 +768,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final keepGrid = home && list.isEmpty && _items.isNotEmpty;
       final pageStyle = KotvGridStyle.parse(data['style']);
       setState(() {
+        if (clearLoading) _loading = false;
         if (replace && !keepGrid) {
           _listStyle = pageStyle.isList;
           _gridStyle = pageStyle;
@@ -699,7 +776,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         _statusMsg = emptyHome
             ? '首页没有返回分类和推荐，请重试'
             : (keepGrid ? '首页没有返回推荐，请重试' : null);
-        if (types.isNotEmpty) {
+        // id/name 未变不整表替换，避免分类条跟着内容刷新重建。
+        if (types.isNotEmpty && !_sameTypeNav(_types, types)) {
           _types = types;
         }
         if (_tid != null && _tid!.isNotEmpty) {
@@ -758,13 +836,14 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     }
   }
 
-  void _open(VodItem it) {
+  void _open(VodItem it, {bool searchIfIndex = true}) {
     openVodItem(
       context,
       ref,
       it,
       site: it.site,
       fromFolder: _categoryIsFolder,
+      searchIfIndex: searchIfIndex,
       extend: Map<String, String>.from(_extend),
     );
   }
@@ -880,8 +959,19 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     }
   }
 
-  Widget _buildRoot(BuildContext context) {
-    final cfg = ref.watch(configProvider);
+  List<SiteInfo> _sitesFromConfig(AsyncValue<Map<String, dynamic>> cfg) {
+    final homeKey = cfg.maybeWhen(
+        data: (c) => '${c['home'] ?? ''}'.trim(), orElse: () => '');
+    final src = cfg.maybeWhen(
+        data: (c) => '${c['source'] ?? ''}'.trim(), orElse: () => '');
+    final n = cfg.maybeWhen(
+        data: (c) => ((c['sites'] as List?) ?? []).length, orElse: () => 0);
+    final stamp = '$src|$homeKey|$n';
+    if (_cachedSites != null &&
+        _cachedHomeKey == stamp &&
+        _cachedHomeName != null) {
+      return _cachedSites!;
+    }
     final sites = cfg.maybeWhen(
       data: (c) {
         try {
@@ -895,6 +985,14 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       },
       orElse: () => <SiteInfo>[],
     );
+    _cachedSites = sites;
+    _cachedHomeKey = stamp;
+    return sites;
+  }
+
+  Widget _buildRoot(BuildContext context) {
+    final cfg = ref.watch(configProvider);
+    final sites = _sitesFromConfig(cfg);
     SiteInfo? home;
     final homeKey = cfg.maybeWhen(
         data: (c) => '${c['home'] ?? ''}'.trim(), orElse: () => '');
@@ -936,6 +1034,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             : cfg.maybeWhen(
                 data: (c) => c['ready'] == true ? '选站' : '未配置源',
                 orElse: () => '…'));
+    _cachedHomeName = siteName;
     final busy = ref.watch(uiBusyProvider);
     final onHome = (_tid ?? '').isEmpty;
     final header = Column(
@@ -953,6 +1052,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               _filtersExpanded = false;
               _types = [];
               _items.clear();
+              _catPageCache.clear();
+              _cachedSites = null;
               _statusMsg = null;
             });
             // 多仓切换已有全局遮罩；内容必须清空后再拉，避免旧仓海报残留
@@ -1368,7 +1469,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           h: cardH,
           onTap: () {
             if (_history.isNotEmpty) {
-              _open(_history.first);
+              _open(_history.first, searchIfIndex: false);
             } else {
               goKotvPage(ref, KotvPage.history);
             }
@@ -1773,6 +1874,70 @@ class _HomeRotatingBannerState extends State<_HomeRotatingBanner> {
         ),
       ),
     );
+  }
+}
+
+class _CatPageSnap {
+  _CatPageSnap({
+    required this.items,
+    required this.page,
+    required this.pageCount,
+    required this.hasMore,
+    required this.listStyle,
+    required this.gridStyle,
+    required this.scrollOffset,
+    required this.filters,
+    required this.extend,
+    required this.filtersExpanded,
+  });
+
+  final List<VodItem> items;
+  final int page;
+  final int pageCount;
+  final bool hasMore;
+  final bool listStyle;
+  final KotvGridStyle gridStyle;
+  final double scrollOffset;
+  final List<CategoryFilter> filters;
+  final Map<String, String> extend;
+  final bool filtersExpanded;
+}
+
+class _CatPageLru {
+  _CatPageLru({required this.max});
+
+  final int max;
+  final Map<String, _CatPageSnap> _map = {};
+  final List<String> _order = [];
+
+  void put(String key, _CatPageSnap snap) {
+    if (_map.containsKey(key)) {
+      _order.remove(key);
+    }
+    _map[key] = snap;
+    _order.add(key);
+    while (_order.length > max) {
+      final old = _order.removeAt(0);
+      _map.remove(old);
+    }
+  }
+
+  _CatPageSnap? get(String key) {
+    final snap = _map[key];
+    if (snap == null) return null;
+    _order.remove(key);
+    _order.add(key);
+    return snap;
+  }
+
+  void remove(String key) {
+    _map.remove(key);
+    _order.remove(key);
+  }
+
+  void clear() {
+    _map.clear();
+    _order.clear();
   }
 }
 

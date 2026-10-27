@@ -989,77 +989,88 @@ class _CategoryNavBarState extends State<CategoryNavBar> {
         ? -1
         : widget.categories.indexWhere((c) => c.id == widget.selectedTid);
     // 固定高度匹配 NavPill(36)，避免 scale 把栏压矮后胶囊溢出。
-    // 按声明顺序走焦点，避免横向列表按几何距离把焦点跳到左边或右边那一项。
+    // 电视端按声明顺序走焦点；手机点选不建整条 FocusTraversal 树。
     final grow = LayoutScale.grow(context);
+    final tv = KotvLayout.television;
+    Widget homePill = NavPill(
+      key: const ValueKey('nav-home'),
+      label: widget.homeLabel,
+      selected: widget.homeSelected,
+      scrollIntoView: tv,
+      onFocusChange: tv ? (v) => _onPillFocus('home', v) : null,
+      onTap: widget.onHome,
+    );
+    Widget livePill = NavPill(
+      key: const ValueKey('nav-live'),
+      label: '直播',
+      onTap: widget.onLive,
+    );
+    if (tv) {
+      homePill = FocusTraversalOrder(
+        order: const NumericFocusOrder(0),
+        child: homePill,
+      );
+      livePill = FocusTraversalOrder(
+        order: NumericFocusOrder(widget.categories.length + 1),
+        child: livePill,
+      );
+    }
+    final row = Row(
+      children: [
+        homePill,
+        SizedBox(width: 8 * s),
+        Expanded(
+          child: HScrollList(
+            scrollToIndex: selectedIndex >= 0 ? selectedIndex : null,
+            itemCount: widget.categories.length,
+            separatorBuilder: (_, __) => SizedBox(width: 8 * s),
+            itemBuilder: (_, i) {
+              final c = widget.categories[i];
+              final selected = widget.selectedTid == c.id;
+              IconData? filterIcon;
+              if (c.hasFilters) {
+                filterIcon = (selected && widget.filtersExpanded)
+                    ? Icons.filter_alt_off
+                    : Icons.filter_alt;
+              }
+              Widget pill = NavPill(
+                key: ValueKey('nav-cat-${c.id}'),
+                label: c.name,
+                selected: selected,
+                scrollIntoView: tv,
+                trailingIcon: filterIcon,
+                onFocusChange:
+                    tv ? (v) => _onPillFocus('cat:${c.id}', v) : null,
+                onTap: () {
+                  if (selected) {
+                    if (c.hasFilters) widget.onToggleFilter?.call();
+                    return;
+                  }
+                  widget.onCategory(c.id);
+                },
+              );
+              if (!tv) return pill;
+              return FocusTraversalOrder(
+                order: NumericFocusOrder(i + 1),
+                child: pill,
+              );
+            },
+          ),
+        ),
+        if (!bottomNav) ...[
+          SizedBox(width: 8 * s),
+          livePill,
+        ],
+      ],
+    );
     return Container(
       height: (compact ? 40.0 : 48.0) * grow,
       color: p.catBar,
       padding: EdgeInsets.symmetric(
           horizontal: compact ? 10.0 : 24.0 * s, vertical: 6 * grow),
-      child: FocusTraversalGroup(
-        policy: OrderedTraversalPolicy(),
-        child: Row(
-          children: [
-            FocusTraversalOrder(
-              order: const NumericFocusOrder(0),
-              child: NavPill(
-                key: const ValueKey('nav-home'),
-                label: widget.homeLabel,
-                selected: widget.homeSelected,
-                scrollIntoView: true,
-                onFocusChange: (v) => _onPillFocus('home', v),
-                onTap: widget.onHome,
-              ),
-            ),
-            SizedBox(width: 8 * s),
-            Expanded(
-              child: HScrollList(
-                scrollToIndex: selectedIndex >= 0 ? selectedIndex : null,
-                itemCount: widget.categories.length,
-                separatorBuilder: (_, __) => SizedBox(width: 8 * s),
-                itemBuilder: (_, i) {
-                  final c = widget.categories[i];
-                  final selected = widget.selectedTid == c.id;
-                  IconData? filterIcon;
-                  if (c.hasFilters) {
-                    filterIcon = (selected && widget.filtersExpanded)
-                        ? Icons.filter_alt_off
-                        : Icons.filter_alt;
-                  }
-                  return FocusTraversalOrder(
-                    order: NumericFocusOrder(i + 1),
-                    child: NavPill(
-                      key: ValueKey('nav-cat-${c.id}'),
-                      label: c.name,
-                      selected: selected,
-                      trailingIcon: filterIcon,
-                      onFocusChange: (v) => _onPillFocus('cat:${c.id}', v),
-                      onTap: () {
-                        if (selected) {
-                          if (c.hasFilters) widget.onToggleFilter?.call();
-                          return;
-                        }
-                        widget.onCategory(c.id);
-                      },
-                    ),
-                  );
-                },
-              ),
-            ),
-            if (!bottomNav) ...[
-              SizedBox(width: 8 * s),
-              FocusTraversalOrder(
-                order: NumericFocusOrder(widget.categories.length + 1),
-                child: NavPill(
-                  key: const ValueKey('nav-live'),
-                  label: '直播',
-                  onTap: widget.onLive,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
+      child: tv
+          ? FocusTraversalGroup(policy: OrderedTraversalPolicy(), child: row)
+          : row,
     );
   }
 }
