@@ -133,6 +133,10 @@ class _HScrollListState extends State<HScrollList> {
   void _keepVisible() {
     final index = _keepIndex;
     if (!mounted || _userOwnsOffset || index == null || index != widget.scrollToIndex) return;
+    if (_sc.hasClients && _sc.position.activity is DragScrollActivity) {
+      _releaseToUser();
+      return;
+    }
     if (index < 0 || index >= widget.itemCount) {
       _keepIndex = null;
       return;
@@ -285,8 +289,7 @@ class _HScrollListState extends State<HScrollList> {
         ? ListView.separated(
             controller: _sc,
             scrollDirection: Axis.horizontal,
-            // 初次定位只多缓存一截；全量 1e6 会在分类很多时预建全部胶囊。
-            cacheExtent: _measure ? 480 : null,
+            cacheExtent: _measure ? 1000000 : null,
             padding: widget.padding,
             physics: widget.physics,
             itemCount: widget.itemCount,
@@ -296,7 +299,7 @@ class _HScrollListState extends State<HScrollList> {
         : ListView.builder(
             controller: _sc,
             scrollDirection: Axis.horizontal,
-            cacheExtent: _measure ? 480 : null,
+            cacheExtent: _measure ? 1000000 : null,
             padding: widget.padding,
             physics: widget.physics,
             itemCount: widget.itemCount,

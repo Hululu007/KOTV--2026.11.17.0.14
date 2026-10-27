@@ -8,6 +8,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -213,6 +214,105 @@ func Fetch(raw string) (string, error) {
 	log.Printf("thunder: fetch ready ih=%s idx=%d file=%s url=%s peers=%d seeders=%d buffered=%d",
 		ih, index, filepath.Base(file.DisplayPath()), u, st.ActivePeers, st.ConnectedSeeders, file.BytesCompleted())
 	return u, nil
+}
+
+// SaveToFile 用磁力引擎拉满选中文件并写入 dest（供下载任务）。
+func SaveToFile(ctx context.Context, raw, dest string, onProg func(bytes, total int64, msg string)) error {
+	raw = Decode(strings.TrimSpace(raw))
+	low := strings.ToLower(raw)
+	if strings.HasPrefix(low, "ed2k:") || strings.HasPrefix(low, "ftp:") {
+		return fmt.Errorf("电驴/FTP 仅 Android 迅雷支持")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	setProgress("meta", 0, 0, 0, "正在获取磁力元数据…")
+	if onProg != nil {
+		onProg(0, 0, "正在获取磁力元数据…")
+	}
+	metaCtx, metaCancel := context.WithTimeout(ctx, metaTimeout)
+	defer metaCancel()
+
+	path, name, index, ih, isFileMagnet := parsePlayURL(raw)
+	var t *torrent.Torrent
+	var file *torrent.File
+	var err error
+	if isFileMagnet {
+		if path != "" {
+			t, err = addTorrentFile(metaCtx, path)
+		} else if ih != "" {
+			t, err = torrentByInfoHash(ih)
+		} else {
+			return fmt.Errorf("无效的磁力剧集地址")
+		}
+		if err != nil {
+			return err
+		}
+		file = fileByIndex(t, index)
+		if file == nil {
+			file = pickLargest(t.Files())
+		}
+		_ = name
+	} else {
+		t, _, err = openTorrent(metaCtx, raw)
+		if err != nil {
+			return err
+		}
+		file = pickLargest(mediaFiles(t))
+		if file == nil {
+			file = pickLargest(t.Files())
+		}
+	}
+	if file == nil {
+		return fmt.Errorf("未找到可下载文件")
+	}
+	selectFile(t, file)
+	need := file.Length()
+	setProgress("buffer", 0, 0, need, "磁力下载中…")
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		done := file.BytesCompleted()
+		st := t.Stats()
+		peers := st.ActivePeers + st.ConnectedSeeders
+		setProgress("buffer", peers, done, need, "磁力下载中…")
+		if onProg != nil {
+			onProg(done, need, "磁力下载中…")
+		}
+		if need > 0 && done >= need {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+	_ = os.MkdirAll(filepath.Dir(dest), 0o755)
+	tmp := dest + ".part"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	reader := file.NewReader()
+	reader.SetResponsive()
+	reader.SetContext(ctx)
+	_, copyErr := io.Copy(out, reader)
+	_ = reader.Close()
+	_ = out.Close()
+	if copyErr != nil {
+		_ = os.Remove(tmp)
+		return copyErr
+	}
+	_ = os.Remove(dest)
+	if err := os.Rename(tmp, dest); err != nil {
+		return err
+	}
+	setProgress("ready", 0, need, need, "磁力已保存")
+	if onProg != nil {
+		onProg(need, need, "磁力已保存")
+	}
+	return nil
 }
 
 // waitHeadBuffer 等到片头有足够字节再开播；无节点/无数据时返回明确错误，避免假就绪。

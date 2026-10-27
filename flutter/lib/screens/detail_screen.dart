@@ -41,6 +41,7 @@ import '../nav/kotv_page.dart';
 import '../nav/kotv_routes.dart';
 import '../api/kotv_settings_cache.dart';
 import '../remote/local_collect.dart';
+import '../remote/local_download.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
 import '../vod/vod_open.dart';
@@ -3925,6 +3926,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               unawaited(_leavePage(afterPop: () => searchByName(ref, name)));
             }),
             _action('解析', Icons.tune_rounded, () => _pickParse()),
+            _action('下载', Icons.download_for_offline_outlined, () {
+              unawaited(_pickDownloadEpisodes());
+            }),
           ],
         ),
         ),
@@ -4132,6 +4136,193 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         },
       ),
     );
+  }
+
+  Future<void> _pickDownloadEpisodes() async {
+    final d = _detail;
+    final eps = _eps;
+    if (d == null || eps.isEmpty) {
+      setState(() => _status = '暂无可下载剧集');
+      return;
+    }
+    final flag = d.flags.isEmpty
+        ? ''
+        : d.flags[_flagIdx.clamp(0, d.flags.length - 1)].flag;
+    final selected = <int>{};
+    if (_epIdx >= 0 && _epIdx < eps.length) {
+      selected.add(_epIdx);
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) {
+        final pal = KotvPalette.of(ctx);
+        final m = MediaQuery.sizeOf(ctx);
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return Dialog(
+              backgroundColor: pal.dialogBg,
+              child: SizedBox(
+                width: m.width > 520 ? 480.0 : m.width * 0.92,
+                height: m.height * 0.7,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text('选择要下载的剧集',
+                          style: TextStyle(
+                              color: pal.fg,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          AppPill(
+                            label: '全选',
+                            height: 34,
+                            onTap: () => setLocal(() {
+                              selected
+                                ..clear()
+                                ..addAll(List.generate(eps.length, (i) => i));
+                            }),
+                          ),
+                          const SizedBox(width: 8),
+                          AppPill(
+                            label: '反选',
+                            height: 34,
+                            onTap: () => setLocal(() {
+                              final next = <int>{};
+                              for (var i = 0; i < eps.length; i++) {
+                                if (!selected.contains(i)) next.add(i);
+                              }
+                              selected
+                                ..clear()
+                                ..addAll(next);
+                            }),
+                          ),
+                          const Spacer(),
+                          Text('${selected.length}/${eps.length}',
+                              style: TextStyle(color: pal.muted)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: GridView.builder(
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 4,
+                            mainAxisSpacing: 8,
+                            crossAxisSpacing: 8,
+                            childAspectRatio: 2.2,
+                          ),
+                          itemCount: eps.length,
+                          itemBuilder: (_, i) {
+                            final on = selected.contains(i);
+                            return AppPill(
+                              label: eps[i].name.isEmpty
+                                  ? '${i + 1}'
+                                  : eps[i].name,
+                              selected: on,
+                              height: 36,
+                              onTap: () => setLocal(() {
+                                if (on) {
+                                  selected.remove(i);
+                                } else {
+                                  selected.add(i);
+                                }
+                              }),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: AppPill(
+                              label: '取消',
+                              height: 40,
+                              onTap: () => Navigator.pop(ctx, false),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: AppPill(
+                              label: '开始下载',
+                              height: 40,
+                              selected: true,
+                              onTap: () => Navigator.pop(ctx, true),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (ok != true || !mounted) return;
+    if (selected.isEmpty) {
+      setState(() => _status = '请先勾选集数');
+      return;
+    }
+    final episodes = selected.toList()..sort();
+    final n = eps.length;
+    final payload = episodes.map((i) {
+      final ep = eps[i];
+      final rawIndex = _reversed ? (n - 1 - i) : i;
+      return {
+        'index': rawIndex,
+        'name': ep.name,
+        'url': ep.url,
+      };
+    }).toList();
+    try {
+      final res = await LocalDownload.enqueue(
+        site: _detailSite(),
+        vodId: _detailId(),
+        title: (d.name).trim().isEmpty ? _routeTitle : d.name.trim(),
+        flag: flag,
+        pic: d.pic,
+        episodes: payload,
+      );
+      final n = res['count'] ?? payload.length;
+      if (!mounted) return;
+      setState(() => _status = '已加入 $n 个下载任务');
+      final go = await showDialog<bool>(
+        context: context,
+        useRootNavigator: true,
+        builder: (ctx) {
+          final pal = KotvPalette.of(ctx);
+          return AlertDialog(
+            backgroundColor: pal.dialogBg,
+            title: Text('已加入下载', style: TextStyle(color: pal.fg)),
+            content: Text('已入队 $n 集。是否打开下载任务？',
+                style: TextStyle(color: pal.muted)),
+            actions: [
+              KotvFocusAction(
+                  label: '稍后',
+                  color: pal.muted,
+                  onPressed: () => Navigator.pop(ctx, false)),
+              KotvFocusAction(
+                  label: '查看任务',
+                  color: pal.fg,
+                  onPressed: () => Navigator.pop(ctx, true)),
+            ],
+          );
+        },
+      );
+      if (go == true && mounted) {
+        unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.download)));
+      }
+    } catch (e) {
+      if (mounted) setState(() => _status = '下载入队失败: $e');
+    }
   }
 
   Future<void> _pickParse() async {

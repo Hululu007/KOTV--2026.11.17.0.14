@@ -22,6 +22,7 @@ import '../widgets/auth_gate.dart';
 import '../widgets/chrome.dart';
 import 'collect_screen.dart';
 import 'detail_screen.dart';
+import 'download_screen.dart';
 import 'file_browser_screen.dart';
 import 'history_screen.dart';
 import 'live_screen.dart';
@@ -164,7 +165,12 @@ class _AppShellState extends ConsumerState<AppShell> {
       KotvPage.video => 0,
       KotvPage.live => 1,
       KotvPage.search => 2,
-      KotvPage.profile || KotvPage.history || KotvPage.collect || KotvPage.settings => 3,
+      KotvPage.profile ||
+      KotvPage.history ||
+      KotvPage.collect ||
+      KotvPage.settings ||
+      KotvPage.download =>
+        3,
     };
   }
 
@@ -189,6 +195,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       KotvPage.settings => const SettingsScreen(),
       KotvPage.profile => const ProfileScreen(),
       KotvPage.collect => const CollectScreen(),
+      KotvPage.download => const DownloadScreen(),
     };
   }
 

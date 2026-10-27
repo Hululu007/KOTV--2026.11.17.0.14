@@ -353,7 +353,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ('历史记录', KotvPage.history),
                       ('我的收藏', KotvPage.collect),
                       if (!bottomNav) ('直播', KotvPage.live),
-                      ('设置', KotvPage.settings),
+                      ('我的下载', KotvPage.download),
                       ('检测爬虫', KotvPage.settings),
                     ])
                       SizedBox(
@@ -383,7 +383,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         ('历史记录', KotvPage.history),
                         ('我的收藏', KotvPage.collect),
                         ('直播', KotvPage.live),
-                        ('设置', KotvPage.settings),
+                        ('我的下载', KotvPage.download),
                       ]) ...[
                         Expanded(child: AppPill(label: e.$1, height: 46, onTap: () => goKotvPage(ref, e.$2))),
                         SizedBox(width: 14 * s),

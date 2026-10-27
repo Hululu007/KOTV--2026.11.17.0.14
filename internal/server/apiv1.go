@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -52,6 +53,11 @@ type ContentAPI interface {
 	APICancelPending(opts map[string]any) map[string]any
 	APISessionPing() map[string]any
 	APISessionLeave() map[string]any
+	APIDownloadList() map[string]any
+	APIDownloadEnqueue(body map[string]any) (map[string]any, error)
+	APIDownloadCancel(id string) map[string]any
+	APIDownloadRemove(id string, deleteFile bool) map[string]any
+	APIDownloadClearFinished() map[string]any
 	PurgeUserData(userID string)
 }
 
@@ -119,6 +125,7 @@ func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/player", wrap(s.handleAPIv1Player))
 	mux.HandleFunc("/api/v1/tools", wrap(s.handleAPIv1Tools))
 	mux.HandleFunc("/api/v1/cancel", wrap(s.handleAPIv1Cancel))
+	mux.HandleFunc("/api/v1/download", wrap(s.handleAPIv1Download))
 	mux.HandleFunc("/api/v1/shutdown", wrap(s.handleAPIv1Shutdown))
 }
 
@@ -486,6 +493,53 @@ func (s *Server) handleAPIv1BtProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.APIBtProgress())
+}
+
+func (s *Server) handleAPIv1Download(w http.ResponseWriter, r *http.Request) {
+	if wroteOptions(w, r) {
+		return
+	}
+	api := s.content()
+	if rejectNoContent(w, api) {
+		return
+	}
+	if r.Method == http.MethodGet {
+		writeJSON(w, http.StatusOK, api.APIDownloadList())
+		return
+	}
+	if rejectUnlessPost(w, r) {
+		return
+	}
+	var body map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if body == nil {
+		body = map[string]any{}
+	}
+	action := strings.TrimSpace(r.URL.Query().Get("action"))
+	if action == "" {
+		action = strings.TrimSpace(fmt.Sprint(body["action"]))
+	}
+	switch action {
+	case "", "enqueue":
+		out, err := api.APIDownloadEnqueue(body)
+		if rejectBadGateway(w, err) {
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+	case "cancel":
+		id := strings.TrimSpace(fmt.Sprint(body["id"]))
+		writeJSON(w, http.StatusOK, api.APIDownloadCancel(id))
+	case "remove":
+		id := strings.TrimSpace(fmt.Sprint(body["id"]))
+		del := body["deleteFile"] == true || fmt.Sprint(body["deleteFile"]) == "true"
+		writeJSON(w, http.StatusOK, api.APIDownloadRemove(id, del))
+	case "clearFinished":
+		writeJSON(w, http.StatusOK, api.APIDownloadClearFinished())
+	case "list":
+		writeJSON(w, http.StatusOK, api.APIDownloadList())
+	default:
+		writeAPIError(w, http.StatusBadRequest, "unknown download action")
+	}
 }
 
 func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {

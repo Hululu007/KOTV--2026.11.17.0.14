@@ -1764,6 +1764,71 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (v != null) await _setAd(v == 'on');
   }
 
+  Future<void> _openDownloadSheet() async {
+    await _showPlayerSubSheet(
+      title: '下载设置',
+      buildChildren: (setSheet) {
+        final dir = g('downloadDir');
+        final rule = g('downloadNameRule', '{title}/{flag}_{ep}.{ext}');
+        final classify = g('downloadClassify', 'true');
+        final classifyOn =
+            classify.isEmpty || classify == 'true' || classify == '1';
+        return [
+          ListTile(
+            title: Text('下载目录', style: TextStyle(color: KotvPalette.of(context).fg)),
+            subtitle: Text(dir.trim().isEmpty ? '系统默认 Downloads' : dir,
+                style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12)),
+            onTap: () async {
+              await _prompt('下载目录', '绝对路径；空=系统 Downloads', dir, (v) async {
+                await _set('downloadDir', v.trim(), msg: '下载目录已保存');
+                setSheet(() {});
+              });
+            },
+          ),
+          ListTile(
+            title: Text('命名规则', style: TextStyle(color: KotvPalette.of(context).fg)),
+            subtitle: Text(rule,
+                style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12)),
+            onTap: () async {
+              await _prompt(
+                  '命名规则',
+                  '{title} {flag} {ep} {ext}',
+                  rule, (v) async {
+                final next = v.trim().isEmpty
+                    ? '{title}/{flag}_{ep}.{ext}'
+                    : v.trim();
+                await _set('downloadNameRule', next, msg: '命名规则已保存');
+                setSheet(() {});
+              });
+            },
+          ),
+          _sheetToggle(
+            label: '按片名分目录',
+            value: classifyOn,
+            onChanged: (next) async {
+              await _set('downloadClassify', next ? 'true' : 'false',
+                  msg: next ? '已按片名分目录' : '已关闭分目录');
+              setSheet(() {});
+            },
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: AppPill(
+              label: '打开下载任务',
+              height: 42,
+              selected: true,
+              onTap: () {
+                Navigator.pop(context);
+                goKotvPage(ref, KotvPage.download);
+              },
+            ),
+          ),
+        ];
+      },
+    );
+  }
+
   Future<void> _checkUpdate() async {
     final data = await _runTool(
         '检查更新中', () => ref.read(apiProvider).tools('checkUpdate'));
@@ -2715,6 +2780,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     const KotvSettingsSectionTitle('功能'),
                     KotvSettingsCard(children: [
                       KotvSettingsGrid(children: [
+                        KotvSettingsCell(
+                          label: '下载设置',
+                          value: g('downloadDir').trim().isEmpty
+                              ? '默认目录'
+                              : _ellipsize(g('downloadDir'), 18),
+                          onTap: () => unawaited(_openDownloadSheet()),
+                        ),
                         KotvSettingsCell(
                             label: '广告过滤', value: adLabel, onTap: _pickAd),
                         KotvSettingsCell(

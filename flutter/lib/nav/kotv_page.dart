@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// 宽屏单栈换页；竖屏窄窗用底部菜单（普通 App）。
-enum KotvPage { video, search, history, live, settings, profile, collect }
+enum KotvPage { video, search, history, live, settings, profile, collect, download }
 
 final kotvPageProvider = StateProvider<KotvPage>((ref) => KotvPage.video);
 

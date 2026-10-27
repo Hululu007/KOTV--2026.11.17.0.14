@@ -17,6 +17,7 @@ import (
 	"github.com/bobo/KOTV/internal/danmaku"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/dlna"
+	"github.com/bobo/KOTV/internal/download"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
 	"github.com/bobo/KOTV/internal/model"
@@ -120,6 +121,8 @@ func New() (*App, error) {
 		}
 	})
 	a.Server.SetContentAPI(a)
+	download.SetResolver(a)
+	download.Start()
 	a.Server.SetMediaProvider(func() map[string]string {
 		return remote.SnapshotMedia()
 	})

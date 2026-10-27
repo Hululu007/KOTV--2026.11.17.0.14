@@ -10,6 +10,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -166,6 +168,141 @@ func Fetch(raw string) (string, error) {
 	// playerContent 前 Source.stop：先停旧任务再起新 Fetch。
 	stopPlatform()
 	return tryAndroidFetch(raw)
+}
+
+// SaveToFile 迅雷起播后把返回地址整文件拉到 dest。
+func SaveToFile(ctx context.Context, raw, dest string, onProg func(bytes, total int64, msg string)) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	u, err := Fetch(raw)
+	if err != nil {
+		return err
+	}
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return fmt.Errorf("迅雷返回空地址")
+	}
+	if onProg != nil {
+		onProg(0, 0, "迅雷拉取中…")
+	}
+	if strings.HasPrefix(u, "file://") {
+		src := strings.TrimPrefix(u, "file://")
+		return copyFileProgress(ctx, src, dest, onProg)
+	}
+	if strings.HasPrefix(u, "/") && !strings.Contains(u, "://") {
+		return copyFileProgress(ctx, u, dest, onProg)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("迅雷下载 HTTP %d", resp.StatusCode)
+	}
+	total := resp.ContentLength
+	_ = os.MkdirAll(filepath.Dir(dest), 0o755)
+	tmp := dest + ".part"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	buf := make([]byte, 256*1024)
+	var written int64
+	for {
+		if ctx.Err() != nil {
+			_ = f.Close()
+			_ = os.Remove(tmp)
+			return ctx.Err()
+		}
+		nr, er := resp.Body.Read(buf)
+		if nr > 0 {
+			nw, ew := f.Write(buf[:nr])
+			written += int64(nw)
+			if onProg != nil {
+				onProg(written, total, "迅雷下载中…")
+			}
+			if ew != nil {
+				_ = f.Close()
+				_ = os.Remove(tmp)
+				return ew
+			}
+		}
+		if er == io.EOF {
+			break
+		}
+		if er != nil {
+			_ = f.Close()
+			_ = os.Remove(tmp)
+			return er
+		}
+	}
+	_ = f.Close()
+	_ = os.Remove(dest)
+	if err := os.Rename(tmp, dest); err != nil {
+		return err
+	}
+	if onProg != nil {
+		onProg(written, written, "迅雷已保存")
+	}
+	return nil
+}
+
+func copyFileProgress(ctx context.Context, src, dest string, onProg func(bytes, total int64, msg string)) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	st, _ := in.Stat()
+	var total int64
+	if st != nil {
+		total = st.Size()
+	}
+	_ = os.MkdirAll(filepath.Dir(dest), 0o755)
+	tmp := dest + ".part"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	buf := make([]byte, 256*1024)
+	var written int64
+	for {
+		if ctx.Err() != nil {
+			_ = out.Close()
+			_ = os.Remove(tmp)
+			return ctx.Err()
+		}
+		nr, er := in.Read(buf)
+		if nr > 0 {
+			nw, ew := out.Write(buf[:nr])
+			written += int64(nw)
+			if onProg != nil {
+				onProg(written, total, "迅雷导出中…")
+			}
+			if ew != nil {
+				_ = out.Close()
+				_ = os.Remove(tmp)
+				return ew
+			}
+		}
+		if er == io.EOF {
+			break
+		}
+		if er != nil {
+			_ = out.Close()
+			_ = os.Remove(tmp)
+			return er
+		}
+	}
+	_ = out.Close()
+	_ = os.Remove(dest)
+	return os.Rename(tmp, dest)
 }
 
 // ClearStorage 清理 Android 迅雷缓存。

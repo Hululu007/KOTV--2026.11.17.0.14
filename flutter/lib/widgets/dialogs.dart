@@ -178,12 +178,14 @@ Future<void> showSitePicker(
   final homeIdx = sites.indexWhere((s) => s.home);
   final focusIdx = homeIdx >= 0 ? homeIdx : 0;
   final scrollCtrl = KotvJumpController();
+  final filterCtrl = TextEditingController();
   var pinnedFocus = -2;
   var pinnedStride = -1.0;
   await showDialog<void>(
     context: context,
     builder: (ctx) {
-      var local = List<SiteInfo>.from(sites);
+      var all = List<SiteInfo>.from(sites);
+      var filter = '';
       final m = _dialogMetrics(ctx);
       return StatefulBuilder(
         builder: (ctx, setLocal) {
@@ -193,15 +195,27 @@ Future<void> showSitePicker(
                 .whereType<Map>()
                 .map((e) => SiteInfo.fromJson(Map<String, dynamic>.from(e)))
                 .toList();
-            setLocal(() => local = list);
+            setLocal(() => all = list);
             ref.invalidate(configProvider);
           }
 
+          final q = filter.trim().toLowerCase();
+          final local = q.isEmpty
+              ? all
+              : all
+                  .where((s) =>
+                      s.name.toLowerCase().contains(q) ||
+                      s.key.toLowerCase().contains(q))
+                  .toList();
           final curHomeIdx = local.indexWhere((s) => s.home);
-          final curFocus = curHomeIdx >= 0 ? curHomeIdx : focusIdx;
+          final curFocus = curHomeIdx >= 0
+              ? curHomeIdx
+              : (local.isEmpty ? -1 : (focusIdx < local.length ? focusIdx : 0));
           final stride = _pillRowStride(ctx,
               pillHeight: m.compact ? 40 : 44, gap: m.compact ? 4 : 8);
-          if (pinnedFocus != curFocus || (pinnedStride - stride).abs() > 0.5) {
+          if (curFocus >= 0 &&
+              (pinnedFocus != curFocus ||
+                  (pinnedStride - stride).abs() > 0.5)) {
             pinnedFocus = curFocus;
             pinnedStride = stride;
             final offset = curFocus <= 0 ? 0.0 : curFocus * stride;
@@ -213,6 +227,7 @@ Future<void> showSitePicker(
             }
           }
 
+          final pal = KotvPalette.of(ctx);
           return Dialog(
             backgroundColor: Colors.transparent,
             insetPadding: m.inset,
@@ -221,9 +236,9 @@ Future<void> showSitePicker(
               height: m.height,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: KotvPalette.of(ctx).dialogBg,
+                  color: pal.dialogBg,
                   borderRadius: BorderRadius.circular(18 * m.ui),
-                  border: Border.all(color: KotvPalette.of(ctx).outline),
+                  border: Border.all(color: pal.outline),
                 ),
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(
@@ -240,7 +255,7 @@ Future<void> showSitePicker(
                             child: Text(
                               '换源',
                               style: TextStyle(
-                                color: KotvPalette.of(ctx).fg,
+                                color: pal.fg,
                                 fontSize: m.compact ? 20 : 26,
                                 fontWeight: FontWeight.w700,
                                 height: 1.2,
@@ -263,14 +278,40 @@ Future<void> showSitePicker(
                             : TextOverflow.visible,
                         softWrap: !m.compact,
                         style: TextStyle(
-                          color: KotvPalette.of(ctx).muted,
+                          color: pal.muted,
                           fontSize: m.compact ? 11 : 14,
                           height: m.compact ? 1.1 : 1.35,
                         ),
                       ),
-                      SizedBox(height: m.compact ? 10 : 16),
+                      SizedBox(height: m.compact ? 8 : 12),
+                      KotvTvTextField(
+                        controller: filterCtrl,
+                        style: TextStyle(color: pal.fg),
+                        cursorColor: pal.primary,
+                        decoration: InputDecoration(
+                          hintText: '搜索站源',
+                          hintStyle: TextStyle(color: pal.muted),
+                          filled: true,
+                          fillColor: pal.input,
+                          prefixIcon: Icon(Icons.search, color: pal.muted),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: m.compact ? 10 : 12,
+                          ),
+                        ),
+                        onChanged: (v) => setLocal(() => filter = v),
+                      ),
+                      SizedBox(height: m.compact ? 8 : 12),
                       Expanded(
-                        child: ListView.separated(
+                        child: local.isEmpty
+                            ? Center(
+                                child: Text(
+                                  q.isEmpty ? '暂无站源' : '无匹配的站源',
+                                  style: TextStyle(color: pal.muted),
+                                ),
+                              )
+                            : ListView.separated(
                           controller: scrollCtrl,
                           itemCount: local.length,
                           separatorBuilder: (_, __) =>
@@ -394,6 +435,7 @@ Future<void> showSitePicker(
     },
   );
   scrollCtrl.dispose();
+  filterCtrl.dispose();
 }
 
 Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {

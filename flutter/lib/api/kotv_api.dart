@@ -280,6 +280,26 @@ class KotvApi {
 
   Future<Map<String, dynamic>> btProgress() => _get('/api/v1/bt/progress');
 
+  Future<Map<String, dynamic>> downloadList() =>
+      _get('/api/v1/download', {'action': 'list'});
+
+  Future<Map<String, dynamic>> downloadEnqueue(Map<String, dynamic> body) =>
+      _post('/api/v1/download', {'action': 'enqueue', ...body});
+
+  Future<Map<String, dynamic>> downloadCancel(String id) =>
+      _post('/api/v1/download', {'action': 'cancel', 'id': id});
+
+  Future<Map<String, dynamic>> downloadRemove(String id,
+          {bool deleteFile = false}) =>
+      _post('/api/v1/download', {
+        'action': 'remove',
+        'id': id,
+        'deleteFile': deleteFile,
+      });
+
+  Future<Map<String, dynamic>> downloadClearFinished() =>
+      _post('/api/v1/download', {'action': 'clearFinished'});
+
   Future<Map<String, dynamic>> search(
     String keyword, {
     List<String>? sites,

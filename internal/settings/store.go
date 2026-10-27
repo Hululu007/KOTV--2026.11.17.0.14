@@ -64,6 +64,10 @@ const (
 	RemoteAuth    Type = "remoteAuth"    // 允许非本机连入并强制登录，默认 false
 	AllowRegister Type = "allowRegister" // 开放注册，默认 false
 
+	DownloadDir      Type = "downloadDir"      // 下载目录；空则 paths.Downloads()
+	DownloadNameRule Type = "downloadNameRule" // 命名规则，默认 {title}/{flag}_{ep}.{ext}
+	DownloadClassify Type = "downloadClassify" // 按片名建子目录，默认 true
+
 	// 播放细项（须进 APIGetSettings 白名单，否则冷启动丢设置）。
 	AudioPassThrough         Type = "audioPassThrough"
 	ExoDiskCache             Type = "exoDiskCache"
@@ -254,6 +258,9 @@ func defaultFile() file {
 			{ID: "deviceUUID", Label: "设备标识", Value: ""},
 			{ID: "remoteAuth", Label: "远端鉴权", Value: "false"},
 			{ID: "allowRegister", Label: "开放注册", Value: "false"},
+			{ID: "downloadDir", Label: "下载目录", Value: ""},
+			{ID: "downloadNameRule", Label: "下载命名", Value: "{title}/{flag}_{ep}.{ext}"},
+			{ID: "downloadClassify", Label: "下载按片名分目录", Value: "true"},
 			{ID: "audioPassThrough", Label: "音频直通", Value: "true"},
 			{ID: "exoDiskCache", Label: "Exo磁盘缓存", Value: "false"},
 			{ID: "exoAdblock", Label: "Exo去广告", Value: "true"},
