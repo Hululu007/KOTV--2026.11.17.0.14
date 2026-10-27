@@ -3935,7 +3935,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             final m = _actionMetrics();
             final n = actions.length;
             final fit = (c.maxWidth - m.gap * (n - 1)) / n;
-            final w = math.min(m.w, fit);
+            // 向下取整，累加不会因浮点误差超出可用宽度。
+            final w = math.min(m.w, fit).floorToDouble();
             return Row(
               children: [
                 for (var i = 0; i < n; i++) ...[
@@ -4015,30 +4016,26 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (pageEps.isEmpty)
             Text('无剧集', style: TextStyle(color: muted))
           else
-            LayoutBuilder(
-              builder: (context, c) {
-                final cols = compact ? 3 : 6;
-                final w = (c.maxWidth - gap * (cols - 1)) / cols;
-                return Wrap(
-                  spacing: gap,
-                  runSpacing: gap,
-                  children: [
-                    for (var i = 0; i < pageEps.length; i++)
-                      SizedBox(
-                        width: w,
-                        height: epH * ui,
-                        child: EpisodeChip(
-                          label: pageEps[i].name,
-                          selected: _epIdx == _epPage * _epSize + i,
-                          autofocus: false,
-                          height: epH,
-                          fontSize: epFs,
-                          onTap: () => _playAt(_epPage * _epSize + i),
-                        ),
-                      ),
-                  ],
-                );
-              },
+            // 固定列数网格：格宽随可用宽度均分。勿用算好宽度的 Wrap——
+            // Win7 线 Flutter 3.19 的 Wrap 无浮点容差，某些窗口宽度会把末列挤到下一行。
+            GridView.builder(
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: compact ? 3 : 6,
+                mainAxisSpacing: gap,
+                crossAxisSpacing: gap,
+                mainAxisExtent: epH * ui,
+              ),
+              itemCount: pageEps.length,
+              itemBuilder: (_, i) => EpisodeChip(
+                label: pageEps[i].name,
+                selected: _epIdx == _epPage * _epSize + i,
+                height: epH,
+                fontSize: epFs,
+                onTap: () => _playAt(_epPage * _epSize + i),
+              ),
             ),
         ],
       );
