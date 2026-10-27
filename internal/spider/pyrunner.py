@@ -650,7 +650,7 @@ def _ensure_ssl_certs():
 
 _ensure_ssl_certs()
 
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 from urllib.request import urlopen
 import base64
 
@@ -781,6 +781,8 @@ def _download_dep(name):
     dep_url = urljoin(api, os.path.basename(name))
     if not str(dep_url).startswith("http"):
         return
+    # 仓库路径常含中文/emoji，urlopen 只收 ASCII；保留 % 以免把已编码部分再编一次。
+    dep_url = quote(dep_url, safe=":/?#[]@!$&'()*+,;=%~")
     lock = _acquire_download(target + ".lock")
     if lock is None:
         return
