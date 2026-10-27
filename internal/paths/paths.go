@@ -70,10 +70,11 @@ func JarPath(md5 string) string {
 	return filepath.Join(JarCache(), md5+".jar")
 }
 
-// Downloads 引擎默认下载目录（设置 downloadDir 为空时使用）。
-// 各平台一律优先系统「下载」文件夹（资源管理器 / Finder / 文件管理器可见）：
-// Windows/macOS/Linux → ~/Downloads；Android → …/Download。
-// 只有没有公共下载或建目录失败时，才落到应用私有 Root()/downloads（如 iOS）。
+// Downloads 引擎主机上的默认下载目录（设置 downloadDir 为空时使用）。
+// 下载落在跑引擎的那台机器上：Windows/macOS/Linux → ~/Downloads；
+// Android → …/Download。均优先系统可见的「下载」文件夹。
+// iOS 无本机引擎，不会在本机执行本函数；远端下载仍走对方引擎的 Downloads()。
+// 公共目录不可用时回落 Root()/downloads。
 func Downloads() string {
 	if p := publicDownloadsDir(); p != "" {
 		return p
