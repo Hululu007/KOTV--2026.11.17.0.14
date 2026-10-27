@@ -10,6 +10,10 @@ export PATH="${HOME}/flutter/bin:${PATH}"
 if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
   export PUB_HOSTED_URL="${PUB_HOSTED_URL:-https://pub.dev}"
   export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.googleapis.com}"
+  # macos-14 默认 Xcode 15.4 / Swift 5.10 编不过新版 video_player_avfoundation。
+  # shellcheck source=kotv-select-xcode.sh
+  source "$ROOT/scripts/kotv-select-xcode.sh"
+  kotv_select_newest_xcode
 else
   export PUB_HOSTED_URL="${PUB_HOSTED_URL:-https://pub.flutter-io.cn}"
   export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flutter-io.cn}"

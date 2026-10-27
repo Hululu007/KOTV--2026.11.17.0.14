@@ -1778,21 +1778,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       current: cur.trim().isEmpty ? 'default' : 'custom',
       options: const [
         (DownloadSettings.defaultDirLabel, 'default'),
-        ('浏览引擎目录…', 'pick'),
+        (DownloadSettings.browseDirLabel, 'pick'),
       ],
     );
     if (mode == null || !mounted) return;
     if (mode == 'default') {
-      await _set('downloadDir', '', msg: '已恢复${DownloadSettings.defaultDirLabel}');
+      await _set('downloadDir', '', msg: DownloadSettings.restoredDirMsg);
       return;
     }
-    final path = await kotvPickEngineDirectory(context, title: '选择引擎下载目录');
+    final path = await kotvPickEngineDirectory(
+      context,
+      title: DownloadSettings.pickDirTitle,
+    );
     if (!mounted) return;
     if (path == null || path.trim().isEmpty) {
       setState(() => _status = '未选择目录');
       return;
     }
-    await _set('downloadDir', path.trim(), msg: '引擎下载目录已保存');
+    await _set('downloadDir', path.trim(), msg: DownloadSettings.savedDirMsg);
   }
 
   Future<void> _pickDownloadNameRule() => _pick(

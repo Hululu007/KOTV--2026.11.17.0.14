@@ -220,7 +220,7 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
     final ui = LayoutScale.grow(context);
-    final pathLabel = _dir.trim().isEmpty ? '引擎可浏览位置' : _dir;
+    final pathLabel = _dir.trim().isEmpty ? '可浏览位置' : _dir;
     return PopScope(
       canPop: _isRoot,
       onPopInvoked: (didPop) {

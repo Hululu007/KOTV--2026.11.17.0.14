@@ -14,20 +14,9 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
   export PUB_HOSTED_URL="${PUB_HOSTED_URL:-https://pub.dev}"
   export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.googleapis.com}"
-  # macos-14 的默认 Xcode 仍是 15.4（iOS 17.5 SDK）。选当前镜像里最新的 Xcode 26。
-  xcode="$(python3 - <<'PY'
-import glob, re
-cands = glob.glob("/Applications/Xcode_26*.app") or glob.glob("/Applications/Xcode_*.app")
-def key(path):
-    m = re.search(r"Xcode_(\d+(?:\.\d+)*)", path)
-    return tuple(int(x) for x in m.group(1).split(".")) if m else (0,)
-print(max(cands, key=key) if cands else "")
-PY
-)"
-  if [[ -n "${xcode:-}" ]]; then
-    sudo xcode-select -s "$xcode"
-  fi
-  xcodebuild -version
+  # shellcheck source=kotv-select-xcode.sh
+  source "$ROOT/scripts/kotv-select-xcode.sh"
+  kotv_select_newest_xcode
   xcodebuild -showsdks | awk '/iphoneos/ { print }'
 fi
 

@@ -59,7 +59,7 @@ Future<String?> kotvPickLocalFile(
   return file.path;
 }
 
-/// 选引擎本机目录（下载落盘在后端设备，须浏览引擎侧路径，而非前端沙盒）。
+/// 选后端主机目录（下载落盘在跑服务的机器上，不是前端沙盒）。
 Future<String?> kotvPickEngineDirectory(
   BuildContext context, {
   String title = '选择目录',

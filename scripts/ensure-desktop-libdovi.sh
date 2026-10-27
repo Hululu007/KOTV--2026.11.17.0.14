@@ -88,12 +88,18 @@ cargo_c_host_runs() {
   "$1" --version >/dev/null 2>&1
 }
 
+macos_hw_is_arm64() {
+  [[ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" == "1" ]]
+}
+
 install_cargo_c_from_source() {
   local bindir="$1"
-  echo "==> cargo-c: build v${CARGO_C_VER} for host $(uname -m)"
+  echo "==> cargo-c: build v${CARGO_C_VER} for host $(uname -m) (clean pkg-config)"
   rm -rf "$bindir"
   mkdir -p "$bindir"
-  cargo install cargo-c --locked --version "$CARGO_C_VER" --root "$bindir"
+  # PREFIX 的 pkg-config（交叉编 x86_64 时是 Intel 库）会污染 host 链接。
+  env -u PKG_CONFIG_PATH -u PKG_CONFIG_LIBDIR -u LIBRARY_PATH -u CPATH \
+    cargo install cargo-c --locked --version "$CARGO_C_VER" --root "$bindir"
   if [[ -x "$bindir/bin/cargo-cinstall" ]]; then
     cp -f "$bindir/bin/cargo-cinstall" "$bindir/cargo-cinstall"
     cp -f "$bindir/bin/cargo-capi" "$bindir/cargo-capi" 2>/dev/null || true
@@ -101,6 +107,17 @@ install_cargo_c_from_source() {
     cp -f "$bindir/bin/cargo-ctest" "$bindir/cargo-ctest" 2>/dev/null || true
   fi
   export PATH="$bindir:$bindir/bin:$PATH"
+}
+
+fetch_cargo_c_macos_zip() {
+  local bindir="$1"
+  local url dest
+  url="https://github.com/lu-zero/cargo-c/releases/download/v${CARGO_C_VER}/cargo-c-macos.zip"
+  dest="$BUILD_DIR/cargo-c-v${CARGO_C_VER}-macos.zip"
+  echo "==> fetch cargo-c v${CARGO_C_VER} (macos zip)"
+  curl -fsSL --retry 5 --retry-delay 2 -o "$dest" "$url"
+  need unzip
+  unzip -o "$dest" -d "$bindir"
 }
 
 ensure_cargo_c() {
@@ -114,11 +131,32 @@ ensure_cargo_c() {
   fi
   rm -f "$bindir"/cargo-capi "$bindir"/cargo-cbuild "$bindir"/cargo-cinstall "$bindir"/cargo-ctest \
     "$bindir"/cargo-capi.exe "$bindir"/cargo-cbuild.exe "$bindir"/cargo-cinstall.exe "$bindir"/cargo-ctest.exe
-  # v0.10.25 的 cargo-c-macos.zip 只有 arm64，Intel 上会 Bad CPU type。
-  if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "x86_64" ]]; then
-    install_cargo_c_from_source "$bindir"
-    command -v cargo-cinstall >/dev/null || { echo "ERROR: cargo-cinstall missing" >&2; exit 1; }
-    echo "ok cargo-cinstall=$(command -v cargo-cinstall) (v${CARGO_C_VER}, host build)"
+  # macOS：官方 zip 仅 arm64。Apple Silicon（含 arch -x86_64 / Rosetta）直接用 zip；
+  # 真 Intel 才源码编，且清掉 PREFIX pkg-config，避免链到交叉产物的 libz。
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    if macos_hw_is_arm64 || [[ "$(uname -m)" == "arm64" ]]; then
+      fetch_cargo_c_macos_zip "$bindir"
+    elif [[ "$(uname -m)" == "x86_64" ]]; then
+      install_cargo_c_from_source "$bindir"
+      command -v cargo-cinstall >/dev/null || { echo "ERROR: cargo-cinstall missing" >&2; exit 1; }
+      echo "ok cargo-cinstall=$(command -v cargo-cinstall) (v${CARGO_C_VER}, host build)"
+      return 0
+    else
+      fetch_cargo_c_macos_zip "$bindir"
+    fi
+    chmod +x "$bindir"/cargo-c* 2>/dev/null || true
+    if [[ ! -x "$bindir/cargo-cinstall" ]]; then
+      local f
+      f="$(find "$bindir" -type f -name 'cargo-cinstall' 2>/dev/null | head -1 || true)"
+      if [[ -n "$f" ]]; then
+        ln -sfn "$f" "$bindir/cargo-cinstall"
+        ln -sfn "$(dirname "$f")"/cargo-capi "$bindir/cargo-capi" 2>/dev/null || true
+        ln -sfn "$(dirname "$f")"/cargo-cbuild "$bindir/cargo-cbuild" 2>/dev/null || true
+      fi
+    fi
+    export PATH="$bindir:$PATH"
+    command -v cargo-cinstall >/dev/null || { echo "ERROR: cargo-cinstall missing after macos zip v${CARGO_C_VER}" >&2; ls -laR "$bindir" >&2; exit 1; }
+    echo "ok cargo-cinstall=$(command -v cargo-cinstall) (v${CARGO_C_VER}, macos zip)"
     return 0
   fi
   echo "==> fetch cargo-c v${CARGO_C_VER}"
@@ -126,12 +164,6 @@ ensure_cargo_c() {
   if is_windows; then
     url="https://github.com/lu-zero/cargo-c/releases/download/v${CARGO_C_VER}/cargo-c-windows-gnu.zip"
     dest="$BUILD_DIR/cargo-c-v${CARGO_C_VER}-windows-gnu.zip"
-    curl -fsSL --retry 5 --retry-delay 2 -o "$dest" "$url"
-    need unzip
-    unzip -o "$dest" -d "$bindir"
-  elif [[ "$(uname -s)" == "Darwin" ]]; then
-    url="https://github.com/lu-zero/cargo-c/releases/download/v${CARGO_C_VER}/cargo-c-macos.zip"
-    dest="$BUILD_DIR/cargo-c-v${CARGO_C_VER}-macos.zip"
     curl -fsSL --retry 5 --retry-delay 2 -o "$dest" "$url"
     need unzip
     unzip -o "$dest" -d "$bindir"

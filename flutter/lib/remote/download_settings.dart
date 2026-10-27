@@ -102,7 +102,11 @@ class DownloadSettings {
     return n;
   }
 
-  static const defaultDirLabel = '引擎默认下载目录';
+  static const defaultDirLabel = '默认目录';
+  static const browseDirLabel = '浏览目录…';
+  static const pickDirTitle = '选择下载目录';
+  static const savedDirMsg = '下载目录已保存';
+  static const restoredDirMsg = '已恢复默认目录';
 
   static String dirLabel(String dir) {
     final d = dir.trim();

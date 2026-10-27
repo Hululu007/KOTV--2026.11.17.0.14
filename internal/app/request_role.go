@@ -15,7 +15,7 @@ func currentRequestIsAdmin() bool {
 	return u != nil && u.Role == auth.RoleAdmin && u.Enabled
 }
 
-// canBrowseEngineFS 本机或远端管理员可浏览引擎目录（下载落盘选型）。
+// canBrowseEngineFS 本机或远端管理员可浏览主机目录（下载落盘选型）。
 func canBrowseEngineFS() bool {
 	return currentRequestIsAdmin()
 }
