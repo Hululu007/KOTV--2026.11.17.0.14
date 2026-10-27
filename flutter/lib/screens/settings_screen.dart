@@ -21,7 +21,9 @@ import '../player/play_headers.dart';
 import '../player/video_eq.dart';
 import '../providers.dart';
 import '../api/kotv_settings_cache.dart';
+import '../remote/download_settings.dart';
 import '../remote/remote_bridge.dart';
+import '../util/pick_local_file.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_theme.dart';
@@ -1764,50 +1766,90 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (v != null) await _setAd(v == 'on');
   }
 
+  Future<void> _pickDownloadDir() async {
+    final cur = g('downloadDir');
+    final mode = await pickChoice(
+      context,
+      title: '下载目录',
+      current: cur.trim().isEmpty ? 'default' : 'custom',
+      options: const [
+        ('系统默认 Downloads', 'default'),
+        ('选择文件夹…', 'pick'),
+      ],
+    );
+    if (mode == null || !mounted) return;
+    if (mode == 'default') {
+      await _set('downloadDir', '', msg: '已恢复系统默认下载目录');
+      return;
+    }
+    final path = await kotvPickLocalDirectory(context, title: '选择下载目录');
+    if (!mounted) return;
+    if (path == null || path.trim().isEmpty) {
+      setState(() => _status = '未选择目录');
+      return;
+    }
+    await _set('downloadDir', path.trim(), msg: '下载目录已保存');
+  }
+
+  Future<void> _pickDownloadNameRule() async {
+    final cur = DownloadSettings.normalizeNameRule(g('downloadNameRule'));
+    final v = await pickChoice(
+      context,
+      title: '文件命名',
+      current: cur,
+      options: DownloadSettings.nameRuleOptions,
+    );
+    if (v == null) return;
+    await _set('downloadNameRule', v, msg: '命名规则已保存');
+  }
+
+  Future<void> _pickDownloadClassify() async {
+    final cur = g('downloadClassify', 'true');
+    final on = cur.trim().isEmpty || cur == 'true' || cur == '1';
+    final v = await pickChoice(
+      context,
+      title: '目录分类',
+      current: on ? 'true' : 'false',
+      options: DownloadSettings.classifyOptions,
+    );
+    if (v == null) return;
+    await _set('downloadClassify', v,
+        msg: v == 'true' ? '已按片名建子目录' : '已全部放在下载根目录');
+  }
+
   Future<void> _openDownloadSheet() async {
     await _showPlayerSubSheet(
       title: '下载设置',
       buildChildren: (setSheet) {
         final dir = g('downloadDir');
-        final rule = g('downloadNameRule', '{title}/{flag}_{ep}.{ext}');
+        final rule = DownloadSettings.normalizeNameRule(g('downloadNameRule'));
         final classify = g('downloadClassify', 'true');
-        final classifyOn =
-            classify.isEmpty || classify == 'true' || classify == '1';
+        final p = KotvPalette.of(context);
         return [
           ListTile(
-            title: Text('下载目录', style: TextStyle(color: KotvPalette.of(context).fg)),
-            subtitle: Text(dir.trim().isEmpty ? '系统默认 Downloads' : dir,
-                style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12)),
+            title: Text('下载目录', style: TextStyle(color: p.fg)),
+            subtitle: Text(DownloadSettings.dirLabel(dir),
+                style: TextStyle(color: p.muted, fontSize: 12)),
             onTap: () async {
-              await _prompt('下载目录', '绝对路径；空=系统 Downloads', dir, (v) async {
-                await _set('downloadDir', v.trim(), msg: '下载目录已保存');
-                setSheet(() {});
-              });
+              await _pickDownloadDir();
+              setSheet(() {});
             },
           ),
           ListTile(
-            title: Text('命名规则', style: TextStyle(color: KotvPalette.of(context).fg)),
-            subtitle: Text(rule,
-                style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12)),
+            title: Text('文件命名', style: TextStyle(color: p.fg)),
+            subtitle: Text(DownloadSettings.nameRuleLabel(rule),
+                style: TextStyle(color: p.muted, fontSize: 12)),
             onTap: () async {
-              await _prompt(
-                  '命名规则',
-                  '{title} {flag} {ep} {ext}',
-                  rule, (v) async {
-                final next = v.trim().isEmpty
-                    ? '{title}/{flag}_{ep}.{ext}'
-                    : v.trim();
-                await _set('downloadNameRule', next, msg: '命名规则已保存');
-                setSheet(() {});
-              });
+              await _pickDownloadNameRule();
+              setSheet(() {});
             },
           ),
-          _sheetToggle(
-            label: '按片名分目录',
-            value: classifyOn,
-            onChanged: (next) async {
-              await _set('downloadClassify', next ? 'true' : 'false',
-                  msg: next ? '已按片名分目录' : '已关闭分目录');
+          ListTile(
+            title: Text('目录分类', style: TextStyle(color: p.fg)),
+            subtitle: Text(DownloadSettings.classifyLabel(classify),
+                style: TextStyle(color: p.muted, fontSize: 12)),
+            onTap: () async {
+              await _pickDownloadClassify();
               setSheet(() {});
             },
           ),
@@ -2782,9 +2824,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       KotvSettingsGrid(children: [
                         KotvSettingsCell(
                           label: '下载设置',
-                          value: g('downloadDir').trim().isEmpty
-                              ? '默认目录'
-                              : _ellipsize(g('downloadDir'), 18),
+                          value: DownloadSettings.dirLabel(g('downloadDir')),
                           onTap: () => unawaited(_openDownloadSheet()),
                         ),
                         KotvSettingsCell(

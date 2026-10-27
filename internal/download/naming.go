@@ -22,12 +22,23 @@ func classifyOn() bool {
 	return v == "" || v == "true" || v == "1"
 }
 
-func nameRule() string {
+// nameTemplate 把设置里的规则 ID（或旧版手写模板）收成路径模板。
+func nameTemplate() string {
 	r := strings.TrimSpace(settings.Get(settings.DownloadNameRule))
-	if r == "" {
+	switch r {
+	case "", "title_flag_ep":
 		return "{title}/{flag}_{ep}.{ext}"
+	case "title_ep":
+		return "{title}/{ep}.{ext}"
+	case "flag_ep":
+		return "{flag}_{ep}.{ext}"
+	case "title_ep_flat":
+		return "{title}_{ep}.{ext}"
 	}
-	return r
+	if strings.Contains(r, "{") {
+		return r
+	}
+	return "{title}/{flag}_{ep}.{ext}"
 }
 
 func sanitizeName(s string) string {
@@ -78,15 +89,13 @@ func ResolvePath(title, flag, ep, ext string) string {
 	if ext == "" {
 		ext = "mp4"
 	}
-	rule := nameRule()
-	rel := rule
+	rel := nameTemplate()
 	rel = strings.ReplaceAll(rel, "{title}", title)
 	rel = strings.ReplaceAll(rel, "{flag}", flag)
 	rel = strings.ReplaceAll(rel, "{ep}", ep)
 	rel = strings.ReplaceAll(rel, "{ext}", ext)
 	rel = filepath.FromSlash(rel)
 	if !classifyOn() {
-		// 关掉按片名分目录时，压成单层文件名。
 		base := filepath.Base(rel)
 		if !strings.Contains(base, ".") {
 			base = flag + "_" + ep + "." + ext

@@ -259,7 +259,7 @@ func defaultFile() file {
 			{ID: "remoteAuth", Label: "远端鉴权", Value: "false"},
 			{ID: "allowRegister", Label: "开放注册", Value: "false"},
 			{ID: "downloadDir", Label: "下载目录", Value: ""},
-			{ID: "downloadNameRule", Label: "下载命名", Value: "{title}/{flag}_{ep}.{ext}"},
+			{ID: "downloadNameRule", Label: "下载命名", Value: "title_flag_ep"},
 			{ID: "downloadClassify", Label: "下载按片名分目录", Value: "true"},
 			{ID: "audioPassThrough", Label: "音频直通", Value: "true"},
 			{ID: "exoDiskCache", Label: "Exo磁盘缓存", Value: "false"},

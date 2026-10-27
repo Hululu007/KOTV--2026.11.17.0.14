@@ -17,12 +17,19 @@ class _FsItem {
   final bool isDir;
 }
 
-/// 点目录进入，点文件才返回路径。
+/// 点目录进入；选文件模式点文件返回路径，选目录模式点「选用此目录」返回当前路径。
 class FileBrowserScreen extends ConsumerStatefulWidget {
-  const FileBrowserScreen({super.key, required this.root, this.title = '选择文件'});
+  const FileBrowserScreen({
+    super.key,
+    required this.root,
+    this.title = '选择文件',
+    this.directoryMode = false,
+  });
 
   final String root;
   final String title;
+  /// true：只浏览文件夹，底部「选用此目录」返回当前路径。
+  final bool directoryMode;
 
   static int _open = 0;
   static bool get isOpen => _open > 0;
@@ -30,6 +37,19 @@ class FileBrowserScreen extends ConsumerStatefulWidget {
   static Future<String?> pick(BuildContext context, {required String root, String title = '选择文件'}) {
     return Navigator.of(context, rootNavigator: true).push<String>(
       kotvDetailRoute(builder: (_) => FileBrowserScreen(root: root, title: title)),
+    );
+  }
+
+  static Future<String?> pickFolder(
+    BuildContext context, {
+    required String root,
+    String title = '选择目录',
+  }) {
+    return Navigator.of(context, rootNavigator: true).push<String>(
+      kotvDetailRoute(
+        builder: (_) =>
+            FileBrowserScreen(root: root, title: title, directoryMode: true),
+      ),
     );
   }
 
@@ -139,6 +159,7 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
       _load();
       return;
     }
+    if (widget.directoryMode) return;
     Navigator.of(context).pop(it.path);
   }
 
@@ -192,13 +213,20 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
             Expanded(
               child: _error != null
                   ? Center(child: Text(_error!, textAlign: TextAlign.center))
-                  : _items.isEmpty
-                      ? const Center(child: Text('空目录'))
-                      : ListView.separated(
-                          itemCount: _items.length,
+                  : () {
+                      final items = widget.directoryMode
+                          ? _items.where((e) => e.isDir).toList()
+                          : _items;
+                      if (items.isEmpty) {
+                        return Center(
+                          child: Text(widget.directoryMode ? '无子文件夹' : '空目录'),
+                        );
+                      }
+                      return ListView.separated(
+                          itemCount: items.length,
                           separatorBuilder: (_, __) => Divider(height: 1, color: p.outline),
                           itemBuilder: (context, i) {
-                            final it = _items[i];
+                            final it = items[i];
                             return TvFocus(
                               autofocus: i == 0,
                               onPressed: () => _enter(it),
@@ -217,8 +245,40 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
                               ),
                             );
                           },
-                        ),
+                        );
+                    }(),
             ),
+            if (widget.directoryMode)
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: TvFocus(
+                    onPressed: () => Navigator.of(context).pop(_dir),
+                    borderRadius: 10,
+                    child: Material(
+                      color: p.primary,
+                      borderRadius: BorderRadius.circular(10),
+                      child: InkWell(
+                        onTap: () => Navigator.of(context).pop(_dir),
+                        borderRadius: BorderRadius.circular(10),
+                        child: const SizedBox(
+                          height: 44,
+                          child: Center(
+                            child: Text(
+                              '选用此目录',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
