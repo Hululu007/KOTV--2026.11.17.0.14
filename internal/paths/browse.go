@@ -7,13 +7,13 @@ import (
 	"strings"
 )
 
-// BrowseRoot 引擎侧可选目录根（供下载目录等浏览）。
+// BrowseRoot 可选目录根（供下载目录等浏览）。
 type BrowseRoot struct {
 	Name string
 	Path string
 }
 
-// BrowseRoots 返回引擎本机可浏览根目录（绝对路径）。
+// BrowseRoots 返回本机可浏览根目录（绝对路径）。
 // Windows：各盘符 + 下载/用户目录；Android：内部存储与 /storage 下卷；桌面：下载/家目录/应用数据。
 func BrowseRoots() []BrowseRoot {
 	seen := map[string]struct{}{}
