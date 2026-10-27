@@ -5,29 +5,65 @@ import (
 	"strings"
 
 	"github.com/bobo/KOTV/internal/download"
+	"github.com/bobo/KOTV/internal/localproxy"
+	"github.com/bobo/KOTV/internal/parse"
+	"github.com/bobo/KOTV/internal/playproxy"
+	"github.com/bobo/KOTV/internal/source"
+	"github.com/bobo/KOTV/internal/thunder"
 )
 
-func (a *App) ResolveDownload(site, vodID, flag, epURL string, epIndex int) (string, map[string]string, string, error) {
-	out, err := a.APIPlay(site, vodID, flag, epURL, epIndex, 0)
+// ResolveDownload 解析可下载地址：与起播共用 playerContent / 二次解析，保留爬虫与站源 Header。
+// 不走 PreparePlayback / /proxy/play；网盘类 /proxy?url=&header= 展开成直链并合并鉴权头。
+func (a *App) ResolveDownload(siteKey, vodID, flag, epURL string, epIndex int) (string, map[string]string, string, error) {
+	site := a.resolvePlaySite(siteKey)
+	ep, err := a.resolveEpisodeURL(vodID, flag, epURL, epIndex)
 	if err != nil {
 		return "", nil, "", err
 	}
-	u := strings.TrimSpace(fmt.Sprint(out["url"]))
-	if u == "" {
-		u = strings.TrimSpace(fmt.Sprint(out["media"]))
+	if err := requireLocalCrawler(); err != nil && !(strings.HasPrefix(ep, "http") && parse.IsVideoFormat(ep)) && !thunder.Match(ep) {
+		return "", nil, "", err
 	}
-	format := strings.TrimSpace(fmt.Sprint(out["format"]))
-	headers := map[string]string{}
-	if h, ok := out["headers"].(map[string]string); ok {
-		for k, v := range h {
-			headers[k] = v
-		}
-	} else if hm, ok := out["headers"].(map[string]any); ok {
-		for k, v := range hm {
-			headers[k] = fmt.Sprint(v)
-		}
+
+	media, err := a.resolvePlayerMedia(siteKey, site, flag, ep, 0, func(u string) bool {
+		return parse.IsVideoFormat(u) || thunder.Match(u) ||
+			localproxy.IsSpiderProxyURL(u) || strings.HasPrefix(u, "proxy://")
+	})
+	if err != nil {
+		return "", nil, "", err
 	}
-	return u, headers, format, nil
+
+	playURL := strings.TrimSpace(media.PlayURL)
+	headers := media.Headers
+	format := media.Format
+	if playURL == "" {
+		if media.PlayMsg != "" {
+			return "", nil, "", fmt.Errorf("%s", media.PlayMsg)
+		}
+		return "", nil, "", fmt.Errorf("未解析到可下载地址")
+	}
+	if apiLooksUnplayable(playURL) && !localproxy.IsSpiderProxyURL(playURL) {
+		return "", nil, "", fmt.Errorf("未解析到可下载地址")
+	}
+	if thunder.Match(playURL) {
+		return playURL, nil, format, nil
+	}
+
+	if source.Match(playURL) {
+		info, err := source.FetchInfo(playURL, a.liveCoreJSON())
+		if err != nil {
+			return "", nil, "", fmt.Errorf("专用源解析失败: %w", err)
+		}
+		playURL = localproxy.ConvertScheme(strings.TrimSpace(info.URL))
+	}
+
+	if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(playURL, headers); ok {
+		playURL = media
+		headers = hdrs
+	}
+	if strings.TrimSpace(playURL) == "" {
+		return "", nil, "", fmt.Errorf("未解析到可下载地址")
+	}
+	return playURL, headers, format, nil
 }
 
 func (a *App) APIDownloadList() map[string]any {

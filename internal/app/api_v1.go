@@ -559,143 +559,38 @@ func (a *App) APISearch(keyword string, siteKeys []string, exact bool, exclude [
 }
 
 func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qualIdx int) (map[string]any, error) {
-	cfg, sites, _ := a.scope()
-	var site model.Site
-	if siteKey != "" {
-		if s := cfg.GetSite(siteKey); s != nil {
-			site = *s
-		} else if siteKey != service.PushAgentKey {
-			site = cfg.Home()
-		}
-		// push_agent 且配置无此站：保持 IsEmpty，走 PlayerContent stub
-	} else {
-		site = cfg.Home()
-	}
-	if site.Key == "" && siteKey != service.PushAgentKey {
-		site = cfg.Home()
-	}
-	epURL := strings.TrimSpace(episodeURL)
-	if epURL == "" {
-		if u, ok := sites.EpisodeURLByIndex(vodID, flag, episodeIndex); ok {
-			epURL = u
-		}
-	}
-	if epURL == "" {
-		return nil, fmt.Errorf("empty episode url")
+	_, sites, _ := a.scope()
+	site := a.resolvePlaySite(siteKey)
+	epURL, err := a.resolveEpisodeURL(vodID, flag, episodeURL, episodeIndex)
+	if err != nil {
+		return nil, err
 	}
 	// iOS 仅支持前端播放链路：允许直链/磁力，不走站点解析。
 	if err := requireLocalCrawler(); err != nil && !(strings.HasPrefix(epURL, "http") && parse.IsVideoFormat(epURL)) && !thunder.Match(epURL) {
 		return nil, err
 	}
 
-	var playURL string
-	var headers map[string]string
-	var danmakuItems []model.DanmakuItem
-	var playSubs []model.Sub
-	var playArtwork, playDesc, playMsg, playFormat string
-	var playPosition int
-	var qualNames, qualURLs []string
-	var playDrm *model.Drm
-	var didParse bool
-
-	// 一律先站点 playerContent（含站点 Header/PlayURL/parse），再专用源预处理 / 二次解析。
-	// 仅磁力可先占位，真正取流仍在后面 thunder.Fetch。
-	if thunder.Match(epURL) {
-		playURL = epURL
-	} else {
-		result, err := sites.PlayerContent(siteKey, site, flag, epURL)
-		if err != nil {
-			return nil, err
-		}
-		if runtime.GOOS != "android" {
-			prepared, derr := model.PrepareForDesktop(result.Drm)
-			if derr != nil {
-				return nil, derr
-			}
-			result.Drm = prepared
-		}
-		playDrm = result.Drm
-		playFormat = strings.TrimSpace(result.Format)
-		headers = map[string]string(result.Header)
-		danmakuItems = append([]model.DanmakuItem(nil), result.Danmaku.Items...)
-		playSubs = append([]model.Sub(nil), result.Subs...)
-		playArtwork = strings.TrimSpace(result.Artwork)
-		playDesc = model.CleanDesc(result.Desc)
-		playMsg = result.EffectiveMsg()
-		playPosition = int(result.Position.Value)
-		if !result.Position.Valid {
-			playPosition = result.URL.Position
-		}
-		qualNames = result.URL.Names
-		qualURLs = result.URL.URLs
-		api := cfg.API()
-		rules := parse.GetRules()
-		if len(rules) == 0 {
-			rules = api.Rules
-		}
-		// 仅 needParse / useParse 时才进二次解析；直链跳过。
-		didParse = parse.NeedParse(result) || parse.IsUseParse(result, api.Flags, api.Parses)
-		parsed, perr := parse.ResolveWithParses(result, parse.Options{
-			Parses:    api.Parses,
-			Flags:     api.Flags,
-			Rules:     rules,
-			Jar:       api.Spider,
-			Flag:      flag,
-			Click:     result.Click,
-			SiteClick: site.Click,
-			Prefer:    settings.Get(settings.PreferredParse),
-			IsVideo: func(u string) bool {
-				return sites.IsVideoFormat(site, u)
-			},
-			ManualVideo: sites.ManualVideoCheck(site),
-		})
-		if perr != nil {
-			cand := apiResolvePlayURL("", result.PlayURL, result.URL.URLs, qualIdx)
-			if cand != "" && (parse.IsVideoFormat(cand) || thunder.Match(cand)) {
-				playURL = cand
-				didParse = false
-			} else {
-				return nil, parse.AnnotateParseErr(perr)
-			}
-		} else {
-			result = parsed
-			if runtime.GOOS != "android" {
-				prepared, derr := model.PrepareForDesktop(result.Drm)
-				if derr != nil {
-					return nil, derr
-				}
-				result.Drm = prepared
-			}
-			if result.Drm != nil {
-				playDrm = result.Drm
-			}
-			headers = copyStringMap(map[string]string(result.Header))
-			qualNames = result.URL.Names
-			qualURLs = result.URL.URLs
-			playURL = apiResolvePlayURL("", result.PlayURL, result.URL.URLs, qualIdx)
-			if len(result.Danmaku.Items) > 0 {
-				danmakuItems = append([]model.DanmakuItem(nil), result.Danmaku.Items...)
-			}
-			if len(result.Subs) > 0 {
-				playSubs = append([]model.Sub(nil), result.Subs...)
-			}
-			if s := strings.TrimSpace(result.Artwork); s != "" {
-				playArtwork = s
-			}
-			if s := model.CleanDesc(result.Desc); s != "" {
-				playDesc = s
-			}
-			if m := result.EffectiveMsg(); m != "" {
-				playMsg = m
-			}
-			if result.Position.Valid {
-				playPosition = int(result.Position.Value)
-			}
-			if s := strings.TrimSpace(result.Format); s != "" {
-				playFormat = s
-			}
-		}
+	media, err := a.resolvePlayerMedia(siteKey, site, flag, epURL, qualIdx, nil)
+	if err != nil {
+		return nil, err
 	}
+	playURL := media.PlayURL
+	headers := media.Headers
+	playFormat := media.Format
+	didParse := media.DidParse
+	playMsg := media.PlayMsg
+	result := media.Result
+	playDrm := result.Drm
+	danmakuItems := append([]model.DanmakuItem(nil), result.Danmaku.Items...)
+	playSubs := append([]model.Sub(nil), result.Subs...)
+	playArtwork := strings.TrimSpace(result.Artwork)
+	playDesc := model.CleanDesc(result.Desc)
+	playPosition := int(result.Position.Value)
+	if !result.Position.Valid {
+		playPosition = result.URL.Position
+	}
+	qualNames := result.URL.Names
+	qualURLs := result.URL.URLs
 
 	if playURL == "" {
 		// 有 msg：真实失败。无 msg：playerContent 可能已副作用弹窗（csp_Config）；
@@ -724,8 +619,6 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 			"id":        vodID,
 		}, nil
 	}
-	// convert：须在可播判断之前，否则 proxy:// 会被当成不可播。
-	playURL = localproxy.ConvertScheme(playURL)
 	if apiLooksUnplayable(playURL) {
 		return nil, fmt.Errorf("未解析到可播放地址")
 	}

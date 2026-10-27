@@ -6,7 +6,7 @@
 # 已含完整 API 时跳过（可用 KOTV_FORCE_FONGMI_MEDIA3=1 强制重编）。
 #
 # 上游缺 smbj 等 POM 类型声明、且全量模块依赖 test-utils；须先打
-# scripts/patches/fongmi-media3-kotv.patch（与本地成功 publish 时一致）。
+# scripts/patches/fongmi-media3-kotv.patch（缺类型声明时的固定补丁）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${KOTV_FONGMI_MEDIA:-$ROOT/.tmp/fongmi-media}"
