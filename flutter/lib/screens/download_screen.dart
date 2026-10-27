@@ -237,7 +237,8 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
     final p = KotvPalette.of(context);
     final s = LayoutScale.of(context);
     final hPad = kotvContentInset(context);
-    const filterH = 34.0;
+    const filterH = 30.0;
+    final filterGrow = LayoutScale.grow(context);
     final topAction = LibraryTopBar.actionMetrics(context);
     final visible = _visible;
     final filterIdx =
@@ -262,19 +263,18 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
         Padding(
           padding: EdgeInsets.fromLTRB(hPad, 8 * s, hPad, 0),
           child: SizedBox(
-            // 跟窗口 design scale：拉宽变大、竖屏变小（勿用 layoutOf，小窗会锁 1.0 反着长）。
-            height: filterH * s + 4,
+            height: filterH * filterGrow + 4,
             child: HScrollList(
               scrollToIndex: filterIdx >= 0 ? filterIdx : 0,
               itemCount: DownloadSettings.filterOptions.length,
-              separatorBuilder: (_, __) => SizedBox(width: 8 * s),
+              separatorBuilder: (_, __) => SizedBox(width: 8 * filterGrow),
               itemBuilder: (_, i) {
                 final e = DownloadSettings.filterOptions[i];
                 return AppPill(
                   label: e.$1,
                   height: filterH,
-                  fontSize: 14,
-                  followWindowScale: true,
+                  fontSize: 13,
+                  growWithWindow: true,
                   selected: _filter == e.$2,
                   onTap: () => setState(() => _filter = e.$2),
                 );

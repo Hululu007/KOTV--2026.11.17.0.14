@@ -283,6 +283,9 @@ fetch "https://github.com/breakfastquay/rubberband/archive/refs/tags/v${RUBBER_V
 rm -rf "$BUILD_DIR/rubberband"
 mkdir -p "$BUILD_DIR/rubberband"
 tar -xf "$src/rubberband-${RUBBER_VER}.tar.gz" -C "$BUILD_DIR/rubberband" --strip-components=1
+# rubberband 多处直接写 size_t 却不 include <cstddef>；Xcode 26 的 libc++ 不再顺带引入全局 size_t。
+# 只给这一次 setup 追加，保留上面导出的 -arch 等 CXXFLAGS。
+CXXFLAGS="${CXXFLAGS:-} -include cstddef" \
 meson setup "$BUILD_DIR/rubberband-build" "$BUILD_DIR/rubberband" \
   --prefix="$PREFIX" \
   --libdir=lib \

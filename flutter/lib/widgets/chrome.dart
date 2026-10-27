@@ -334,7 +334,7 @@ class AppPill extends StatelessWidget {
     this.focusNode,
     this.suffix,
     this.marqueeWhenSelected = false,
-    this.followWindowScale = false,
+    this.growWithWindow = false,
   });
 
   final String label;
@@ -352,19 +352,18 @@ class AppPill extends StatelessWidget {
   final String? suffix;
   /// 选中时对过长 label 跑马灯（直播分组等）。
   final bool marqueeWhenSelected;
-  /// true：严格跟窗口设计缩放（竖屏缩小、拉宽放大）；默认 layoutOf 避免小窗字撑破胶囊。
-  final bool followWindowScale;
+  /// true：小窗/手机保持设计尺寸，超过 1280×720 才随窗口放大（[LayoutScale.grow]），
+  /// 不会在 layoutOf 的文字缩放阈值处反向跳变。默认 layoutOf，避免小窗字撑破胶囊。
+  final bool growWithWindow;
 
   @override
   Widget build(BuildContext context) {
-    // 默认 layoutOf：小窗文字锁 1.0 时控件不跟着 design scale 再缩。
-    // followWindowScale：跟 LayoutScale.of，适合筛选条要随窗口收放。
-    final design = LayoutScale.of(context);
-    final layout = LayoutScale.layoutOf(context);
-    final s = followWindowScale ? design : layout;
+    final s = growWithWindow
+        ? LayoutScale.grow(context)
+        : LayoutScale.layoutOf(context);
     final textScale = MediaQuery.textScalerOf(context).scale(1.0);
-    // 抵消 TextScaler，使最终字号≈ fontSize * s（跟窗口一致）。
-    final resolvedFont = followWindowScale && textScale > 0
+    // 抵消 TextScaler，使最终字号≈ fontSize * s，与胶囊同比例。
+    final resolvedFont = growWithWindow && textScale > 0
         ? fontSize * s / textScale
         : fontSize;
     final p = KotvPalette.of(context);
@@ -606,6 +605,7 @@ class EpisodeChip extends StatelessWidget {
     this.autofocus = false,
     this.height = 40,
     this.fontSize = 14,
+    this.outlined = false,
   });
 
   final String label;
@@ -614,6 +614,12 @@ class EpisodeChip extends StatelessWidget {
   final bool autofocus;
   final double height;
   final double fontSize;
+  /// 弹窗底色与格子底色相近时加描边。
+  final bool outlined;
+
+  /// 选集格子设计尺寸（详情选集与下载选集共用）；实际高度再乘 [LayoutScale.grow]。
+  static ({double h, double fs}) metrics(BuildContext context) =>
+      KotvLayout.isCompact(context) ? (h: 32.0, fs: 12.0) : (h: 42.0, fs: 14.0);
 
   @override
   Widget build(BuildContext context) {
@@ -636,6 +642,9 @@ class EpisodeChip extends StatelessWidget {
             decoration: BoxDecoration(
               color: bg,
               borderRadius: BorderRadius.circular(8),
+              border: outlined
+                  ? Border.all(color: selected ? p.primary : p.pillBorder)
+                  : null,
             ),
             child: Text(
               label,

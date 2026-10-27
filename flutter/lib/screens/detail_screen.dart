@@ -3874,13 +3874,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     Widget actionRow() {
       final compactActions = compact || KotvLayout.useBottomNav(context);
       final rowH = compactActions ? 40.0 : 58.0;
-      return SizedBox(
-        height: rowH,
-        child: HScroll(
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            children: [
-            _action('全屏', Icons.crop_free_rounded, () {
+      final actions = <(String, IconData, VoidCallback)>[
+            ('全屏', Icons.crop_free_rounded, () {
               if (_playUrl.isNotEmpty) {
                 unawaited(_enterFullscreen());
               } else if (_epIdx >= 0) {
@@ -3889,14 +3884,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 unawaited(_playAt(0, fullscreen: true));
               }
             }),
-            _action('搜索', Icons.search_rounded, () {
+            ('搜索', Icons.search_rounded, () {
               final q = d.name.trim();
               unawaited(_leavePage(afterPop: () {
                 ref.read(pendingSearchProvider.notifier).state = q;
                 goKotvPage(ref, KotvPage.search);
               }));
             }),
-            _action(_reversed ? '正序' : '倒叙', Icons.swap_vert_rounded, () {
+            (_reversed ? '正序' : '倒叙', Icons.swap_vert_rounded, () {
               final n = _eps.length;
               final old = _epIdx;
               setState(() {
@@ -3911,14 +3906,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               });
               unawaited(LocalRevSort.set(_detailId(), _detailSite(), _reversed));
             }),
-            _action(_kept ? '取消收藏' : '收藏', Icons.star_border_rounded, () async {
+            (_kept ? '取消收藏' : '收藏', Icons.star_border_rounded, () async {
               final kept = await LocalCollect.toggle(_collectItemFromDetail());
+              if (!mounted) return;
               setState(() {
                 _kept = kept;
                 _status = kept ? '已加入收藏' : '已取消收藏';
               });
             }),
-            _action('换源', Icons.visibility_outlined, () {
+            ('换源', Icons.visibility_outlined, () {
               final name = (_detail?.name ?? _routeTitle).trim();
               if (name.isEmpty) {
                 setState(() => _status = '无法换源');
@@ -3926,12 +3922,29 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               }
               unawaited(_leavePage(afterPop: () => searchByName(ref, name)));
             }),
-            _action('解析', Icons.tune_rounded, () => _pickParse()),
-            _action('下载', Icons.download_for_offline_outlined, () {
+            ('解析', Icons.tune_rounded, () => _pickParse()),
+            ('下载', Icons.download_for_offline_outlined, () {
               unawaited(_pickDownloadEpisodes());
             }),
-          ],
-        ),
+      ];
+      // 一排全部放进视口：设计宽度放得下就用设计宽度，否则均分可用宽度。
+      return SizedBox(
+        height: rowH,
+        child: LayoutBuilder(
+          builder: (context, c) {
+            final m = _actionMetrics();
+            final n = actions.length;
+            final fit = (c.maxWidth - m.gap * (n - 1)) / n;
+            final w = math.min(m.w, fit);
+            return Row(
+              children: [
+                for (var i = 0; i < n; i++) ...[
+                  if (i > 0) SizedBox(width: m.gap),
+                  _action(actions[i].$1, actions[i].$2, actions[i].$3, width: w),
+                ],
+              ],
+            );
+          },
         ),
       );
     }
@@ -3940,8 +3953,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       final ui = LayoutScale.grow(context);
       final pillH = compact ? 28.0 : 36.0;
       final pillFs = compact ? 12.0 : 15.0;
-      final epH = compact ? 32.0 : 42.0;
-      final epFs = compact ? 12.0 : 14.0;
+      final epM = EpisodeChip.metrics(context);
+      final epH = epM.h;
+      final epFs = epM.fs;
       final gap = (compact ? 6.0 : 10.0) * ui;
       final srcLabelFs = compact ? 13.0 : 16.0;
       final pillBox = pillH * LayoutScale.layoutOf(context);
@@ -4174,6 +4188,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       builder: (ctx) {
         final pal = KotvPalette.of(ctx);
         final m = MediaQuery.sizeOf(ctx);
+        final epM = EpisodeChip.metrics(ctx);
+        final epCols = KotvLayout.isCompact(ctx) ? 3 : 4;
         return StatefulBuilder(
           builder: (ctx, setLocal) {
             return Dialog(
@@ -4233,22 +4249,24 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                       Expanded(
                         child: GridView.builder(
                           gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 4,
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: epCols,
                             mainAxisSpacing: 8,
                             crossAxisSpacing: 8,
-                            childAspectRatio: 2.2,
+                            mainAxisExtent: epM.h * LayoutScale.grow(ctx),
                           ),
                           itemCount: eps.length,
                           itemBuilder: (_, i) {
                             final taken = !free(i);
                             final on = selected.contains(i);
-                            final pill = AppPill(
+                            final pill = EpisodeChip(
                               label: eps[i].name.isEmpty
                                   ? '${i + 1}'
                                   : eps[i].name,
                               selected: on && !taken,
-                              height: 36,
+                              height: epM.h,
+                              fontSize: epM.fs,
+                              outlined: true,
                               onTap: taken
                                   ? () {}
                                   : () => setLocal(() {
@@ -4635,50 +4653,56 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
   }
 
-  Widget _action(String label, IconData icon, VoidCallback onTap) {
-    final p = KotvPalette.of(context);
+  /// 详情操作按钮设计尺寸；[w] 是上限，一排放不下时由 actionRow 均分。
+  ({double w, double h, double icon, double fs, double gap, double inner, double radius})
+      _actionMetrics() {
     final compact = KotvLayout.isCompact(context) || KotvLayout.useBottomNav(context);
     final s = LayoutScale.layoutOf(context);
     final ui = compact ? 1.0 : (s < 0.75 ? 0.75 : s);
-    final w = (compact ? 48.0 : 72.0) * ui;
-    final h = (compact ? 36.0 : 56.0) * ui;
-    final iconSz = (compact ? 14.0 : 20.0) * ui;
-    final fs = compact ? 9.0 : 11.0;
-    final gap = (compact ? 1.0 : 4.0) * ui;
-    final radius = (compact ? 7.0 : 10.0) * ui;
-    return Padding(
-      padding: EdgeInsets.only(right: (compact ? 4 : 8) * ui),
-      child: TvFocus(
-        onPressed: onTap,
-        borderRadius: radius,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            canRequestFocus: false,
-            borderRadius: BorderRadius.circular(radius),
-            child: Ink(
-              width: w,
-              height: h,
-              decoration: BoxDecoration(
-                color: p.pillBg,
-                borderRadius: BorderRadius.circular(radius),
-                border: Border.all(color: p.pillBorder),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(icon, color: p.fg, size: iconSz),
-                  SizedBox(height: gap),
-                  Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: p.fg.withOpacity(0.85), fontSize: fs, height: 1.1),
-                  ),
-                ],
-              ),
+    return (
+      w: (compact ? 48.0 : 72.0) * ui,
+      h: (compact ? 36.0 : 56.0) * ui,
+      icon: (compact ? 14.0 : 20.0) * ui,
+      fs: compact ? 9.0 : 11.0,
+      gap: (compact ? 4.0 : 8.0) * ui,
+      inner: (compact ? 1.0 : 4.0) * ui,
+      radius: (compact ? 7.0 : 10.0) * ui,
+    );
+  }
+
+  Widget _action(String label, IconData icon, VoidCallback onTap, {required double width}) {
+    final p = KotvPalette.of(context);
+    final m = _actionMetrics();
+    return TvFocus(
+      onPressed: onTap,
+      borderRadius: m.radius,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          canRequestFocus: false,
+          borderRadius: BorderRadius.circular(m.radius),
+          child: Ink(
+            width: width,
+            height: m.h,
+            decoration: BoxDecoration(
+              color: p.pillBg,
+              borderRadius: BorderRadius.circular(m.radius),
+              border: Border.all(color: p.pillBorder),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: p.fg, size: m.icon),
+                SizedBox(height: m.inner),
+                Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: p.fg.withOpacity(0.85), fontSize: m.fs, height: 1.1),
+                ),
+              ],
             ),
           ),
         ),

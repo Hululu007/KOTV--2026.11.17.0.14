@@ -364,7 +364,7 @@ public class SpiderBridge {
             if (req.has("jarGen") && !req.get("jarGen").isJsonNull()) {
                 callGen = req.get("jarGen").getAsLong();
             }
-            if ("unloadJar".equals(method) || "clear".equals(method)) {
+            if ("clear".equals(method)) {
                 acceptJarGen(callGen);
             }
             callJarGen.set(callGen);
@@ -420,13 +420,6 @@ public class SpiderBridge {
                     boolean recent = argsObj.has("recent") && !argsObj.get("recent").isJsonNull()
                             && argsObj.get("recent").getAsBoolean();
                     parseJar(jar, recent);
-                }
-                return "{}";
-            }
-            if ("unloadJar".equals(method)) {
-                String jar = jarArg(argsObj, req);
-                if (!jar.isEmpty()) {
-                    unloadJar(jar);
                 }
                 return "{}";
             }
