@@ -28,7 +28,7 @@ String _castDeviceLabel(Map d) {
 }
 
 /// 高版本 Android 投屏前申请附近设备 / 定位（组播发现）权限。
-Future<bool> ensureCastPermissions() async {
+Future<bool> _ensureCastPermissions() async {
   if (kIsWeb || !Platform.isAndroid) return true;
   try {
     final ok = await _androidChannel.invokeMethod<bool>('ensureCastPermissions');
@@ -38,7 +38,7 @@ Future<bool> ensureCastPermissions() async {
   }
 }
 
-/// 正在播放时投屏。没有地址就提示；投上后暂停本机，避免两边一起响。
+/// 正在播放时投屏：先弹窗，窗内搜索并列出设备；投上后暂停本机，避免两边一起响。
 Future<void> kotvCastPlaying(
   BuildContext context,
   KotvApi api, {
@@ -48,116 +48,64 @@ Future<void> kotvCastPlaying(
   required void Function(String status) setStatus,
   required Future<void> Function() pauseLocal,
 }) async {
+  void status(String m) {
+    if (isMounted()) setStatus(m);
+  }
+
   if (playUrl.isEmpty) {
     if (isMounted()) showAppNews(context, '请先播放内容再投屏');
     return;
   }
-  final msg = await runKotvCast(
-    context,
-    api,
-    positionMs: positionMs,
-    onStatus: (m) {
-      if (isMounted()) setStatus(m);
-    },
-  );
-  if (msg != null && isMounted()) {
-    setStatus(msg);
-    if (msg.startsWith('已投屏到')) {
-      unawaited(pauseLocal());
-    }
-  }
-}
-
-/// 搜索设备并投送；弹窗显示投屏中/可断开；成功返回状态文案，取消返回 null。
-/// [positionMs] 为本机播放进度，投到电视时用于续看。
-Future<String?> runKotvCast(
-  BuildContext context,
-  KotvApi api, {
-  void Function(String msg)? onStatus,
-  int? positionMs,
-}) async {
-  void status(String m) => onStatus?.call(m);
-
-  final granted = await ensureCastPermissions();
-  if (!granted) {
+  if (!await _ensureCastPermissions()) {
     status('需要附近设备/定位权限才能搜索投屏');
     if (context.mounted) {
       showAppNews(context, '投屏需要附近 Wi‑Fi 设备权限（Android 13+）或定位权限（旧版）。\n请在系统设置中允许后重试。');
     }
-    return null;
+    return;
   }
-
-  status('正在搜索投屏设备…');
-  Map<String, dynamic> data;
-  Map<String, dynamic> session = const {};
-  try {
-    final results = await Future.wait([
-      api.tools('castDiscover'),
-      api.tools('castStatus').catchError((_) => <String, dynamic>{'ok': true, 'active': false}),
-    ]);
-    data = results[0];
-    session = results[1];
-  } catch (e) {
-    status('$e');
-    if (context.mounted) showAppNews(context, '搜索失败\n$e');
-    return null;
-  }
-  if (!context.mounted) return null;
-  final devices = ((data['devices'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
-  final active = session['active'] == true;
-  final activeKey = active ? '${session['key'] ?? ''}'.trim() : '';
-
-  if (devices.isEmpty && !active) {
-    status('未发现投屏设备');
-    showAppNews(context, '未发现设备。\n已搜索 DLNA / Chromecast / 局域网 App\n请确认设备与本机在同一局域网，并已授予投屏相关权限。');
-    return '未发现投屏设备';
-  }
-
-  final result = await showDialog<String>(
+  if (!context.mounted) return;
+  final result = await showDialog<_CastResult>(
     context: context,
     useRootNavigator: true,
     barrierDismissible: true,
-    builder: (ctx) => _CastDeviceDialog(
-      api: api,
-      devices: devices,
-      activeKey: activeKey,
-      activeLabel: active ? '${session['label'] ?? session['name'] ?? ''}'.trim() : '',
-      onStatus: status,
-      positionMs: positionMs,
-    ),
+    builder: (_) => _CastDeviceDialog(api: api, onStatus: status, positionMs: positionMs),
   );
   if (result == null) {
     status('已取消投屏');
-    return null;
+    return;
   }
-  status(result);
-  return result;
+  status(result.message);
+  if (result.casted) unawaited(pauseLocal());
+}
+
+/// 弹窗结果：[casted] 为真表示已投到设备（本机应暂停）；断开投屏时为假。
+class _CastResult {
+  const _CastResult(this.message, {required this.casted});
+  final String message;
+  final bool casted;
 }
 
 class _CastDeviceDialog extends StatefulWidget {
   const _CastDeviceDialog({
     required this.api,
-    required this.devices,
-    required this.activeKey,
-    required this.activeLabel,
     required this.onStatus,
-    this.positionMs,
+    required this.positionMs,
   });
 
   final KotvApi api;
-  final List<Map<String, dynamic>> devices;
-  final String activeKey;
-  final String activeLabel;
   final void Function(String msg) onStatus;
-  final int? positionMs;
+  final int positionMs;
 
   @override
   State<_CastDeviceDialog> createState() => _CastDeviceDialogState();
 }
 
 class _CastDeviceDialogState extends State<_CastDeviceDialog> {
-  late String _activeKey = widget.activeKey;
-  late String _activeLabel = widget.activeLabel;
+  List<Map<String, dynamic>> _devices = const [];
+  bool _searching = true;
+  String? _searchError;
+  String _activeKey = '';
+  String _activeLabel = '';
   int? _busyIndex;
   int? _statusIndex;
   String? _rowStatus;
@@ -165,9 +113,54 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
   bool _blockPop = false;
   bool _stopping = false;
 
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_discover());
+  }
+
+  Future<void> _discover() async {
+    setState(() {
+      _searching = true;
+      _searchError = null;
+      _statusIndex = null;
+      _rowStatus = null;
+    });
+    widget.onStatus('正在搜索投屏设备…');
+    try {
+      final results = await Future.wait([
+        widget.api.tools('castDiscover'),
+        widget.api
+            .tools('castStatus')
+            .catchError((_) => <String, dynamic>{'ok': true, 'active': false}),
+      ]);
+      if (!mounted) return;
+      final session = results[1];
+      final active = session['active'] == true;
+      setState(() {
+        _searching = false;
+        _devices = ((results[0]['devices'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+        _activeKey = active ? '${session['key'] ?? ''}'.trim() : '';
+        _activeLabel =
+            active ? '${session['label'] ?? session['name'] ?? ''}'.trim() : '';
+      });
+      widget.onStatus(_devices.isEmpty ? '未发现投屏设备' : '发现 ${_devices.length} 个设备');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _searching = false;
+        _searchError = '$e';
+      });
+      widget.onStatus('搜索失败：$e');
+    }
+  }
+
   Future<void> _castAt(int i) async {
     if (_blockPop || _stopping) return;
-    final d = widget.devices[i];
+    final d = _devices[i];
     final index = int.tryParse('${d['index']}') ?? i;
     final label = _castDeviceLabel(d);
     setState(() {
@@ -180,8 +173,7 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
     widget.onStatus('正在投屏到 $label…');
     try {
       final params = <String, dynamic>{'index': index};
-      final pos = widget.positionMs;
-      if (pos != null && pos > 0) params['positionMs'] = pos;
+      if (widget.positionMs > 0) params['positionMs'] = widget.positionMs;
       final cast = await widget.api.tools('cast', params);
       final msg = '${cast['message'] ?? '已投屏到 $label'}';
       final key = '${cast['key'] ?? ''}'.trim().isNotEmpty
@@ -191,17 +183,11 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
               'name': cast['name'] ?? d['name'],
               'detail': cast['detail'] ?? d['detail'],
             });
-      var statusIdx = i;
-      for (var j = 0; j < widget.devices.length; j++) {
-        if (_castDeviceKey(widget.devices[j]) == key) {
-          statusIdx = j;
-          break;
-        }
-      }
+      final statusIdx = _devices.indexWhere((e) => _castDeviceKey(e) == key);
       if (!mounted) return;
       setState(() {
         _busyIndex = null;
-        _statusIndex = statusIdx;
+        _statusIndex = statusIdx >= 0 ? statusIdx : i;
         _rowStatus = '已投屏';
         _rowOk = true;
         _activeKey = key;
@@ -209,7 +195,9 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
       });
       widget.onStatus(msg);
       await Future<void>.delayed(const Duration(milliseconds: 700));
-      if (mounted) Navigator.of(context, rootNavigator: true).pop(msg);
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop(_CastResult(msg, casted: true));
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -225,36 +213,21 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
 
   Future<void> _stopCast() async {
     if (_blockPop || _stopping) return;
+    final activeIdx = _devices.indexWhere((e) => _castDeviceKey(e) == _activeKey);
     setState(() {
       _stopping = true;
       _blockPop = true;
       _rowStatus = '断开中…';
       _rowOk = false;
-      if (_activeKey.isNotEmpty) {
-        for (var j = 0; j < widget.devices.length; j++) {
-          if (_castDeviceKey(widget.devices[j]) == _activeKey) {
-            _statusIndex = j;
-            break;
-          }
-        }
-      }
+      if (activeIdx >= 0) _statusIndex = activeIdx;
     });
     widget.onStatus('正在断开投屏…');
     try {
       final r = await widget.api.tools('castStop');
       final msg = '${r['message'] ?? '已断开投屏'}';
       if (!mounted) return;
-      setState(() {
-        _activeKey = '';
-        _activeLabel = '';
-        _rowStatus = '已断开';
-        _rowOk = true;
-        _stopping = false;
-        _blockPop = false;
-        _busyIndex = null;
-      });
       widget.onStatus(msg);
-      if (mounted) Navigator.of(context, rootNavigator: true).pop(msg);
+      Navigator.of(context, rootNavigator: true).pop(_CastResult(msg, casted: false));
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -267,11 +240,28 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
     }
   }
 
+  Widget _action(String label, VoidCallback? onPressed, KotvPalette p, {bool autofocus = false}) {
+    return KotvStableFocus(
+      autofocus: autofocus,
+      onPressed: onPressed,
+      borderRadius: 8,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        child: Text(label, style: TextStyle(color: p.primary, fontWeight: FontWeight.w700)),
+      ),
+    );
+  }
+
+  Widget _note(String text, KotvPalette p) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+        child: Text(text, style: TextStyle(color: p.muted, fontSize: 13)),
+      );
+
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
     final hasActive = _activeKey.isNotEmpty;
-    final activeInList = hasActive && widget.devices.any((d) => _castDeviceKey(d) == _activeKey);
+    final activeInList = hasActive && _devices.any((d) => _castDeviceKey(d) == _activeKey);
 
     return PopScope(
       canPop: !_blockPop,
@@ -279,89 +269,93 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
         backgroundColor: p.dialogBg,
         title: Text('投屏到', style: TextStyle(color: p.fg)),
         children: [
-          if (hasActive) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-              child: Text(
-                activeInList ? '当前投屏：$_activeLabel' : '当前投屏：$_activeLabel（未在列表中）',
-                style: TextStyle(color: p.muted, fontSize: 13),
-              ),
-            ),
-            KotvStableFocus(
-              autofocus: !_blockPop && widget.devices.isEmpty,
-              onPressed: _blockPop ? null : () => unawaited(_stopCast()),
-              borderRadius: 8,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                child: Text(
-                  _stopping ? '断开中…' : '断开投屏',
-                  style: TextStyle(color: p.primary, fontWeight: FontWeight.w700),
-                ),
-              ),
-            ),
-            const Divider(height: 12),
-          ],
-          if (widget.devices.isEmpty)
+          if (_searching)
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-              child: Text('未发现其它设备', style: TextStyle(color: p.muted)),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: p.primary),
+                  ),
+                  const SizedBox(width: 12),
+                  Text('正在搜索投屏设备…', style: TextStyle(color: p.muted)),
+                ],
+              ),
+            )
+          else ...[
+            if (hasActive) ...[
+              _note(activeInList ? '当前投屏：$_activeLabel' : '当前投屏：$_activeLabel（未在列表中）', p),
+              _action(
+                _stopping ? '断开中…' : '断开投屏',
+                _blockPop ? null : () => unawaited(_stopCast()),
+                p,
+                autofocus: _devices.isEmpty,
+              ),
+              const Divider(height: 12),
+            ],
+            if (_searchError != null)
+              _note('搜索失败：$_searchError', p)
+            else if (_devices.isEmpty)
+              _note('未发现设备。已搜索 DLNA / Chromecast / 局域网 App，\n请确认设备与本机在同一局域网。', p),
+            for (var i = 0; i < _devices.length; i++) _deviceRow(i, p, hasActive),
+            _action(
+              '重新搜索',
+              _blockPop ? null : () => unawaited(_discover()),
+              p,
+              autofocus: _devices.isEmpty && !hasActive,
             ),
-          for (var i = 0; i < widget.devices.length; i++)
-            Builder(
-              builder: (ctx) {
-                final d = widget.devices[i];
-                final key = _castDeviceKey(d);
-                final label = _castDeviceLabel(d);
-                final isActive = hasActive && key == _activeKey;
-                final showStatus = _statusIndex == i && _rowStatus != null;
-                final trailing = showStatus
-                    ? _rowStatus!
-                    : (isActive ? '投屏中' : '');
-                final muted = _blockPop && _busyIndex != i;
-                return KotvStableFocus(
-                  autofocus: i == 0 && !_blockPop && !hasActive,
-                  scrollIntoView: true,
-                  onPressed: _blockPop ? null : () => unawaited(_castAt(i)),
-                  borderRadius: 8,
-                  child: Opacity(
-                    opacity: muted ? 0.45 : 1,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              label,
-                              style: TextStyle(
-                                color: p.fg,
-                                fontWeight: isActive || showStatus ? FontWeight.w700 : FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          if (trailing.isNotEmpty)
-                            Flexible(
-                              child: Text(
-                                trailing,
-                                textAlign: TextAlign.right,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: showStatus
-                                      ? (_rowOk ? const Color(0xFF5CDB95) : p.primary)
-                                      : p.primary,
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _deviceRow(int i, KotvPalette p, bool hasActive) {
+    final d = _devices[i];
+    final label = _castDeviceLabel(d);
+    final isActive = hasActive && _castDeviceKey(d) == _activeKey;
+    final showStatus = _statusIndex == i && _rowStatus != null;
+    final trailing = showStatus ? _rowStatus! : (isActive ? '投屏中' : '');
+    final muted = _blockPop && _busyIndex != i;
+    return KotvStableFocus(
+      autofocus: i == 0 && !_blockPop && !hasActive,
+      scrollIntoView: true,
+      onPressed: _blockPop ? null : () => unawaited(_castAt(i)),
+      borderRadius: 8,
+      child: Opacity(
+        opacity: muted ? 0.45 : 1,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: p.fg,
+                    fontWeight: isActive || showStatus ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+              if (trailing.isNotEmpty)
+                Flexible(
+                  child: Text(
+                    trailing,
+                    textAlign: TextAlign.right,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: showStatus ? (_rowOk ? const Color(0xFF5CDB95) : p.primary) : p.primary,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                );
-              },
-            ),
-        ],
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

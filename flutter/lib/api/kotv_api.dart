@@ -348,8 +348,6 @@ class KotvApi {
   Future<Map<String, dynamic>> setMedia(Map<String, String> state) =>
       _post('/api/v1/media', Map<String, dynamic>.from(state));
 
-  Future<Map<String, dynamic>> getMedia() => _get('/api/v1/media');
-
   Future<Map<String, dynamic>> listRepos() => _get('/api/v1/repos');
 
   Future<Map<String, dynamic>> deleteRepo(String url) async {

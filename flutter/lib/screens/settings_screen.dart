@@ -39,7 +39,6 @@ import '../util/pick_font_file.dart';
 import '../util/runtime_info.dart';
 import '../vod/grid_style.dart';
 import '../widgets/auth_gate.dart';
-import '../widgets/cast_flow.dart';
 import '../widgets/spider_check_dialog.dart';
 import '../widgets/chrome.dart';
 import '../widgets/danmaku_settings_sheet.dart';
@@ -2250,29 +2249,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
   }
 
-  Future<void> _cast() async {
-    try {
-      final m = await ref.read(apiProvider).getMedia();
-      final media = m['media'];
-      final url = media is Map ? '${media['url'] ?? ''}'.trim() : '';
-      if (url.isEmpty) {
-        if (mounted) showAppNews(context, '请先播放内容再投屏');
-        return;
-      }
-    } catch (_) {
-      if (mounted) showAppNews(context, '请先播放内容再投屏');
-      return;
-    }
-    final msg = await runKotvCast(
-      context,
-      ref.read(apiProvider),
-      onStatus: (m) {
-        if (mounted) setState(() => _status = m);
-      },
-    );
-    if (msg != null && mounted) setState(() => _status = msg);
-  }
-
   Future<void> _pickWall() async {
     final wall = g('wallMode', 'config');
     final v = await pickChoice(
@@ -2875,8 +2851,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               'dlnaRenderer', dmr ? 'false' : 'true',
                               msg: dmr ? '已关闭 DLNA 被投端' : '已开启 DLNA 被投端'),
                         ),
-                        KotvSettingsCell(
-                            label: '投屏', value: 'DLNA', onTap: _cast),
                         KotvSettingsCell(
                           label: '播放缺省 UA',
                           value: g('ua').isEmpty
