@@ -56,6 +56,10 @@ type ContentAPI interface {
 	APIDownloadList() map[string]any
 	APIDownloadEnqueue(body map[string]any) (map[string]any, error)
 	APIDownloadCancel(id string) map[string]any
+	APIDownloadPause(id string) map[string]any
+	APIDownloadResume(id string) map[string]any
+	APIDownloadPauseAll() map[string]any
+	APIDownloadResumeAll() map[string]any
 	APIDownloadRemove(id string, deleteFile bool) map[string]any
 	APIDownloadClearFinished() map[string]any
 	PurgeUserData(userID string)
@@ -529,6 +533,16 @@ func (s *Server) handleAPIv1Download(w http.ResponseWriter, r *http.Request) {
 	case "cancel":
 		id := strings.TrimSpace(fmt.Sprint(body["id"]))
 		writeJSON(w, http.StatusOK, api.APIDownloadCancel(id))
+	case "pause":
+		id := strings.TrimSpace(fmt.Sprint(body["id"]))
+		writeJSON(w, http.StatusOK, api.APIDownloadPause(id))
+	case "resume", "start":
+		id := strings.TrimSpace(fmt.Sprint(body["id"]))
+		writeJSON(w, http.StatusOK, api.APIDownloadResume(id))
+	case "pauseAll":
+		writeJSON(w, http.StatusOK, api.APIDownloadPauseAll())
+	case "resumeAll", "startAll":
+		writeJSON(w, http.StatusOK, api.APIDownloadResumeAll())
 	case "remove":
 		id := strings.TrimSpace(fmt.Sprint(body["id"]))
 		del := body["deleteFile"] == true || fmt.Sprint(body["deleteFile"]) == "true"

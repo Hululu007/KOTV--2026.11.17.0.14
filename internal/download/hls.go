@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	appruntime "github.com/bobo/KOTV/internal/runtime"
@@ -26,7 +28,7 @@ func isHLSURL(raw, format string) bool {
 	return strings.Contains(u, ".m3u8") || strings.Contains(raw, "=m3u8")
 }
 
-func downloadHLS(ctx context.Context, src string, headers map[string]string, dest string, onProg func(float64, int64, int64, string)) error {
+func downloadHLS(ctx context.Context, src string, headers map[string]string, dest string, threads int, onProg func(float64, int64, int64, string)) error {
 	tmp := dest + ".hls"
 	_ = os.RemoveAll(tmp)
 	if err := os.MkdirAll(tmp, 0o755); err != nil {
@@ -53,26 +55,62 @@ func downloadHLS(ctx context.Context, src string, headers map[string]string, des
 	if len(segs) == 0 {
 		return fmt.Errorf("HLS 无切片")
 	}
+	threads = clampThreads(threads)
 	listPath := filepath.Join(tmp, "list.txt")
 	var list strings.Builder
+	sizes := make([]int64, len(segs))
+	var doneCount atomic.Int32
+	var totalBytes atomic.Int64
+	var firstErr error
+	var errMu sync.Mutex
+	jobs := make(chan int, len(segs))
+	var wg sync.WaitGroup
+	for w := 0; w < threads; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				u := resolveURI(src, segs[i])
+				part := filepath.Join(tmp, fmt.Sprintf("seg_%05d.ts", i))
+				n, err := httpGetFile(ctx, u, headers, part)
+				if err != nil {
+					errMu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("切片 %d: %w", i+1, err)
+					}
+					errMu.Unlock()
+					return
+				}
+				sizes[i] = n
+				tb := totalBytes.Add(n)
+				c := int(doneCount.Add(1))
+				if onProg != nil {
+					onProg(float64(c)/float64(len(segs))*0.9, tb, 0, fmt.Sprintf("切片 %d/%d", c, len(segs)))
+				}
+			}
+		}()
+	}
+	for i := range segs {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	if firstErr != nil {
+		return firstErr
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	var total int64
-	for i, seg := range segs {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		u := resolveURI(src, seg)
+	for i := range segs {
 		part := filepath.Join(tmp, fmt.Sprintf("seg_%05d.ts", i))
-		n, err := httpGetFile(ctx, u, headers, part)
-		if err != nil {
-			return fmt.Errorf("切片 %d: %w", i+1, err)
-		}
-		total += n
 		list.WriteString("file '")
 		list.WriteString(strings.ReplaceAll(part, `'`, `'\''`))
 		list.WriteString("'\n")
-		if onProg != nil {
-			onProg(float64(i+1)/float64(len(segs))*0.9, total, 0, fmt.Sprintf("切片 %d/%d", i+1, len(segs)))
-		}
+		total += sizes[i]
 	}
 	if err := os.WriteFile(listPath, []byte(list.String()), 0o644); err != nil {
 		return err
@@ -132,12 +170,7 @@ func httpGetString(ctx context.Context, raw string, headers map[string]string) (
 	if err != nil {
 		return "", err
 	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", "Mozilla/5.0 KOTV")
-	}
+	applyHeaders(req, headers)
 	cli := &http.Client{Timeout: 60 * time.Second}
 	resp, err := cli.Do(req)
 	if err != nil {
@@ -159,12 +192,7 @@ func httpGetFile(ctx context.Context, raw string, headers map[string]string, des
 	if err != nil {
 		return 0, err
 	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", "Mozilla/5.0 KOTV")
-	}
+	applyHeaders(req, headers)
 	cli := &http.Client{Timeout: 120 * time.Second}
 	resp, err := cli.Do(req)
 	if err != nil {

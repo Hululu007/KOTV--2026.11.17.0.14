@@ -5,11 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -46,16 +46,15 @@ type Manager struct {
 	byID     map[string]*Task
 	cancels  map[string]context.CancelFunc
 	resolver PlayResolver
-	workers  int
-	queue    chan string
+	running  int
+	wake     chan struct{}
 	started  bool
 }
 
 var defaultMgr = &Manager{
 	byID:    map[string]*Task{},
 	cancels: map[string]context.CancelFunc{},
-	workers: 2,
-	queue:   make(chan string, 256),
+	wake:    make(chan struct{}, 8),
 }
 
 // Default 返回进程级下载管理器。
@@ -64,7 +63,7 @@ func Default() *Manager { return defaultMgr }
 // SetResolver 注入播放地址解析。
 func SetResolver(r PlayResolver) { defaultMgr.resolver = r }
 
-// Start 启动 worker（幂等）。
+// Start 启动调度（幂等）。
 func Start() { defaultMgr.start() }
 
 func (m *Manager) start() {
@@ -75,45 +74,79 @@ func (m *Manager) start() {
 	}
 	m.started = true
 	m.loadLocked()
-	n := m.workers
-	if n < 1 {
-		n = 1
-	}
-	for i := 0; i < n; i++ {
-		go m.loop()
-	}
 	for _, t := range m.tasks {
-		if t.Status == StatusQueued || t.Status == StatusRunning {
+		if t.Status == StatusRunning {
 			t.Status = StatusQueued
 			t.Message = "等待中"
-			select {
-			case m.queue <- t.ID:
-			default:
-			}
+		}
+	}
+	m.persistLocked()
+	go m.dispatcher()
+	m.signalLocked()
+}
+
+func (m *Manager) signalLocked() {
+	select {
+	case m.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (m *Manager) signal() {
+	m.mu.Lock()
+	m.signalLocked()
+	m.mu.Unlock()
+}
+
+func (m *Manager) dispatcher() {
+	for range m.wake {
+		for m.tryStartOne() {
 		}
 	}
 }
 
-func (m *Manager) loop() {
-	for id := range m.queue {
-		m.runOne(id)
+func (m *Manager) tryStartOne() bool {
+	m.mu.Lock()
+	limit := concurrencyLimit()
+	if m.running >= limit {
+		m.mu.Unlock()
+		return false
 	}
+	var id string
+	for _, t := range m.tasks {
+		if t.Status == StatusQueued {
+			id = t.ID
+			t.Status = StatusRunning
+			t.Message = "开始下载"
+			t.UpdatedAt = nowMS()
+			m.running++
+			m.persistLocked()
+			break
+		}
+	}
+	m.mu.Unlock()
+	if id == "" {
+		return false
+	}
+	go m.runOne(id)
+	return true
 }
 
 func (m *Manager) runOne(id string) {
 	m.mu.Lock()
 	t := m.byID[id]
-	if t == nil || t.Status == StatusCancelled || t.Status == StatusDone {
+	if t == nil || t.Status != StatusRunning {
+		m.running--
+		if m.running < 0 {
+			m.running = 0
+		}
+		m.signalLocked()
 		m.mu.Unlock()
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancels[id] = cancel
-	t.Status = StatusRunning
-	t.Message = "开始下载"
-	t.UpdatedAt = nowMS()
 	snap := *t
-	m.persistLocked()
 	m.mu.Unlock()
 
 	err := m.execute(ctx, &snap)
@@ -122,18 +155,42 @@ func (m *Manager) runOne(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.cancels, id)
+	m.running--
+	if m.running < 0 {
+		m.running = 0
+	}
 	cur := m.byID[id]
 	if cur == nil {
+		m.signalLocked()
 		return
 	}
-	if cur.Status == StatusCancelled {
+	switch cur.Status {
+	case StatusCancelled, StatusPaused:
+		cur.Progress = snap.Progress
+		cur.Bytes = snap.Bytes
+		cur.Total = snap.Total
+		cur.Path = snap.Path
+		if cur.Status == StatusPaused {
+			cur.Message = "已暂停"
+		}
+		cur.UpdatedAt = nowMS()
 		m.persistLocked()
+		m.signalLocked()
 		return
 	}
 	if err != nil {
-		cur.Status = StatusError
-		cur.Error = err.Error()
-		cur.Message = err.Error()
+		if errors.Is(err, context.Canceled) {
+			// 外部取消已改状态；否则记失败。
+			if cur.Status == StatusRunning {
+				cur.Status = StatusError
+				cur.Error = "已中断"
+				cur.Message = "已中断"
+			}
+		} else {
+			cur.Status = StatusError
+			cur.Error = err.Error()
+			cur.Message = err.Error()
+		}
 	} else {
 		cur.Status = StatusDone
 		cur.Progress = 1
@@ -145,6 +202,7 @@ func (m *Manager) runOne(id string) {
 	}
 	cur.UpdatedAt = nowMS()
 	m.persistLocked()
+	m.signalLocked()
 }
 
 func (m *Manager) execute(ctx context.Context, t *Task) error {
@@ -162,7 +220,9 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 			cur.Message = msg
 		}
 		cur.UpdatedAt = nowMS()
+		t.Progress, t.Bytes, t.Total = p, bytes, total
 	}
+	threads := threadLimit()
 
 	epURL := strings.TrimSpace(t.EpURL)
 	if thunder.Match(epURL) {
@@ -176,7 +236,6 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 				p = float64(bytes) / float64(total)
 			}
 			onProg(p, bytes, total, msg)
-			t.Bytes, t.Total = bytes, total
 		})
 		if err != nil {
 			return err
@@ -198,45 +257,36 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 	if playURL == "" {
 		return fmt.Errorf("未解析到可下载地址")
 	}
-	if thunder.Match(playURL) || thunder.IsLocalStream(playURL) {
-		// 解析结果又变磁力：走 thunder；本地流地址则 HTTP 拉满。
-		if thunder.Match(playURL) {
-			t.Kind = KindMagnet
-			dest := ResolvePath(t.Title, t.Flag, t.EpName, "mp4")
-			t.Path = dest
-			return thunder.SaveToFile(ctx, playURL, dest, func(bytes, total int64, msg string) {
-				p := 0.0
-				if total > 0 {
-					p = float64(bytes) / float64(total)
-				}
-				onProg(p, bytes, total, msg)
-				t.Bytes, t.Total = bytes, total
-			})
-		}
+	if thunder.Match(playURL) {
+		t.Kind = KindMagnet
+		dest := ResolvePath(t.Title, t.Flag, t.EpName, "mp4")
+		t.Path = dest
+		return thunder.SaveToFile(ctx, playURL, dest, func(bytes, total int64, msg string) {
+			p := 0.0
+			if total > 0 {
+				p = float64(bytes) / float64(total)
+			}
+			onProg(p, bytes, total, msg)
+		})
 	}
 
 	if isHLSURL(playURL, format) {
 		t.Kind = KindHLS
 		dest := ResolvePath(t.Title, t.Flag, t.EpName, "mp4")
 		t.Path = dest
-		err := downloadHLS(ctx, playURL, headers, dest, func(p float64, bytes, total int64, msg string) {
-			onProg(p, bytes, total, msg)
-			t.Bytes, t.Total = bytes, total
-		})
-		return err
+		return downloadHLS(ctx, playURL, headers, dest, threads, onProg)
 	}
 
 	t.Kind = KindHTTP
 	ext := extFromURL(playURL, "mp4")
 	dest := ResolvePath(t.Title, t.Flag, t.EpName, ext)
 	t.Path = dest
-	n, total, err := downloadHTTP(ctx, playURL, headers, dest, func(bytes, total int64) {
+	n, total, err := downloadHTTP(ctx, playURL, headers, dest, threads, func(bytes, total int64) {
 		p := 0.0
 		if total > 0 {
 			p = float64(bytes) / float64(total)
 		}
 		onProg(p, bytes, total, "下载中")
-		t.Bytes, t.Total = bytes, total
 	})
 	if err != nil {
 		return err
@@ -245,71 +295,7 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 	return nil
 }
 
-func downloadHTTP(ctx context.Context, raw string, headers map[string]string, dest string, onProg func(bytes, total int64)) (int64, int64, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
-	if err != nil {
-		return 0, 0, err
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", "Mozilla/5.0 KOTV")
-	}
-	cli := &http.Client{Timeout: 0}
-	resp, err := cli.Do(req)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return 0, 0, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	total := resp.ContentLength
-	tmp := dest + ".part"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return 0, 0, err
-	}
-	var written int64
-	buf := make([]byte, 256*1024)
-	for {
-		if ctx.Err() != nil {
-			_ = f.Close()
-			_ = os.Remove(tmp)
-			return written, total, ctx.Err()
-		}
-		nr, er := resp.Body.Read(buf)
-		if nr > 0 {
-			nw, ew := f.Write(buf[:nr])
-			written += int64(nw)
-			if onProg != nil {
-				onProg(written, total)
-			}
-			if ew != nil {
-				_ = f.Close()
-				_ = os.Remove(tmp)
-				return written, total, ew
-			}
-		}
-		if er == io.EOF {
-			break
-		}
-		if er != nil {
-			_ = f.Close()
-			_ = os.Remove(tmp)
-			return written, total, er
-		}
-	}
-	_ = f.Close()
-	_ = os.Remove(dest)
-	if err := os.Rename(tmp, dest); err != nil {
-		return written, total, err
-	}
-	return written, total, nil
-}
-
-// Enqueue 批量入队，返回新建任务。
+// Enqueue 批量入队。
 func Enqueue(req EnqueueReq) ([]*Task, error) {
 	m := defaultMgr
 	m.start()
@@ -352,26 +338,133 @@ func Enqueue(req EnqueueReq) ([]*Task, error) {
 		m.tasks = append(m.tasks, t)
 		m.byID[t.ID] = t
 		out = append(out, cloneTask(t))
-		select {
-		case m.queue <- t.ID:
-		default:
-		}
 	}
 	m.persistLocked()
+	m.signalLocked()
 	return out, nil
 }
 
-// List 返回任务快照（新在前）。
+// List 按状态优先级排序后返回快照。
 func List() []*Task {
 	m := defaultMgr
 	m.start()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]*Task, 0, len(m.tasks))
-	for i := len(m.tasks) - 1; i >= 0; i-- {
-		out = append(out, cloneTask(m.tasks[i]))
+	for _, t := range m.tasks {
+		out = append(out, cloneTask(t))
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, rj := statusRank(out[i].Status), statusRank(out[j].Status)
+		if ri != rj {
+			return ri < rj
+		}
+		return out[i].UpdatedAt > out[j].UpdatedAt
+	})
 	return out
+}
+
+// Pause 暂停排队或运行中任务。
+func Pause(id string) error {
+	m := defaultMgr
+	m.start()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.byID[id]
+	if t == nil {
+		return fmt.Errorf("任务不存在")
+	}
+	switch t.Status {
+	case StatusDone, StatusCancelled, StatusPaused:
+		return nil
+	case StatusQueued:
+		t.Status = StatusPaused
+		t.Message = "已暂停"
+		t.UpdatedAt = nowMS()
+		m.persistLocked()
+		return nil
+	case StatusRunning:
+		t.Status = StatusPaused
+		t.Message = "正在暂停…"
+		t.UpdatedAt = nowMS()
+		if c := m.cancels[id]; c != nil {
+			c()
+		}
+		m.persistLocked()
+		return nil
+	default:
+		t.Status = StatusPaused
+		t.Message = "已暂停"
+		t.UpdatedAt = nowMS()
+		m.persistLocked()
+		return nil
+	}
+}
+
+// Resume 继续暂停或失败任务。
+func Resume(id string) error {
+	m := defaultMgr
+	m.start()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.byID[id]
+	if t == nil {
+		return fmt.Errorf("任务不存在")
+	}
+	switch t.Status {
+	case StatusPaused, StatusError, StatusCancelled:
+		t.Status = StatusQueued
+		t.Error = ""
+		t.Message = "排队中"
+		t.UpdatedAt = nowMS()
+		m.persistLocked()
+		m.signalLocked()
+		return nil
+	default:
+		return nil
+	}
+}
+
+// PauseAll 暂停全部可暂停任务。
+func PauseAll() int {
+	m := defaultMgr
+	m.start()
+	ids := []string{}
+	m.mu.Lock()
+	for _, t := range m.tasks {
+		if t.Status == StatusQueued || t.Status == StatusRunning {
+			ids = append(ids, t.ID)
+		}
+	}
+	m.mu.Unlock()
+	n := 0
+	for _, id := range ids {
+		if Pause(id) == nil {
+			n++
+		}
+	}
+	return n
+}
+
+// ResumeAll 恢复全部暂停/失败。
+func ResumeAll() int {
+	m := defaultMgr
+	m.start()
+	ids := []string{}
+	m.mu.Lock()
+	for _, t := range m.tasks {
+		if t.Status == StatusPaused || t.Status == StatusError || t.Status == StatusCancelled {
+			ids = append(ids, t.ID)
+		}
+	}
+	m.mu.Unlock()
+	n := 0
+	for _, id := range ids {
+		if Resume(id) == nil {
+			n++
+		}
+	}
+	return n
 }
 
 // Cancel 取消排队或运行中任务。
@@ -394,6 +487,7 @@ func Cancel(id string) error {
 		c()
 	}
 	m.persistLocked()
+	m.signalLocked()
 	return nil
 }
 
@@ -419,6 +513,7 @@ func Remove(id string, deleteFile bool) error {
 		}
 	}
 	m.persistLocked()
+	m.signalLocked()
 	if deleteFile && path != "" {
 		_ = os.Remove(path)
 	}

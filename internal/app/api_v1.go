@@ -1292,6 +1292,7 @@ func (a *App) APIGetSettings() map[string]any {
 		settings.DanmakuProjectionOffsetX, settings.DanmakuProjectionOffsetY,
 		settings.DanmakuProjectionOpacity,
 		settings.DownloadDir, settings.DownloadNameRule, settings.DownloadClassify,
+		settings.DownloadConcurrency, settings.DownloadThreads,
 	}
 	out := map[string]any{"ok": true, "port": a.Server.ProxyPort()}
 	vals := map[string]string{}

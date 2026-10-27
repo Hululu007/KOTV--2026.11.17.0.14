@@ -84,6 +84,28 @@ func (a *App) APIDownloadCancel(id string) map[string]any {
 	return map[string]any{"ok": true}
 }
 
+func (a *App) APIDownloadPause(id string) map[string]any {
+	if err := download.Pause(strings.TrimSpace(id)); err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	return map[string]any{"ok": true}
+}
+
+func (a *App) APIDownloadResume(id string) map[string]any {
+	if err := download.Resume(strings.TrimSpace(id)); err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	return map[string]any{"ok": true}
+}
+
+func (a *App) APIDownloadPauseAll() map[string]any {
+	return map[string]any{"ok": true, "count": download.PauseAll()}
+}
+
+func (a *App) APIDownloadResumeAll() map[string]any {
+	return map[string]any{"ok": true, "count": download.ResumeAll()}
+}
+
 func (a *App) APIDownloadRemove(id string, deleteFile bool) map[string]any {
 	if err := download.Remove(strings.TrimSpace(id), deleteFile); err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}

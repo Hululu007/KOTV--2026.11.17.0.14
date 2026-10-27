@@ -4,11 +4,12 @@ import "time"
 
 // 任务状态。
 const (
-	StatusQueued     = "queued"
-	StatusRunning    = "running"
-	StatusDone       = "done"
-	StatusError      = "error"
-	StatusCancelled  = "cancelled"
+	StatusQueued    = "queued"
+	StatusRunning   = "running"
+	StatusPaused    = "paused"
+	StatusDone      = "done"
+	StatusError     = "error"
+	StatusCancelled = "cancelled"
 )
 
 // Kind 下载类型。
@@ -42,3 +43,23 @@ type Task struct {
 }
 
 func nowMS() int64 { return time.Now().UnixMilli() }
+
+// statusRank 越小越靠前：下载中 > 等待 > 暂停 > 失败 > 取消 > 完成。
+func statusRank(s string) int {
+	switch s {
+	case StatusRunning:
+		return 0
+	case StatusQueued:
+		return 1
+	case StatusPaused:
+		return 2
+	case StatusError:
+		return 3
+	case StatusCancelled:
+		return 4
+	case StatusDone:
+		return 5
+	default:
+		return 9
+	}
+}

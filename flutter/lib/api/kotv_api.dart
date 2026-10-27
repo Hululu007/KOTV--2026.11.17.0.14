@@ -289,6 +289,18 @@ class KotvApi {
   Future<Map<String, dynamic>> downloadCancel(String id) =>
       _post('/api/v1/download', {'action': 'cancel', 'id': id});
 
+  Future<Map<String, dynamic>> downloadPause(String id) =>
+      _post('/api/v1/download', {'action': 'pause', 'id': id});
+
+  Future<Map<String, dynamic>> downloadResume(String id) =>
+      _post('/api/v1/download', {'action': 'resume', 'id': id});
+
+  Future<Map<String, dynamic>> downloadPauseAll() =>
+      _post('/api/v1/download', {'action': 'pauseAll'});
+
+  Future<Map<String, dynamic>> downloadResumeAll() =>
+      _post('/api/v1/download', {'action': 'resumeAll'});
+
   Future<Map<String, dynamic>> downloadRemove(String id,
           {bool deleteFile = false}) =>
       _post('/api/v1/download', {

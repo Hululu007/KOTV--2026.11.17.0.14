@@ -1,4 +1,4 @@
-/// 下载设置选项（与引擎 [internal/download] 命名 ID 一致）。
+/// 下载设置选项（与引擎 download 包规则/并发键一致）。
 class DownloadSettings {
   DownloadSettings._();
 
@@ -17,6 +17,30 @@ class DownloadSettings {
     ('全部放在下载根目录', 'false'),
   ];
 
+  static const concurrencyOptions = <(String, String)>[
+    ('1 个任务', '1'),
+    ('2 个任务', '2'),
+    ('3 个任务', '3'),
+    ('4 个任务', '4'),
+    ('5 个任务', '5'),
+  ];
+
+  static const threadOptions = <(String, String)>[
+    ('1 线程', '1'),
+    ('2 线程', '2'),
+    ('4 线程', '4'),
+    ('8 线程', '8'),
+  ];
+
+  static const filterOptions = <(String, String)>[
+    ('全部', 'all'),
+    ('下载中', 'running'),
+    ('等待', 'queued'),
+    ('暂停', 'paused'),
+    ('完成', 'done'),
+    ('失败', 'error'),
+  ];
+
   static String nameRuleLabel(String id) {
     final key = normalizeNameRule(id);
     for (final e in nameRuleOptions) {
@@ -31,7 +55,6 @@ class DownloadSettings {
     for (final e in nameRuleOptions) {
       if (e.$2 == v) return v;
     }
-    // 兼容旧版手写模板
     if (v.contains('{title}/{flag}_{ep}')) return 'title_flag_ep';
     if (v.contains('{title}/{ep}')) return 'title_ep';
     if (v.contains('{title}_{ep}')) return 'title_ep_flat';
@@ -44,10 +67,62 @@ class DownloadSettings {
     return on ? classifyOptions.first.$1 : classifyOptions.last.$1;
   }
 
+  static String concurrencyLabel(String raw) {
+    final v = _clampInt(raw, 2, 1, 5).toString();
+    for (final e in concurrencyOptions) {
+      if (e.$2 == v) return e.$1;
+    }
+    return '$v 个任务';
+  }
+
+  static String threadsLabel(String raw) {
+    final n = _clampInt(raw, 4, 1, 8);
+    final v = n == 3 || n == 5 || n == 6 || n == 7 ? '4' : n.toString();
+    for (final e in threadOptions) {
+      if (e.$2 == v) return e.$1;
+    }
+    return '$v 线程';
+  }
+
+  static String normalizeConcurrency(String raw) =>
+      _clampInt(raw, 2, 1, 5).toString();
+
+  static String normalizeThreads(String raw) {
+    final n = _clampInt(raw, 4, 1, 8);
+    if (n == 1 || n == 2 || n == 4 || n == 8) return '$n';
+    return '4';
+  }
+
+  static int _clampInt(String raw, int def, int min, int max) {
+    final n = int.tryParse(raw.trim()) ?? def;
+    if (n < min) return min;
+    if (n > max) return max;
+    return n;
+  }
+
   static String dirLabel(String dir) {
     final d = dir.trim();
     if (d.isEmpty) return '系统默认 Downloads';
     if (d.length <= 28) return d;
     return '…${d.substring(d.length - 26)}';
+  }
+
+  static bool matchFilter(String status, String filter) {
+    switch (filter) {
+      case 'all':
+        return true;
+      case 'running':
+        return status == 'running';
+      case 'queued':
+        return status == 'queued';
+      case 'paused':
+        return status == 'paused';
+      case 'done':
+        return status == 'done';
+      case 'error':
+        return status == 'error' || status == 'cancelled';
+      default:
+        return true;
+    }
   }
 }

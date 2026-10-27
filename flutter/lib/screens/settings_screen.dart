@@ -1817,6 +1817,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         msg: v == 'true' ? '已按片名建子目录' : '已全部放在下载根目录');
   }
 
+  Future<void> _pickDownloadConcurrency() async {
+    final cur = DownloadSettings.normalizeConcurrency(g('downloadConcurrency', '2'));
+    final v = await pickChoice(
+      context,
+      title: '同时进行的任务数',
+      current: cur,
+      options: DownloadSettings.concurrencyOptions,
+    );
+    if (v == null) return;
+    await _set('downloadConcurrency', v, msg: '同时下载数已保存');
+  }
+
+  Future<void> _pickDownloadThreads() async {
+    final cur = DownloadSettings.normalizeThreads(g('downloadThreads', '4'));
+    final v = await pickChoice(
+      context,
+      title: '每个任务的线程数',
+      current: cur,
+      options: DownloadSettings.threadOptions,
+    );
+    if (v == null) return;
+    await _set('downloadThreads', v, msg: '每任务线程数已保存');
+  }
+
   Future<void> _openDownloadSheet() async {
     await _showPlayerSubSheet(
       title: '下载设置',
@@ -1824,6 +1848,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final dir = g('downloadDir');
         final rule = DownloadSettings.normalizeNameRule(g('downloadNameRule'));
         final classify = g('downloadClassify', 'true');
+        final conc = DownloadSettings.normalizeConcurrency(
+            g('downloadConcurrency', '2'));
+        final threads =
+            DownloadSettings.normalizeThreads(g('downloadThreads', '4'));
         final p = KotvPalette.of(context);
         return [
           ListTile(
@@ -1850,6 +1878,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 style: TextStyle(color: p.muted, fontSize: 12)),
             onTap: () async {
               await _pickDownloadClassify();
+              setSheet(() {});
+            },
+          ),
+          ListTile(
+            title: Text('同时进行的任务数', style: TextStyle(color: p.fg)),
+            subtitle: Text(DownloadSettings.concurrencyLabel(conc),
+                style: TextStyle(color: p.muted, fontSize: 12)),
+            onTap: () async {
+              await _pickDownloadConcurrency();
+              setSheet(() {});
+            },
+          ),
+          ListTile(
+            title: Text('每个任务的线程数', style: TextStyle(color: p.fg)),
+            subtitle: Text(DownloadSettings.threadsLabel(threads),
+                style: TextStyle(color: p.muted, fontSize: 12)),
+            onTap: () async {
+              await _pickDownloadThreads();
               setSheet(() {});
             },
           ),

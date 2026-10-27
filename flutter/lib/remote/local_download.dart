@@ -36,6 +36,22 @@ class LocalDownload {
     await (await _engineApi()).downloadCancel(id);
   }
 
+  static Future<void> pause(String id) async {
+    await (await _engineApi()).downloadPause(id);
+  }
+
+  static Future<void> resume(String id) async {
+    await (await _engineApi()).downloadResume(id);
+  }
+
+  static Future<void> pauseAll() async {
+    await (await _engineApi()).downloadPauseAll();
+  }
+
+  static Future<void> resumeAll() async {
+    await (await _engineApi()).downloadResumeAll();
+  }
+
   static Future<void> remove(String id, {bool deleteFile = false}) async {
     await (await _engineApi()).downloadRemove(id, deleteFile: deleteFile);
   }

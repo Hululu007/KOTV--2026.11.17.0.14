@@ -83,13 +83,42 @@ ensure_rust() {
   rustup default stable >/dev/null 2>&1 || true
 }
 
+cargo_c_host_runs() {
+  [[ -x "$1" ]] || return 1
+  "$1" --version >/dev/null 2>&1
+}
+
+install_cargo_c_from_source() {
+  local bindir="$1"
+  echo "==> cargo-c: build v${CARGO_C_VER} for host $(uname -m)"
+  rm -rf "$bindir"
+  mkdir -p "$bindir"
+  cargo install cargo-c --locked --version "$CARGO_C_VER" --root "$bindir"
+  if [[ -x "$bindir/bin/cargo-cinstall" ]]; then
+    cp -f "$bindir/bin/cargo-cinstall" "$bindir/cargo-cinstall"
+    cp -f "$bindir/bin/cargo-capi" "$bindir/cargo-capi" 2>/dev/null || true
+    cp -f "$bindir/bin/cargo-cbuild" "$bindir/cargo-cbuild" 2>/dev/null || true
+    cp -f "$bindir/bin/cargo-ctest" "$bindir/cargo-ctest" 2>/dev/null || true
+  fi
+  export PATH="$bindir:$bindir/bin:$PATH"
+}
+
 ensure_cargo_c() {
   # 按版本装到独立目录，Win7 的 0.9.32 不能被 PATH 上残留的 0.10.x 抢走。
   local bindir="$BUILD_DIR/cargo-c-v${CARGO_C_VER}"
   mkdir -p "$bindir" "$HOME/.cargo/bin"
-  if [[ -x "$bindir/cargo-cinstall" || -x "$bindir/cargo-cinstall.exe" ]]; then
+  if cargo_c_host_runs "$bindir/cargo-cinstall" || cargo_c_host_runs "$bindir/cargo-cinstall.exe"; then
     export PATH="$bindir:$PATH"
     echo "ok cargo-cinstall=$(command -v cargo-cinstall) (cached v${CARGO_C_VER})"
+    return 0
+  fi
+  rm -f "$bindir"/cargo-capi "$bindir"/cargo-cbuild "$bindir"/cargo-cinstall "$bindir"/cargo-ctest \
+    "$bindir"/cargo-capi.exe "$bindir"/cargo-cbuild.exe "$bindir"/cargo-cinstall.exe "$bindir"/cargo-ctest.exe
+  # v0.10.25 的 cargo-c-macos.zip 只有 arm64，Intel 上会 Bad CPU type。
+  if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "x86_64" ]]; then
+    install_cargo_c_from_source "$bindir"
+    command -v cargo-cinstall >/dev/null || { echo "ERROR: cargo-cinstall missing" >&2; exit 1; }
+    echo "ok cargo-cinstall=$(command -v cargo-cinstall) (v${CARGO_C_VER}, host build)"
     return 0
   fi
   echo "==> fetch cargo-c v${CARGO_C_VER}"

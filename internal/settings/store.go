@@ -64,9 +64,11 @@ const (
 	RemoteAuth    Type = "remoteAuth"    // 允许非本机连入并强制登录，默认 false
 	AllowRegister Type = "allowRegister" // 开放注册，默认 false
 
-	DownloadDir      Type = "downloadDir"      // 下载目录；空则 paths.Downloads()
-	DownloadNameRule Type = "downloadNameRule" // 命名规则，默认 {title}/{flag}_{ep}.{ext}
-	DownloadClassify Type = "downloadClassify" // 按片名建子目录，默认 true
+	DownloadDir         Type = "downloadDir"         // 下载目录；空则 paths.Downloads()
+	DownloadNameRule    Type = "downloadNameRule"    // 命名规则 ID
+	DownloadClassify    Type = "downloadClassify"    // 按片名建子目录，默认 true
+	DownloadConcurrency Type = "downloadConcurrency" // 同时进行的任务数 1-5，默认 2
+	DownloadThreads     Type = "downloadThreads"     // 每任务线程数 1-8，默认 4
 
 	// 播放细项（须进 APIGetSettings 白名单，否则冷启动丢设置）。
 	AudioPassThrough         Type = "audioPassThrough"
@@ -261,6 +263,8 @@ func defaultFile() file {
 			{ID: "downloadDir", Label: "下载目录", Value: ""},
 			{ID: "downloadNameRule", Label: "下载命名", Value: "title_flag_ep"},
 			{ID: "downloadClassify", Label: "下载按片名分目录", Value: "true"},
+			{ID: "downloadConcurrency", Label: "同时下载数", Value: "2"},
+			{ID: "downloadThreads", Label: "每任务线程数", Value: "4"},
 			{ID: "audioPassThrough", Label: "音频直通", Value: "true"},
 			{ID: "exoDiskCache", Label: "Exo磁盘缓存", Value: "false"},
 			{ID: "exoAdblock", Label: "Exo去广告", Value: "true"},
