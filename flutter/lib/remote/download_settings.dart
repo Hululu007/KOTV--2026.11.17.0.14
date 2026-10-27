@@ -35,10 +35,10 @@ class DownloadSettings {
   static const filterOptions = <(String, String)>[
     ('全部', 'all'),
     ('下载中', 'running'),
-    ('等待', 'queued'),
-    ('暂停', 'paused'),
-    ('完成', 'done'),
-    ('失败', 'error'),
+    ('排队中', 'queued'),
+    ('已暂停', 'paused'),
+    ('已完成', 'done'),
+    ('已失败', 'error'),
   ];
 
   static String nameRuleLabel(String id) {

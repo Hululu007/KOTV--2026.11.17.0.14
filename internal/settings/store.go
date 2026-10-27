@@ -189,18 +189,28 @@ func isHostOnly(t Type) bool {
 	switch t {
 	case RemoteAuth, AllowRegister, DeviceUUID, SyncPairCode, UpdateURL, LOG, DLNARenderer,
 		DownloadDir, DownloadNameRule, DownloadClassify, DownloadConcurrency, DownloadThreads:
-		// 下载落盘在引擎主机，远端租户不可改主机路径/并发。
+		// 落在引擎主机：普通远端租户不可改；管理员可读改下载相关键。
 		return true
 	default:
 		return false
 	}
 }
 
-// IsHostOnly 宿主机专用键：远端用户不可读写。
+// IsHostOnly 宿主机专用键：远端普通用户不可读写。
 func IsHostOnly(t Type) bool { return isHostOnly(t) }
 
 // IsHostOnlyID 按设置 id 字符串判断。
 func IsHostOnlyID(id string) bool { return isHostOnly(Type(strings.TrimSpace(id))) }
+
+// IsDownloadHostID 主机下载相关设置（远端管理员可读写）。
+func IsDownloadHostID(id string) bool {
+	switch Type(strings.TrimSpace(id)) {
+	case DownloadDir, DownloadNameRule, DownloadClassify, DownloadConcurrency, DownloadThreads:
+		return true
+	default:
+		return false
+	}
+}
 
 // resolveOwner 本机/宿主机键 → ''；远端用户偏好 → userId。
 func resolveOwner(t Type) string {

@@ -12,6 +12,9 @@ import (
 
 // APIFsRoots 引擎本机可浏览根（下载目录等）。
 func (a *App) APIFsRoots() map[string]any {
+	if !canBrowseEngineFS() {
+		return map[string]any{"ok": false, "error": "需要管理员", "roots": []any{}}
+	}
 	roots := paths.BrowseRoots()
 	items := make([]any, 0, len(roots))
 	for _, r := range roots {
@@ -25,6 +28,9 @@ func (a *App) APIFsRoots() map[string]any {
 
 // APIFsList 列出引擎本机目录。path 空则返回浏览根列表。
 func (a *App) APIFsList(raw string) (map[string]any, error) {
+	if !canBrowseEngineFS() {
+		return nil, fmt.Errorf("需要管理员")
+	}
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		roots := paths.BrowseRoots()

@@ -263,6 +263,9 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
     final p = KotvPalette.of(context);
     final compact = KotvLayout.isCompact(context);
     final s = LayoutScale.of(context);
+    final layout = LayoutScale.layoutOf(context);
+    final hPad = 20 * s;
+    const filterH = 34.0;
     final visible = _visible;
     final filterIdx =
         DownloadSettings.filterOptions.indexWhere((e) => e.$2 == _filter);
@@ -282,18 +285,20 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
           ),
         ),
         Padding(
-          padding: EdgeInsets.fromLTRB(12 * s, 8, 12 * s, 0),
+          padding: EdgeInsets.fromLTRB(hPad, 8 * s, hPad, 0),
           child: SizedBox(
-            height: 36,
+            // AppPill 内部会再乘 layoutOf，外框同步缩放以免竖屏裁切。
+            height: filterH * layout + 4,
             child: HScrollList(
               scrollToIndex: filterIdx >= 0 ? filterIdx : 0,
               itemCount: DownloadSettings.filterOptions.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              separatorBuilder: (_, __) => SizedBox(width: 8 * layout),
               itemBuilder: (_, i) {
                 final e = DownloadSettings.filterOptions[i];
                 return AppPill(
                   label: e.$1,
-                  height: 34,
+                  height: filterH,
+                  fontSize: 14,
                   selected: _filter == e.$2,
                   onTap: () => setState(() => _filter = e.$2),
                 );
@@ -303,7 +308,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
         ),
         if (_toast != null && _toast!.isNotEmpty)
           Padding(
-            padding: EdgeInsets.fromLTRB(16 * s, 8, 16 * s, 0),
+            padding: EdgeInsets.fromLTRB(hPad, 8 * s, hPad, 0),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(_toast!,
@@ -318,9 +323,9 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                       child: Text('暂无下载任务', style: TextStyle(color: p.muted)),
                     )
                   : ListView.separated(
-                      padding: EdgeInsets.fromLTRB(12 * s, 10, 12 * s, 16),
+                      padding: EdgeInsets.fromLTRB(hPad, 12 * s, hPad, 20 * s),
                       itemCount: visible.length,
-                      separatorBuilder: (_, __) => SizedBox(height: 8 * s),
+                      separatorBuilder: (_, __) => SizedBox(height: 10 * s),
                       itemBuilder: (_, i) {
                         final t = visible[i];
                         final id = '${t['id']}';
@@ -352,7 +357,8 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                               setState(() {});
                             },
                             child: Padding(
-                              padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
+                              padding:
+                                  const EdgeInsets.fromLTRB(12, 12, 8, 12),
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [

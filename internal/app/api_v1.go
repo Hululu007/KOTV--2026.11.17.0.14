@@ -1197,11 +1197,17 @@ func (a *App) APIGetSettings() map[string]any {
 	}
 	settings.OverlayClientProfile(vals, hostclient.CurrentPlatform())
 	remoteUser := hostclient.DataOwner() != ""
+	admin := currentRequestIsAdmin()
 	if remoteUser {
 		for k := range vals {
-			if settings.IsHostOnlyID(k) {
-				delete(vals, k)
+			if !settings.IsHostOnlyID(k) {
+				continue
 			}
+			// 远端管理员可看下载落盘相关键；其它宿主机键仍隐藏。
+			if admin && settings.IsDownloadHostID(k) {
+				continue
+			}
+			delete(vals, k)
 		}
 	}
 	out["settings"] = vals
@@ -1477,6 +1483,7 @@ func (a *App) APISetSettings(kv map[string]string) error {
 	needLive := false
 	needDLNA := false
 	remoteUser := hostclient.DataOwner() != ""
+	admin := currentRequestIsAdmin()
 	kv = settings.SetClientProfileKeys(kv, hostclient.CurrentPlatform())
 	for k, v := range kv {
 		k = strings.TrimSpace(k)
@@ -1484,7 +1491,10 @@ func (a *App) APISetSettings(kv map[string]string) error {
 			continue
 		}
 		if remoteUser && settings.IsHostOnlyID(k) {
-			continue
+			// 远端管理员可改主机下载目录/并发等；普通租户跳过。
+			if !(admin && settings.IsDownloadHostID(k)) {
+				continue
+			}
 		}
 		if k == "searchHot" {
 			settings.SetSearchHot(parseStringList(v))

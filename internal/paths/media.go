@@ -42,7 +42,7 @@ func UnderMediaRoot(p string) bool {
 		if err != nil {
 			continue
 		}
-		if abs == r || strings.HasPrefix(abs, r+string(os.PathSeparator)) {
+		if PathUnderRoot(abs, r) {
 			return true
 		}
 	}

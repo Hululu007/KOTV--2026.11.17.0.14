@@ -14,6 +14,7 @@ type BrowseRoot struct {
 }
 
 // BrowseRoots 返回引擎本机可浏览根目录（绝对路径）。
+// Windows：各盘符 + 下载/用户目录；Android：内部存储与 /storage 下卷；桌面：下载/家目录/应用数据。
 func BrowseRoots() []BrowseRoot {
 	seen := map[string]struct{}{}
 	var out []BrowseRoot
@@ -41,14 +42,95 @@ func BrowseRoots() []BrowseRoot {
 		out = append(out, BrowseRoot{Name: name, Path: abs})
 	}
 
-	add("下载", Downloads())
-	if home, err := os.UserHomeDir(); err == nil {
-		add("用户目录", home)
+	switch runtime.GOOS {
+	case "windows":
+		for _, d := range windowsDriveRoots() {
+			add(d.Name, d.Path)
+		}
+		add("下载", Downloads())
+		if home, err := os.UserHomeDir(); err == nil {
+			add("用户目录", home)
+		}
+	case "android":
+		if ext := externalStorageRoot(); ext != "" {
+			add("内部存储", ext)
+		}
+		for _, d := range androidVolumeRoots() {
+			add(d.Name, d.Path)
+		}
+		add("应用数据", Data())
+	default:
+		add("下载", Downloads())
+		if home, err := os.UserHomeDir(); err == nil {
+			add("用户目录", home)
+		}
+		add("应用数据", Data())
+		for _, d := range unixMediaRoots() {
+			add(d.Name, d.Path)
+		}
 	}
-	if ext := externalStorageRoot(); ext != "" {
-		add("内部存储", ext)
+	return out
+}
+
+func windowsDriveRoots() []BrowseRoot {
+	var out []BrowseRoot
+	for c := 'A'; c <= 'Z'; c++ {
+		p := string(c) + `:\`
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			out = append(out, BrowseRoot{Name: string(c) + ":", Path: p})
+		}
 	}
-	add("应用数据", Data())
+	return out
+}
+
+func androidVolumeRoots() []BrowseRoot {
+	ents, err := os.ReadDir("/storage")
+	if err != nil {
+		return nil
+	}
+	var out []BrowseRoot
+	for _, e := range ents {
+		name := e.Name()
+		if name == "" || name == "self" || name == "emulated" || name == "." || name == ".." {
+			continue
+		}
+		p := filepath.Join("/storage", name)
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			out = append(out, BrowseRoot{Name: name, Path: p})
+		}
+	}
+	return out
+}
+
+func unixMediaRoots() []BrowseRoot {
+	home, _ := os.UserHomeDir()
+	cands := []string{"/media", "/mnt", "/Volumes"}
+	if home != "" {
+		cands = append(cands, filepath.Join("/media", filepath.Base(home)))
+	}
+	var out []BrowseRoot
+	seen := map[string]struct{}{}
+	for _, root := range cands {
+		ents, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, e := range ents {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if name == "" || strings.HasPrefix(name, ".") {
+				continue
+			}
+			p := filepath.Join(root, name)
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			out = append(out, BrowseRoot{Name: name, Path: p})
+		}
+	}
 	return out
 }
 
@@ -59,8 +141,7 @@ func UnderBrowseRoot(p string) bool {
 		return false
 	}
 	for _, r := range BrowseRoots() {
-		root := r.Path
-		if abs == root || strings.HasPrefix(abs, root+string(os.PathSeparator)) {
+		if PathUnderRoot(abs, r.Path) {
 			return true
 		}
 	}
@@ -74,7 +155,8 @@ func BrowseParent(dir string) string {
 		return ""
 	}
 	for _, r := range BrowseRoots() {
-		if abs == r.Path {
+		if PathUnderRoot(abs, r.Path) && PathUnderRoot(r.Path, abs) {
+			// abs 与某浏览根相同
 			return ""
 		}
 	}
