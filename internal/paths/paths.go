@@ -84,33 +84,37 @@ func Downloads() string {
 
 func publicDownloadsDir() string {
 	switch runtime.GOOS {
-	case "windows":
-		base := strings.TrimSpace(os.Getenv("USERPROFILE"))
-		if base == "" {
-			base, _ = os.UserHomeDir()
-		}
-		if base == "" {
-			return ""
-		}
-		return ensure(filepath.Join(base, "Downloads"))
-	case "darwin", "linux":
-		home, err := os.UserHomeDir()
-		if err != nil || strings.TrimSpace(home) == "" {
-			return ""
-		}
-		return ensure(filepath.Join(home, "Downloads"))
+	case "windows", "darwin", "linux":
+		return ensureHomeDownloads()
 	case "android":
-		if ext := externalStorageRoot(); ext != "" {
-			// DIRECTORY_DOWNLOADS：安卓是 Download（单数）。
-			pub := filepath.Join(ext, "Download")
-			if err := os.MkdirAll(pub, 0o755); err == nil {
-				return pub
-			}
+		ext := externalStorageRoot()
+		if ext == "" {
+			return ""
 		}
-		return ""
+		// DIRECTORY_DOWNLOADS：安卓是 Download（单数）。
+		pub := filepath.Join(ext, "Download")
+		if err := os.MkdirAll(pub, 0o755); err != nil {
+			return ""
+		}
+		return pub
 	default:
 		return ""
 	}
+}
+
+func ensureHomeDownloads() string {
+	home := ""
+	if runtime.GOOS == "windows" {
+		home = strings.TrimSpace(os.Getenv("USERPROFILE"))
+	}
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	home = strings.TrimSpace(home)
+	if home == "" {
+		return ""
+	}
+	return ensure(filepath.Join(home, "Downloads"))
 }
 
 func ensure(p string) string {

@@ -47,10 +47,6 @@ func BrowseRoots() []BrowseRoot {
 		for _, d := range windowsDriveRoots() {
 			add(d.Name, d.Path)
 		}
-		add("下载", Downloads())
-		if home, err := os.UserHomeDir(); err == nil {
-			add("用户目录", home)
-		}
 	case "android":
 		if ext := externalStorageRoot(); ext != "" {
 			add("内部存储", ext)
@@ -58,10 +54,16 @@ func BrowseRoots() []BrowseRoot {
 		for _, d := range androidVolumeRoots() {
 			add(d.Name, d.Path)
 		}
-		add("下载", Downloads())
+	}
+	add("下载", Downloads())
+	switch runtime.GOOS {
+	case "windows":
+		if home, err := os.UserHomeDir(); err == nil {
+			add("用户目录", home)
+		}
+	case "android":
 		add("应用数据", Data())
 	default:
-		add("下载", Downloads())
 		if home, err := os.UserHomeDir(); err == nil {
 			add("用户目录", home)
 		}

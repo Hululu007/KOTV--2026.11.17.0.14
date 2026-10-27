@@ -102,9 +102,11 @@ class DownloadSettings {
     return n;
   }
 
+  static const defaultDirLabel = '引擎默认下载目录';
+
   static String dirLabel(String dir) {
     final d = dir.trim();
-    if (d.isEmpty) return '引擎默认下载目录';
+    if (d.isEmpty) return defaultDirLabel;
     if (d.length <= 28) return d;
     return '…${d.substring(d.length - 26)}';
   }

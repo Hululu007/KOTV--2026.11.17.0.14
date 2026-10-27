@@ -1777,13 +1777,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       title: '下载目录',
       current: cur.trim().isEmpty ? 'default' : 'custom',
       options: const [
-        ('引擎默认下载目录', 'default'),
+        (DownloadSettings.defaultDirLabel, 'default'),
         ('浏览引擎目录…', 'pick'),
       ],
     );
     if (mode == null || !mounted) return;
     if (mode == 'default') {
-      await _set('downloadDir', '', msg: '已恢复引擎默认下载目录');
+      await _set('downloadDir', '', msg: '已恢复${DownloadSettings.defaultDirLabel}');
       return;
     }
     final path = await kotvPickEngineDirectory(context, title: '选择引擎下载目录');
