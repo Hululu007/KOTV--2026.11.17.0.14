@@ -1237,11 +1237,7 @@ func (a *App) APIGetSettings() map[string]any {
 
 // APIBackdrop 输出统一背景规格，供 Flutter 背景层使用。
 func (a *App) APIBackdrop() map[string]any {
-	cfg, _, sess := a.scope()
-	ready := a.Ready
-	if sess != nil {
-		ready = sess.Ready
-	}
+	cfg, ready := a.scopeReady()
 	mode := strings.TrimSpace(settings.Get(settings.WallMode))
 	if mode == "" {
 		mode = "config"
@@ -1451,12 +1447,7 @@ func (a *App) resolveBackdropImageURL(src string) string {
 	if strings.HasPrefix(src, "/") {
 		return src
 	}
-	cfg, _, sess := a.scope()
-	ready := a.Ready
-	if sess != nil {
-		ready = sess.Ready
-	}
-	if ready {
+	if cfg, ready := a.scopeReady(); ready {
 		base := strings.TrimSpace(cfg.API().URL)
 		if base != "" {
 			if resolved := util.ResolveRelativeURL(base, src); resolved != "" {

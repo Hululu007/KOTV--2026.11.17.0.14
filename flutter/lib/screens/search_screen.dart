@@ -254,9 +254,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     try {
       final cfg = await ref.read(apiProvider).getConfig();
       if (!mounted || gen != _searchGen) return;
-      final sites = ((cfg['sites'] as List?) ?? [])
-          .whereType<Map>()
-          .map((e) => SiteInfo.fromJson(Map<String, dynamic>.from(e)))
+      final sites = SiteInfo.listFromConfig(cfg)
           .where((s) => s.searchable && s.key.isNotEmpty)
           .toList();
 

@@ -965,9 +965,14 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         data: (c) => '${c['home'] ?? ''}'.trim(), orElse: () => '');
     final src = cfg.maybeWhen(
         data: (c) => '${c['source'] ?? ''}'.trim(), orElse: () => '');
-    final n = cfg.maybeWhen(
-        data: (c) => ((c['sites'] as List?) ?? []).length, orElse: () => 0);
-    final stamp = '$src|$homeKey|$n';
+    // 用站点 key 列表做标记：检测爬虫里禁用一个、恢复一个时数量不变，也要刷新。
+    final keys = cfg.maybeWhen(
+        data: (c) => ((c['sites'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((e) => '${e['key'] ?? ''}')
+            .join(','),
+        orElse: () => '');
+    final stamp = '$src|$homeKey|$keys';
     if (_cachedSites != null &&
         _cachedHomeKey == stamp &&
         _cachedHomeName != null) {
@@ -976,10 +981,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     final sites = cfg.maybeWhen(
       data: (c) {
         try {
-          return ((c['sites'] as List?) ?? [])
-              .whereType<Map>()
-              .map((e) => SiteInfo.fromJson(Map<String, dynamic>.from(e)))
-              .toList();
+          return SiteInfo.listFromConfig(c);
         } catch (_) {
           return <SiteInfo>[];
         }

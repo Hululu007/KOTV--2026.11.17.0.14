@@ -298,4 +298,11 @@ class SiteInfo {
         indexs: j['indexs'] == true,
         styleType: VodItem._styleType(j['style']),
       );
+
+  /// 配置接口里的 `sites` 列表（已排除隐藏与用户禁用的站）。
+  static List<SiteInfo> listFromConfig(Map<String, dynamic> cfg) =>
+      ((cfg['sites'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => SiteInfo.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
 }

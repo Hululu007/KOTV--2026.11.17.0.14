@@ -212,6 +212,15 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 	return sess.Cfg, sess.Sites, sess
 }
 
+// scopeReady 当前点播配置，以及它是否已加载就绪（远端会话看会话自己的状态）。
+func (a *App) scopeReady() (*config.Manager, bool) {
+	cfg, _, sess := a.scope()
+	if sess != nil {
+		return cfg, sess.Ready
+	}
+	return cfg, a.Ready
+}
+
 // bindSessionConfig 替换会话配置时必须同步 Sites/Live，否则换源/换站只改 Cfg，
 // 内容请求仍打旧空 Manager，表现为长期 Get "": unsupported protocol scheme ""。
 func bindSessionConfig(sess *clientsession.Session, cfg *config.Manager) {

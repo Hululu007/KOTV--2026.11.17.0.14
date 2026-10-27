@@ -191,10 +191,7 @@ Future<void> showSitePicker(
         builder: (ctx, setLocal) {
           Future<void> reload() async {
             final cfg = await ref.read(apiProvider).getConfig();
-            final list = ((cfg['sites'] as List?) ?? [])
-                .whereType<Map>()
-                .map((e) => SiteInfo.fromJson(Map<String, dynamic>.from(e)))
-                .toList();
+            final list = SiteInfo.listFromConfig(cfg);
             setLocal(() => all = list);
             ref.invalidate(configProvider);
           }

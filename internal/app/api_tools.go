@@ -282,11 +282,7 @@ func (a *App) toolCheckUpdate() (map[string]any, error) {
 
 // spiderScope 当前会话的配置；未就绪时报错。
 func (a *App) spiderScope() (*config.Manager, error) {
-	cfg, _, sess := a.scope()
-	ready := a.Ready
-	if sess != nil {
-		ready = sess.Ready
-	}
+	cfg, ready := a.scopeReady()
 	if !ready {
 		return nil, fmt.Errorf("配置未就绪")
 	}

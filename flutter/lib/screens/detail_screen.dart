@@ -4530,9 +4530,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _rememberEmptyTried(_routeSite, _routeId);
     try {
       final cfg = await ref.read(apiProvider).getConfig();
-      final keys = ((cfg['sites'] as List?) ?? [])
-          .whereType<Map>()
-          .map((e) => SiteInfo.fromJson(Map<String, dynamic>.from(e)))
+      final keys = SiteInfo.listFromConfig(cfg)
           .where((s) => s.searchable && s.changeable && s.key.isNotEmpty)
           .map((s) => s.key)
           .toList();
