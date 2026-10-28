@@ -79,7 +79,6 @@ class KotvClientStore {
         final n = kotvNormalizeEngineBaseUrl(v);
         d.engineBaseUrlDraft = (n.isEmpty || kotvIsLocalEngineBaseUrl(n)) ? '' : kotvEffectiveEngineBaseUrl(n);
       });
-  static Future<void> setRemoteUsername(String v) => update((d) => d.remoteUsername = v.trim());
   static Future<void> setAuthToken(String v) => update((d) => d.authToken = v.trim());
   static Future<void> clearAuth() => update((d) {
         d.authToken = '';

@@ -61,12 +61,4 @@ func (f FlexInt) MarshalJSON() ([]byte, error) {
 	return json.Marshal(f.Value)
 }
 
-func (f *FlexInt) Ptr() *int {
-	if f == nil || !f.Valid {
-		return nil
-	}
-	v := f.Value
-	return &v
-}
-
 func (f FlexInt) Is(v int) bool { return f.Valid && f.Value == v }

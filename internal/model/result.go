@@ -175,10 +175,6 @@ func (t *Type) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func HomeType() Type {
-	return Type{TypeID: "home", TypeName: "推荐", Selected: true}
-}
-
 // Filter 筛选条件。
 type Filter struct {
 	Key   string       `json:"key"`

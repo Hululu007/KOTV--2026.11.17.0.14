@@ -882,7 +882,6 @@ type Keep struct {
 	SiteName   string `json:"siteName"`
 }
 
-func KeepVodKey(siteKey, vodID string) string { return siteKey + "$$$" + vodID }
 func KeepLiveKey(liveName, channel string) string {
 	return liveName + "$$$" + channel
 }

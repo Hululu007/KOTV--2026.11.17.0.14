@@ -32,12 +32,4 @@ class KotvKeepAwake {
       WakelockPlus.disable().catchError((_) {});
     }
   }
-
-  /// 强制清空（进程退出兜底；正常路径靠各 playback dispose）。
-  static void clearAll() {
-    if (_holders.isEmpty && _applied != true) return;
-    _holders.clear();
-    _applied = false;
-    WakelockPlus.disable().catchError((_) {});
-  }
 }

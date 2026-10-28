@@ -293,17 +293,6 @@ func (c *LiveChannel) IsLastLine() bool {
 	return c.URLIndex >= len(c.URLs)-1
 }
 
-func (c *LiveChannel) SwitchLine(next bool) {
-	if len(c.URLs) == 0 {
-		return
-	}
-	step := 1
-	if !next {
-		step = -1
-	}
-	c.URLIndex = (c.URLIndex + step + len(c.URLs)) % len(c.URLs)
-}
-
 func (c *LiveChannel) LineLabel() string {
 	if !c.HasMultipleLines() {
 		return ""

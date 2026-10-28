@@ -29,12 +29,7 @@ type Vod struct {
 	Ratio       FlexString `json:"ratio"`
 	VodFlags    []Flag     `json:"-"`
 	Site        *Site      `json:"-"`
-	CurrentFlag Flag       `json:"-"`
-	SubEpisode  []Episode  `json:"-"`
-	CurrentTab  int        `json:"-"`
 }
-
-const EpSize = 20
 
 var flagSplit = regexp.MustCompile(`\$\$\$`)
 
@@ -96,33 +91,6 @@ func (v *Vod) SetCurrentFlag(idx int) {
 	for i := range v.VodFlags {
 		v.VodFlags[i].Activated = i == idx
 	}
-	v.CurrentFlag = v.VodFlags[idx]
-	v.CurrentFlag.Activated = true
-}
-
-func (v *Vod) ActiveEpisode() *Episode {
-	for i := range v.CurrentFlag.Episodes {
-		if v.CurrentFlag.Episodes[i].Activated {
-			return &v.CurrentFlag.Episodes[i]
-		}
-	}
-	return nil
-}
-
-func EpisodePage(eps []Episode, index int) []Episode {
-	if len(eps) == 0 {
-		return nil
-	}
-	from := index * EpSize
-	if from >= len(eps) {
-		lastPage := ((len(eps) - 1) / EpSize) * EpSize
-		return eps[lastPage:]
-	}
-	to := from + EpSize
-	if to > len(eps) {
-		to = len(eps)
-	}
-	return eps[from:to]
 }
 
 var (

@@ -1,8 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui' show PlatformDispatcher;
 
-import 'package:flutter/painting.dart';
-
 /// 画面调色（MPV / media_kit / FVP 全量；Exo：Surface/Texture 均走 Media3 setVideoEffects）。
 ///
 /// 数值：brightness/contrast/saturation/gamma/hue/temperature/shadow ∈ [-100, 100]，0 为中性；
@@ -231,33 +229,6 @@ class KotvVideoEq {
       parts.add('unsharp=5:5:$amount:5:5:0');
     }
     return parts.join(',');
-  }
-
-  /// Exo Flutter Texture 兜底滤镜（隧道等原生 effects 不可用时）；关闭或全 0 时返回 null。
-  ColorFilter? exoTextureColorFilter() {
-    if (!enabled) return null;
-    final b = brightness.clamp(-100, 100) / 100.0;
-    final c = (1.0 + contrast.clamp(-100, 100) / 100.0).clamp(0.1, 3.0);
-    final s = (1.0 + saturation.clamp(-100, 100) / 100.0).clamp(0.0, 3.0);
-    final temp = temperature.clamp(-100, 100) / 100.0 * 0.12;
-    if (b.abs() < 0.001 &&
-        (c - 1.0).abs() < 0.001 &&
-        (s - 1.0).abs() < 0.001 &&
-        temp.abs() < 0.001) {
-      return null;
-    }
-    final t = (1.0 - c) * 0.5 + b;
-    final invS = 1.0 - s;
-    const lr = 0.2126, lg = 0.7152, lb = 0.0722;
-    final r = lr * invS;
-    final g = lg * invS;
-    final bl = lb * invS;
-    return ColorFilter.matrix(<double>[
-      c * (r + s) + temp, c * g, c * bl - temp * 0.5, 0, t * 255,
-      c * r, c * (g + s), c * bl, 0, t * 255,
-      c * r - temp * 0.5, c * g, c * (bl + s) - temp, 0, t * 255,
-      0, 0, 0, 1, 0,
-    ]);
   }
 
   static int _i(dynamic v, int def) {

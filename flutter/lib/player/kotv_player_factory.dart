@@ -6,7 +6,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'art_playback.dart';
 import 'exo_playback.dart';
 import 'fvp_playback.dart';
-import 'fvp_register.dart';
 import 'html_playback.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
@@ -34,29 +33,8 @@ void kotvPushPlayerSettings(
   }
   exo?.applyPlayerOptions(settings);
   fvp?.applyPlayerOptions(settings);
-  unawaited(kotvApplySubtitleSettings(current, settings));
-}
-
-/// 根据播放器 ID 创建页内后端（不负责复用；由页面缓存实例）。
-KotvPlayback createKotvPlayback(String playerVal) {
-  switch (kotvEmbedBackend(playerVal)) {
-    case KotvEmbedBackend.html:
-      return HtmlPlayback();
-    case KotvEmbedBackend.art:
-      return ArtPlayback();
-    case KotvEmbedBackend.xg:
-      return XgPlayback();
-    case KotvEmbedBackend.zw:
-      return ZwPlayback();
-    case KotvEmbedBackend.fvp:
-      kotvEnsureFvpRegistered();
-      return FvpPlayback();
-    case KotvEmbedBackend.exo:
-      return ExoPlayback();
-    case KotvEmbedBackend.mpv:
-      if (kotvIsAndroid()) return NativeMpvPlayback();
-      throw StateError('桌面 MPV 由详情页 kotvCreateMpvPlayer + MediaKitPlayback 持有');
-  }
+  // Exo 的 applyPlayerOptions 播放中已按同一份设置写过字幕样式与偏移。
+  if (!identical(current, exo)) unawaited(kotvApplySubtitleSettings(current, settings));
 }
 
 /// 页内画面：Android 原生 MPV PlatformView；桌面/Windows/iOS media_kit Video；FVP 各平台独立。

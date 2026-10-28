@@ -706,14 +706,6 @@ func boolSetting(t Type, def bool) bool {
 	return v == "true" || v == "1" || v == "on"
 }
 
-func SetBool(t Type, on bool) {
-	if on {
-		Set(t, "true")
-	} else {
-		Set(t, "false")
-	}
-}
-
 // SearchHistory 搜索历史。
 type SearchHistory struct {
 	Items []string `json:"items"`

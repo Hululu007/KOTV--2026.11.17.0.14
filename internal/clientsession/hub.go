@@ -114,24 +114,6 @@ func (s *Session) MediaTitle() string {
 	return s.mediaTitle
 }
 
-func (s *Session) MediaSnapshot() map[string]string {
-	s.mediaMu.RLock()
-	defer s.mediaMu.RUnlock()
-	st := s.mediaState
-	if st == "" {
-		st = "idle"
-	}
-	title := s.mediaTitle
-	if title == "" {
-		title = "未播放"
-	}
-	return map[string]string{
-		"state": st,
-		"title": title,
-		"url":   s.mediaURL,
-	}
-}
-
 func (s *Session) SetMediaSnapshot(m map[string]string) {
 	s.mediaMu.Lock()
 	defer s.mediaMu.Unlock()

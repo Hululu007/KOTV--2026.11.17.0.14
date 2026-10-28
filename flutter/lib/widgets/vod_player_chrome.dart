@@ -933,14 +933,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     });
   }
 
-  /// 右侧选集打开后焦点落到当前集。
-  void focusEpisodes() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_epOpen) return;
-      _focusEpisodeList();
-    });
-  }
-
   void _focusEpisodeList() {
     final i = widget.epIdx >= 0 && widget.epIdx < widget.episodes.length
         ? widget.epIdx

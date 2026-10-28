@@ -5,19 +5,12 @@ class Platform {
   static bool get isMacOS => false;
   static bool get isWindows => false;
   static bool get isLinux => false;
-  static bool get isFuchsia => false;
   static String get pathSeparator => '/';
   static String get operatingSystem => 'web';
   static String get operatingSystemVersion => '';
-  static String get localeName => 'en';
-  static String get localHostname => 'localhost';
-  static int get numberOfProcessors => 1;
   static String get resolvedExecutable => '';
   static String get script => '';
   static String get executable => '';
-  static List<String> get executableArguments => const [];
-  static String? get packageConfig => null;
-  static Uri get scriptUri => Uri.parse('https://localhost/');
   static Map<String, String> get environment => const {};
 }
 
@@ -33,17 +26,13 @@ class File {
   bool existsSync() => false;
   Future<bool> exists() async => false;
   Future<String> readAsString({encoding}) async => '';
-  String readAsStringSync({encoding}) => '';
   Future<File> writeAsString(String contents, {encoding, mode, flush}) async => this;
   void writeAsStringSync(String contents, {encoding, mode, flush}) {}
   Future<File> delete({bool recursive = false}) async => this;
   void deleteSync({bool recursive = false}) {}
   Future<File> rename(String newPath) async => File(newPath);
-  File renameSync(String newPath) => File(newPath);
   Future<int> length() async => 0;
   int lengthSync() => 0;
-  Future<FileStat> stat() async => FileStat._();
-  FileStat statSync() => FileStat._();
 }
 
 class Directory {
@@ -67,21 +56,6 @@ class FileSystemEntity {
   static bool isDirectorySync(String path) => false;
   Future<FileSystemEntity> delete({bool recursive = false}) async => this;
   void deleteSync({bool recursive = false}) {}
-}
-
-class FileStat {
-  FileStat._();
-  int get size => 0;
-  DateTime get modified => DateTime.fromMillisecondsSinceEpoch(0);
-}
-
-class Process {
-  static Future<ProcessResult> run(String executable, List<String> arguments,
-          {String? workingDirectory, Map<String, String>? environment, bool includeParentEnvironment = true, bool runInShell = false, encoding, stderrEncoding}) async =>
-      ProcessResult(0, 1, '', 'unsupported on web');
-  static Future<Process> start(String executable, List<String> arguments,
-          {String? workingDirectory, Map<String, String>? environment, bool includeParentEnvironment = true, bool runInShell = false, ProcessStartMode mode = ProcessStartMode.normal}) async =>
-      throw UnsupportedError('Process.start unsupported on web');
 }
 
 class ProcessResult {
