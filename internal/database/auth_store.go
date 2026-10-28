@@ -133,6 +133,11 @@ func (db *DB) DeleteAuthTokensForUser(userID string) error {
 	return err
 }
 
+func (db *DB) DeleteAuthTokensForUserExcept(userID, keep string) error {
+	_, err := db.conn.Exec(`DELETE FROM auth_token WHERE user_id = ? AND token <> ?`, userID, keep)
+	return err
+}
+
 func (db *DB) LookupAuthToken(token string) (*AuthToken, error) {
 	row := db.conn.QueryRow(
 		`SELECT token, user_id, expires_at FROM auth_token WHERE token = ?`, token)

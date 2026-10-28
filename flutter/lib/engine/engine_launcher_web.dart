@@ -12,8 +12,8 @@ class EngineLauncher {
   String baseUrl = kotvDefaultLocalEngineBaseUrl;
   KotvApi? _api;
 
-  /// Web 固定同源，不会切本机进程。
-  bool takeFellBackToLocal() => false;
+  /// 最近一次连不上引擎的原因，显示在未连接页。
+  String lastError = '';
 
   KotvApi client() {
     _api = kotvEngineClient(_api, baseUrl);
@@ -35,20 +35,21 @@ class EngineLauncher {
     if (_shuttingDown) return false;
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      if (await _ping(baseUrl)) return true;
+      if (await _check()) return true;
       await Future<void>.delayed(const Duration(milliseconds: 400));
     }
-    return await _ping(baseUrl);
+    return false;
   }
 
   Future<bool> recoverIfNeeded({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
-    return _ping(baseUrl);
+    return _check();
   }
 
-  /// Web 无远端→本机切换；与 [recoverIfNeeded] 相同。
-  Future<bool> recoverOrFallbackLocal({bool forceRestart = false}) async {
-    return recoverIfNeeded(forceRestart: forceRestart);
+  Future<bool> _check() async {
+    final ok = await _ping(baseUrl);
+    lastError = ok ? '' : '无法连接本站后端服务，请确认引擎已启动后刷新页面';
+    return ok;
   }
 
   Future<bool> onAppResumed() async {

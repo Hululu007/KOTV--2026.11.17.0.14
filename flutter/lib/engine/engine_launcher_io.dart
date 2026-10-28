@@ -6,9 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../api/kotv_api.dart';
-import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_id.dart';
-import '../api/kotv_client_store.dart';
 import '../api/kotv_engine_url.dart';
 import 'engine_probe.dart';
 import '../player/kotv_traffic.dart';
@@ -29,15 +27,8 @@ class EngineLauncher {
   KotvApi? _api;
   DateTime _lastResumeCheck = DateTime.fromMillisecondsSinceEpoch(0);
 
-  /// 远端不可达已切本机；由 [takeFellBackToLocal] 读取并清除。
-  bool _fellBackToLocal = false;
-
-  /// 是否刚因远端不可达切到本机（读一次即清）。
-  bool takeFellBackToLocal() {
-    final v = _fellBackToLocal;
-    _fellBackToLocal = false;
-    return v;
-  }
+  /// 最近一次连不上引擎的原因，显示在未连接页。
+  String lastError = '';
 
   KotvApi client() {
     _api = kotvEngineClient(_api, baseUrl);
@@ -63,17 +54,35 @@ class EngineLauncher {
   Future<bool> ensureReady({Duration timeout = const Duration(seconds: 30)}) async {
     // 尽早固化 clientId，后续 API / 界面套接字带同一身份。
     await kotvClientId();
-    // 远端引擎：只探一次配置的地址，连不上或不是 KOTV 引擎直接失败；不拉起/回退本机 :9978。
-    if (!kotvIsLocalEngineBaseUrl(baseUrl)) return _ping(baseUrl);
+    // 远端引擎：只探一次配置的地址，连不上、不是 KOTV 后端或版本不兼容直接失败；
+    // 不拉起本机引擎，也不改地址，由用户自己更换。
+    if (!kotvIsLocalEngineBaseUrl(baseUrl)) {
+      try {
+        await kotvProbeEngine(baseUrl);
+        lastError = '';
+        return true;
+      } catch (e) {
+        lastError = '$e';
+        return false;
+      }
+    }
     await _startOnce();
-    if (_noBundledEngine && !Platform.isAndroid) return false;
+    if (_noBundledEngine && !Platform.isAndroid) {
+      lastError = '没有本机引擎，请连接后端';
+      return false;
+    }
 
     // 引擎先开端口再加载点播源，端口一通就算连上；点播源加载中/失败由首页等待和提示。
+    lastError = '本机引擎没有启动';
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       final h = await _health(baseUrl);
       // 端口有响应但不是本引擎（被别的服务占用等）：直接失败。
-      if (h != null) return kotvIsEngineHealth(h) && _acceptLocalHealth();
+      if (h != null) {
+        final ok = kotvEngineHealthProblem(h).isEmpty && _acceptLocalHealth();
+        lastError = ok ? '' : '本机 $kotvDefaultEnginePort 端口被其他程序占用';
+        return ok;
+      }
       // 只在引擎还在启动时等端口：安卓服务模式，或自己拉起的进程仍存活。
       final starting = (Platform.isAndroid && !_owned) ||
           (_owned && _proc != null && await _procAlive(_proc!));
@@ -88,10 +97,10 @@ class EngineLauncher {
   /// **引擎 :9978 已通时绝不动 spider（:9979）。** 首页刷新/换源都会走到这里，
   /// 若每次重启 spider，正在进行的 jar 调用会卡到 ~120s，界面一直「加载中」。
   ///
-  /// 远端地址只探测，不在此切本机；需要回落时用 [recoverOrFallbackLocal]。
+  /// 远端地址只探测，连不上就返回 false，不切本机。
   Future<bool> recoverIfNeeded({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
-    if (!kotvIsLocalEngineBaseUrl(baseUrl)) return _ping(baseUrl);
+    if (!kotvIsLocalEngineBaseUrl(baseUrl)) return ensureReady();
     if (Platform.isAndroid) {
       if (await _ping(baseUrl)) return true;
     } else if (_owned && _proc != null && await _procAlive(_proc!) && await _ping(baseUrl)) {
@@ -106,28 +115,6 @@ class EngineLauncher {
       await _killOwnedQuietly();
     }
     return ensureReady(timeout: const Duration(seconds: 20));
-  }
-
-  /// 远端可达则返回 true。不可达时，桌面和安卓清掉远端地址并切本机。
-  /// iOS 没有本机引擎，探失败直接返回，不清地址。已是本机则等同 [recoverIfNeeded]。
-  Future<bool> recoverOrFallbackLocal({bool forceRestart = false}) async {
-    if (_shuttingDown) return false;
-    if (kotvIsLocalEngineBaseUrl(baseUrl)) {
-      return recoverIfNeeded(forceRestart: forceRestart);
-    }
-    if (await _ping(baseUrl)) return true;
-    if (Platform.isIOS) return false;
-    debugPrint('engine: remote unreachable → fallback local ($baseUrl)');
-    try {
-      // draft 保留，方便设置页再次登录；业务地址与登录态清掉。
-      await KotvClientStore.clearEngine();
-      await kotvClearAuthToken();
-    } catch (e) {
-      debugPrint('engine: clear remote client store failed: $e');
-    }
-    applyBaseUrl('');
-    _fellBackToLocal = true;
-    return recoverIfNeeded(forceRestart: forceRestart);
   }
 
   /// 从后台回前台：只探活。健康则立即返回，不 stop/restart spider。

@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../api/kotv_settings_cache.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
@@ -50,7 +49,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   bool _filtersExpanded = false;
   final Map<String, String> _extend = {};
   String? _statusMsg;
-  bool _authPromptOpen = false;
   bool _loading = true;
   bool _ready = false;
   List<ConfigBannerSlide> _apiBanners = [];
@@ -166,13 +164,12 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     try {
       await _refreshLocalMeta();
     } catch (e) {
-      if (_needsRemoteLogin('$e')) {
+      if (kotvMessageNeedsLogin(e)) {
         await _promptRemoteLogin(_loadGen);
         return;
       }
     }
     // 暖启动：配置已 ready 且爬虫就绪时跳过 refreshRepo，直接拉首页。
-    // 远端断开时由 _reload 内 recoverOrFallbackLocal 切本机并强制拉仓。
     var refreshRepo = true;
     try {
       final cfg = await ref.read(apiProvider).getConfig();
@@ -213,7 +210,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         setState(() {
           _ready = false;
           _loading = true;
-          _statusMsg = '正在加载点播源…';
         });
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));
@@ -221,30 +217,16 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     return cfg;
   }
 
-  bool _needsRemoteLogin(String msg) {
-    return msg.contains('需要登录') || msg.contains('登录已失效');
-  }
-
+  /// 登录失效：弹登录框，成功后重新加载；取消则由入口回到登录页。
   Future<void> _promptRemoteLogin(int gen) async {
-    if (_authPromptOpen || !mounted || gen != _loadGen) return;
-    _authPromptOpen = true;
+    if (!mounted || gen != _loadGen) return;
     setState(() {
       _loading = false;
       _statusMsg = null;
     });
-    final prompt = await promptRemoteLoginIfNeeded(
-      context,
-      ref,
-      baseUrl: ref.read(engineLauncherProvider).baseUrl,
-    );
-    _authPromptOpen = false;
-    if (!mounted || gen != _loadGen) return;
-    if (prompt == RemoteLoginPrompt.signedIn) {
-      unawaited(Future<void>(() => _reload(clearContent: true, refreshRepo: true)));
-      return;
-    }
-    if (prompt != RemoteLoginPrompt.ready) {
-      setState(() => _statusMsg = '需要登录');
+    final ok = await kotvPresentLoginIfNeeded(context, ref);
+    if (ok && mounted && gen == _loadGen) {
+      unawaited(_reload(clearContent: true, refreshRepo: true));
     }
   }
 
@@ -270,13 +252,14 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     return run;
   }
 
+  /// [afterRecover]：引擎刚重新拉起后的重试，不再二次重试。
   Future<void> _reloadBody({
     bool clearContent = false,
     bool refreshRepo = false,
     bool refreshConfig = false,
+    bool afterRecover = false,
   }) async {
     final gen = ++_loadGen;
-    var fellBack = false;
     setState(() {
       _loading = true;
       _statusMsg = null;
@@ -293,33 +276,12 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       }
     });
     try {
-      final launcher = ref.read(engineLauncherProvider);
-      final up = await launcher.recoverOrFallbackLocal();
-      if (!mounted || gen != _loadGen) return;
-      if (launcher.takeFellBackToLocal()) {
-        fellBack = true;
-        KotvSettingsCache.clear();
-        ref.invalidate(engineReadyProvider);
-        ref.invalidate(configProvider);
-        ref.invalidate(settingsProvider);
-        refreshRepo = true;
-        clearContent = true;
-        setState(() {
-          _items.clear();
-          _types = [];
-          _filters = [];
-          _catPageCache.clear();
-          _statusMsg = '远端不可达，已切回本机引擎';
-        });
-      }
-      if (!up) {
-        setState(() {
-          _ready = false;
-          _statusMsg = '无法连接引擎，请稍后点重试';
-          _loading = false;
-        });
+      if (!await ref.read(engineLauncherProvider).recoverIfNeeded()) {
+        // 引擎连不上：交给入口重新检查，显示原因，由用户重试或换地址。
+        if (mounted) ref.invalidate(engineStatusProvider);
         return;
       }
+      if (!mounted || gen != _loadGen) return;
 
       final cfg = await _waitConfigReady();
       if (!mounted || gen != _loadGen) return;
@@ -327,7 +289,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       if (!ready && !clearContent && _items.isNotEmpty) {
         final source = '${cfg['source'] ?? ''}'.trim();
         final err = '${cfg['error'] ?? ''}'.trim();
-        if (_needsRemoteLogin(err)) {
+        if (kotvMessageNeedsLogin(err)) {
           await _promptRemoteLogin(gen);
           return;
         }
@@ -348,7 +310,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       if (!ready) {
         final source = '${cfg['source'] ?? ''}'.trim();
         final err = '${cfg['error'] ?? ''}'.trim();
-        if (_needsRemoteLogin(err)) {
+        if (kotvMessageNeedsLogin(err)) {
           await _promptRemoteLogin(gen);
           return;
         }
@@ -387,8 +349,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       if (!mounted || gen != _loadGen) return;
       if (repoErr.isNotEmpty) {
         setState(() => _statusMsg = '仓库加载失败: $repoErr');
-      } else if (fellBack) {
-        setState(() => _statusMsg = '远端不可达，已切回本机引擎');
       }
       unawaited(_fillHomeRecommendIfEmpty(gen));
       _scheduleAutofill();
@@ -399,7 +359,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     } catch (e) {
       if (!mounted || gen != _loadGen) return;
       final msg = '$e';
-      if (_needsRemoteLogin(msg)) {
+      if (kotvMessageNeedsLogin(msg)) {
         await _promptRemoteLogin(gen);
         return;
       }
@@ -407,62 +367,21 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         setState(() => _statusMsg = '首页加载超时，请重试或换源');
         return;
       }
-      if (msg.contains('Connection refused') ||
-          msg.contains('SocketException')) {
-        final launcher = ref.read(engineLauncherProvider);
-        final ok = await launcher.recoverOrFallbackLocal();
-        if (!mounted || gen != _loadGen) return;
-        final retryFellBack = launcher.takeFellBackToLocal();
-        if (ok) {
-          if (retryFellBack) {
-            KotvSettingsCache.clear();
-            ref.invalidate(engineReadyProvider);
-            ref.invalidate(configProvider);
-            ref.invalidate(settingsProvider);
+      if (!afterRecover && (msg.contains('Connection refused') || msg.contains('SocketException'))) {
+        // 引擎断了：本机会重新拉起，成功就重来一次；仍连不上交给入口显示原因。
+        if (await ref.read(engineLauncherProvider).recoverIfNeeded()) {
+          if (mounted && gen == _loadGen) {
+            unawaited(_reloadBody(
+              clearContent: clearContent,
+              refreshRepo: refreshRepo,
+              refreshConfig: refreshConfig,
+              afterRecover: true,
+            ));
           }
-          try {
-            // 重启/切本机后须再等 ready，否则会打到空仓。
-            final cfg = await _waitConfigReady();
-            if (!mounted || gen != _loadGen) return;
-            if (cfg['ready'] != true) {
-              setState(() {
-                _ready = false;
-                _statusMsg = '引擎已恢复，但点播源未就绪，请重试';
-              });
-              return;
-            }
-            setState(() => _ready = true);
-            if (retryFellBack) {
-              final source = '${cfg['source'] ?? ''}'.trim();
-              final lower = source.toLowerCase();
-              if (lower.startsWith('http://') || lower.startsWith('https://')) {
-                try {
-                  await ref
-                      .read(apiProvider)
-                      .refreshConfig()
-                      .timeout(const Duration(seconds: 45));
-                } catch (_) {}
-              }
-              if (!mounted || gen != _loadGen) return;
-            }
-            final data = await _fetchFirstPage(gen);
-            if (!mounted || gen != _loadGen) return;
-            _applyPage(data, replace: true);
-            unawaited(_fillHomeRecommendIfEmpty(gen));
-            _scheduleAutofill();
-            setState(() {
-              _statusMsg = retryFellBack ? '远端不可达，已切回本机引擎' : null;
-            });
-            if (retryFellBack) {
-              ref.invalidate(configProvider);
-            }
-            return;
-          } catch (e2) {
-            if (!mounted || gen != _loadGen) return;
-            setState(() => _statusMsg = '$e2');
-            return;
-          }
+        } else if (mounted) {
+          ref.invalidate(engineStatusProvider);
         }
+        return;
       }
       setState(() => _statusMsg = msg);
     } finally {
@@ -488,7 +407,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         final msg = '$e';
         final retry = msg.contains('Timeout') || msg.contains('首页加载已取消');
         if (!retry || i >= attempts - 1 || !mounted || gen != _loadGen) rethrow;
-        setState(() => _statusMsg = '正在加载首页…');
       }
     }
   }
@@ -1024,16 +942,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     final cfgReady =
         cfg.maybeWhen(data: (c) => c['ready'] == true, orElse: () => false);
     final ready = _ready || cfgReady;
-    // 有源但尚未 ready：显示加载，而不是「请先添加点播源」
-    // 勿用 contains('加载')：会误伤「点播源加载超时」，导致超时后永久转圈。
-    final msg = _statusMsg ?? '';
+    // 有源但尚未 ready：加载中只转圈，失败显示原因和重试，而不是「请先添加点播源」。
     final hasConfiguredSource = cfgSource.isNotEmpty || sites.isNotEmpty;
-    final loadingSource = !ready &&
-        (_loading ||
-            msg.contains('正在加载') ||
-            msg.contains('超时') ||
-            msg.contains('无法连接') ||
-            (hasConfiguredSource && msg.isEmpty));
+    final loadingSource =
+        !ready && (_loading || (_statusMsg ?? '').isNotEmpty || hasConfiguredSource);
     final siteName = !ready
         ? (loadingSource ? '加载中…' : '未配置源')
         : ((home != null && home.name.isNotEmpty)
@@ -1136,37 +1048,31 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     );
   }
 
+  /// 点播源未就绪：加载中只转圈；加载失败显示原因和重试。
   Widget _buildLoadingSource() {
     final p = KotvPalette.of(context);
+    final msg = (_statusMsg ?? '').trim();
+    if (_loading || msg.isEmpty) {
+      return Center(
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: CircularProgressIndicator(strokeWidth: 3, color: p.primary),
+        ),
+      );
+    }
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
-            width: 36,
-            height: 36,
-            child: CircularProgressIndicator(
-                strokeWidth: 3, color: p.primary),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(msg,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: p.muted, fontSize: 13)),
           ),
-          const SizedBox(height: 16),
-          Text('正在加载点播源…',
-              style: TextStyle(
-                  color: p.fg, fontSize: 18, fontWeight: FontWeight.w700)),
-          if ((_statusMsg ?? '').isNotEmpty &&
-              !(_statusMsg ?? '').contains('正在加载')) ...[
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Text(_statusMsg!,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: p.muted, fontSize: 13)),
-            ),
-            const SizedBox(height: 14),
-            AppPill(
-                label: '重试',
-                width: 100,
-                onTap: () => _reload(clearContent: true)),
-          ],
+          const SizedBox(height: 14),
+          AppPill(label: '重试', width: 100, onTap: () => _reload(clearContent: true)),
         ],
       ),
     );

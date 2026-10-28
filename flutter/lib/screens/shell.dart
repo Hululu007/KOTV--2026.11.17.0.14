@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,7 +18,6 @@ import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../vod/vod_open.dart';
-import '../widgets/auth_gate.dart';
 import '../widgets/chrome.dart';
 import 'collect_screen.dart';
 import 'detail_screen.dart';
@@ -51,8 +49,6 @@ class _AppShellState extends ConsumerState<AppShell> {
   /// 防止 PopScope / 右键 Listener / 画面 onSecondaryTap 短时间内连触发两次。
   bool _handlingBack = false;
   Timer? _handlingBackReset;
-  /// Web：登录完成前不渲染主界面。
-  bool _webAuthed = !kIsWeb;
   /// 稳定 Navigator key：切 Tab 用 pushAndRemoveUntil 换根页，勿用 GlobalObjectKey(page)
   ///（卸树再挂同一 GlobalKey 会在 activate 时 _state! 空指针 →「页面渲染出错」）。
   final GlobalKey<NavigatorState> _shellNavKey = GlobalKey<NavigatorState>();
@@ -61,21 +57,8 @@ class _AppShellState extends ConsumerState<AppShell> {
   void initState() {
     super.initState();
     kotvHandleAppBack = () => _onShellBack(fromMouse: true);
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      // Web：同源本站，进页必须先登录（无需配置远程引擎）。
-      if (kIsWeb) {
-        while (mounted) {
-          final ok = await ensureRemoteAuthIfNeeded(context, ref);
-          if (!mounted) return;
-          if (ok) {
-            setState(() => _webAuthed = true);
-            break;
-          }
-        }
-      }
-      if (!mounted) return;
-      _wireRemote();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _wireRemote();
     });
   }
 
@@ -281,12 +264,6 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_webAuthed) {
-      return const Scaffold(
-        backgroundColor: Colors.transparent,
-        body: SizedBox.expand(),
-      );
-    }
     final page = ref.watch(kotvPageProvider);
     final busy = ref.watch(uiBusyProvider);
     final coverFlag = ref.watch(detailChromeCoverProvider);

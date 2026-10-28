@@ -92,7 +92,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           e.key: '${e.value ?? ''}',
       };
       final lines = <String>[
-        'KO影视 Flutter ${st['version'] ?? kotvFallbackAppVersion}',
+        'KO影视 Flutter ${st['version'] ?? kotvClientVersion}',
         '引擎端口：${st['port'] ?? kotvDefaultEnginePort}',
         '',
         '运行时：',
@@ -117,9 +117,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final versionText = ref.watch(settingsProvider).maybeWhen(
       data: (d) {
         final v = '${d['version'] ?? ''}'.trim();
-        return v.isEmpty ? kotvFallbackAppVersion : v;
+        return v.isEmpty ? kotvClientVersion : v;
       },
-      orElse: () => kotvFallbackAppVersion,
+      orElse: () => kotvClientVersion,
     );
     final bottomNav = KotvLayout.useBottomNav(context);
     final compact = KotvLayout.isCompact(context);

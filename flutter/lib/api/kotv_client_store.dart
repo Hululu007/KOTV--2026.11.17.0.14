@@ -84,10 +84,20 @@ class KotvClientStore {
         d.authToken = '';
       });
 
-  static Future<void> clearEngine() => update((d) {
-        d.engineBaseUrl = '';
-        d.remoteUsername = '';
+  /// 记住的远端后端身份（按规范化地址）。
+  static Future<String> engineKey(String baseUrl) async =>
+      (await load()).engineKeys[kotvEffectiveEngineBaseUrl(baseUrl)] ?? '';
+
+  static Future<void> setEngineKey(String baseUrl, String key) => update((d) {
+        d.engineKeys[kotvEffectiveEngineBaseUrl(baseUrl)] = key;
       });
+
+  /// 用户重新填写了地址：忘掉这个地址记住的身份，下次登录成功时重新记住。
+  static Future<void> forgetEngineKey(String baseUrl) => update((d) {
+        d.engineKeys.remove(kotvEffectiveEngineBaseUrl(baseUrl));
+      });
+
+  static Future<void> clearEngine() => update((d) => d.engineBaseUrl = '');
 
   static Future<void> setWindowBounds({
     required double w,
@@ -165,17 +175,21 @@ class KotvClientData {
     this.remoteUsername = '',
     this.authToken = '',
     this.clientId = '',
+    Map<String, String>? engineKeys,
     this.windowW,
     this.windowH,
     this.windowX,
     this.windowY,
-  });
+  }) : engineKeys = engineKeys ?? {};
 
   String engineBaseUrl;
   String engineBaseUrlDraft;
   String remoteUsername;
   String authToken;
   String clientId;
+
+  /// 远端后端地址 → 登录成功时的身份公钥。再次连接时不一致就拒绝登录。
+  Map<String, String> engineKeys;
   double? windowW;
   double? windowH;
   double? windowX;
@@ -187,6 +201,7 @@ class KotvClientData {
       remoteUsername.isEmpty &&
       authToken.isEmpty &&
       clientId.isEmpty &&
+      engineKeys.isEmpty &&
       windowW == null &&
       windowH == null &&
       windowX == null &&
@@ -207,6 +222,9 @@ class KotvClientData {
       remoteUsername: '${j['remoteUsername'] ?? ''}'.trim(),
       authToken: '${j['authToken'] ?? ''}'.trim(),
       clientId: '${j['clientId'] ?? ''}'.trim(),
+      engineKeys: j['engineKeys'] is Map
+          ? {for (final e in (j['engineKeys'] as Map).entries) '${e.key}': '${e.value}'}
+          : null,
       windowW: numOrNull(wmap?['w']),
       windowH: numOrNull(wmap?['h']),
       windowX: numOrNull(wmap?['x']),
@@ -220,6 +238,7 @@ class KotvClientData {
         'remoteUsername': remoteUsername,
         'authToken': authToken,
         'clientId': clientId,
+        if (engineKeys.isNotEmpty) 'engineKeys': engineKeys,
         if (windowW != null || windowH != null || windowX != null || windowY != null)
           'window': {
             if (windowW != null) 'w': windowW,

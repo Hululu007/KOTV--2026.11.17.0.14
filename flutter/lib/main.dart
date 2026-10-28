@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'util/kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
@@ -7,17 +6,18 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'desktop/mini_player_window.dart';
+import 'api/kotv_api.dart';
 import 'api/kotv_client_store.dart';
 import 'api/kotv_engine_url.dart';
 import 'engine/engine_launcher.dart';
 import 'player/buffer_budget.dart';
 import 'player/play_headers.dart';
 import 'player/kotv_playback.dart';
+import 'engine/engine_status.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
 import 'theme/layout_scale.dart';
@@ -67,13 +67,7 @@ Future<void> _kotvSyncLanguageSetting() async {
     final lang = traditional ? 'zh-Hant' : '';
     if (lang.isEmpty) return;
     final base = await KotvClientStore.effectiveEngineBaseUrl();
-    await http
-        .post(
-          Uri.parse('$base/api/v1/settings'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'key': 'language', 'value': lang}),
-        )
-        .timeout(const Duration(seconds: 3));
+    await KotvApi(baseUrl: base).setSetting('language', lang).timeout(const Duration(seconds: 3));
   } catch (_) {}
 }
 
@@ -215,23 +209,6 @@ Future<void> main() async {
     await KotvClientStore.setEngineBaseUrl('');
     final origin = Uri.base.origin;
     engineUrl = (origin.isNotEmpty && origin != 'null') ? origin : kotvDefaultLocalEngineBaseUrl;
-  } else {
-    // 远端地址若无 token：降级为草稿，启动仍用本机（不拉远端仓）
-    final tok = client.authToken.trim();
-    final stored = client.engineBaseUrl.trim();
-    if (stored.isNotEmpty && !kotvIsLocalEngineBaseUrl(stored) && tok.isEmpty) {
-      // iOS 没有本机引擎。地址还在、登录态没有时直接进远端，由首页弹出登录。
-      if (Platform.isIOS) {
-        engineUrl = kotvEffectiveEngineBaseUrl(stored);
-      } else {
-        await KotvClientStore.update((d) {
-          d.engineBaseUrlDraft = kotvEffectiveEngineBaseUrl(stored);
-          d.engineBaseUrl = '';
-          d.remoteUsername = '';
-        });
-        engineUrl = kotvDefaultLocalEngineBaseUrl;
-      }
-    }
   }
   runApp(ProviderScope(
     overrides: [
@@ -360,7 +337,7 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
 
   @override
   Widget build(BuildContext context) {
-    final ready = ref.watch(engineReadyProvider);
+    final status = ref.watch(engineStatusProvider);
     final palette = ref.watch(kotvPaletteProvider);
     return MaterialApp(
       title: 'KO影视',
@@ -395,79 +372,24 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
           child: ScaledLayoutBox(child: child ?? const SizedBox.shrink()),
         );
       },
-      home: ready.when(
-        data: (ok) {
-          if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
-            return _IosEntry(key: ValueKey(ok), engineUp: ok);
-          }
-          return ok ? const AppShell() : const _EngineOfflinePage();
+      home: status.when(
+        data: (st) => switch (st.state) {
+          KotvEngineState.ready => const AppShell(),
+          KotvEngineState.signIn => _SignInPage(key: ObjectKey(st), allowRegister: st.allowRegister),
+          KotvEngineState.offline => _EngineOfflinePage(error: st.error),
         },
-        loading: () => const AppBackdrop(
-          child: Scaffold(
-            backgroundColor: Colors.transparent,
-            body: Center(child: CircularProgressIndicator(color: Colors.white)),
-          ),
-        ),
-        error: (e, _) => AppBackdrop(
-          child: Scaffold(
-            backgroundColor: Colors.transparent,
-            body: Center(child: Text('$e', style: const TextStyle(color: Colors.white))),
-          ),
-        ),
+        loading: () => const _EngineWaitPage(),
+        error: (e, _) => _EngineOfflinePage(error: '$e'),
       ),
     );
   }
 }
 
-/// iOS：地址可用时先登录。取消登录才进入连接页。没有地址或地址不通时直接进连接页。
-class _IosEntry extends ConsumerStatefulWidget {
-  const _IosEntry({super.key, required this.engineUp});
-
-  final bool engineUp;
-
-  @override
-  ConsumerState<_IosEntry> createState() => _IosEntryState();
-}
-
-class _IosEntryState extends ConsumerState<_IosEntry> {
-  /// null：还在决定。true：进首页。false：连接页。
-  bool? _shell;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _decide());
-  }
-
-  Future<void> _decide() async {
-    final saved = await kotvSavedRemoteEngineAddress(ref);
-    if (!mounted) return;
-    if (!widget.engineUp) {
-      setState(() => _shell = false);
-      if (saved.isEmpty) return;
-      final typed = await kotvPromptEngineAddress(
-        context,
-        initial: saved,
-        errorText: '无法连接 $saved',
-      );
-      if (!mounted || typed == null || typed.isEmpty) return;
-      await kotvFinishEngineAddress(context, ref, typed);
-      return;
-    }
-    final prompt = await promptRemoteLoginIfNeeded(
-      context,
-      ref,
-      baseUrl: ref.read(engineLauncherProvider).baseUrl,
-      assumeReachable: true,
-    );
-    if (!mounted) return;
-    setState(() => _shell = prompt != RemoteLoginPrompt.cancelled);
-  }
+class _EngineWaitPage extends StatelessWidget {
+  const _EngineWaitPage();
 
   @override
   Widget build(BuildContext context) {
-    if (_shell == true) return const AppShell();
-    if (_shell == false) return const _EngineOfflinePage();
     return const AppBackdrop(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -477,9 +399,56 @@ class _IosEntryState extends ConsumerState<_IosEntry> {
   }
 }
 
+/// 远端（或 Web）未登录：先弹登录框。登录前不进入任何页面；取消后留在本页，可重新登录或换地址。
+class _SignInPage extends ConsumerStatefulWidget {
+  const _SignInPage({super.key, required this.allowRegister});
+
+  final bool allowRegister;
+
+  @override
+  ConsumerState<_SignInPage> createState() => _SignInPageState();
+}
+
+class _SignInPageState extends ConsumerState<_SignInPage> {
+  bool _prompting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _signIn());
+  }
+
+  Future<void> _signIn() async {
+    if (_prompting || !mounted) return;
+    setState(() => _prompting = true);
+    final ok = await kotvShowSignIn(
+      context,
+      ref,
+      allowRegister: widget.allowRegister,
+      allowCancel: !kIsWeb,
+    );
+    if (!ok && mounted) setState(() => _prompting = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_prompting) return const _EngineWaitPage();
+    return _EngineOfflinePage(
+      error: '需要登录 ${ref.read(engineLauncherProvider).baseUrl}',
+      onSignIn: _signIn,
+    );
+  }
+}
+
 /// 引擎未就绪页：必须作为 MaterialApp.home 的子树，dialog / Theme 才能用到 Navigator。
 class _EngineOfflinePage extends ConsumerWidget {
-  const _EngineOfflinePage();
+  const _EngineOfflinePage({required this.error, this.onSignIn});
+
+  /// 连不上或需要登录的原因。
+  final String error;
+
+  /// 需要登录时的「登录」按钮。
+  final VoidCallback? onSignIn;
 
   Future<void> _editAddress(BuildContext context, WidgetRef ref) async {
     final initial = await kotvSavedRemoteEngineAddress(ref);
@@ -490,12 +459,13 @@ class _EngineOfflinePage extends ConsumerWidget {
       await kotvUseLocalEngine(ref);
       return;
     }
-    await kotvFinishEngineAddress(context, ref, typed);
+    await kotvFinishEngineAddress(ref, typed);
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final muted = Theme.of(context).colorScheme.onSurface.withOpacity(0.7);
+    final message = error.trim().isEmpty ? '请先连接可用后端服务' : error.trim();
     return AppBackdrop(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -507,39 +477,31 @@ class _EngineOfflinePage extends ConsumerWidget {
               children: [
                 const Text('KO影视', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 12),
-                Text(
-                  kIsWeb
-                      ? '无法连接本站后端服务\n请确认引擎已启动后刷新页面'
-                      : '请先连接可用后端服务',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: muted),
-                ),
+                Text(message, textAlign: TextAlign.center, style: TextStyle(color: muted)),
                 const SizedBox(height: 16),
-                if (!kIsWeb)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    if (onSignIn != null)
+                      AppPill(label: '登录', width: 100, autofocus: true, onTap: onSignIn!),
+                    if (!kIsWeb)
                       AppPill(
                         label: '连接后端',
                         width: 130,
-                        autofocus: true,
+                        autofocus: onSignIn == null,
                         onTap: () => unawaited(_editAddress(context, ref)),
                       ),
-                      const SizedBox(width: 10),
+                    if (onSignIn == null)
                       AppPill(
-                        label: '重试',
-                        width: 90,
-                        onTap: () => unawaited(kotvRetryEngineConnect(context, ref)),
+                        label: kIsWeb ? '刷新重试' : '重试',
+                        width: kIsWeb ? 120 : 90,
+                        autofocus: kIsWeb,
+                        onTap: () => ref.invalidate(engineStatusProvider),
                       ),
-                    ],
-                  )
-                else
-                  AppPill(
-                    label: '刷新重试',
-                    width: 120,
-                    autofocus: true,
-                    onTap: () => ref.invalidate(engineReadyProvider),
-                  ),
+                  ],
+                ),
               ],
             ),
           ),

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'api/kotv_api.dart';
 import 'engine/engine_launcher.dart';
+import 'engine/engine_status.dart';
 import 'remote/remote_bridge.dart';
 
 final engineLauncherProvider = Provider<EngineLauncher>((ref) {
@@ -11,11 +12,9 @@ final engineLauncherProvider = Provider<EngineLauncher>((ref) {
   return launcher;
 });
 
-final engineReadyProvider = FutureProvider<bool>((ref) async {
-  final launcher = ref.watch(engineLauncherProvider);
-  // 远端不可达时切本机并拉起，避免一直停在离线页。
-  return launcher.recoverOrFallbackLocal();
-});
+/// 进入应用前的引擎状态（连接、远端登录）。换地址、登录、登录失效后 invalidate 重查。
+final engineStatusProvider = FutureProvider<KotvEngineStatus>(
+    (ref) => kotvCheckEngine(ref.watch(engineLauncherProvider)));
 
 final apiProvider = Provider<KotvApi>((ref) {
   final launcher = ref.watch(engineLauncherProvider);
@@ -23,8 +22,7 @@ final apiProvider = Provider<KotvApi>((ref) {
 });
 
 final configProvider = FutureProvider<Map<String, dynamic>>((ref) async {
-  final ok = await ref.watch(engineReadyProvider.future);
-  if (!ok) return const <String, dynamic>{};
+  if (!(await ref.watch(engineStatusProvider.future)).ready) return const <String, dynamic>{};
   final api = ref.watch(apiProvider);
   // 有源时短等 ready；无源立刻返回。http(s) 仓库由首页进入时再请求，这里只读当前配置。
   for (var i = 0; i < 20; i++) {
@@ -51,8 +49,7 @@ final configProvider = FutureProvider<Map<String, dynamic>>((ref) async {
 
 /// 引擎设置（含 wallMode）+ backdrop 解析结果。
 final settingsProvider = FutureProvider<Map<String, dynamic>>((ref) async {
-  final ok = await ref.watch(engineReadyProvider.future);
-  if (!ok) return const <String, dynamic>{};
+  if (!(await ref.watch(engineStatusProvider.future)).ready) return const <String, dynamic>{};
   return ref.watch(apiProvider).getSettings();
 });
 

@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_store.dart';
 import '../api/kotv_engine_url.dart';
@@ -15,124 +14,53 @@ import '../util/kotv_image_cache.dart';
 import 'chrome.dart';
 import 'kotv_tv_text_field.dart';
 
-/// Web 进页闸：同源本站必须先登录（不配远程后端；PC/安卓远端登录走设置页）。
-Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async {
-  if (!kIsWeb) return true;
-  final api = ref.read(apiProvider);
-
-  final tok = await kotvAuthToken();
-  if (tok.isNotEmpty) {
-    try {
-      await api.authMe();
-      return true;
-    } catch (_) {
-      await kotvClearAuthToken();
-    }
-  }
-  if (!context.mounted) return false;
-  var allowReg = false;
-  try {
-    final st = await api.authStatus();
-    allowReg = st['allowRegister'] == true;
-  } catch (_) {}
-  if (!context.mounted) return false;
-  final r = await showRemoteLoginDialog(
-    context,
-    ref,
-    api: api,
-    allowRegister: allowReg,
-    allowCancel: false,
-    title: '登录',
-    subtitle: '使用本站账号登录后即可观看',
-  );
-  return r.ok;
-}
-
-enum RemoteLoginPrompt {
-  /// 本机、未开鉴权，或已有有效登录态。
-  ready,
-  /// 刚刚在弹窗里登录成功。
-  signedIn,
-  /// 用户取消或登录失败。
-  cancelled,
-  /// 引擎暂时连不上，交给原来的重试。
-  skipped,
-}
-
-/// 远端地址需要登录时直接弹出登录框。
-Future<RemoteLoginPrompt> promptRemoteLoginIfNeeded(
-  BuildContext context,
-  WidgetRef ref, {
-  required String baseUrl,
-  bool allowCancel = true,
-  bool assumeReachable = false,
-}) async {
-  final normalized = baseUrl.trim();
-  if (normalized.isEmpty || kotvIsLocalEngineBaseUrl(normalized)) {
-    return RemoteLoginPrompt.ready;
-  }
-  final probe = KotvApi(baseUrl: normalized);
-  if (!assumeReachable) {
-    try {
-      await kotvProbeEngine(normalized);
-    } catch (_) {
-      return RemoteLoginPrompt.skipped;
-    }
-  }
-  var allowReg = false;
-  var needsLogin = false;
-  try {
-    final st = await probe.authStatus().timeout(const Duration(seconds: 4));
-    needsLogin = st['remoteAccess'] == true || st['remoteAuth'] == true;
-    allowReg = st['allowRegister'] == true;
-  } catch (_) {}
-  if (!needsLogin) return RemoteLoginPrompt.ready;
-  final tok = await kotvAuthToken();
-  if (tok.isNotEmpty) {
-    try {
-      await probe.authMe();
-      return RemoteLoginPrompt.ready;
-    } catch (_) {
-      await kotvClearAuthToken();
-    }
-  }
-  if (!context.mounted) return RemoteLoginPrompt.cancelled;
-  final r = await showRemoteLoginDialog(
-    context,
-    ref,
-    api: probe,
-    allowRegister: allowReg,
-    allowCancel: allowCancel,
-    title: '远端登录',
-    subtitle: '登录成功后才使用远端仓库',
-  );
-  return r.ok ? RemoteLoginPrompt.signedIn : RemoteLoginPrompt.cancelled;
-}
-
 bool kotvMessageNeedsLogin(Object error) {
   final s = '$error';
   return s.contains('需要登录') || s.contains('登录已失效');
 }
 
-/// 点播、直播、详情碰到未登录时直接弹登录框。
-/// 先清掉失效 token，避免探测认为已经登录而把对话框跳过。
-/// 登录成功返回 true。
-Future<bool> kotvPresentLoginIfNeeded(BuildContext context, WidgetRef ref) async {
+/// 弹出登录框（远端后端或 Web）。登录成功后重查引擎状态并返回 true。
+Future<bool> kotvShowSignIn(
+  BuildContext context,
+  WidgetRef ref, {
+  bool allowCancel = true,
+  bool? allowRegister,
+}) async {
+  var register = allowRegister;
+  if (register == null) {
+    try {
+      register = (await ref.read(apiProvider).authStatus())['allowRegister'] == true;
+    } catch (_) {
+      register = false;
+    }
+  }
   if (!context.mounted) return false;
-  await kotvClearAuthToken();
-  if (!context.mounted) return false;
-  final prompt = await promptRemoteLoginIfNeeded(
+  final ok = await showRemoteLoginDialog(
     context,
     ref,
-    baseUrl: ref.read(engineLauncherProvider).baseUrl,
+    allowRegister: register,
+    allowCancel: allowCancel,
   );
-  return prompt == RemoteLoginPrompt.signedIn;
+  if (ok) ref.invalidate(engineStatusProvider);
+  return ok;
 }
 
-class RemoteLoginResult {
-  const RemoteLoginResult({required this.ok, this.username = ''});
-  final bool ok;
-  final String username;
+Future<bool>? _signInPending;
+
+/// 使用中登录失效：弹登录框，成功返回 true 由调用方重试。
+/// 取消则回到登录页，未登录不能继续使用。同时多处触发只弹一次。
+Future<bool> kotvPresentLoginIfNeeded(BuildContext context, WidgetRef ref) {
+  return _signInPending ??= () async {
+    try {
+      await kotvClearAuthToken();
+      if (!context.mounted) return false;
+      final ok = await kotvShowSignIn(context, ref);
+      if (!ok) ref.invalidate(engineStatusProvider);
+      return ok;
+    } finally {
+      _signInPending = null;
+    }
+  }();
 }
 
 /// 已保存的远端地址。本机地址不算。
@@ -151,27 +79,24 @@ Future<String> kotvSavedRemoteEngineAddress(WidgetRef ref) async {
 
 Future<void> kotvUseLocalEngine(WidgetRef ref) async {
   await KotvClientStore.clearEngine();
+  await kotvClearAuthToken();
   ref.read(engineLauncherProvider).applyBaseUrl('');
-  ref.invalidate(engineReadyProvider);
+  ref.invalidate(engineStatusProvider);
 }
 
-/// 地址可用后写入并登录。用户取消登录则保留地址，不进入首页。
-Future<void> kotvFinishEngineAddress(BuildContext context, WidgetRef ref, String url) async {
-  await KotvClientStore.setEngineBaseUrl(url);
-  ref.read(engineLauncherProvider).applyBaseUrl(url);
-  KotvSettingsCache.clear();
-  if (context.mounted) {
-    await kotvClearImageMemory(ref: ref);
+/// 保存用户填写的后端地址并重新检查，远端会进入登录。
+/// 用户亲自确认了这个地址，所以忘掉它记住的后端身份；换了地址时旧登录令牌不发给新地址。
+Future<void> kotvFinishEngineAddress(WidgetRef ref, String url) async {
+  final launcher = ref.read(engineLauncherProvider);
+  if (kotvEffectiveEngineBaseUrl(url) != launcher.baseUrl) {
+    await kotvClearAuthToken();
   }
-  if (!context.mounted) return;
-  final prompt = await promptRemoteLoginIfNeeded(
-    context,
-    ref,
-    baseUrl: url,
-    assumeReachable: true,
-  );
-  if (!context.mounted || prompt == RemoteLoginPrompt.cancelled) return;
-  ref.invalidate(engineReadyProvider);
+  await KotvClientStore.setEngineBaseUrl(url);
+  await KotvClientStore.forgetEngineKey(url);
+  launcher.applyBaseUrl(url);
+  KotvSettingsCache.clear();
+  await kotvClearImageMemory(ref: ref);
+  ref.invalidate(engineStatusProvider);
 }
 
 /// 填写或改正后端地址。探测失败时弹窗说明，输入框保持打开。
@@ -254,63 +179,21 @@ Future<String?> kotvPromptEngineAddress(
   return result;
 }
 
-/// 重试当前地址。连不上就弹出地址框；能连上且要登录就弹出登录框。
-Future<void> kotvRetryEngineConnect(BuildContext context, WidgetRef ref) async {
-  final saved = await kotvSavedRemoteEngineAddress(ref);
-  if (!context.mounted) return;
-  if (saved.isEmpty) {
-    final typed = await kotvPromptEngineAddress(context);
-    if (typed == null || !context.mounted) return;
-    if (typed.isEmpty) {
-      await kotvUseLocalEngine(ref);
-      return;
-    }
-    await kotvFinishEngineAddress(context, ref, typed);
-    return;
-  }
-  var reachable = false;
-  Object? failure;
-  try {
-    await kotvProbeEngine(saved);
-    reachable = true;
-  } catch (e) {
-    failure = e;
-  }
-  if (!context.mounted) return;
-  if (!reachable) {
-    final typed = await kotvPromptEngineAddress(
-      context,
-      initial: saved,
-      errorText: '无法连接 $saved${failure == null ? '' : '\n$failure'}',
-    );
-    if (typed == null || !context.mounted) return;
-    if (typed.isEmpty) {
-      await kotvUseLocalEngine(ref);
-      return;
-    }
-    await kotvFinishEngineAddress(context, ref, typed);
-    return;
-  }
-  await kotvFinishEngineAddress(context, ref, saved);
-}
-
-/// [api] 可指向探测用临时客户端（尚未切换业务引擎时）。
-Future<RemoteLoginResult> showRemoteLoginDialog(
+/// 登录框。账号预填上次登录的用户名；账号密码加密发送，成功后本设备记住登录态。
+Future<bool> showRemoteLoginDialog(
   BuildContext context,
   WidgetRef ref, {
-  KotvApi? api,
   bool allowRegister = false,
   bool allowCancel = true,
-  String title = '远端登录',
-  String? subtitle,
 }) async {
-  final KotvApi client = api ?? ref.read(apiProvider);
+  final client = ref.read(apiProvider);
   final p = KotvPalette.of(context);
-  final userCtrl = TextEditingController();
+  final userCtrl = TextEditingController(text: await KotvClientStore.remoteUsername());
   final passCtrl = TextEditingController();
   var modeRegister = false;
-  final hint = subtitle ??
-      (kIsWeb ? '使用本站账号登录后即可观看' : '连接此引擎需登录一次，之后与本机使用相同');
+  final title = kIsWeb ? '登录' : '远端登录';
+  final hint = kIsWeb ? '使用本站账号登录后即可观看' : '登录 ${client.baseUrl}\n之后本设备免登录，账号或地址失效时再登录';
+  if (!context.mounted) return false;
 
   var busy = false;
   final ok = await showDialog<bool>(
@@ -360,7 +243,7 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
                 const SizedBox(height: 14),
                 KotvTvTextField(
                   controller: userCtrl,
-                  autofocus: true,
+                  autofocus: userCtrl.text.isEmpty,
                   keyboardType: TextInputType.text,
                   textInputAction: TextInputAction.next,
                   style: TextStyle(color: p.fg),
@@ -375,6 +258,7 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
                 const SizedBox(height: 10),
                 KotvTvTextField(
                   controller: passCtrl,
+                  autofocus: userCtrl.text.isNotEmpty,
                   obscureText: true,
                   keyboardType: TextInputType.visiblePassword,
                   textInputAction: TextInputAction.done,
@@ -429,8 +313,5 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
       },
     ),
   );
-  if (ok != true) return const RemoteLoginResult(ok: false);
-  ref.invalidate(configProvider);
-  ref.invalidate(settingsProvider);
-  return RemoteLoginResult(ok: true, username: userCtrl.text.trim());
+  return ok == true;
 }

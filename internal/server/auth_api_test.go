@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/bobo/KOTV/internal/auth"
@@ -15,6 +16,31 @@ func TestProbeOnlyPath(t *testing.T) {
 	}
 	if probeOnlyPath("/api/v1/auth/login") || probeOnlyPath("/api/v1/home") {
 		t.Fatal("login/home must not be probe-only")
+	}
+}
+
+func TestProtocolMismatch(t *testing.T) {
+	t.Parallel()
+	req := func(addr, path, proto string) *http.Request {
+		r, _ := http.NewRequest(http.MethodGet, "http://h:9978"+path, nil)
+		r.RemoteAddr = addr
+		if proto != "" {
+			r.Header.Set("X-Kotv-Protocol", proto)
+		}
+		return r
+	}
+	const lan = "192.168.1.8:5000"
+	if protocolMismatch(req("127.0.0.1:5000", "/api/v1/home", "")) {
+		t.Fatal("loopback is never checked")
+	}
+	if protocolMismatch(req(lan, "/api/v1/health", "")) {
+		t.Fatal("health is never checked")
+	}
+	if !protocolMismatch(req(lan, "/api/v1/home", "")) || !protocolMismatch(req(lan, "/api/v1/home", "0")) {
+		t.Fatal("missing or old protocol must be rejected")
+	}
+	if protocolMismatch(req(lan, "/api/v1/home", strconv.Itoa(ProtocolVersion))) {
+		t.Fatal("same protocol must pass")
 	}
 }
 

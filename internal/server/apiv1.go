@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bobo/KOTV/internal/auth"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/remote"
@@ -150,7 +151,7 @@ func clientIDFromRequest(r *http.Request) string {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Kotv-Client-Id, X-Kotv-Client-Platform, Authorization")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Kotv-Client-Id, X-Kotv-Client-Platform, X-Kotv-Client-Version, X-Kotv-Protocol, X-Kotv-Engine-Base")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
@@ -204,12 +205,14 @@ func (s *Server) handleAPIv1Health(w http.ResponseWriter, r *http.Request) {
 	if wroteOptions(w, r) {
 		return
 	}
-	api := s.content()
-	if api == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "engine": "kotv", "ready": false})
-		return
+	h := map[string]any{"ok": true, "engine": "kotv", "ready": false}
+	if api := s.content(); api != nil {
+		h = api.APIHealth()
 	}
-	writeJSON(w, http.StatusOK, api.APIHealth())
+	// 远端客户端据此判断是否同一套接口、加密账号密码，并记住这台后端。
+	h["protocol"] = ProtocolVersion
+	h["identity"] = auth.IdentityKey()
+	writeJSON(w, http.StatusOK, h)
 }
 
 // handleAPIv1Net 缓冲浮层测速：代理累计下行字节（与播放器解耦，Traffic 思路）。

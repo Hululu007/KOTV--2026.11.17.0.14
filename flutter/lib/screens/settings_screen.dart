@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_store.dart';
 import '../api/kotv_engine_url.dart';
@@ -63,7 +62,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Map<String, String> _runtime = {};
   List<Map<String, dynamic>> _parses = [];
   String _port = '$kotvDefaultEnginePort';
-  String _version = kotvFallbackAppVersion;
+  String _version = kotvClientVersion;
   String _status = '';
   String _pairCode = '';
   String _remoteUser = '';
@@ -110,7 +109,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
       _port = '${data['port'] ?? kotvDefaultEnginePort}';
-      _version = '${data['version'] ?? kotvFallbackAppVersion}';
+      _version = '${data['version'] ?? kotvClientVersion}';
       _pairCode = '${data['pairCode'] ?? g('syncPairCode')}';
       _vodDesc = '${data['vodDesc'] ?? ''}';
       _liveDesc = '${data['liveDesc'] ?? ''}';
@@ -2011,36 +2010,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   /// 切换业务引擎：[baseUrl] 为空即本机。写 client.json → 换地址 → 作废缓存 →
-  /// 本机未运行则拉起 → 重新加载本页（点播源 / 直播源 / 线路等换成新引擎的数据）。
-  Future<void> _switchEngine(String baseUrl, {String user = ''}) async {
+  /// 本机未运行则拉起 → 重新加载本页。远端由入口统一检查并要求登录。
+  Future<void> _switchEngine(String baseUrl) async {
     await DetailScreen.prepareLeave();
     await LiveScreen.prepareLeave();
-    final launcher = ref.read(engineLauncherProvider);
     if (baseUrl.isEmpty || kotvIsLocalEngineBaseUrl(baseUrl)) {
-      await KotvClientStore.clearEngine();
+      await kotvUseLocalEngine(ref);
     } else {
-      await KotvClientStore.update((d) {
-        d.engineBaseUrl = kotvStoreEngineBaseUrl(baseUrl);
-        d.remoteUsername = user;
-      });
+      await kotvFinishEngineAddress(ref, baseUrl);
     }
-    launcher.applyBaseUrl(baseUrl);
     KotvSettingsCache.clear();
-    if (mounted) {
-      await kotvClearImageMemory(ref: ref);
-    }
-    ref.invalidate(engineReadyProvider);
     ref.invalidate(configProvider);
     ref.invalidate(settingsProvider);
     // 双向切换都抬世代，首页回前台时强制重拉（含仓刷新）。
     ref.read(vodContentEpochProvider.notifier).state++;
-    if (!mounted) return;
-    setState(() => _remoteUser = user);
-    if (baseUrl.isEmpty) {
-      try {
-        await launcher.recoverIfNeeded();
-      } catch (_) {}
-    }
     if (!mounted) return;
     await _reload();
   }
@@ -2049,10 +2032,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final normalized = kotvNormalizeEngineBaseUrl(raw);
     _engineCtrl.text = normalized;
 
-    // 空 / 本机：立即切回本机，清远端登录态
+    // 空 / 本机：立即切回本机
     if (normalized.isEmpty || kotvIsLocalEngineBaseUrl(normalized)) {
       await KotvClientStore.setEngineBaseUrlDraft('');
-      await kotvClearAuthToken();
       await _switchEngine('');
       if (!mounted) return;
       setState(() => _status = '已使用本机引擎');
@@ -2061,63 +2043,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
-    // 远端：只探测，不切换业务引擎；未登录继续用本机仓
+    // 远端：先确认是可用的 KOTV 后端再切换；切换后由入口要求登录，未登录不能使用。
     await KotvClientStore.setEngineBaseUrlDraft(normalized);
     if (!mounted) return;
     setState(() => _status = '正在探测 $normalized…');
-
-    final probe = KotvApi(baseUrl: normalized);
     try {
       final h = await kotvProbeEngine(normalized);
-      // spider/runtime 未就绪也提示，但仍允许尝试登录
-      final spiderOk = h['spiderOk'];
-      if (spiderOk == false) {
-        if (!mounted) return;
+      if (h['spiderOk'] == false && mounted) {
         showAppNews(
             context, '引擎可达，但爬虫未就绪\n$normalized\n${h['spiderError'] ?? ''}');
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = '探测失败: $e');
-      showAppNews(context, '无法连接远端\n$normalized\n$e\n仍使用本机引擎');
+      showAppNews(context, '无法连接远端\n$normalized\n$e');
       return;
     }
-
-    var allowReg = false;
-    try {
-      final st = await probe.authStatus().timeout(const Duration(seconds: 4));
-      if (st['remoteAccess'] != true && st['remoteAuth'] != true) {
-        if (!mounted) return;
-        setState(() => _status = '对方未开启远端鉴权');
-        showAppNews(context, '对方未开启远端鉴权\n请在安卓端「用户管理」打开后再连接\n仍使用本机引擎');
-        return;
-      }
-      allowReg = st['allowRegister'] == true;
-    } catch (_) {}
-
-    if (!mounted) return;
-
-    final login = await showRemoteLoginDialog(
-      context,
-      ref,
-      api: probe,
-      allowRegister: allowReg,
-      allowCancel: true,
-      title: '远端登录',
-      subtitle: '登录成功后才使用远端仓库与能力；取消则继续本机',
-    );
-    if (!mounted) return;
-    if (!login.ok) {
-      setState(() => _status = '已取消远端登录，继续本机');
-      showAppNews(context, '未登录远端，继续使用本机引擎');
-      return;
-    }
-
-    // 登录成功：才切换业务引擎
-    await _switchEngine(normalized, user: login.username);
-    if (!mounted) return;
-    setState(() => _status = '远端已登录：${login.username}');
-    showAppNews(context, '登录成功\n用户：${login.username}\n$normalized');
+    await _switchEngine(normalized);
   }
 
   Future<void> _logoutRemote() async {

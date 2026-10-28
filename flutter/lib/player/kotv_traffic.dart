@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
+import '../api/kotv_api.dart';
 import '../api/kotv_engine_url.dart';
 import 'kotv_platform.dart';
 
@@ -89,7 +90,7 @@ class KotvTraffic {
     if (base.isEmpty) return null;
     try {
       final uri = Uri.parse('$base/api/v1/net');
-      final res = await http.get(uri).timeout(const Duration(milliseconds: 800));
+      final res = await http.get(uri, headers: kotvClientHeaders()).timeout(const Duration(milliseconds: 800));
       if (res.statusCode != 200) return null;
       final map = jsonDecode(utf8.decode(res.bodyBytes));
       if (map is! Map) return null;

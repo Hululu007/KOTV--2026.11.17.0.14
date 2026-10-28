@@ -6,11 +6,25 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/bobo/KOTV/internal/auth"
 	"github.com/bobo/KOTV/internal/hostclient"
 )
+
+// ProtocolVersion 前后端接口协议号，接口或加密方式不兼容时加一。
+// 远端客户端在请求头 X-Kotv-Protocol 带上自己的协议号，不一致的请求一律拒绝；
+// 健康检查不拦，客户端据其中的 protocol 提示升级。
+const ProtocolVersion = 1
+
+// protocolMismatch 非本机的 /api/v1 请求协议号与后端不一致。
+func protocolMismatch(r *http.Request) bool {
+	if isLoopbackRequest(r) || !strings.HasPrefix(r.URL.Path, "/api/v1/") || r.URL.Path == "/api/v1/health" {
+		return false
+	}
+	return strings.TrimSpace(r.Header.Get("X-Kotv-Protocol")) != strconv.Itoa(ProtocolVersion)
+}
 
 func isLoopbackRequest(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -93,6 +107,10 @@ func publicAuthPath(path string) bool {
 func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if wroteOptions(w, r) {
+			return
+		}
+		if protocolMismatch(r) {
+			writeAPIError(w, http.StatusUpgradeRequired, "客户端与后端版本不匹配，请升级到相同版本")
 			return
 		}
 		loopback := isLoopbackRequest(r)
@@ -272,16 +290,16 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
-	username, password, ok := readLoginForm(w, r)
+	body, reply, ok := readLoginForm(w, r)
 	if !ok {
 		return
 	}
-	tok, user, err := auth.Login(username, password)
+	tok, user, err := auth.Login(body.Username, body.Password)
 	if err != nil {
 		writeAPIError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeSealed(w, reply, map[string]any{
 		"ok":    true,
 		"token": tok,
 		"user":  user.Public(),
@@ -289,35 +307,62 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
-	username, password, ok := readLoginForm(w, r)
+	body, reply, ok := readLoginForm(w, r)
 	if !ok {
 		return
 	}
-	user, err := auth.Register(username, password)
+	user, err := auth.Register(body.Username, body.Password)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": user.Public()})
+	writeSealed(w, reply, map[string]any{"ok": true, "user": user.Public()})
 }
 
-func readLoginForm(w http.ResponseWriter, r *http.Request) (username, password string, ok bool) {
-	if wroteOptions(w, r) {
-		return "", "", false
-	}
-	if rejectUnlessPost(w, r) {
-		return "", "", false
+type loginForm struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+func readLoginForm(w http.ResponseWriter, r *http.Request) (loginForm, *auth.SealReply, bool) {
+	var body loginForm
+	if wroteOptions(w, r) || rejectUnlessPost(w, r) {
+		return body, nil, false
 	}
 	if !remoteAccessAllowed(r) {
 		writeAPIError(w, http.StatusForbidden, "未开启远端鉴权")
-		return "", "", false
+		return body, nil, false
 	}
-	var body struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+	reply, ok := readCredentials(w, r, &body)
+	return body, reply, ok
+}
+
+// readCredentials 读带密码的请求体。只收客户端用引擎身份公钥加密的 {"sealed":…}，
+// 返回的 SealReply 供 writeSealed 加密回复。
+func readCredentials(w http.ResponseWriter, r *http.Request, dst any) (*auth.SealReply, bool) {
+	var env struct {
+		Sealed *auth.Sealed `json:"sealed"`
 	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
-	return body.Username, body.Password, true
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&env); err != nil || env.Sealed == nil {
+		writeAPIError(w, http.StatusBadRequest, "账号密码需加密传输，请升级客户端")
+		return nil, false
+	}
+	plain, reply, err := auth.OpenSealed(*env.Sealed, r.URL.Path)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
+	if err := json.Unmarshal(plain, dst); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "请求格式错误")
+		return nil, false
+	}
+	return reply, true
+}
+
+// writeSealed 加密回复 readCredentials 读到的请求。
+func writeSealed(w http.ResponseWriter, reply *auth.SealReply, v map[string]any) {
+	plain, _ := json.Marshal(v)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sealed": reply.Seal(plain)})
 }
 
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
@@ -383,12 +428,16 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 		OldPassword string `json:"oldPassword"`
 		NewPassword string `json:"newPassword"`
 	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
-	if err := auth.ChangePassword(u.ID, body.OldPassword, body.NewPassword); err != nil {
+	reply, ok := readCredentials(w, r, &body)
+	if !ok {
+		return
+	}
+	keep := auth.BearerFromHeader(r.Header.Get("Authorization"))
+	if err := auth.ChangePassword(u.ID, keep, body.OldPassword, body.NewPassword); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeSealed(w, reply, map[string]any{"ok": true})
 }
 
 func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
@@ -414,13 +463,16 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 			Password string `json:"password"`
 			Role     string `json:"role"`
 		}
-		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
+		reply, ok := readCredentials(w, r, &body)
+		if !ok {
+			return
+		}
 		u, err := auth.CreateUser(body.Username, body.Password, body.Role)
 		if err != nil {
 			writeAPIError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": u.Public()})
+		writeSealed(w, reply, map[string]any{"ok": true, "user": u.Public()})
 	default:
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -467,12 +519,15 @@ func (s *Server) handleAdminUserAction(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Password string `json:"password"`
 		}
-		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
+		reply, ok := readCredentials(w, r, &body)
+		if !ok {
+			return
+		}
 		if err := auth.ResetPassword(id, body.Password); err != nil {
 			writeAPIError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeSealed(w, reply, map[string]any{"ok": true})
 	default:
 		writeAPIError(w, http.StatusBadRequest, "unknown action")
 	}

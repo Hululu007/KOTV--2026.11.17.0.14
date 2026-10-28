@@ -6,7 +6,26 @@ import 'package:http/http.dart' as http;
 import '../player/kotv_platform.dart';
 import 'kotv_auth_token.dart';
 import 'kotv_client_id.dart';
+import 'kotv_client_store.dart';
 import 'kotv_engine_url.dart';
+import 'kotv_seal.dart';
+
+/// 每个请求都带的客户端信息：平台、版本、协议号。远端后端按协议号决定是否服务。
+Map<String, String> kotvClientHeaders() => {
+      'X-Kotv-Client-Platform': kotvHostPlatform(),
+      'X-Kotv-Client-Version': kotvClientVersion,
+      'X-Kotv-Protocol': '$kotvProtocolVersion',
+    };
+
+/// 健康检查响应的问题：不是 KOTV 后端，或协议号与本机不同。没问题返回空串。
+String kotvEngineHealthProblem(Map<String, dynamic>? h) {
+  if (h == null || h['ok'] != true || h['engine'] != 'kotv') return '该地址不是 KOTV 后端';
+  if (h['protocol'] != kotvProtocolVersion) {
+    final v = '${h['version'] ?? ''}'.trim();
+    return '后端版本${v.isEmpty ? '过旧' : ' $v '}与本机 $kotvClientVersion 不兼容，请升级到相同版本';
+  }
+  return '';
+}
 
 class KotvApi {
   KotvApi({String? baseUrl, String? clientId})
@@ -55,7 +74,7 @@ class KotvApi {
       if (id.isNotEmpty) 'X-Kotv-Client-Id': id,
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',
       if (engineBase.isNotEmpty) 'X-Kotv-Engine-Base': engineBase,
-      'X-Kotv-Client-Platform': kotvHostPlatform(),
+      ...kotvClientHeaders(),
       ...?extra,
     };
   }
@@ -124,18 +143,52 @@ class KotvApi {
 
   Future<Map<String, dynamic>> authStatus() => _get('/api/v1/auth/status');
 
+  bool get _remoteEngine => !kIsWeb && !kotvIsLocalEngineBaseUrl(baseUrl);
+
+  /// 后端身份公钥。远端后端须与登录成功时记住的一致，避免把密码交给别的服务。
+  Future<String> engineIdentity() async {
+    final h = await health();
+    final problem = kotvEngineHealthProblem(h);
+    if (problem.isNotEmpty) throw KotvApiException(problem);
+    final identity = '${h['identity'] ?? ''}';
+    if (_remoteEngine) {
+      final known = await KotvClientStore.engineKey(baseUrl);
+      if (known.isNotEmpty && known != identity) {
+        throw KotvApiException('后端身份与上次登录时不同，可能不是同一台主机。\n确认地址无误请在「连接后端」重新保存');
+      }
+    }
+    return identity;
+  }
+
+  /// 记住远端后端身份（登录成功或已登录时调用）。
+  Future<void> rememberEngineIdentity(String identity) async {
+    if (!_remoteEngine || identity.isEmpty) return;
+    if (await KotvClientStore.engineKey(baseUrl) == identity) return;
+    await KotvClientStore.setEngineKey(baseUrl, identity);
+  }
+
+  /// 带密码的请求：用后端身份公钥加密，回复也是加密的。返回回复和所用的身份公钥。
+  Future<(Map<String, dynamic>, String)> _postSealed(String path, Map<String, dynamic> body) async {
+    final identity = await engineIdentity();
+    final (request, seal) = await KotvSeal.seal(identity, path, body);
+    return (await seal.open(await _post(path, request)), identity);
+  }
+
+  /// 登录并记住令牌、账号和后端身份；之后免登录，直到令牌或账号失效。
   Future<Map<String, dynamic>> login(String username, String password) async {
-    final data = await _post('/api/v1/auth/login', {
+    final (data, identity) = await _postSealed('/api/v1/auth/login', {
       'username': username,
       'password': password,
     });
     final token = '${data['token'] ?? ''}';
     if (token.isNotEmpty) await kotvSetAuthToken(token);
+    await KotvClientStore.update((d) => d.remoteUsername = username);
+    await rememberEngineIdentity(identity);
     return data;
   }
 
-  Future<Map<String, dynamic>> register(String username, String password) =>
-      _post('/api/v1/auth/register', {'username': username, 'password': password});
+  Future<Map<String, dynamic>> register(String username, String password) async =>
+      (await _postSealed('/api/v1/auth/register', {'username': username, 'password': password})).$1;
 
   Future<Map<String, dynamic>> logout() async {
     try {
@@ -153,11 +206,12 @@ class KotvApi {
   Future<Map<String, dynamic>> changePassword({
     required String oldPassword,
     required String newPassword,
-  }) =>
-      _post('/api/v1/auth/password', {
+  }) async =>
+      (await _postSealed('/api/v1/auth/password', {
         'oldPassword': oldPassword,
         'newPassword': newPassword,
-      });
+      }))
+          .$1;
 
   Future<Map<String, dynamic>> adminListUsers() => _get('/api/v1/admin/users');
 
@@ -165,12 +219,13 @@ class KotvApi {
     required String username,
     required String password,
     String role = 'user',
-  }) =>
-      _post('/api/v1/admin/users', {
+  }) async =>
+      (await _postSealed('/api/v1/admin/users', {
         'username': username,
         'password': password,
         'role': role,
-      });
+      }))
+          .$1;
 
   Future<Map<String, dynamic>> adminDeleteUser(String id) async {
     final res = await http
@@ -185,8 +240,8 @@ class KotvApi {
   Future<Map<String, dynamic>> adminDisableUser(String id) =>
       _post('/api/v1/admin/users/$id/disable', {});
 
-  Future<Map<String, dynamic>> adminResetPassword(String id, String password) =>
-      _post('/api/v1/admin/users/$id/password', {'password': password});
+  Future<Map<String, dynamic>> adminResetPassword(String id, String password) async =>
+      (await _postSealed('/api/v1/admin/users/$id/password', {'password': password})).$1;
 
   Future<Map<String, dynamic>> adminSetSettings({
     bool? remoteAuth,

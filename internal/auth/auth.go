@@ -18,6 +18,8 @@ const (
 	RoleAdmin = "admin"
 	RoleUser  = "user"
 	tokenTTL  = 30 * 24 * time.Hour
+	// 令牌在使用中滑动续期：距上次续期超过一天就把有效期重新拉满 tokenTTL。
+	tokenRenewAfter = 24 * time.Hour
 )
 
 // User 远端引擎账号。
@@ -218,7 +220,7 @@ func Logout(token string) {
 	}
 }
 
-// LookupToken 返回有效用户。
+// LookupToken 返回有效用户，并为常用的令牌续期（不常用满 tokenTTL 才失效）。
 func LookupToken(token string) (*User, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -247,6 +249,10 @@ func LookupToken(token string) (*User, error) {
 	u := fromRow(row)
 	if u == nil || !u.Enabled {
 		return nil, fmt.Errorf("用户不可用")
+	}
+	if time.Until(rec.ExpiresAt) < tokenTTL-tokenRenewAfter {
+		rec.ExpiresAt = time.Now().Add(tokenTTL)
+		_ = db.InsertAuthToken(*rec)
 	}
 	cp := *u
 	return &cp, nil
@@ -355,7 +361,7 @@ func SetEnabled(userID string, enabled bool) error {
 	return nil
 }
 
-// ResetPassword 管理员重置密码。
+// ResetPassword 管理员重置密码；该用户所有设备需重新登录。
 func ResetPassword(userID, password string) error {
 	password = strings.TrimSpace(password)
 	if len(password) < 6 {
@@ -381,11 +387,14 @@ func ResetPassword(userID, password string) error {
 	}
 	u.PassHash = string(hash)
 	u.MustChangePassword = false
-	return db.UpsertAuthUser(toRow(*u))
+	if err := db.UpsertAuthUser(toRow(*u)); err != nil {
+		return err
+	}
+	return db.DeleteAuthTokensForUser(userID)
 }
 
-// ChangePassword 登录用户修改自己的密码。
-func ChangePassword(userID, oldPassword, newPassword string) error {
+// ChangePassword 登录用户修改自己的密码；除 keepToken（当前设备）外的登录全部失效。
+func ChangePassword(userID, keepToken, oldPassword, newPassword string) error {
 	oldPassword = strings.TrimSpace(oldPassword)
 	newPassword = strings.TrimSpace(newPassword)
 	if len(newPassword) < 6 {
@@ -417,7 +426,10 @@ func ChangePassword(userID, oldPassword, newPassword string) error {
 	}
 	u.PassHash = string(hash)
 	u.MustChangePassword = false
-	return db.UpsertAuthUser(toRow(*u))
+	if err := db.UpsertAuthUser(toRow(*u)); err != nil {
+		return err
+	}
+	return db.DeleteAuthTokensForUserExcept(userID, strings.TrimSpace(keepToken))
 }
 
 // DeleteUser 删除用户（不可删唯一管理员）。账号行删除；用户态由 App.PurgeUserData 清理。
