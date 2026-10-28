@@ -55,7 +55,7 @@ func TestSyncHistoryLoadsBeforeImport(t *testing.T) {
 	imported := make(chan struct{})
 	var mu sync.Mutex
 	var order []string
-	s := New(nil)
+	s := New()
 	s.SetSyncHandler(&SyncHandler{
 		LoadConfig: func(url, name string) error {
 			if url != "file:///tmp/a.json" || name != "全部" {
@@ -127,7 +127,7 @@ func TestSyncHistorySameURLImportsWithoutLoad(t *testing.T) {
 	settings.Set(settings.VOD, "file:///tmp/a.json")
 
 	var loaded, imported bool
-	s := New(nil)
+	s := New()
 	s.SetSyncHandler(&SyncHandler{
 		LoadConfig: func(url, name string) error {
 			loaded = true
@@ -162,7 +162,7 @@ func TestSyncHistoryEmptyURLSkipsImport(t *testing.T) {
 	settings.Set(settings.VOD, "http://current")
 
 	called := false
-	s := New(nil)
+	s := New()
 	s.SetSyncHandler(&SyncHandler{
 		LoadConfig: func(url, name string) error {
 			called = true
@@ -194,7 +194,7 @@ func TestSyncHistoryTargetsOnly(t *testing.T) {
 	settings.Set(settings.VOD, "http://current")
 
 	var loaded, imported bool
-	s := New(nil)
+	s := New()
 	s.SetSyncHandler(&SyncHandler{
 		LoadConfig: func(url, name string) error {
 			loaded = true
@@ -222,7 +222,7 @@ func TestSyncLoadFailureSkipsImport(t *testing.T) {
 	settings.Set(settings.VOD, "http://current")
 
 	imported := make(chan struct{}, 1)
-	s := New(nil)
+	s := New()
 	s.SetSyncHandler(&SyncHandler{
 		LoadConfig: func(url, name string) error {
 			return errSyncLoad

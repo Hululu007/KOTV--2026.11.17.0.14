@@ -671,6 +671,7 @@ class VodFullscreenChrome extends StatefulWidget {
     this.danmakuSources = const [],
     this.danmakuSourceIdx = 0,
     this.onDanmakuSourceChanged,
+    this.onDanmakuSearch,
     this.onDanmakuSettingsChanged,
     this.ambientOn = false,
     this.onAmbientChanged,
@@ -725,6 +726,8 @@ class VodFullscreenChrome extends StatefulWidget {
   final List<DanmakuSource> danmakuSources;
   final int danmakuSourceIdx;
   final ValueChanged<int>? onDanmakuSourceChanged;
+  /// 「搜索弹幕」弹窗（父页负责弹出并加载选中的源）。
+  final VoidCallback? onDanmakuSearch;
   /// 弹幕设置 sheet 内热更新（字号等已即时；其余靠父页 refresh）。
   final VoidCallback? onDanmakuSettingsChanged;
   final bool ambientOn;
@@ -2059,6 +2062,16 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               if (picked != null) widget.onDanmakuSourceChanged?.call(picked);
                             },
                           ),
+                        if (widget.onDanmakuSearch != null)
+                          linkRow(
+                            icon: Icons.manage_search,
+                            label: '搜索弹幕',
+                            trailing: '',
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              widget.onDanmakuSearch!();
+                            },
+                          ),
                         linkRow(
                           icon: Icons.bedtime_outlined,
                           label: '休眠定时器',
@@ -2200,6 +2213,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
 
   Future<void> _showPlayInfo() async {
     final actualDecoder = await widget.player.activeDecoderLabel();
+    final videoColor = await widget.player.videoColorLabel();
     if (!mounted) return;
     final w = widget.player.width;
     final h = widget.player.height;
@@ -2228,6 +2242,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               '比例：${_aspects[_aspectIdx].$2}\n'
               '解码：${_decodeModes[_decodeIdx].$2}\n'
               '${actualDecoder == null ? '' : '实际解码：$actualDecoder\n'}'
+              '${videoColor == null ? '' : '画面色彩：$videoColor\n'}'
               '播放器：${widget.player.engineLabel}',
               style: TextStyle(color: Colors.white.withOpacity(0.75), height: 1.55, fontSize: 15),
             ),

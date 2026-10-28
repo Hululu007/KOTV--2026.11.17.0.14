@@ -22,9 +22,16 @@ type Site struct {
 	Jar         string     `json:"jar"`
 	Header      FlexHeader `json:"header"`
 	Click       string     `json:"click"`
-	ID          int        `json:"-"`
+	// Danmaku 0 = 不自动搜索弹幕（片源自带的弹幕照常加载）；缺省为 1。
+	Danmaku FlexInt `json:"danmaku"`
+	ID      int     `json:"-"`
 	// Disabled 用户在「检测爬虫」里禁用：不进换源列表与搜索，存于本地库 site.disabled。
 	Disabled bool `json:"-"`
+}
+
+// AutoDanmaku 是否允许为本站自动搜索弹幕。
+func (s Site) AutoDanmaku() bool {
+	return !s.Danmaku.Valid || s.Danmaku.Value != 0
 }
 
 func (s Site) TypeID() int {

@@ -3,6 +3,7 @@ package com.bobo.kotv
 import android.content.Context
 import android.content.IntentFilter
 import android.graphics.Color
+import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
@@ -78,6 +79,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var diskCache = false
   /** 杜比视界策略：0=AUTO 1=假定支持 2=假定不支持（与 exoDolbyVision 枚举一致）。 */
   private var dolbyVisionPolicy = 0
+  /** 当前是否允许杜比视界直出（android-dolby-vision-output=direct）。 */
+  private var dvDirect = false
+  /** 已交给 mpv 的 OSD Surface（android-osd-wid）。 */
+  private var attachedOsdSurface: Surface? = null
   /** 首选字幕语言（BCP-47，逗号分隔）→ mpv slang。 */
   private var preferredTextLangs = ""
   private var livePlayback = false
@@ -197,6 +202,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     }
     host.onSurfaceSize = { w, h -> if (surfaceHost === host) applySurfaceSize("${w}x$h") }
+    host.onOsdSurface = { if (surfaceHost === host) syncOsdSurface() }
+    host.setOsdLayer(dvDirect)
     if (surfaceLayerEnabled) {
       host.setRender(renderTexture)
       if (host.currentSurface() != null) {
@@ -219,8 +226,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** TV detachMpvSurface(resetVideoOutput=false)：仅松 Surface。 */
+  /** 短暂丢 Surface（全屏改布局等）：只卸 Surface，保留 vo。 */
   private fun parkSurfaceTransient() {
+    detachOsdSurface()
     if (!created.get() || !surfaceAttached) {
       attachedSurface = null
       surfaceAttached = false
@@ -235,8 +243,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     appliedSurfaceSize = null
   }
 
-  /** TV clearVideoOutput / detachMpvSurface(true)。 */
+  /** PlatformView 卸树：vo=null 并卸 Surface。 */
   private fun parkSurfaceTerminal() {
+    detachOsdSurface()
     if (!created.get()) {
       attachedSurface = null
       surfaceAttached = false
@@ -611,6 +620,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             result.success(buildAudioTracksJson())
           } catch (e: Throwable) {
             result.error("TRACKS_FAILED", e.message, null)
+          }
+        }
+      }
+      "videoInfo" -> {
+        main.post {
+          try {
+            result.success(videoInfo())
+          } catch (e: Throwable) {
+            result.error("VIDEO_INFO_FAILED", e.message, null)
           }
         }
       }
@@ -1083,25 +1101,91 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** DV 输出策略（Android mpv 专有选项）。 */
+  /**
+   * 杜比视界输出。direct：遇到杜比视界轨道时 libmpv 自己换成 mediacodec_embed，
+   * 由 MediaCodec 直接把画面送到 Surface，电视才进杜比视界模式；换不成会退回普通渲染。
+   * 直出要 SurfaceView 和非拷贝硬解，Texture 方式或软解一律 configured。
+   */
   private fun applyDolbyVisionOptions() {
+    val ctx = appContext
+    val displayDv = ctx != null && KotvDisplayHdr.supportsDolbyVision(ctx)
+    val wantDirect = when (dolbyVisionPolicy) {
+      1 -> true
+      2 -> false
+      else -> displayDv
+    }
+    val direct = wantDirect && !renderTexture && resolveHwdec(decodeMode) != "no"
+    // 显示器不支持杜比视界时，双层 Profile 7 只留 HDR10 基础层；用户选「开」则保留原样。
+    val profile7 = if (!displayDv && dolbyVisionPolicy != 1) "hdr10" else "preserve"
+    setMpvOption("android-dolby-vision-output", if (direct) "direct" else "configured")
+    setMpvOption("demuxer-dovi-profile7", profile7)
+    dvDirect = direct
+    surfaceHost?.setOsdLayer(direct)
+    syncOsdSurface()
+  }
+
+  /** 直出时画面不经 mpv 渲染，字幕画在叠在视频上方的透明 OSD Surface 上；须在视频 Surface 之后挂。 */
+  private fun syncOsdSurface() {
+    val target = if (dvDirect && created.get() && surfaceAttached) {
+      surfaceHost?.currentOsdSurface()
+    } else {
+      null
+    }
+    if (target === attachedOsdSurface) return
+    detachOsdSurface()
+    if (target == null) return
     try {
-      val set: (String, String) -> Unit = { k, v ->
-        if (created.get()) MPVLib.setPropertyString(k, v) else MPVLib.setOptionString(k, v)
-      }
-      when (dolbyVisionPolicy) {
-        1 -> {
-          set("android-dolby-vision-output", "yes")
-          set("demuxer-dovi-profile7", "yes")
-        }
-        2 -> {
-          set("android-dolby-vision-output", "no")
-          set("demuxer-dovi-profile7", "no")
-        }
-        else -> Unit
-      }
+      MPVLib.attachOsdSurface(target)
+      attachedOsdSurface = target
     } catch (t: Throwable) {
-      Log.w(TAG, "dolby vision opts", t)
+      Log.w(TAG, "attachOsdSurface", t)
+    }
+  }
+
+  private fun detachOsdSurface() {
+    if (attachedOsdSurface == null) return
+    attachedOsdSurface = null
+    if (!created.get()) return
+    try {
+      MPVLib.detachOsdSurface()
+    } catch (t: Throwable) {
+      Log.w(TAG, "detachOsdSurface", t)
+    }
+  }
+
+  /** 播放信息：hwdec-current、片源色彩、是否杜比视界直出、显示器 HDR 能力。 */
+  private fun videoInfo(): Map<String, String> {
+    val display = appContext?.let { KotvDisplayHdr.label(it) } ?: ""
+    if (!created.get()) return mapOf("display" to display)
+    fun prop(name: String) = MPVLib.getPropertyString(name)?.trim().orEmpty()
+    val transfer = when (prop("video-params/gamma")) {
+      "" -> ""
+      "pq" -> "PQ"
+      "hlg" -> "HLG"
+      else -> "SDR"
+    }
+    val dvProfile = prop("current-tracks/video/dolby-vision-profile")
+    return mapOf(
+      "hwdec" to prop("hwdec-current"),
+      "transfer" to transfer,
+      "primaries" to prop("video-params/primaries").uppercase(),
+      "dolbyVision" to if (dvProfile.isEmpty()) "" else "杜比视界 P$dvProfile",
+      "output" to if (prop("current-vo") == "mediacodec_embed") "杜比视界直出" else "",
+      "display" to display,
+    )
+  }
+
+  /** 上下文建好前写 option，之后写 property；libmpv 不认的取值只返回错误码，这里记下来。 */
+  private fun setMpvOption(name: String, value: String) {
+    try {
+      val code = if (created.get()) {
+        MPVLib.setPropertyString(name, value)
+      } else {
+        MPVLib.setOptionString(name, value)
+      }
+      if (code < 0) Log.w(TAG, "mpv $name=$value rejected ($code)")
+    } catch (t: Throwable) {
+      Log.w(TAG, "mpv $name=$value", t)
     }
   }
 
@@ -1464,6 +1548,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       appliedSurfaceSize = null
       if (size != null) applySurfaceSize(size)
       MPVLib.setPropertyString("vo", vo)
+      syncOsdSurface()
       // 绑定输出时不强制 force-window / 不重播；保持 pause 与 time-pos。
       if (pendingUrl == null) {
         MPVLib.setPropertyBoolean("pause", paused)
@@ -1826,6 +1911,24 @@ internal class KotvMpvSurfaceHost(context: Context) :
   /** 最近一次回调的缓冲区宽高（"WxH"）；未知时为 null。 */
   var bufferSize: String? = null
     private set
+  /** OSD Surface 可用或失效时回调；插件据此挂/卸 android-osd-wid。 */
+  var onOsdSurface: (() -> Unit)? = null
+  private var osdWanted = false
+  private var osdView: SurfaceView? = null
+  private var osdReady = false
+  private val osdCallback = object : SurfaceHolder.Callback {
+    override fun surfaceCreated(holder: SurfaceHolder) {
+      osdReady = true
+      onOsdSurface?.invoke()
+    }
+
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+      osdReady = false
+      onOsdSurface?.invoke()
+    }
+  }
 
   init {
     setBackgroundColor(Color.BLACK)
@@ -1845,6 +1948,52 @@ internal class KotvMpvSurfaceHost(context: Context) :
     return if (s != null && s.isValid) s else null
   }
 
+  fun currentOsdSurface(): Surface? {
+    if (!osdReady) return null
+    val s = osdView?.holder?.surface
+    return if (s != null && s.isValid) s else null
+  }
+
+  /** 杜比视界直出时在视频上方叠一层透明 SurfaceView 画字幕；Texture 方式不直出，不建。 */
+  fun setOsdLayer(enabled: Boolean) {
+    osdWanted = enabled
+    syncOsdView()
+  }
+
+  private fun syncOsdView() {
+    val want = osdWanted && surfaceView != null
+    if (want == (osdView != null)) return
+    if (!want) {
+      // 先让插件卸掉 android-osd-wid，再拆 View，mpv 不会拿着已销毁的 Surface。
+      osdReady = false
+      onOsdSurface?.invoke()
+      removeOsdView()
+      return
+    }
+    val v = SurfaceView(context).apply {
+      layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+      isFocusable = false
+      isFocusableInTouchMode = false
+      setZOrderMediaOverlay(true)
+      holder.setFormat(PixelFormat.TRANSLUCENT)
+      holder.addCallback(osdCallback)
+    }
+    osdView = v
+    addView(v)
+    stripPlatformViewFocus()
+  }
+
+  private fun removeOsdView() {
+    val v = osdView ?: return
+    try {
+      v.holder.removeCallback(osdCallback)
+    } catch (_: Throwable) {
+    }
+    removeView(v)
+    osdView = null
+    osdReady = false
+  }
+
   fun setRender(texture: Boolean) {
     if (useTexture == texture && (surfaceView != null || textureView != null)) {
       if (currentSurface() != null) onSurface?.invoke(true)
@@ -1854,6 +2003,7 @@ internal class KotvMpvSurfaceHost(context: Context) :
       onSurface?.invoke(false)
     }
     unbindViews()
+    removeOsdView()
     listOfNotNull(surfaceView, textureView).forEach { removeView(it) }
     surfaceView = null
     textureView = null
@@ -1884,6 +2034,7 @@ internal class KotvMpvSurfaceHost(context: Context) :
       }
       surfaceView = sv
       addView(sv)
+      syncOsdView()
     }
     stripPlatformViewFocus()
   }
@@ -1893,6 +2044,7 @@ internal class KotvMpvSurfaceHost(context: Context) :
     if (surfaceView == null && textureView == null) return
     onSurface?.invoke(false)
     unbindViews()
+    removeOsdView()
     listOfNotNull(surfaceView, textureView).forEach { removeView(it) }
     surfaceView = null
     textureView = null
@@ -1901,9 +2053,11 @@ internal class KotvMpvSurfaceHost(context: Context) :
 
   fun release() {
     unbindViews()
+    removeOsdView()
     releaseTextureSurface()
     onSurface = null
     onSurfaceSize = null
+    onOsdSurface = null
     removeAllViews()
   }
 

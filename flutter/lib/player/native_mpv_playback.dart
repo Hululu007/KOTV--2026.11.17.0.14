@@ -109,6 +109,21 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   String get engineLabel => '内置 MPV';
 
+  Future<Map<Object?, Object?>?> _videoInfo() async {
+    try {
+      return await _ch.invokeMethod<Map<Object?, Object?>>('videoInfo');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<String?> activeDecoderLabel() async =>
+      kotvMpvHwdecLabel('${(await _videoInfo())?['hwdec'] ?? ''}');
+
+  @override
+  Future<String?> videoColorLabel() async => kotvVideoColorLabel(await _videoInfo());
+
   @override
   bool get playing => _playing;
 

@@ -159,7 +159,7 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
     final h = MediaQuery.sizeOf(context).height * 0.72;
-    final on = g('danmaku', 'false').toLowerCase() == 'true';
+    final on = g('danmaku', 'true').toLowerCase() == 'true';
     final size = (double.tryParse(g('danmakuSize', '18')) ?? 18).clamp(12.0, 48.0);
     final opacity = (double.tryParse(g('danmakuOpacity', '85')) ?? 85).clamp(0.0, 100.0);
     final rows = (double.tryParse(g('danmakuRows', '6')) ?? 6).clamp(1.0, 16.0);

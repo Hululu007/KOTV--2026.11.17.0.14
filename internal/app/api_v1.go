@@ -15,6 +15,7 @@ import (
 
 	"github.com/bobo/KOTV/internal/clientsession"
 	"github.com/bobo/KOTV/internal/config"
+	"github.com/bobo/KOTV/internal/danmaku"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/download"
 	"github.com/bobo/KOTV/internal/hostclient"
@@ -1002,6 +1003,12 @@ func (a *App) APIRemotePoll() map[string]any {
 	for _, r := range refreshes {
 		outRef = append(outRef, map[string]any{"type": r.Type, "path": r.Path})
 	}
+	outLive := make([]danmaku.Item, 0, len(liveDm))
+	for _, t := range liveDm {
+		if it := danmaku.ParseLive(t); it.Content != "" {
+			outLive = append(outLive, it)
+		}
+	}
 	outOpen := make([]map[string]any, 0, len(opens))
 	for _, o := range opens {
 		outOpen = append(outOpen, map[string]any{
@@ -1021,7 +1028,7 @@ func (a *App) APIRemotePoll() map[string]any {
 		"controls":    outCtrl,
 		"searches":    searches,
 		"refreshes":   outRef,
-		"danmakuLive": liveDm,
+		"danmakuLive": outLive,
 		"opens":       outOpen,
 	}
 }

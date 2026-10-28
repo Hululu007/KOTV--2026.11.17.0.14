@@ -122,6 +122,23 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   String get engineLabel => '内置 ExoPlayer';
+
+  Future<Map<Object?, Object?>?> _videoInfo() async {
+    try {
+      return await _ch.invokeMethod<Map<Object?, Object?>>('videoInfo');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<String?> activeDecoderLabel() async {
+    final name = '${(await _videoInfo())?['decoder'] ?? ''}'.trim();
+    return name.isEmpty ? null : name;
+  }
+
+  @override
+  Future<String?> videoColorLabel() async => kotvVideoColorLabel(await _videoInfo());
   @override
   String? get lastError => _lastError;
   @override

@@ -516,11 +516,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     unawaited(_playChannel(_chIdx, line: _line));
   }
 
-  void _onRemoteLiveDanmaku(String text) {
-    final content = text.trim();
-    if (!mounted || content.isEmpty) return;
-    final sec = _playback.position.inMilliseconds / 1000.0;
-    _danmakuItems.value = kotvAppendDanmaku(_danmakuItems.value, time: sec, content: content);
+  void _onRemoteLiveDanmaku(DanmakuItem item) {
+    if (!mounted) return;
+    _danmakuItems.value = kotvAppendLiveDanmaku(_danmakuItems.value, item, _playback.position);
   }
 
   Widget _buildLiveDanmakuOverlay() {

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,6 +30,9 @@ type ContentAPI interface {
 	APIBtProgress() map[string]any
 	APISearch(keyword string, siteKeys []string, exact bool, exclude []model.VodKey) (map[string]any, error)
 	APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qualIdx int) (map[string]any, error)
+	APIDanmakuLoad(ctx context.Context, src string) (map[string]any, error)
+	APIDanmakuSearch(ctx context.Context, name, episode string) (map[string]any, error)
+	APIDanmakuAuto(ctx context.Context, siteKey, name, episode string, spiderSources []model.DanmakuItem) map[string]any
 	APIRemotePoll() map[string]any
 	APISetMedia(state map[string]string)
 	APIListRepos() map[string]any
@@ -121,6 +125,7 @@ func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/bt/progress", wrap(s.handleAPIv1BtProgress))
 	mux.HandleFunc("/api/v1/search", wrap(s.handleAPIv1Search))
 	mux.HandleFunc("/api/v1/play", wrap(s.handleAPIv1Play))
+	mux.HandleFunc("/api/v1/danmaku", wrap(s.handleAPIv1Danmaku))
 	mux.HandleFunc("/api/v1/sites", wrap(s.handleAPIv1Sites))
 	mux.HandleFunc("/api/v1/remote/poll", wrap(s.handleAPIv1RemotePoll))
 	mux.HandleFunc("/api/v1/media", wrap(s.handleAPIv1Media))
@@ -693,6 +698,54 @@ func (s *Server) handleAPIv1Play(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleAPIv1Danmaku 弹幕：GET ?action=load&url= 拉取解析；POST action=search 手动搜索；
+// POST action=auto 起播时决定弹幕源（body: site,name,episode,sources）。
+func (s *Server) handleAPIv1Danmaku(w http.ResponseWriter, r *http.Request) {
+	if wroteOptions(w, r) {
+		return
+	}
+	api := s.content()
+	if rejectNoContent(w, api) {
+		return
+	}
+	q := r.URL.Query()
+	var body struct {
+		URL     string              `json:"url"`
+		Site    string              `json:"site"`
+		Name    string              `json:"name"`
+		Episode string              `json:"episode"`
+		Sources []model.DanmakuItem `json:"sources"`
+	}
+	if r.Method == http.MethodPost {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	pick := func(fromBody, key string) string {
+		if v := strings.TrimSpace(fromBody); v != "" {
+			return v
+		}
+		return strings.TrimSpace(q.Get(key))
+	}
+	switch q.Get("action") {
+	case "", "load":
+		out, err := api.APIDanmakuLoad(r.Context(), pick(body.URL, "url"))
+		if rejectBadGateway(w, err) {
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+	case "search":
+		out, err := api.APIDanmakuSearch(r.Context(), pick(body.Name, "name"), pick(body.Episode, "episode"))
+		if rejectBadGateway(w, err) {
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+	case "auto":
+		writeJSON(w, http.StatusOK, api.APIDanmakuAuto(r.Context(), pick(body.Site, "site"),
+			pick(body.Name, "name"), pick(body.Episode, "episode"), body.Sources))
+	default:
+		writeAPIError(w, http.StatusBadRequest, "unknown action")
+	}
 }
 
 func (s *Server) handleAPIv1RemotePoll(w http.ResponseWriter, r *http.Request) {

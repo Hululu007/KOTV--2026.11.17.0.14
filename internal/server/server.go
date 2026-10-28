@@ -39,7 +39,6 @@ type Server struct {
 	port          int
 	http          *http.Server
 	events        *Events
-	onAction      func(Action)
 	ui            *uiHub
 	uiReply       *uiReplyStore
 	mediaProvider func() map[string]string
@@ -77,8 +76,8 @@ var defaultServer *Server
 
 func Default() *Server { return defaultServer }
 
-func New(onAction func(Action)) *Server {
-	s := &Server{events: NewEvents(), onAction: onAction, ui: newUIHub(), uiReply: newUIReplyStore()}
+func New() *Server {
+	s := &Server{events: NewEvents(), ui: newUIHub(), uiReply: newUIReplyStore()}
 	s.events.SetDeliver(s.ui.pushUI)
 	defaultServer = s
 	spider.SetPostMsgEmitter(func(msg, clientID string) {
@@ -365,9 +364,6 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		}
 		s.handleSync(w, r, qmap)
 		return
-	}
-	if s.onAction != nil {
-		s.onAction(action)
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("OK"))

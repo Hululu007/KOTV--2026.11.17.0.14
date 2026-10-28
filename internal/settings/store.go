@@ -683,11 +683,14 @@ func IsAdFilterEnabled() bool {
 	return v == "" || v == "true" || v == "1" || v == "on"
 }
 
-// IsDanmakuEnabled 弹幕开关。
-func IsDanmakuEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(Get(DanmakuOn)))
-	return v == "" || v == "true" || v == "1" || v == "on"
-}
+// IsDanmakuLoad 加载弹幕（默认开）；关掉后片源弹幕和自动搜索都不加载。
+func IsDanmakuLoad() bool { return boolSetting(DanmakuLoad, true) }
+
+// IsDanmakuAuto 起播时按片名/集名自动搜索弹幕（默认开）。
+func IsDanmakuAuto() bool { return boolSetting(DanmakuAuto, true) }
+
+// IsDanmakuSpiderFirst 片源自带弹幕优先（默认开）：有片源弹幕时搜索结果只追加。
+func IsDanmakuSpiderFirst() bool { return boolSetting(DanmakuSpiderFirst, true) }
 
 // IsLiveAcross 跨分组换台（默认开）。
 func IsLiveAcross() bool { return boolSetting(LiveAcross, true) }

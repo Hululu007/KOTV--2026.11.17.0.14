@@ -1,12 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
-import 'danmaku_file_read.dart';
 import 'kotv_playback.dart';
 
 /// Flutter 3.19 没有 Color.toARGB32；3.47 的 value 仍可用。
@@ -15,7 +12,7 @@ int _colorArgb(Color color) {
   return color.value;
 }
 
-/// 单条弹幕（internal/danmaku.Item）。
+/// 单条弹幕；由引擎 /api/v1/danmaku 解析好下发（internal/danmaku.Item）。
 class DanmakuItem {
   const DanmakuItem({
     required this.time,
@@ -25,196 +22,62 @@ class DanmakuItem {
     this.color = 0xFFFFFF,
   });
 
+  factory DanmakuItem.fromJson(Map<Object?, Object?> m) => DanmakuItem(
+        time: (m['time'] as num?)?.toDouble() ?? 0,
+        content: '${m['content'] ?? ''}',
+        mode: (m['mode'] as num?)?.toInt() ?? 1,
+        size: (m['size'] as num?)?.toInt() ?? 25,
+        color: (m['color'] as num?)?.toInt() ?? 0xFFFFFF,
+      );
+
   final double time; // 秒
   final String content;
   final int mode;
   final int size;
   final int color;
+
+  DanmakuItem withTime(double sec) =>
+      DanmakuItem(time: sec, content: content, mode: mode, size: size, color: color);
 }
 
-List<DanmakuItem> kotvAppendDanmaku(List<DanmakuItem> items, {required double time, required String content}) {
-  return List<DanmakuItem>.of(items)..add(DanmakuItem(time: time, content: content));
+/// 整体平移时轴（弹幕偏移设置）。
+List<DanmakuItem> kotvShiftDanmaku(List<DanmakuItem> items, double deltaSec) {
+  if (deltaSec.abs() <= 0.0001 || items.isEmpty) return items;
+  return [for (final it in items) it.withTime(it.time + deltaSec)];
 }
 
-class DanmakuParser {
-  static List<DanmakuItem> parse(String body) {
-    final t = body.trim();
-    if (t.contains('<d ') || t.contains('<i>')) {
-      return _parseXml(t);
-    }
-    return _parseText(t);
-  }
+/// 遥控即时弹幕：按当前播放进度插入。
+List<DanmakuItem> kotvAppendLiveDanmaku(List<DanmakuItem> items, DanmakuItem item, Duration position) =>
+    List<DanmakuItem>.of(items)..add(item.withTime(position.inMilliseconds / 1000.0));
 
-  static List<DanmakuItem> _parseXml(String body) {
-    final out = <DanmakuItem>[];
-    final re =
-        RegExp(r'''<d\s+p="([^"]*)"[^>]*>([^<]*)</d>''', multiLine: true);
-    for (final m in re.allMatches(body)) {
-      final meta = m.group(1) ?? '';
-      final text = _xmlUnescape(m.group(2) ?? '').trim();
-      if (text.isEmpty) continue;
-      final parts = meta.split(',');
-      out.add(DanmakuItem(
-        time: parts.isNotEmpty ? double.tryParse(parts[0]) ?? 0 : 0,
-        mode: parts.length > 1 ? int.tryParse(parts[1]) ?? 1 : 1,
-        size: parts.length > 2 ? int.tryParse(parts[2]) ?? 25 : 25,
-        color: parts.length > 3 ? int.tryParse(parts[3]) ?? 0xFFFFFF : 0xFFFFFF,
-        content: text,
-      ));
-    }
-    return out;
-  }
+/// 引擎返回的 items 列表 → [DanmakuItem]。
+List<DanmakuItem> kotvDanmakuItemsFrom(Object? raw) => [
+      if (raw is List)
+        for (final m in raw)
+          if (m is Map) DanmakuItem.fromJson(m),
+    ];
 
-  static List<DanmakuItem> _parseText(String body) {
-    final out = <DanmakuItem>[];
-    final re = RegExp(r'^\[([^\]]+)\](.*)$');
-    for (final line in body.split('\n')) {
-      final m = re.firstMatch(line.trim());
-      if (m == null) continue;
-      final text = (m.group(2) ?? '').trim();
-      if (text.isEmpty) continue;
-      final parts = (m.group(1) ?? '').split(',');
-      out.add(DanmakuItem(
-        time: parts.isNotEmpty ? double.tryParse(parts[0]) ?? 0 : 0,
-        mode: parts.length > 1 ? int.tryParse(parts[1]) ?? 1 : 1,
-        size: parts.length > 2 ? int.tryParse(parts[2]) ?? 25 : 25,
-        color: parts.length > 3 ? int.tryParse(parts[3]) ?? 0xFFFFFF : 0xFFFFFF,
-        content: text,
-      ));
-    }
-    return out;
-  }
-
-  static String _xmlUnescape(String s) => s
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>')
-      .replaceAll('&amp;', '&')
-      .replaceAll('&quot;', '"')
-      .replaceAll('&apos;', "'");
-}
-
-class DanmakuLoader {
-  static Future<List<DanmakuItem>> loadUrl(String url,
-      {bool followSources = true}) async {
-    if (url.trim().isEmpty) return const [];
-    final resp =
-        await http.get(Uri.parse(url)).timeout(const Duration(seconds: 12));
-    if (resp.statusCode < 200 || resp.statusCode >= 300) return const [];
-    final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
-    return _parseBodyOrSources(body, followSources: followSources);
-  }
-
-  static Future<List<DanmakuItem>> loadFile(String path) async {
-    final body = await readDanmakuFileText(path);
-    if (body == null || body.isEmpty) return const [];
-    return DanmakuParser.parse(body);
-  }
-
-  /// 模板 GET：`https://…?n={name}&e={episode}`；无占位符时 POST name/episode。
-  /// 响应可为弹幕正文，或 `[{name,url},…]` 源列表（再拉首条 url）。
-  static Future<List<DanmakuItem>> loadApi(String api,
-      {required String name, required String episode}) async {
-    final base = api.trim();
-    if (base.isEmpty) return const [];
-    final hasTpl = base.contains('{name}') || base.contains('{episode}');
-    late final http.Response resp;
-    if (hasTpl) {
-      final u = base
-          .replaceAll('{name}', Uri.encodeComponent(name))
-          .replaceAll('{episode}', Uri.encodeComponent(episode));
-      resp = await http.get(Uri.parse(u)).timeout(const Duration(seconds: 12));
-    } else {
-      resp = await http.post(
-        Uri.parse(base),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'name': name, 'episode': episode},
-      ).timeout(const Duration(seconds: 12));
-    }
-    if (resp.statusCode < 200 || resp.statusCode >= 300) return const [];
-    final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
-    return _parseBodyOrSources(body, followSources: true);
-  }
-
-  static Future<List<DanmakuItem>> _parseBodyOrSources(String body,
-      {required bool followSources}) async {
-    if (followSources) {
-      final src = _firstSourceUrl(body);
-      if (src != null && src.isNotEmpty) {
-        return loadUrl(src, followSources: false);
-      }
-    }
-    return DanmakuParser.parse(body);
-  }
-
-  /// 弹幕搜索 API 常见返回：`[{"name":"…","url":"https://…xml"},…]`
-  static String? _firstSourceUrl(String body) {
-    final all = listSources(body);
-    return all.isEmpty ? null : all.first.url;
-  }
-
-  static List<DanmakuSource> listSources(String body) {
-    final t = body.trim();
-    if (t.isEmpty || (t[0] != '[' && t[0] != '{')) return const [];
-    try {
-      final decoded = jsonDecode(t);
-      final out = <DanmakuSource>[];
-      if (decoded is List) {
-        for (var i = 0; i < decoded.length; i++) {
-          final s = _sourceFrom(decoded[i], i);
-          if (s != null) out.add(s);
-        }
-        return out;
-      }
-      final one = _sourceFrom(decoded, 0);
-      return one == null ? const [] : [one];
-    } catch (_) {
-      return const [];
-    }
-  }
-
-  static DanmakuSource? _sourceFrom(dynamic item, int index) {
-    if (item is String) {
-      final s = item.trim();
-      if (!s.startsWith('http')) return null;
-      return DanmakuSource(name: '源 ${index + 1}', url: s);
-    }
-    if (item is Map) {
-      final u = '${item['url'] ?? ''}'.trim();
-      if (!u.startsWith('http')) return null;
-      final n = '${item['name'] ?? item['title'] ?? ''}'.trim();
-      return DanmakuSource(name: n.isEmpty ? '源 ${index + 1}' : n, url: u);
-    }
-    return null;
-  }
-
-  /// 拉搜索接口正文（不跟进源），便于列出多源。
-  static Future<String> fetchApiBody(String api,
-      {required String name, required String episode}) async {
-    final base = api.trim();
-    if (base.isEmpty) return '';
-    final hasTpl = base.contains('{name}') || base.contains('{episode}');
-    late final http.Response resp;
-    if (hasTpl) {
-      final u = base
-          .replaceAll('{name}', Uri.encodeComponent(name))
-          .replaceAll('{episode}', Uri.encodeComponent(episode));
-      resp = await http.get(Uri.parse(u)).timeout(const Duration(seconds: 12));
-    } else {
-      resp = await http.post(
-        Uri.parse(base),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'name': name, 'episode': episode},
-      ).timeout(const Duration(seconds: 12));
-    }
-    if (resp.statusCode < 200 || resp.statusCode >= 300) return '';
-    return utf8.decode(resp.bodyBytes, allowMalformed: true);
-  }
-}
-
+/// 弹幕源：片源 playerContent 的 danmaku、或弹幕搜索结果。
 class DanmakuSource {
   const DanmakuSource({required this.name, required this.url});
   final String name;
   final String url;
+
+  Map<String, String> toJson() => {'name': name, 'url': url};
+}
+
+/// 引擎返回的 [{name,url}] → [DanmakuSource]；缺名时按序号补「源 N」。
+List<DanmakuSource> kotvDanmakuSourcesFrom(Object? raw) {
+  final out = <DanmakuSource>[];
+  if (raw is! List) return out;
+  for (final it in raw) {
+    if (it is! Map) continue;
+    final url = '${it['url'] ?? ''}'.trim();
+    if (url.isEmpty) continue;
+    final name = '${it['name'] ?? ''}'.trim();
+    out.add(DanmakuSource(name: name.isEmpty ? '源 ${out.length + 1}' : name, url: url));
+  }
+  return out;
 }
 
 /// 叠在画面上的弹幕层：跟 [KotvPlayback.positionStream] 与媒体时钟滚动，

@@ -54,6 +54,7 @@ import '../vod/content_clicker.dart';
 import '../widgets/auth_gate.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
+import '../widgets/danmaku_search_dialog.dart';
 import '../widgets/chrome.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/h_scroll.dart';
@@ -247,17 +248,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   String _renderMode = 'surface';
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   bool _danmakuOn = false;
-  bool _danmakuLoad = true;
-  bool _danmakuAuto = true;
-  bool _danmakuSpiderFirst = true;
   bool _ambientOn = false;
   /// off | audio | pip
   String _playerBackground = 'pip';
   double _holdSpeed = 2.0;
   bool _stableVolumeOn = false;
-  String _danmakuApi = '';
-  String _lastPlayDanmaku = '';
-  List<DanmakuSource> _lastSpiderDanmakuSources = const [];
+  /// 本集 play 返回的片源弹幕；改弹幕设置后带着它重新让引擎选源。
+  List<DanmakuSource> _spiderDanmakuSources = const [];
   double _danmakuSize = 18;
   double _danmakuOpacity = 0.85;
   int _danmakuRows = 6;
@@ -787,41 +784,20 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     unawaited(_playback.addSubtitlePath(path));
   }
 
+  /// 遥控推送的弹幕文件（引擎本机路径或 URL），由引擎读取解析。
   void _onRemoteDanmakuFile(String path) {
     if (!mounted || path.trim().isEmpty) return;
     unawaited(() async {
-      try {
-        List<DanmakuItem> items;
-        final p = path.trim();
-        if (p.startsWith('http://') || p.startsWith('https://')) {
-          items = await DanmakuLoader.loadUrl(p);
-        } else {
-          items = await DanmakuLoader.loadFile(p);
-        }
-        if (!mounted) return;
-        if (_danmakuOffsetSec.abs() > 0.0001) {
-          items = [
-            for (final it in items)
-              DanmakuItem(
-                time: it.time + _danmakuOffsetSec,
-                content: it.content,
-                mode: it.mode,
-                size: it.size,
-                color: it.color,
-              ),
-          ];
-        }
-        _danmakuItems.value = items;
-        if (!_danmakuOn) setState(() => _danmakuOn = true);
-      } catch (_) {}
+      final items = await _fetchDanmaku(path.trim());
+      if (!mounted || items == null) return;
+      _danmakuItems.value = items;
+      if (!_danmakuOn) setState(() => _danmakuOn = true);
     }());
   }
 
-  void _onRemoteLiveDanmaku(String text) {
-    final content = text.trim();
-    if (!mounted || content.isEmpty) return;
-    final sec = _playback.position.inMilliseconds / 1000.0;
-    _danmakuItems.value = kotvAppendDanmaku(_danmakuItems.value, time: sec, content: content);
+  void _onRemoteLiveDanmaku(DanmakuItem item) {
+    if (!mounted) return;
+    _danmakuItems.value = kotvAppendLiveDanmaku(_danmakuItems.value, item, _playback.position);
     if (!_danmakuOn) setState(() => _danmakuOn = true);
   }
 
@@ -1833,118 +1809,81 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }());
   }
 
+  /// 起播或改了弹幕设置：引擎按设置把片源弹幕和自动搜到的合成源列表，再加载默认选中的那条。
   Future<void> _loadDanmakuForEpisode({
-    required String playDanmaku,
     required String name,
     required String episode,
-    List<DanmakuSource> spiderSources = const [],
     int? playSerial,
   }) async {
     final serial = playSerial ?? _playAtSerial;
     _danmakuItems.value = const [];
-    if (!_danmakuLoad) return;
-    _lastPlayDanmaku = playDanmaku;
-    _lastSpiderDanmakuSources = spiderSources;
-    final engineBase = ref.read(apiProvider).baseUrl;
-    String spiderUrl = '';
-    List<DanmakuSource> spiderList = spiderSources;
-    if (spiderList.isEmpty && playDanmaku.trim().isNotEmpty) {
-      spiderUrl = kotvRewriteEngineLocalUrl(playDanmaku.trim(), engineBase);
-    } else if (spiderList.isNotEmpty) {
-      spiderList = [
-        for (final s in spiderList)
-          DanmakuSource(name: s.name, url: kotvRewriteEngineLocalUrl(s.url, engineBase)),
-      ];
-      final idx = _danmakuSourceIdx.clamp(0, spiderList.length - 1);
-      spiderUrl = spiderList[idx].url;
-    }
-    final api = _danmakuApi.trim();
-    final canSpider = spiderUrl.isNotEmpty;
-    final canApi = api.isNotEmpty && _danmakuAuto;
-    if (!canSpider && !canApi) return;
     try {
-      List<DanmakuItem> items = const [];
-      List<DanmakuSource> sources = spiderList;
-      if (_danmakuSpiderFirst) {
-        if (canSpider) items = await DanmakuLoader.loadUrl(spiderUrl, followSources: spiderList.length <= 1);
-        if (!mounted || serial != _playAtSerial) return;
-        if (items.isEmpty && canApi) {
-          final body = await DanmakuLoader.fetchApiBody(api, name: name, episode: episode);
-          if (!mounted || serial != _playAtSerial) return;
-          sources = DanmakuLoader.listSources(body);
-          if (sources.isNotEmpty) {
-            final idx = _danmakuSourceIdx.clamp(0, sources.length - 1);
-            items = await DanmakuLoader.loadUrl(sources[idx].url, followSources: false);
-          } else {
-            items = DanmakuParser.parse(body);
-          }
-        }
-      } else {
-        if (canApi) {
-          final body = await DanmakuLoader.fetchApiBody(api, name: name, episode: episode);
-          if (!mounted || serial != _playAtSerial) return;
-          sources = DanmakuLoader.listSources(body);
-          if (sources.isNotEmpty) {
-            final idx = _danmakuSourceIdx.clamp(0, sources.length - 1);
-            items = await DanmakuLoader.loadUrl(sources[idx].url, followSources: false);
-          } else {
-            items = DanmakuParser.parse(body);
-          }
-        }
-        if (!mounted || serial != _playAtSerial) return;
-        if (items.isEmpty && canSpider) {
-          items = await DanmakuLoader.loadUrl(spiderUrl, followSources: spiderList.length <= 1);
-          if (sources.isEmpty) sources = spiderList;
-        }
-      }
+      final res = await ref.read(apiProvider).danmakuAuto(
+            site: _detailSite(),
+            name: name,
+            episode: episode,
+            sources: [for (final s in _spiderDanmakuSources) s.toJson()],
+          );
       if (!mounted || serial != _playAtSerial) return;
-      if (_danmakuOffsetSec.abs() > 0.0001) {
-        items = [
-          for (final it in items)
-            DanmakuItem(
-              time: it.time + _danmakuOffsetSec,
-              content: it.content,
-              mode: it.mode,
-              size: it.size,
-              color: it.color,
-            ),
-        ];
-      }
-      if (!mounted || serial != _playAtSerial) return;
+      final sources = kotvDanmakuSourcesFrom(res['sources']);
+      final selected = (res['selected'] as num?)?.toInt() ?? 0;
       setState(() {
         _danmakuSources = sources;
-        if (_danmakuSourceIdx >= sources.length) _danmakuSourceIdx = 0;
+        _danmakuSourceIdx = sources.isEmpty ? 0 : selected.clamp(0, sources.length - 1);
       });
-      _danmakuItems.value = items;
+      if (sources.isNotEmpty) await _loadDanmakuSource(_danmakuSourceIdx, playSerial: serial);
     } catch (_) {
-      if (mounted && serial == _playAtSerial) {
-        setState(() => _danmakuSources = const []);
-        _danmakuItems.value = const [];
-      }
+      if (mounted && serial == _playAtSerial) setState(() => _danmakuSources = const []);
     }
   }
 
-  List<DanmakuSource> _danmakuSourcesFromPlay(dynamic raw) {
-    if (raw is List) {
-      final out = <DanmakuSource>[];
-      for (var i = 0; i < raw.length; i++) {
-        final it = raw[i];
-        if (it is Map) {
-          final u = '${it['url'] ?? ''}'.trim();
-          if (u.isEmpty) continue;
-          final n = '${it['name'] ?? ''}'.trim();
-          out.add(DanmakuSource(name: n.isEmpty ? '源 ${i + 1}' : n, url: u));
-        } else {
-          final u = '$it'.trim();
-          if (u.isEmpty) continue;
-          out.add(DanmakuSource(name: '源 ${i + 1}', url: u));
-        }
-      }
-      return out;
+  /// 加载弹幕源列表里第 [index] 条。
+  Future<void> _loadDanmakuSource(int index, {int? playSerial}) async {
+    final serial = playSerial ?? _playAtSerial;
+    if (index < 0 || index >= _danmakuSources.length) return;
+    final items = await _fetchDanmaku(_danmakuSources[index].url);
+    if (!mounted || serial != _playAtSerial) return;
+    _danmakuItems.value = items ?? const [];
+  }
+
+  /// 引擎拉取并解析一个弹幕源，套上当前时轴偏移；失败返回 null。
+  Future<List<DanmakuItem>?> _fetchDanmaku(String url) async {
+    try {
+      final res = await ref.read(apiProvider).danmakuLoad(url);
+      return kotvShiftDanmaku(kotvDanmakuItemsFrom(res['items']), _danmakuOffsetSec);
+    } catch (_) {
+      return null;
     }
-    final s = '${raw ?? ''}'.trim();
-    if (s.isEmpty || s == 'null' || s.startsWith('[')) return const [];
-    return [DanmakuSource(name: '源 1', url: s)];
+  }
+
+  void _reloadDanmakuForCurrentEpisode() {
+    final d = _detail;
+    if (d == null || _epIdx < 0 || _epIdx >= _eps.length) return;
+    unawaited(_loadDanmakuForEpisode(name: d.name, episode: _eps[_epIdx].name));
+  }
+
+  /// 「搜索弹幕」：选中的源不在列表里就放到第一位，然后加载它。
+  Future<void> _searchDanmaku() async {
+    final d = _detail;
+    if (d == null) return;
+    final episode = (_epIdx >= 0 && _epIdx < _eps.length) ? _eps[_epIdx].name : '';
+    final picked = await showKotvDanmakuSearchDialog(
+      context,
+      api: ref.read(apiProvider),
+      name: d.name,
+      episode: episode,
+    );
+    if (picked == null || !mounted) return;
+    var idx = _danmakuSources.indexWhere((s) => s.url == picked.url);
+    setState(() {
+      if (idx < 0) {
+        _danmakuSources = [picked, ..._danmakuSources];
+        idx = 0;
+      }
+      _danmakuSourceIdx = idx;
+      _danmakuOn = true;
+    });
+    await _loadDanmakuSource(idx);
   }
 
   Future<void> _playAt(int epIdx, {bool fullscreen = false}) async {
@@ -1974,6 +1913,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _posSub?.cancel();
     _posSub = null;
     _danmakuItems.value = const [];
+    _spiderDanmakuSources = const [];
     final canDirect = ep.url.trim().isNotEmpty;
     // 立刻高亮：先于 flush/停播，避免点选集要等落盘才变色。
     if (mounted) {
@@ -2392,14 +2332,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         } catch (_) {}
       }
       if (!mounted) return;
-      final spiderDm = _danmakuSourcesFromPlay(data['danmaku']);
-      unawaited(_loadDanmakuForEpisode(
-        playDanmaku: spiderDm.isEmpty ? '' : spiderDm.first.url,
-        spiderSources: spiderDm,
-        name: d.name,
-        episode: ep.name,
-        playSerial: serial,
-      ));
+      _spiderDanmakuSources = kotvDanmakuSourcesFrom(data['danmaku']);
+      unawaited(_loadDanmakuForEpisode(name: d.name, episode: ep.name, playSerial: serial));
       // 专用源可带回封面/简介；片名仅当前为空时补全，勿用 play.title（曾默认=vodID）覆盖已有名。
       final srcTitle = '${data['title'] ?? ''}'.trim();
       final srcArt = '${data['artwork'] ?? ''}'.trim();
@@ -2895,11 +2829,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 把接口里的弹幕参数写进当前画面。
   /// [applyOffset] 只在起播时记下时轴；之后改偏移走增量平移，读回不再加一次。
   void _applyDanmakuPrefsFromSettings(Map<String, dynamic> settings, {bool applyOffset = false}) {
-    _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
-    _danmakuLoad = _flagFromSettings(settings, 'danmakuLoad', true);
-    _danmakuAuto = _flagFromSettings(settings, 'danmakuAuto', true);
-    _danmakuSpiderFirst = _flagFromSettings(settings, 'danmakuSpiderFirst', true);
-    _danmakuApi = '${settings['danmakuApi'] ?? ''}';
+    _danmakuOn = _flagFromSettings(settings, 'danmaku');
     _danmakuSize = double.tryParse('${settings['danmakuSize'] ?? ''}') ?? 18;
     final op = double.tryParse('${settings['danmakuOpacity'] ?? ''}');
     _danmakuOpacity = op == null ? 0.85 : (op > 1 ? op / 100.0 : op).clamp(0.15, 1.0);
@@ -3006,16 +2936,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         onDanmakuSourceChanged: (i) {
           if (!mounted || i < 0 || i >= _danmakuSources.length) return;
           setState(() => _danmakuSourceIdx = i);
-          final d = _detail;
-          if (d == null) return;
-          final epName = (_epIdx >= 0 && _epIdx < _eps.length) ? _eps[_epIdx].name : '';
-          unawaited(_loadDanmakuForEpisode(
-            playDanmaku: _lastPlayDanmaku,
-            spiderSources: _lastSpiderDanmakuSources,
-            name: d.name,
-            episode: epName,
-          ));
+          unawaited(_loadDanmakuSource(i));
         },
+        onDanmakuSearch: () => unawaited(_searchDanmaku()),
         onDanmakuSettingsChanged: () => unawaited(_refreshDanmakuPrefs()),
         ambientOn: _ambientOn,
         stableVolumeOn: _stableVolumeOn,
@@ -3104,49 +3027,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             final next = ((int.tryParse(v) ?? 0) / 1000.0);
             final delta = next - _danmakuOffsetSec;
             _danmakuOffsetSec = next;
-            if (delta.abs() > 0.0001 && _danmakuItems.value.isNotEmpty) {
-              _danmakuItems.value = [
-                for (final it in _danmakuItems.value)
-                  DanmakuItem(
-                    time: it.time + delta,
-                    content: it.content,
-                    mode: it.mode,
-                    size: it.size,
-                    color: it.color,
-                  ),
-              ];
-            }
+            _danmakuItems.value = kotvShiftDanmaku(_danmakuItems.value, delta);
             if (mounted) setState(() {});
           }
-          if (k == 'danmakuLoad' || k == 'danmakuAuto' || k == 'danmakuSpiderFirst') {
-            setState(() {
-              if (k == 'danmakuLoad') {
-                _danmakuLoad = v.toLowerCase() != 'false' && v != '0' && v.toLowerCase() != 'off';
-              }
-              if (k == 'danmakuAuto') {
-                _danmakuAuto = v.toLowerCase() != 'false' && v != '0' && v.toLowerCase() != 'off';
-              }
-              if (k == 'danmakuSpiderFirst') {
-                _danmakuSpiderFirst = v.toLowerCase() != 'false' && v != '0' && v.toLowerCase() != 'off';
-              }
-            });
-            if (_detail != null && _eps.isNotEmpty && _epIdx >= 0 && _epIdx < _eps.length) {
-              unawaited(_loadDanmakuForEpisode(
-                playDanmaku: '',
-                name: _detail!.name,
-                episode: _eps[_epIdx].name,
-              ));
-            }
-          }
-          if (k == 'danmakuApi') {
-            setState(() => _danmakuApi = v);
-            if (_detail != null && _eps.isNotEmpty && _epIdx >= 0 && _epIdx < _eps.length) {
-              unawaited(_loadDanmakuForEpisode(
-                playDanmaku: '',
-                name: _detail!.name,
-                episode: _eps[_epIdx].name,
-              ));
-            }
+          if (const {'danmakuLoad', 'danmakuAuto', 'danmakuSpiderFirst', 'danmakuApi'}.contains(k)) {
+            _reloadDanmakuForCurrentEpisode();
           }
           if (k == 'danmakuSize') {
             setState(() => _danmakuSize = double.tryParse(v) ?? _danmakuSize);

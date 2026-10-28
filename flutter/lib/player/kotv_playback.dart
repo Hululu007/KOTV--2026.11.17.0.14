@@ -5,6 +5,28 @@ import 'package:flutter/widgets.dart';
 
 import 'keep_awake.dart';
 
+/// mpv `hwdec-current` → 播放信息文案（桌面 media_kit 与安卓原生 MPV 共用）。
+String? kotvMpvHwdecLabel(String raw) {
+  final v = raw.trim();
+  if (v.isEmpty) return null;
+  if (v == 'no') return '软解';
+  return v.endsWith('-copy') ? '硬解后拷贝（$v）' : '硬解直出（$v）';
+}
+
+/// 原生播放器 videoInfo → 「PQ · BT.2020 · 杜比视界 P8 · 杜比视界直出（显示器：HDR10/HLG）」。
+String? kotvVideoColorLabel(Map<Object?, Object?>? info) {
+  if (info == null) return null;
+  String s(String k) => '${info[k] ?? ''}'.trim();
+  final parts = [
+    for (final k in const ['transfer', 'primaries', 'dolbyVision', 'output'])
+      if (s(k).isNotEmpty) s(k),
+  ];
+  final display = s('display');
+  if (parts.isEmpty && display.isEmpty) return null;
+  final head = parts.isEmpty ? '未知' : parts.join(' · ');
+  return display.isEmpty ? head : '$head（显示器：$display）';
+}
+
 /// 统一播放后端：Exo / 原生 MPV / FVP / HTML 等共用同一套菜单/控件。
 abstract class KotvPlayback extends ChangeNotifier {
   bool? _keepAwakeWant;
@@ -38,6 +60,9 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// 当前实际在用的视频解码方式（播放信息里展示）；读不到时为 null。
   Future<String?> activeDecoderLabel() async => null;
+
+  /// 片源色彩与显示器 HDR 能力（播放信息里展示，见 [kotvVideoColorLabel]）；读不到时为 null。
+  Future<String?> videoColorLabel() async => null;
 
   Stream<Duration> get positionStream;
 

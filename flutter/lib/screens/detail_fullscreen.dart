@@ -88,6 +88,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.danmakuSources = const [],
     this.danmakuSourceIdx = 0,
     this.onDanmakuSourceChanged,
+    this.onDanmakuSearch,
     this.onDanmakuSettingsChanged,
     this.ambientOn = false,
     this.onAmbientChanged,
@@ -170,6 +171,7 @@ class DetailFullscreenPage extends StatefulWidget {
   final List<DanmakuSource> danmakuSources;
   final int danmakuSourceIdx;
   final ValueChanged<int>? onDanmakuSourceChanged;
+  final VoidCallback? onDanmakuSearch;
   final VoidCallback? onDanmakuSettingsChanged;
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
@@ -1041,6 +1043,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       danmakuSources: widget.danmakuSources,
       danmakuSourceIdx: widget.danmakuSourceIdx,
       onDanmakuSourceChanged: widget.onDanmakuSourceChanged,
+      onDanmakuSearch: widget.onDanmakuSearch,
       onDanmakuSettingsChanged: widget.onDanmakuSettingsChanged,
       ambientOn: _ambientOn,
       onAmbientChanged: (v) {

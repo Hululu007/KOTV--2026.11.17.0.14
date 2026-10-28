@@ -2316,7 +2316,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final render = kotvNormalizePlayerRender(g('playerRender', 'surface'));
     final playerFailover = g('playerFailover', 'auto');
     final liveAutoChange = g('liveChange', 'true');
-    final danOn = g('danmaku', 'false') == 'true';
+    final danOn = g('danmaku', 'true') == 'true';
     final incognito = g('incognito', 'false') == 'true';
     final dmr = g('dlnaRenderer', 'false') == 'true';
     final parseName = g('preferredParse').isEmpty ? '自动' : g('preferredParse');

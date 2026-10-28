@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../api/kotv_api.dart';
 import '../api/kotv_settings_cache.dart';
 import '../models/models.dart';
+import '../player/danmaku_layer.dart';
 import '../player/kotv_platform.dart';
 import 'engine_api.dart';
 
@@ -19,10 +20,10 @@ class RemoteBridge {
   void Function(String keyword)? onSearch;
   /// 遥控推送的本地/URL 字幕文件。
   void Function(String path)? onSubtitleFile;
-  /// 遥控推送的弹幕文件（本地路径或 URL）。
+  /// 遥控推送的弹幕文件（引擎本机路径或 URL）。
   void Function(String path)? onDanmakuFile;
-  /// 遥控即时弹幕文本。
-  void Function(String text)? onLiveDanmaku;
+  /// 遥控即时弹幕（引擎已解析模式/字号/颜色；time 不用，按当前进度插入）。
+  void Function(DanmakuItem item)? onLiveDanmaku;
   /// 遥控 refresh type=live：重拉当前直播源频道表。
   void Function()? onLiveRefresh;
   /// 遥控 refresh type=detail：详情页重拉。
@@ -100,10 +101,8 @@ class RemoteBridge {
           onDanmakuFile?.call(path);
         }
       }
-      final live = (data['danmakuLive'] as List?) ?? const [];
-      for (final t in live) {
-        final text = '$t'.trim();
-        if (text.isNotEmpty) onLiveDanmaku?.call(text);
+      for (final it in kotvDanmakuItemsFrom(data['danmakuLive'])) {
+        if (it.content.trim().isNotEmpty) onLiveDanmaku?.call(it);
       }
       final opens = (data['opens'] as List?) ?? const [];
       for (final o in opens) {

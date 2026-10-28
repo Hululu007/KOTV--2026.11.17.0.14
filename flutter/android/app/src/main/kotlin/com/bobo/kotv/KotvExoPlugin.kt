@@ -167,6 +167,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** diskCache / bufferFactor 写入 LoadControl 与 CacheDataSource，变更须重建。 */
   private var playerBuiltDiskCache: Boolean? = null
   private var playerBuiltBufferFactor: Int? = null
+  /** 杜比视界策略写进渲染器工厂，变更须重建。 */
+  private var playerBuiltDolbyVision: Int? = null
+  /** 最近一次初始化的视频解码器名（播放信息用）。 */
+  private var lastVideoDecoder = ""
   private var subtitleOverlay: KotvSubtitleOverlay? = null
   private var subtitleFontScale = 1.0f
   private var subtitlePos = 0.0
@@ -713,6 +717,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           result.success(videoTrackCandidates().size)
         }
       }
+      "videoInfo" -> {
+        main.post {
+          result.success(videoInfo())
+        }
+      }
       "audioTrackCount" -> {
         main.post {
           result.success(audioTrackCount())
@@ -1058,7 +1067,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         playerBuiltLibass != libassEnabled ||
         playerBuiltSecondary != wantSecondary ||
         playerBuiltDiskCache != diskCacheEnabled ||
-        playerBuiltBufferFactor != bufferFactor
+        playerBuiltBufferFactor != bufferFactor ||
+        playerBuiltDolbyVision != dolbyVisionPolicy
 
     if (needRebuild) {
       rebuildPlayer(live, effective, nextDrmKey)
@@ -1256,6 +1266,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             initializedTimestampMs: Long,
             initializationDurationMs: Long,
           ) {
+            lastVideoDecoder = decoderName
             Log.i(
               TAG,
               "videoDecoder=$decoderName decodeMode=${playerBuiltDecode ?: effectiveDecodeMode()} initMs=$initializationDurationMs",
@@ -1288,6 +1299,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     playerBuiltSecondary = secondarySubtitleMode != "off"
     playerBuiltDiskCache = diskCacheEnabled
     playerBuiltBufferFactor = bufferFactor
+    playerBuiltDolbyVision = dolbyVisionPolicy
     preloadUpstream = smbAware
     preloadRenderers = renderers
     bindPlayerSurface()
@@ -1785,11 +1797,41 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return null
   }
 
-  /** HDR、10bit、杜比视界留在 Surface 直出，不进 SDR 着色器。 */
-  private fun formatLeavesSurface(format: Format): Boolean {
+  private fun isDolbyVision(format: Format): Boolean {
     if (MimeTypes.VIDEO_DOLBY_VISION == format.sampleMimeType) return true
     val codecs = format.codecs?.lowercase().orEmpty()
-    if (codecs.startsWith("dvh1") || codecs.startsWith("dvhe") || codecs.startsWith("dav1")) return true
+    return codecs.startsWith("dvh1") || codecs.startsWith("dvhe") || codecs.startsWith("dav1")
+  }
+
+  /** 播放信息：实际视频解码器、片源色彩、显示器 HDR 能力。 */
+  private fun videoInfo(): Map<String, String> {
+    val f = player?.videoFormat
+    val info = f?.colorInfo
+    val transfer = when (info?.colorTransfer) {
+      C.COLOR_TRANSFER_ST2084 -> "PQ"
+      C.COLOR_TRANSFER_HLG -> "HLG"
+      null, Format.NO_VALUE -> ""
+      else -> "SDR"
+    }
+    val primaries = when (info?.colorSpace) {
+      C.COLOR_SPACE_BT2020 -> "BT.2020"
+      C.COLOR_SPACE_BT709 -> "BT.709"
+      C.COLOR_SPACE_BT601 -> "BT.601"
+      else -> ""
+    }
+    return mapOf(
+      "decoder" to lastVideoDecoder,
+      "transfer" to transfer,
+      "primaries" to primaries,
+      "dolbyVision" to if (f != null && isDolbyVision(f)) "杜比视界" else "",
+      "display" to (appContext?.let { KotvDisplayHdr.label(it) } ?: ""),
+    )
+  }
+
+  /** HDR、10bit、杜比视界留在 Surface 直出，不进 SDR 着色器。 */
+  private fun formatLeavesSurface(format: Format): Boolean {
+    if (isDolbyVision(format)) return true
+    val codecs = format.codecs?.lowercase().orEmpty()
     if (codecs.startsWith("hvc1.2") || codecs.startsWith("hev1.2")) return true
     val info = format.colorInfo ?: return false
     if (ColorInfo.isTransferHdr(info)) return true
@@ -2218,6 +2260,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     playerBuiltSecondary = null
     playerBuiltDiskCache = null
     playerBuiltBufferFactor = null
+    playerBuiltDolbyVision = null
+    lastVideoDecoder = ""
     try {
       subtitleOverlay?.setLibassEnabled(false)
     } catch (_: Throwable) {

@@ -343,6 +343,28 @@ class KotvApi {
         'qual': qual,
       });
 
+  /// 引擎拉取并解析一个弹幕源（http(s) 地址或引擎本机弹幕文件）→ `{items:[...]}`。
+  Future<Map<String, dynamic>> danmakuLoad(String url) =>
+      _get('/api/v1/danmaku', {'action': 'load', 'url': url});
+
+  /// 按片名/集名调弹幕搜索接口 → `{sources:[{name,url}]}`。
+  Future<Map<String, dynamic>> danmakuSearch({required String name, required String episode}) =>
+      _post('/api/v1/danmaku?action=search', {'name': name, 'episode': episode});
+
+  /// 起播时由引擎决定弹幕源：片源弹幕加自动搜到的 → `{sources:[...], selected}`。
+  Future<Map<String, dynamic>> danmakuAuto({
+    required String site,
+    required String name,
+    required String episode,
+    required List<Map<String, String>> sources,
+  }) =>
+      _post('/api/v1/danmaku?action=auto', {
+        'site': site,
+        'name': name,
+        'episode': episode,
+        'sources': sources,
+      });
+
   Future<Map<String, dynamic>> remotePoll() => _get('/api/v1/remote/poll');
 
   Future<Map<String, dynamic>> setMedia(Map<String, String> state) =>

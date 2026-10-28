@@ -19,9 +19,11 @@ type Api struct {
 	Wallpaper string          `json:"wallpaper"`
 	Logo      string          `json:"logo"`
 	Banner    string          `json:"banner"`
-	URL       string          `json:"-"`
-	Data      string          `json:"-"`
-	Ref       int             `json:"-"`
+	// Danmaku 弹幕搜索接口；可用 {name}/{episode}。用户在设置里填的 danmakuApi 优先。
+	Danmaku string `json:"danmaku"`
+	URL     string `json:"-"`
+	Data    string `json:"-"`
+	Ref     int    `json:"-"`
 }
 
 // Parse 二次解析配置。

@@ -14,7 +14,6 @@ import (
 	"github.com/bobo/KOTV/internal/cast"
 	"github.com/bobo/KOTV/internal/clientsession"
 	"github.com/bobo/KOTV/internal/config"
-	"github.com/bobo/KOTV/internal/danmaku"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/dlna"
 	"github.com/bobo/KOTV/internal/download"
@@ -67,8 +66,6 @@ type App struct {
 	liveLoadMu        sync.Mutex
 	liveLoadCachedKey string
 	liveLoadCached    map[string]any
-
-	DanmakuToast string
 }
 
 var defaultApp *App
@@ -117,13 +114,7 @@ func New() (*App, error) {
 	})
 	defaultApp = a
 
-	a.Server = server.New(func(action server.Action) {
-		switch action.Do {
-		case "danmaku":
-			danmaku.PushLive(action.Text)
-			a.DanmakuToast = danmaku.FormatLive(action.Text)
-		}
-	})
+	a.Server = server.New()
 	a.Server.SetContentAPI(a)
 	download.SetResolver(a)
 	download.Start()
@@ -450,8 +441,6 @@ func (a *App) listenEvents() {
 	}()
 	go func() {
 		for text := range a.Server.Events().SubscribeDanmaku() {
-			danmaku.PushLive(text)
-			a.DanmakuToast = danmaku.FormatLive(text)
 			remote.DefaultQueue.PushLiveDanmaku(text, "")
 		}
 	}()
@@ -475,7 +464,7 @@ func (a *App) listenEvents() {
 				if path == "" {
 					continue
 				}
-				// 弹幕由 Flutter DanmakuLoader 加载渲染；此处只推路径，避免引擎再 Load* 双份 IO。
+				// 前端收到路径后经 /api/v1/danmaku 让引擎读本机文件并解析。
 				remote.DefaultQueue.PushRefresh("danmaku", path, "")
 			}
 		}
@@ -826,14 +815,6 @@ func (a *App) MediaTitle() string {
 	a.mediaMu.RLock()
 	defer a.mediaMu.RUnlock()
 	return a.mediaTitle
-}
-
-func (a *App) LoadDanmaku(url string) {
-	go func() {
-		if err := danmaku.LoadURL(url); err != nil {
-			log.Printf("弹幕加载失败: %v", err)
-		}
-	}()
 }
 
 // PlayURL 统一播放入口。

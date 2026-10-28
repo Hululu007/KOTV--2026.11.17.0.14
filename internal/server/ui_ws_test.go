@@ -11,7 +11,7 @@ import (
 )
 
 func TestUISocketFlushAndReply(t *testing.T) {
-	s := New(nil)
+	s := New()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ui", s.handleUI)
 	ts := httptest.NewServer(mux)
@@ -79,7 +79,7 @@ func TestUISocketFlushAndReply(t *testing.T) {
 }
 
 func TestSrcFrameUsesPyCallScope(t *testing.T) {
-	s := New(nil)
+	s := New()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ui", s.handleUI)
 	ts := httptest.NewServer(mux)
