@@ -12,6 +12,7 @@ import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_store.dart';
 import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
+import '../engine/engine_probe.dart';
 import '../player/kotv_playback.dart';
 import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
@@ -2067,10 +2068,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     final probe = KotvApi(baseUrl: normalized);
     try {
-      final h = await probe.health().timeout(const Duration(seconds: 6));
-      if (h['ok'] != true) {
-        throw Exception('${h['error'] ?? '引擎未就绪'}');
-      }
+      final h = await kotvProbeEngine(normalized);
       // spider/runtime 未就绪也提示，但仍允许尝试登录
       final spiderOk = h['spiderOk'];
       if (spiderOk == false) {

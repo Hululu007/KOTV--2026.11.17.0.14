@@ -6,6 +6,7 @@ import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_store.dart';
 import '../api/kotv_engine_url.dart';
+import '../engine/engine_probe.dart';
 import '../api/kotv_settings_cache.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
@@ -73,8 +74,7 @@ Future<RemoteLoginPrompt> promptRemoteLoginIfNeeded(
   final probe = KotvApi(baseUrl: normalized);
   if (!assumeReachable) {
     try {
-      final h = await probe.health().timeout(const Duration(seconds: 6));
-      if (h['ok'] != true) return RemoteLoginPrompt.skipped;
+      await kotvProbeEngine(normalized);
     } catch (_) {
       return RemoteLoginPrompt.skipped;
     }
@@ -202,12 +202,8 @@ Future<String?> kotvPromptEngineAddress(
             return;
           }
           setLocal(() => busy = true);
-          final probe = KotvApi(baseUrl: stored);
           try {
-            final h = await probe.health().timeout(const Duration(seconds: 6));
-            if (h['ok'] != true) {
-              throw Exception('${h['error'] ?? '引擎未就绪'}');
-            }
+            await kotvProbeEngine(stored);
           } catch (e) {
             if (ctx.mounted) {
               setLocal(() => busy = false);
@@ -275,9 +271,8 @@ Future<void> kotvRetryEngineConnect(BuildContext context, WidgetRef ref) async {
   var reachable = false;
   Object? failure;
   try {
-    final h = await KotvApi(baseUrl: saved).health().timeout(const Duration(seconds: 6));
-    reachable = h['ok'] == true;
-    if (!reachable) failure = h['error'] ?? '引擎未就绪';
+    await kotvProbeEngine(saved);
+    reachable = true;
   } catch (e) {
     failure = e;
   }

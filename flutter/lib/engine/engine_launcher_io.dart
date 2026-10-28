@@ -63,36 +63,23 @@ class EngineLauncher {
   Future<bool> ensureReady({Duration timeout = const Duration(seconds: 30)}) async {
     // 尽早固化 clientId，后续 API / 界面套接字带同一身份。
     await kotvClientId();
-    final remote = !kotvIsLocalEngineBaseUrl(baseUrl);
-    // 远端引擎：只探测配置的地址，绝不要拉起/回退本机 :9978。
-    if (!remote) {
-      await _startOnce();
-    }
-    if (!remote && _noBundledEngine && !Platform.isAndroid) {
-      return false;
-    }
+    // 远端引擎：只探一次配置的地址，连不上或不是 KOTV 引擎直接失败；不拉起/回退本机 :9978。
+    if (!kotvIsLocalEngineBaseUrl(baseUrl)) return _ping(baseUrl);
+    await _startOnce();
+    if (_noBundledEngine && !Platform.isAndroid) return false;
 
+    // 引擎先开端口再加载点播源，端口一通就算连上；点播源加载中/失败由首页等待和提示。
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       final h = await _health(baseUrl);
-      if (h != null && h['ok'] == true && (remote || _acceptLocalHealth())) {
-        if (h['ready'] == true) return true;
-        // 带 loading 的引擎：连上即可，点播源加载中/失败由首页等待和提示。
-        if (h.containsKey('loading')) return true;
-        final source = '${h['source'] ?? ''}'.trim();
-        final err = '${h['error'] ?? ''}';
-        if (source.isEmpty && _looksLikeNoSource(err)) {
-          return true;
-        }
-      } else if (!remote && _owned && _proc != null && !await _procAlive(_proc!)) {
-        _owned = false;
-        _proc = null;
-        await _startOnce();
-      }
+      // 端口有响应但不是本引擎（被别的服务占用等）：直接失败。
+      if (h != null) return kotvIsEngineHealth(h) && _acceptLocalHealth();
+      // 只在引擎还在启动时等端口：安卓服务模式，或自己拉起的进程仍存活。
+      final starting = (Platform.isAndroid && !_owned) ||
+          (_owned && _proc != null && await _procAlive(_proc!));
+      if (!starting) return false;
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
-    if (remote || Platform.isAndroid) return _ping(baseUrl);
-    if (_owned) return _ping(baseUrl);
     return false;
   }
 
@@ -206,11 +193,6 @@ class EngineLauncher {
   Future<Map<String, dynamic>?> _health(String base) => kotvEngineHealth(base);
 
   Future<bool> _ping(String base) => kotvEnginePing(base);
-
-  static bool _looksLikeNoSource(String err) {
-    if (err.trim().isEmpty) return true; // 源字段空且无错误：视为未配源
-    return err.contains('未配置') || err.contains('点播源') || err.contains('请输入');
-  }
 
   Future<bool> _procAlive(Process proc) async {
     // Android 无可靠 kill -0；统一用 exitCode 短超时探测。
