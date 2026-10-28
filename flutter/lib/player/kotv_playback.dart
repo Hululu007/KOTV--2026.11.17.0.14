@@ -36,6 +36,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   int get height;
   String get engineLabel;
 
+  /// 当前实际在用的视频解码方式（播放信息里展示）；读不到时为 null。
+  Future<String?> activeDecoderLabel() async => null;
+
   Stream<Duration> get positionStream;
 
   /// 缓冲位置变化（可选；UI 也可靠 [ChangeNotifier]）。

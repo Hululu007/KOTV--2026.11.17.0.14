@@ -627,6 +627,14 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   bool get supportsDiscNav => true;
 
+  @override
+  Future<String?> activeDecoderLabel() async {
+    final v = '${await _mpvProp('hwdec-current') ?? ''}'.trim();
+    if (v.isEmpty) return null;
+    if (v == 'no') return '软解';
+    return v.endsWith('-copy') ? '硬解后拷贝（$v）' : '硬解直出（$v）';
+  }
+
   Future<dynamic> _mpvProp(String name) async {
     try {
       final platform = player.platform;

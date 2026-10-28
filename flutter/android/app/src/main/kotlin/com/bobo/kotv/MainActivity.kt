@@ -20,6 +20,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Rational
+import android.view.WindowManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -56,6 +57,17 @@ class MainActivity : FlutterActivity() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
       window.statusBarColor = android.graphics.Color.TRANSPARENT
       window.navigationBarColor = android.graphics.Color.TRANSPARENT
+    }
+    // 刘海屏：默认模式横屏时不让画进刘海那条边，全屏播放那一侧被系统留黑，
+    // 「适应屏幕」左右黑边不等宽。允许画进刘海区；非全屏页由 SafeArea 按刘海内边距避让。
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+      window.attributes = window.attributes.apply {
+        layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+          WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        } else {
+          WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+      }
     }
     // 潇洒 jar：小米/夜间 getButtonTextColor=白，而 Theme.Light 的 multiChoice 列表偏浅 → 白字白底。
     // 只改 AlertDialog 主题，不整站改成常驻深色。

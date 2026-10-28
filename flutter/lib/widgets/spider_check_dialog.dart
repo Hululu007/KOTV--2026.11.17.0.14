@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
+import '../theme/kotv_theme.dart';
 import 'chrome.dart';
 import 'dialogs.dart';
 
@@ -60,24 +61,30 @@ Future<void> showSpiderCheckDialog(BuildContext context, WidgetRef ref) async {
     if (open) refresh?.call(() {});
   }
 
+  Future<void> checkOne(_SpiderRow row) async {
+    update(() {
+      row.state = _CheckState.checking;
+      row.message = '';
+    });
+    try {
+      final r = await api.tools('checkSpider', {'key': row.key});
+      update(() {
+        row.state = r['pass'] == true ? _CheckState.pass : _CheckState.fail;
+        row.message = '${r['message'] ?? ''}'.trim();
+      });
+    } catch (e) {
+      update(() {
+        row.state = _CheckState.error;
+        row.message = '$e';
+      });
+    }
+  }
+
   Future<void> checkAll() async {
     var next = 0;
     Future<void> worker() async {
       while (open && next < rows.length) {
-        final row = rows[next++];
-        update(() => row.state = _CheckState.checking);
-        try {
-          final r = await api.tools('checkSpider', {'key': row.key});
-          update(() {
-            row.state = r['pass'] == true ? _CheckState.pass : _CheckState.fail;
-            row.message = '${r['message'] ?? ''}'.trim();
-          });
-        } catch (e) {
-          update(() {
-            row.state = _CheckState.error;
-            row.message = '$e';
-          });
-        }
+        await checkOne(rows[next++]);
       }
     }
 
@@ -173,6 +180,9 @@ Future<void> showSpiderCheckDialog(BuildContext context, WidgetRef ref) async {
                             pillH: pillH,
                             onToggle: () =>
                                 setDisabled([rows[i]], !rows[i].disabled),
+                            onRetry: checkable
+                                ? () => unawaited(checkOne(rows[i]))
+                                : null,
                           ),
                         ),
                       ),
@@ -219,12 +229,16 @@ class _SpiderRowView extends StatelessWidget {
     required this.compact,
     required this.pillH,
     required this.onToggle,
+    required this.onRetry,
   });
 
   final _SpiderRow row;
   final bool compact;
   final double pillH;
   final VoidCallback onToggle;
+
+  /// 失败/出错时重试本条；当前设备不能检测时为空。
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -246,36 +260,54 @@ class _SpiderRowView extends StatelessWidget {
         Icon(Icons.error_outline, size: iconSz, color: Colors.orange),
     };
     final nameColor = row.disabled ? pal.muted : pal.fg;
+    final failed =
+        row.state == _CheckState.fail || row.state == _CheckState.error;
+    final retry = failed ? onRetry : null;
     return Row(
       children: [
-        status,
-        SizedBox(width: compact ? 8 : 12),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                row.disabled ? '${row.name}（已禁用）' : row.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: nameColor,
-                  fontSize: compact ? 14 : 16,
-                  fontWeight: FontWeight.w600,
+          child: TvFocus(
+            // 失败的条目点整行即重试。
+            onPressed: retry,
+            borderRadius: 8,
+            child: Row(
+              children: [
+                status,
+                SizedBox(width: compact ? 8 : 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        row.disabled ? '${row.name}（已禁用）' : row.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: nameColor,
+                          fontSize: compact ? 14 : 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (failed && row.message.isNotEmpty)
+                        Text(
+                          row.message,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: pal.muted, fontSize: compact ? 11 : 12),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-              if ((row.state == _CheckState.fail ||
-                      row.state == _CheckState.error) &&
-                  row.message.isNotEmpty)
-                Text(
-                  row.message,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style:
-                      TextStyle(color: pal.muted, fontSize: compact ? 11 : 12),
-                ),
-            ],
+                if (retry != null)
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 8),
+                    child:
+                        Icon(Icons.refresh, size: iconSz, color: pal.primary),
+                  ),
+              ],
+            ),
           ),
         ),
         SizedBox(width: compact ? 8 : 12),

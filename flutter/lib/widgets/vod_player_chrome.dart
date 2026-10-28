@@ -2132,7 +2132,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           label: '播放信息',
                           onTap: () {
                             Navigator.pop(ctx);
-                            _showPlayInfo();
+                            unawaited(_showPlayInfo());
                           },
                         ),
                         linkRow(
@@ -2199,7 +2199,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     });
   }
 
-  void _showPlayInfo() {
+  Future<void> _showPlayInfo() async {
+    final actualDecoder = await widget.player.activeDecoderLabel();
+    if (!mounted) return;
     final w = widget.player.width;
     final h = widget.player.height;
     final pos = widget.player.position;
@@ -2226,6 +2228,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               '倍速：x${widget.player.rate.toStringAsFixed(2)}\n'
               '比例：${_aspects[_aspectIdx].$2}\n'
               '解码：${_decodeModes[_decodeIdx].$2}\n'
+              '${actualDecoder == null ? '' : '实际解码：$actualDecoder\n'}'
               '播放器：${widget.player.engineLabel}',
               style: TextStyle(color: Colors.white.withOpacity(0.75), height: 1.55, fontSize: 15),
             ),
