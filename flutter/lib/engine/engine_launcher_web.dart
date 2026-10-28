@@ -15,6 +15,9 @@ class EngineLauncher {
   /// 最近一次连不上引擎的原因，显示在未连接页。
   String lastError = '';
 
+  /// Web 只连提供页面的那台后端，不核对身份。
+  bool get engineChanged => false;
+
   KotvApi client() {
     _api = kotvEngineClient(_api, baseUrl);
     return _api!;

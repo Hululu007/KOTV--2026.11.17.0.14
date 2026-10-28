@@ -9,9 +9,9 @@ import 'package:path_provider/path_provider.dart';
 
 import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_store.dart';
+import '../api/kotv_api.dart';
 import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
-import '../engine/engine_probe.dart';
 import '../player/kotv_playback.dart';
 import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
@@ -2048,7 +2048,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!mounted) return;
     setState(() => _status = '正在探测 $normalized…');
     try {
-      final h = await kotvProbeEngine(normalized);
+      final h = await KotvApi(baseUrl: normalized).verifyEngine(checkIdentity: false);
       if (h['spiderOk'] == false && mounted) {
         showAppNews(
             context, '引擎可达，但爬虫未就绪\n$normalized\n${h['spiderError'] ?? ''}');

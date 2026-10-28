@@ -4,18 +4,23 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../player/kotv_platform.dart';
+import '../util/kotv_io.dart' show kotvHostArch;
 import 'kotv_auth_token.dart';
 import 'kotv_client_id.dart';
 import 'kotv_client_store.dart';
 import 'kotv_engine_url.dart';
 import 'kotv_seal.dart';
 
-/// 每个请求都带的客户端信息：平台、版本、协议号。远端后端按协议号决定是否服务。
-Map<String, String> kotvClientHeaders() => {
-      'X-Kotv-Client-Platform': kotvHostPlatform(),
-      'X-Kotv-Client-Version': kotvClientVersion,
-      'X-Kotv-Protocol': '$kotvProtocolVersion',
-    };
+/// 每个请求都带的客户端信息：平台、架构、版本、协议号。远端后端按协议号决定是否服务。
+Map<String, String> kotvClientHeaders() {
+  final arch = kotvHostArch();
+  return {
+    'X-Kotv-Client-Platform': kotvHostPlatform(),
+    if (arch.isNotEmpty) 'X-Kotv-Client-Arch': arch,
+    'X-Kotv-Client-Version': kotvClientVersion,
+    'X-Kotv-Protocol': '$kotvProtocolVersion',
+  };
+}
 
 /// 健康检查响应的问题：不是 KOTV 后端，或协议号与本机不同。没问题返回空串。
 String kotvEngineHealthProblem(Map<String, dynamic>? h) {
@@ -25,6 +30,19 @@ String kotvEngineHealthProblem(Map<String, dynamic>? h) {
     return '后端版本${v.isEmpty ? '过旧' : ' $v '}与本机 $kotvClientVersion 不兼容，请升级到相同版本';
   }
   return '';
+}
+
+/// 后端简介「平台 架构 · 版本」，如 android arm64 · 0.2.2。
+String kotvEngineLabel(Map<String, dynamic> h) {
+  final host = ['${h['platform'] ?? ''}', '${h['arch'] ?? ''}'].where((e) => e.isNotEmpty).join(' ');
+  final version = '${h['version'] ?? ''}';
+  return [host, version].where((e) => e.isNotEmpty).join(' · ');
+}
+
+/// 远端后端的身份与登录成功时记住的不一致。
+class KotvEngineChangedException extends KotvApiException {
+  KotvEngineChangedException()
+      : super('后端身份与上次登录时不同，可能不是同一台主机。\n确认地址无误请在「连接后端」重新保存');
 }
 
 class KotvApi {
@@ -65,9 +83,10 @@ class KotvApi {
   Uri _u(String path, [Map<String, String>? query]) =>
       Uri.parse('$baseUrl$path').replace(queryParameters: query);
 
-  Future<Map<String, String>> _headers([Map<String, String>? extra]) async {
+  /// [withToken] 为 false 时不带登录令牌：确认后端身份前的探测请求不能把令牌交出去。
+  Future<Map<String, String>> _headers([Map<String, String>? extra, bool withToken = true]) async {
     // 有 token 就带上（用户管理/远端租户）；本机内容会话服务端仍只用 clientId。
-    final token = await kotvAuthToken();
+    final token = withToken ? await kotvAuthToken() : '';
     final id = await ensureClientId();
     final engineBase = kotvNormalizeEngineBaseUrl(baseUrl);
     return {
@@ -79,9 +98,13 @@ class KotvApi {
     };
   }
 
-  Future<Map<String, dynamic>> _get(String path, [Map<String, String>? query]) async {
+  Future<Map<String, dynamic>> _get(
+    String path, [
+    Map<String, String>? query,
+    bool withToken = true,
+  ]) async {
     final res = await http
-        .get(_u(path, query), headers: await _headers())
+        .get(_u(path, query), headers: await _headers(null, withToken))
         .timeout(const Duration(seconds: 120));
     return _decode(res);
   }
@@ -125,7 +148,7 @@ class KotvApi {
     return map;
   }
 
-  Future<Map<String, dynamic>> health() => _get('/api/v1/health');
+  Future<Map<String, dynamic>> health() => _get('/api/v1/health', null, false);
 
   /// 引擎本机信息：`name` / `ip` / `ipv4` / `ipv6` / `publicIp` / `uuid`（见 `GET /device`）。
   Future<Map<String, dynamic>> getDevice() async {
@@ -141,23 +164,29 @@ class KotvApi {
     throw KotvApiException(text.trim().isEmpty ? 'HTTP ${res.statusCode}' : text.trim());
   }
 
-  Future<Map<String, dynamic>> authStatus() => _get('/api/v1/auth/status');
+  Future<Map<String, dynamic>> authStatus() => _get('/api/v1/auth/status', null, false);
 
   bool get _remoteEngine => !kIsWeb && !kotvIsLocalEngineBaseUrl(baseUrl);
 
-  /// 后端身份公钥。远端后端须与登录成功时记住的一致，避免把密码交给别的服务。
-  Future<String> engineIdentity() async {
-    final h = await health();
+  /// 校验后端并返回健康检查响应：连不上、不是 KOTV 后端、版本不兼容时抛错说明原因。
+  /// [checkIdentity] 时远端后端还须与登录成功时记住的身份一致，否则抛 [KotvEngineChangedException]；
+  /// 用户刚填写的地址不比对。
+  Future<Map<String, dynamic>> verifyEngine({bool checkIdentity = true}) async {
+    final Map<String, dynamic> h;
+    try {
+      h = await health().timeout(const Duration(seconds: 6));
+    } on KotvApiException {
+      throw KotvApiException('该地址不是 KOTV 后端');
+    } catch (_) {
+      throw KotvApiException('无法连接 $baseUrl');
+    }
     final problem = kotvEngineHealthProblem(h);
     if (problem.isNotEmpty) throw KotvApiException(problem);
-    final identity = '${h['identity'] ?? ''}';
-    if (_remoteEngine) {
+    if (checkIdentity && _remoteEngine) {
       final known = await KotvClientStore.engineKey(baseUrl);
-      if (known.isNotEmpty && known != identity) {
-        throw KotvApiException('后端身份与上次登录时不同，可能不是同一台主机。\n确认地址无误请在「连接后端」重新保存');
-      }
+      if (known.isNotEmpty && known != '${h['identity'] ?? ''}') throw KotvEngineChangedException();
     }
-    return identity;
+    return h;
   }
 
   /// 记住远端后端身份（登录成功或已登录时调用）。
@@ -169,7 +198,7 @@ class KotvApi {
 
   /// 带密码的请求：用后端身份公钥加密，回复也是加密的。返回回复和所用的身份公钥。
   Future<(Map<String, dynamic>, String)> _postSealed(String path, Map<String, dynamic> body) async {
-    final identity = await engineIdentity();
+    final identity = '${(await verifyEngine())['identity'] ?? ''}';
     final (request, seal) = await KotvSeal.seal(identity, path, body);
     return (await seal.open(await _post(path, request)), identity);
   }

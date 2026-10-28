@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -295,6 +296,13 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tok, user, err := auth.Login(body.Username, body.Password)
+	if !isLoopbackRequest(r) {
+		result := "成功"
+		if err != nil {
+			result = "失败"
+		}
+		log.Printf("远端登录%s: 用户 %s，来自 %s（%s）", result, strings.TrimSpace(body.Username), r.RemoteAddr, clientLabel(r))
+	}
 	if err != nil {
 		writeAPIError(w, http.StatusUnauthorized, err.Error())
 		return
@@ -317,6 +325,14 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeSealed(w, reply, map[string]any{"ok": true, "user": user.Public()})
+}
+
+// clientLabel 请求方客户端「平台 架构 版本」，记日志用。
+func clientLabel(r *http.Request) string {
+	h := r.Header
+	return strings.Join(strings.Fields(strings.Join([]string{
+		h.Get("X-Kotv-Client-Platform"), h.Get("X-Kotv-Client-Arch"), h.Get("X-Kotv-Client-Version"),
+	}, " ")), " ")
 }
 
 type loginForm struct {

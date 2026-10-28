@@ -30,6 +30,9 @@ class EngineLauncher {
   /// 最近一次连不上引擎的原因，显示在未连接页。
   String lastError = '';
 
+  /// 最近一次检查发现远端后端身份变了（不是同一台后端）。
+  bool engineChanged = false;
+
   KotvApi client() {
     _api = kotvEngineClient(_api, baseUrl);
     return _api!;
@@ -56,13 +59,16 @@ class EngineLauncher {
     await kotvClientId();
     // 远端引擎：只探一次配置的地址，连不上、不是 KOTV 后端或版本不兼容直接失败；
     // 不拉起本机引擎，也不改地址，由用户自己更换。
+    // 每次都核对后端身份，换了后端就不再往它发登录令牌。
     if (!kotvIsLocalEngineBaseUrl(baseUrl)) {
       try {
-        await kotvProbeEngine(baseUrl);
+        await client().verifyEngine();
         lastError = '';
+        engineChanged = false;
         return true;
       } catch (e) {
         lastError = '$e';
+        engineChanged = e is KotvEngineChangedException;
         return false;
       }
     }
@@ -117,15 +123,11 @@ class EngineLauncher {
     return ensureReady(timeout: const Duration(seconds: 20));
   }
 
-  /// 从后台回前台：只探活。健康则立即返回，不 stop/restart spider。
+  /// 从后台回前台：只探活，远端同时核对身份。健康则立即返回，不 stop/restart spider。
   Future<bool> onAppResumed() async {
     if (_shuttingDown) return false;
-    if (kIsWeb || Platform.isIOS) {
-      return _ping(baseUrl);
-    }
-    if (!kotvIsLocalEngineBaseUrl(baseUrl)) {
-      return _ping(baseUrl);
-    }
+    if (!kotvIsLocalEngineBaseUrl(baseUrl)) return ensureReady();
+    if (Platform.isIOS) return false;
     final now = DateTime.now();
     if (now.difference(_lastResumeCheck) < const Duration(seconds: 3)) {
       if (Platform.isAndroid || (_owned && _proc != null && await _procAlive(_proc!))) {

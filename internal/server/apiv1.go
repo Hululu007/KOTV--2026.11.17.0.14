@@ -151,7 +151,7 @@ func clientIDFromRequest(r *http.Request) string {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Kotv-Client-Id, X-Kotv-Client-Platform, X-Kotv-Client-Version, X-Kotv-Protocol, X-Kotv-Engine-Base")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Kotv-Client-Id, X-Kotv-Client-Platform, X-Kotv-Client-Arch, X-Kotv-Client-Version, X-Kotv-Protocol, X-Kotv-Engine-Base")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)

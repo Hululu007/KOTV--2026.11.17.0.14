@@ -2,10 +2,10 @@ import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_store.dart';
 import '../api/kotv_engine_url.dart';
-import '../engine/engine_probe.dart';
 import '../api/kotv_settings_cache.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
@@ -85,15 +85,13 @@ Future<void> kotvUseLocalEngine(WidgetRef ref) async {
 }
 
 /// 保存用户填写的后端地址并重新检查，远端会进入登录。
-/// 用户亲自确认了这个地址，所以忘掉它记住的后端身份；换了地址时旧登录令牌不发给新地址。
+/// 用户亲自确认了这个地址：忘掉它记住的后端身份，并清掉旧登录令牌（可能属于别的后端），
+/// 重新登录后再记住新的。
 Future<void> kotvFinishEngineAddress(WidgetRef ref, String url) async {
-  final launcher = ref.read(engineLauncherProvider);
-  if (kotvEffectiveEngineBaseUrl(url) != launcher.baseUrl) {
-    await kotvClearAuthToken();
-  }
+  await kotvClearAuthToken();
   await KotvClientStore.setEngineBaseUrl(url);
   await KotvClientStore.forgetEngineKey(url);
-  launcher.applyBaseUrl(url);
+  ref.read(engineLauncherProvider).applyBaseUrl(url);
   KotvSettingsCache.clear();
   await kotvClearImageMemory(ref: ref);
   ref.invalidate(engineStatusProvider);
@@ -128,7 +126,7 @@ Future<String?> kotvPromptEngineAddress(
           }
           setLocal(() => busy = true);
           try {
-            await kotvProbeEngine(stored);
+            await KotvApi(baseUrl: stored).verifyEngine(checkIdentity: false);
           } catch (e) {
             if (ctx.mounted) {
               setLocal(() => busy = false);

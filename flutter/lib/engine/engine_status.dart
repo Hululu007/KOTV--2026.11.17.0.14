@@ -18,12 +18,15 @@ enum KotvEngineState {
 
 /// 进入应用前的引擎状态。
 class KotvEngineStatus {
-  const KotvEngineStatus(this.state, {this.error = '', this.allowRegister = false});
+  const KotvEngineStatus(this.state, {this.error = '', this.engine = '', this.allowRegister = false});
 
   final KotvEngineState state;
 
   /// [KotvEngineState.offline] 的原因。
   final String error;
+
+  /// 远端后端简介（平台 架构 · 版本），登录页显示。
+  final String engine;
 
   /// 远端是否开放注册（登录框显示「注册」）。
   final bool allowRegister;
@@ -35,7 +38,7 @@ class KotvEngineStatus {
 bool kotvEngineNeedsSignIn(String baseUrl) => kIsWeb || !kotvIsLocalEngineBaseUrl(baseUrl);
 
 /// 检查当前引擎：本机连上即可；远端须是同协议、身份未变、开放了远端访问的 KOTV 后端，
-/// 且记住的登录态仍有效。
+/// 且记住的登录态仍有效。核对身份之前的请求都不带登录令牌。
 Future<KotvEngineStatus> kotvCheckEngine(EngineLauncher launcher) async {
   if (!await launcher.recoverIfNeeded()) {
     return KotvEngineStatus(KotvEngineState.offline, error: launcher.lastError);
@@ -45,7 +48,7 @@ Future<KotvEngineStatus> kotvCheckEngine(EngineLauncher launcher) async {
   }
   final api = launcher.client();
   try {
-    final identity = await api.engineIdentity();
+    final h = await api.verifyEngine();
     final st = await api.authStatus();
     if (st['remoteAccess'] != true) {
       return const KotvEngineStatus(
@@ -56,13 +59,17 @@ Future<KotvEngineStatus> kotvCheckEngine(EngineLauncher launcher) async {
     if ((await kotvAuthToken()).isNotEmpty) {
       try {
         await api.authMe();
-        await api.rememberEngineIdentity(identity);
+        await api.rememberEngineIdentity('${h['identity'] ?? ''}');
         return const KotvEngineStatus(KotvEngineState.ready);
       } on KotvApiException {
         await kotvClearAuthToken();
       }
     }
-    return KotvEngineStatus(KotvEngineState.signIn, allowRegister: st['allowRegister'] == true);
+    return KotvEngineStatus(
+      KotvEngineState.signIn,
+      engine: kotvEngineLabel(h),
+      allowRegister: st['allowRegister'] == true,
+    );
   } catch (e) {
     return KotvEngineStatus(KotvEngineState.offline, error: '$e');
   }

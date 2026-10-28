@@ -56,6 +56,7 @@ bool _kotvIsSoftUiException(Object error) {
       (msg.contains('failed assertion') && msg.contains('dependents'));
 }
 
+/// 本机引擎按系统语言切繁体。远端后端的语言由主机决定，且启动时还没核对远端身份，不发请求。
 Future<void> _kotvSyncLanguageSetting() async {
   if (kIsWeb) return;
   try {
@@ -67,6 +68,7 @@ Future<void> _kotvSyncLanguageSetting() async {
     final lang = traditional ? 'zh-Hant' : '';
     if (lang.isEmpty) return;
     final base = await KotvClientStore.effectiveEngineBaseUrl();
+    if (!kotvIsLocalEngineBaseUrl(base)) return;
     await KotvApi(baseUrl: base).setSetting('language', lang).timeout(const Duration(seconds: 3));
   } catch (_) {}
 }
@@ -269,7 +271,13 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
     // 后台回来：Android 常把子进程引擎冻死/杀掉，不恢复则 /api/v1/play 会 Connection closed。
-    unawaited(ref.read(engineLauncherProvider).onAppResumed());
+    // 远端后端换了（身份不符）就回到未连接页，不再往它发登录令牌。
+    unawaited(() async {
+      final launcher = ref.read(engineLauncherProvider);
+      if (!await launcher.onAppResumed() && launcher.engineChanged) {
+        ref.invalidate(engineStatusProvider);
+      }
+    }());
   }
 
   Timer? _saveBoundsTimer;
@@ -375,7 +383,7 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
       home: status.when(
         data: (st) => switch (st.state) {
           KotvEngineState.ready => const AppShell(),
-          KotvEngineState.signIn => _SignInPage(key: ObjectKey(st), allowRegister: st.allowRegister),
+          KotvEngineState.signIn => _SignInPage(key: ObjectKey(st), status: st),
           KotvEngineState.offline => _EngineOfflinePage(error: st.error),
         },
         loading: () => const _EngineWaitPage(),
@@ -401,9 +409,9 @@ class _EngineWaitPage extends StatelessWidget {
 
 /// 远端（或 Web）未登录：先弹登录框。登录前不进入任何页面；取消后留在本页，可重新登录或换地址。
 class _SignInPage extends ConsumerStatefulWidget {
-  const _SignInPage({super.key, required this.allowRegister});
+  const _SignInPage({super.key, required this.status});
 
-  final bool allowRegister;
+  final KotvEngineStatus status;
 
   @override
   ConsumerState<_SignInPage> createState() => _SignInPageState();
@@ -424,7 +432,7 @@ class _SignInPageState extends ConsumerState<_SignInPage> {
     final ok = await kotvShowSignIn(
       context,
       ref,
-      allowRegister: widget.allowRegister,
+      allowRegister: widget.status.allowRegister,
       allowCancel: !kIsWeb,
     );
     if (!ok && mounted) setState(() => _prompting = false);
@@ -433,8 +441,9 @@ class _SignInPageState extends ConsumerState<_SignInPage> {
   @override
   Widget build(BuildContext context) {
     if (_prompting) return const _EngineWaitPage();
+    final engine = widget.status.engine;
     return _EngineOfflinePage(
-      error: '需要登录 ${ref.read(engineLauncherProvider).baseUrl}',
+      error: '需要登录 ${ref.read(engineLauncherProvider).baseUrl}${engine.isEmpty ? '' : '\n$engine'}',
       onSignIn: _signIn,
     );
   }

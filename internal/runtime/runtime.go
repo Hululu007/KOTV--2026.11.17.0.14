@@ -14,29 +14,28 @@ import (
 	"github.com/bobo/KOTV/internal/localproxy"
 )
 
-// 平台标识（用于下载键、提示信息等）。
-func Platform() string {
-	goos, arch := runtime.GOOS, runtime.GOARCH
-	switch goos {
-	case "darwin":
-		if arch == "arm64" {
-			return "macos-arm64"
-		}
-		return "macos-x64"
-	case "windows":
-		if arch == "arm64" {
-			return "windows-arm64"
-		}
-		return "windows-x64"
-	case "linux":
-		if arch == "arm64" {
-			return "linux-arm64"
-		}
-		return "linux-x64"
+// OS 本机平台：macos / windows / linux / android。前端用同一套写法（另有 ios、web）。
+func OS() string {
+	if runtime.GOOS == "darwin" {
+		return "macos"
+	}
+	return runtime.GOOS
+}
+
+// Arch 本机架构：x64 / arm64 / arm / x86 / riscv64。前端用同一套写法。
+func Arch() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x64"
+	case "386":
+		return "x86"
 	default:
-		return goos + "-" + arch
+		return runtime.GOARCH
 	}
 }
+
+// Platform「平台-架构」，如 macos-x64；打包目录名与日志用。
+func Platform() string { return OS() + "-" + Arch() }
 
 var (
 	mu       sync.RWMutex
@@ -387,7 +386,8 @@ func Status() map[string]string {
 			st = v
 		}
 		return map[string]string{
-			"platform": Platform(),
+			"platform": OS(),
+			"arch":     Arch(),
 			"java":     st,
 			"python":   st,
 			"quickjs":  "embedded(CGO)",
@@ -395,7 +395,8 @@ func Status() map[string]string {
 		}
 	}
 	return map[string]string{
-		"platform": Platform(),
+		"platform": OS(),
+		"arch":     Arch(),
 		"java":     orMissing(Java()),
 		"python":   orMissing(Python()),
 		"quickjs":  "embedded(CGO)",

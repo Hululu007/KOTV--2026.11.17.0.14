@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 /// 桌面客户端：可展示引擎侧捆绑运行时与本机外部 MPV。
 const kotvRuntimeDisplayKeysDesktop = <String>[
   'platform',
+  'arch',
   'java',
   'python',
   'quickjs',
@@ -17,6 +18,7 @@ const kotvRuntimeDisplayKeysDesktop = <String>[
 /// 安卓客户端：只展示引擎/bridge；不展示桌面播放器库。
 const kotvRuntimeDisplayKeysAndroid = <String>[
   'platform',
+  'arch',
   'java',
   'python',
   'quickjs',
@@ -26,6 +28,7 @@ const kotvRuntimeDisplayKeysAndroid = <String>[
 /// Web 客户端：浏览器内不能加载 libmpv，列表也不展示播放器库。
 const kotvRuntimeDisplayKeysWeb = <String>[
   'platform',
+  'arch',
   'java',
   'python',
   'quickjs',

@@ -101,3 +101,6 @@ abstract class HttpClientResponse {
 }
 
 Never exit(int code) => throw UnsupportedError('exit unsupported on web');
+
+/// 浏览器里拿不到可靠的 CPU 架构。
+String kotvHostArch() => '';
