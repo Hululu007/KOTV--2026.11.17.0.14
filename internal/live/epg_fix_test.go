@@ -46,7 +46,7 @@ func TestLoadChannelEPG_RelativeEpgToken(t *testing.T) {
 	// LoadChannelEPG 会对 example.invalid 发请求并失败，返回空；此处断言不会因无 `{` 在 ch.EPG 上提前 return。
 	// 用可观测的旁路：channelLocation + 模板选择逻辑等价于先走到 HTTP。
 	out := LoadChannelEPG(ch)
-	if out != nil && len(out) > 0 {
+	if len(out) > 0 {
 		t.Fatalf("expected empty (unreachable host), got %d", len(out))
 	}
 	// 若错误地把 cctv1 当模板（无 {），会立刻 nil 且零请求；这里至少确认函数可调用。

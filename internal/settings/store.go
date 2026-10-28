@@ -218,7 +218,7 @@ func IsDownloadHostID(id string) bool {
 	return isDownloadHost(Type(strings.TrimSpace(id)))
 }
 
-// resolveOwner 本机/宿主机键 → ''；远端用户偏好 → userId。
+// resolveOwner 本机/宿主机键 → 空 owner；远端用户偏好 → userId。
 func resolveOwner(t Type) string {
 	if isHostOnly(t) {
 		return ""
@@ -413,7 +413,7 @@ func ResolvePlayerVod() string {
 	return defaultVodPlayerValue()
 }
 
-// Load 从数据库加载全局设置（owner=''），并补齐缺省项。
+// Load 从数据库加载全局设置（owner 为空），并补齐缺省项。
 func Load() error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -576,7 +576,7 @@ func dropSettingLocked(id string) {
 	data.List = out
 }
 
-// Save 将内存中的全局设置刷入数据库（owner=''）。单键 Set 已即时落库。
+// Save 将内存中的全局设置刷入数据库（owner 为空）。单键 Set 已即时落库。
 func Save() error {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -827,7 +827,7 @@ func ListEntriesForOwner(owner string, includeHostOnly bool) []Entry {
 	return out
 }
 
-// ReplaceEntries 替换内存设置列表（保留 cache）；并覆盖写入 owner=''。
+// ReplaceEntries 替换内存设置列表（保留 cache）；并覆盖写入 owner 为空的全局行。
 func ReplaceEntries(entries []Entry) error {
 	return ReplaceEntriesForOwner("", entries)
 }

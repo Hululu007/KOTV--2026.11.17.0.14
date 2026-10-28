@@ -16,7 +16,7 @@ import (
 )
 
 type androidPlaylistResp struct {
-	OK       bool `json:"ok"`
+	OK       bool   `json:"ok"`
 	Error    string `json:"error"`
 	Episodes []struct {
 		Name string `json:"name"`

@@ -71,7 +71,7 @@ func (db *DB) ListSettings(owner string) (map[string]string, error) {
 	return out, rows.Err()
 }
 
-// DeleteSettingsOwner 删除某 owner 全部设置行（含 owner=''，供备份覆盖写入）。
+// DeleteSettingsOwner 删除某 owner 全部设置行（含 owner 为空的本机行，供备份覆盖写入）。
 func (db *DB) DeleteSettingsOwner(owner string) error {
 	if db == nil || db.conn == nil {
 		return nil

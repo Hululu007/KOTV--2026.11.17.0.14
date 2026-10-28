@@ -179,7 +179,7 @@ func trimTrailingComma(buf *bytes.Buffer) {
 }
 
 // readQuoted 从 src[i] 的开引号起读完整字符串，返回内容（不含引号）与下一位置。
-// 单引号串内 '' 转义为 '；双引号串按 JSON 转义原样取到结尾。
+// 单引号串内两个连续单引号转义为一个单引号；双引号串按 JSON 转义原样取到结尾。
 func readQuoted(src []byte, i int) (content []byte, next int, ok bool) {
 	quote := src[i]
 	j := i + 1

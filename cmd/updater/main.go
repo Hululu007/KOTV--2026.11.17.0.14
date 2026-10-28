@@ -18,7 +18,7 @@ func main() {
 	var file = flag.String("file", "", "zip file path")
 	flag.Parse()
 
-    fmt.Println("KOTV Updater v1.0.0")
+	fmt.Println("KOTV Updater v1.0.0")
 
 	if *path == "" {
 		fmt.Println("path is required")
@@ -145,177 +145,175 @@ func copyFile(src, dst string) error {
 }
 
 func removeAllFiles(dir, excludePath string) error {
-    maxRetries := 5
-    retryDelay := time.Millisecond * 500
+	maxRetries := 5
+	retryDelay := time.Millisecond * 500
 
-    for attempt := 0; attempt < maxRetries; attempt++ {
-        if attempt > 0 {
-            fmt.Printf("Retry attempt %d/%d...\n", attempt+1, maxRetries)
-            time.Sleep(retryDelay)
-        }
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			fmt.Printf("Retry attempt %d/%d...\n", attempt+1, maxRetries)
+			time.Sleep(retryDelay)
+		}
 
-        err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-            if err != nil {
-                if os.IsNotExist(err) {
-                    return nil
-                }
-                return err
-            }
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
+			}
 
-            if path == dir {
-                return nil
-            }
+			if path == dir {
+				return nil
+			}
 
-            if strings.EqualFold(path, excludePath) {
-                return nil
-            }
+			if strings.EqualFold(path, excludePath) {
+				return nil
+			}
 
-            if info.IsDir() {
-                // 先尝试删除目录中的文件
-                return filepath.Walk(path, func(subPath string, subInfo os.FileInfo, subErr error) error {
-                    if subErr != nil {
-                        return nil // 忽略子目录错误
-                    }
-                    if !subInfo.IsDir() {
-                        if _, statErr := os.Stat(subPath); !os.IsNotExist(statErr) {
-                            os.Remove(subPath) // 尝试删除但不返回错误
-                        }
-                    }
-                    return nil
-                })
-            }
+			if info.IsDir() {
+				// 先尝试删除目录中的文件
+				return filepath.Walk(path, func(subPath string, subInfo os.FileInfo, subErr error) error {
+					if subErr != nil {
+						return nil // 忽略子目录错误
+					}
+					if !subInfo.IsDir() {
+						if _, statErr := os.Stat(subPath); !os.IsNotExist(statErr) {
+							os.Remove(subPath) // 尝试删除但不返回错误
+						}
+					}
+					return nil
+				})
+			}
 
-            if _, err := os.Stat(path); os.IsNotExist(err) {
-                return nil
-            }
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				return nil
+			}
 
-            return os.Remove(path)
-        })
+			return os.Remove(path)
+		})
 
-        if err == nil {
-            return nil
-        }
+		if err == nil {
+			return nil
+		}
 
-        if attempt == maxRetries-1 {
-            return err
-        }
-    }
+		if attempt == maxRetries-1 {
+			return err
+		}
+	}
 
-    return fmt.Errorf("failed to remove files after %d attempts", maxRetries)
+	return fmt.Errorf("failed to remove files after %d attempts", maxRetries)
 }
 
-
 func extractZip(zipPath, dest string) error {
-    r, err := zip.OpenReader(zipPath)
-    if err != nil {
-        return err
-    }
-    defer r.Close()
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
 
-    fmt.Printf("Extracting %s to %s\n", zipPath, dest)
+	fmt.Printf("Extracting %s to %s\n", zipPath, dest)
 
-    // 检测是否有统一的根目录
-    rootFolder := detectRootFolder(r)
-    if rootFolder != "" {
-        fmt.Printf("Will strip root folder: %s\n", rootFolder)
-    }
+	// 检测是否有统一的根目录
+	rootFolder := detectRootFolder(r)
+	if rootFolder != "" {
+		fmt.Printf("Will strip root folder: %s\n", rootFolder)
+	}
 
-    for _, f := range r.File {
-        var fpath string
-        if rootFolder != "" && strings.HasPrefix(f.Name, rootFolder+"/") {
-            // 如果有统一的根目录，去掉这一层
-            relativePath := f.Name[len(rootFolder)+1:]
-            fpath = filepath.Join(dest, relativePath)
-            fmt.Printf("Stripping root: %s -> %s\n", f.Name, relativePath)
-        } else {
-            fpath = filepath.Join(dest, f.Name)
-            if rootFolder == "" {
-                fmt.Printf("Direct extract: %s\n", f.Name)
-            }
-        }
+	for _, f := range r.File {
+		var fpath string
+		if rootFolder != "" && strings.HasPrefix(f.Name, rootFolder+"/") {
+			// 如果有统一的根目录，去掉这一层
+			relativePath := f.Name[len(rootFolder)+1:]
+			fpath = filepath.Join(dest, relativePath)
+			fmt.Printf("Stripping root: %s -> %s\n", f.Name, relativePath)
+		} else {
+			fpath = filepath.Join(dest, f.Name)
+			if rootFolder == "" {
+				fmt.Printf("Direct extract: %s\n", f.Name)
+			}
+		}
 
-        // 跳过空路径和根目录本身
-        if fpath == dest || fpath == dest+"/" || filepath.Base(fpath) == rootFolder {
-            continue
-        }
+		// 跳过空路径和根目录本身
+		if fpath == dest || fpath == dest+"/" || filepath.Base(fpath) == rootFolder {
+			continue
+		}
 
-        if f.FileInfo().IsDir() {
-            os.MkdirAll(fpath, f.Mode())
-            continue
-        }
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, f.Mode())
+			continue
+		}
 
-        if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
-            return err
-        }
+		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+			return err
+		}
 
-        outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-        if err != nil {
-            return err
-        }
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
 
-        rc, err := f.Open()
-        if err != nil {
-            outFile.Close()
-            return err
-        }
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return err
+		}
 
-        _, err = io.Copy(outFile, rc)
-        rc.Close()
-        outFile.Close()
+		_, err = io.Copy(outFile, rc)
+		rc.Close()
+		outFile.Close()
 
-        if err != nil {
-            return err
-        }
-    }
+		if err != nil {
+			return err
+		}
+	}
 
-    fmt.Println("Extraction completed")
-    return nil
+	fmt.Println("Extraction completed")
+	return nil
 }
 
 // 检测ZIP文件是否有一个统一的根目录
 func detectRootFolder(r *zip.ReadCloser) string {
-    folderCount := make(map[string]int)
-    fileCount := 0
-    rootFolders := make([]string, 0)
+	folderCount := make(map[string]int)
+	fileCount := 0
+	rootFolders := make([]string, 0)
 
-    // 统计所有文件和文件夹
-    for _, f := range r.File {
-        // 跳过目录本身
-        if f.FileInfo().IsDir() && !strings.HasSuffix(f.Name, "/") {
-            continue
-        }
+	// 统计所有文件和文件夹
+	for _, f := range r.File {
+		// 跳过目录本身
+		if f.FileInfo().IsDir() && !strings.HasSuffix(f.Name, "/") {
+			continue
+		}
 
-        parts := strings.Split(strings.Trim(f.Name, "/"), "/")
-        if len(parts) > 0 && parts[0] != "" {
-            folderName := parts[0]
-            if _, exists := folderCount[folderName]; !exists {
-                rootFolders = append(rootFolders, folderName)
-            }
-            folderCount[folderName]++
-            fileCount++
-        }
-    }
+		parts := strings.Split(strings.Trim(f.Name, "/"), "/")
+		if len(parts) > 0 && parts[0] != "" {
+			folderName := parts[0]
+			if _, exists := folderCount[folderName]; !exists {
+				rootFolders = append(rootFolders, folderName)
+			}
+			folderCount[folderName]++
+			fileCount++
+		}
+	}
 
-    fmt.Printf("Analysis: fileCount=%d, root folders: %v\n", fileCount, rootFolders)
-    for folder, count := range folderCount {
-        fmt.Printf("  Folder '%s': %d files\n", folder, count)
-    }
+	fmt.Printf("Analysis: fileCount=%d, root folders: %v\n", fileCount, rootFolders)
+	for folder, count := range folderCount {
+		fmt.Printf("  Folder '%s': %d files\n", folder, count)
+	}
 
-    // 如果只有一个根目录，且名称与目标应用名匹配，则去除这个根目录
-    if len(rootFolders) == 1 {
-        rootFolder := rootFolders[0]
-        // 检查是否是应用名称相关的根目录
+	// 如果只有一个根目录，且名称与目标应用名匹配，则去除这个根目录
+	if len(rootFolders) == 1 {
+		rootFolder := rootFolders[0]
+		// 检查是否是应用名称相关的根目录
 		if strings.Contains(strings.ToLower(rootFolder), "kotv") ||
-		   strings.Contains(strings.ToLower(rootFolder), "app") {
-            fmt.Printf("Detected application root folder '%s', will strip it\n", rootFolder)
-            return rootFolder
-        }
-    }
+			strings.Contains(strings.ToLower(rootFolder), "app") {
+			fmt.Printf("Detected application root folder '%s', will strip it\n", rootFolder)
+			return rootFolder
+		}
+	}
 
-    fmt.Printf("Keeping original structure\n")
-    return ""
+	fmt.Printf("Keeping original structure\n")
+	return ""
 }
-
 
 func restoreBackup(backupPath, destPath string) error {
 	fmt.Println("Restoring backup...")

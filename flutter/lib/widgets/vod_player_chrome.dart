@@ -1647,9 +1647,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             onTap: () async {
               if (context.mounted) Navigator.pop(context);
               final path = await kotvPickSubtitleFile(context);
-              if (path == null || path.isEmpty) return;
-              final name = path.split(RegExp(r'[/\\]')).last;
-              await widget.player.addSubtitleFile(path, title: name);
+              if (path == null) return;
+              await widget.player.addSubtitlePath(path);
             },
           ),
         if (widget.onAssrtSearch != null)

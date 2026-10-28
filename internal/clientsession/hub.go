@@ -12,7 +12,7 @@ import (
 )
 
 // Session 远端 Dedicated 内存会话：当前点播源/首页/直播选中 + 媒体态。
-// 持久化走 setting(owner=userId)；本机不建会话，只用全局 Config + setting(owner='')。
+// 持久化走 setting(owner=userId)；本机不建会话，只用全局 Config + owner 为空的 setting。
 type Session struct {
 	ClientID string
 	Cfg      *config.Manager

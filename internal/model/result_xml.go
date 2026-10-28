@@ -7,9 +7,9 @@ import (
 
 // rssXML 点播 Result/Vod/Class 的 XML 结构。
 type rssXML struct {
-	XMLName xml.Name   `xml:"rss"`
-	Class   rssClass   `xml:"class"`
-	List    rssList    `xml:"list"`
+	XMLName xml.Name `xml:"rss"`
+	Class   rssClass `xml:"class"`
+	List    rssList  `xml:"list"`
 }
 
 type rssClass struct {

@@ -97,10 +97,8 @@ class EngineLauncher {
 
   /// API 调用失败时调用：若引擎挂了则重启。
   ///
-  /// **引擎 :9978 已通时绝不动 spider。** bd0a8de 曾在此无条件
-  /// `_ensureAndroidSpiderService`（还先 stop），导致首页 `_reload`/换源每次
-  /// 都把 :9979 干掉；随后 detail/home 的 jar 调用会卡到 ~120s，UI 表现为
-  /// 「无限加载中」而不是立刻失败。
+  /// **引擎 :9978 已通时绝不动 spider（:9979）。** 首页刷新/换源都会走到这里，
+  /// 若每次重启 spider，正在进行的 jar 调用会卡到 ~120s，界面一直「加载中」。
   ///
   /// 远端地址只探测，不在此切本机；需要回落时用 [recoverOrFallbackLocal]。
   Future<bool> recoverIfNeeded({bool forceRestart = false}) async {
@@ -160,10 +158,8 @@ class EngineLauncher {
       }
     }
     _lastResumeCheck = now;
-    debugPrint('engine: app resumed → health check');
     if (Platform.isAndroid || (_owned && _proc != null && await _procAlive(_proc!))) {
       if (await _ping(baseUrl)) {
-        debugPrint('engine: still healthy after resume');
         unawaited(_ensureAndroidSpiderService(forceRestart: false));
         return true;
       }
@@ -498,8 +494,8 @@ class EngineLauncher {
 
   /// 确保 :9979 spider 在听。
   ///
-  /// 注意：MainActivity.onPostResume 也会 start。bd0a8de 曾在每次 ensure 时先
-  /// `stop()`，会杀掉已健康的服务 → 详情/换源打 jar 全部失败。默认只幂等 start；
+  /// MainActivity.onPostResume 也会 start。默认只幂等 start，不先 stop：
+  /// stop 会杀掉已健康的服务，详情/换源的 jar 调用全部失败。
   /// 仅 [forceRestart] 或多次 start 仍不通时才 stop+start。
   Future<void> _ensureAndroidSpiderService({bool forceRestart = false}) async {
     if (!Platform.isAndroid) return;

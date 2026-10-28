@@ -603,9 +603,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   void _onRemoteSubtitle(String path) {
-    if (!mounted || path.trim().isEmpty) return;
-    final name = path.split(RegExp(r'[/\\]')).last;
-    unawaited(_playback.addSubtitleFile(path.trim(), title: name));
+    if (!mounted) return;
+    unawaited(_playback.addSubtitlePath(path));
   }
 
   bool _livePopupOpen() {

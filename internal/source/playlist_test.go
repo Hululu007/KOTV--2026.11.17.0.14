@@ -8,12 +8,12 @@ import (
 
 func TestMatchPlaylist(t *testing.T) {
 	cases := map[string]bool{
-		"https://www.youtube.com/playlist?list=PLxxx":                 true,
-		"https://www.youtube.com/watch?v=abc&list=PLxxx":              true,
-		"https://youtu.be/abc?list=PLxxx":                             true,
-		"https://www.youtube.com/watch?v=abc":                         false,
-		"https://example.com/playlist?list=1":                         false,
-		"": false,
+		"https://www.youtube.com/playlist?list=PLxxx":    true,
+		"https://www.youtube.com/watch?v=abc&list=PLxxx": true,
+		"https://youtu.be/abc?list=PLxxx":                true,
+		"https://www.youtube.com/watch?v=abc":            false,
+		"https://example.com/playlist?list=1":            false,
+		"":                                               false,
 	}
 	for u, want := range cases {
 		if got := MatchPlaylist(u); got != want {

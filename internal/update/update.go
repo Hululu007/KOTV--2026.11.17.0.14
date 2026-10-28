@@ -21,10 +21,10 @@ var CurrentVersion = "0.2.2"
 
 // Info 远程版本信息。
 type Info struct {
-	Version     string            `json:"version"`
-	Notes       string            `json:"notes"`
-	Downloads   map[string]string `json:"downloads"`
-	VersionURL  string            `json:"-"`
+	Version    string            `json:"version"`
+	Notes      string            `json:"notes"`
+	Downloads  map[string]string `json:"downloads"`
+	VersionURL string            `json:"-"`
 }
 
 // DefaultVersionURL 默认 version.json 地址（可被设置覆盖）。

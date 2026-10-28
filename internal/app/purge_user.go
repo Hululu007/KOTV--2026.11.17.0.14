@@ -11,7 +11,7 @@ import (
 	"github.com/bobo/KOTV/internal/spider"
 )
 
-// PurgeUserData 删除远端用户的全部用户态（不可对 owner='' 调用）。
+// PurgeUserData 删除远端用户的全部用户态（owner 为空即本机，不可调用）。
 func (a *App) PurgeUserData(userID string) {
 	userID = strings.TrimSpace(userID)
 	if a == nil || userID == "" {

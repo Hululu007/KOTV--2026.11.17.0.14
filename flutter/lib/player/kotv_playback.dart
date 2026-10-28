@@ -129,6 +129,13 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 外挂字幕文件（本地路径或 URL）；不支持的引擎忽略。
   Future<void> addSubtitleFile(String path, {String? title}) async {}
 
+  /// 按路径加外挂字幕，标题取文件名（本地选择 / 远端推来的字幕路径）。
+  Future<void> addSubtitlePath(String path) {
+    final p = path.trim();
+    if (p.isEmpty) return Future.value();
+    return addSubtitleFile(p, title: p.split(RegExp(r'[/\\]')).last);
+  }
+
   /// 字幕样式（字号/位置/颜色等）；不支持的引擎忽略。
   Future<void> setSubtitleStyle({
     double? scale,

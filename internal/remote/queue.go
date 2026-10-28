@@ -14,11 +14,11 @@ type Queue struct {
 }
 
 type clientBucket struct {
-	ctrl     []ControlCmd
-	srch     []string
-	refresh  []RefreshCmd
-	danmaku  []string
-	opens    []OpenCmd
+	ctrl    []ControlCmd
+	srch    []string
+	refresh []RefreshCmd
+	danmaku []string
+	opens   []OpenCmd
 }
 
 type ControlCmd struct {

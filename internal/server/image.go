@@ -25,10 +25,10 @@ const (
 var (
 	imageMIME = regexp.MustCompile(`(?i)^image/[a-z0-9.+-]+$`)
 
-	imageMu     sync.Mutex
-	imageByKey  = map[string]cachedImage{}
-	imageOrder  []string // 最旧在前
-	imageBytes  int
+	imageMu    sync.Mutex
+	imageByKey = map[string]cachedImage{}
+	imageOrder []string // 最旧在前
+	imageBytes int
 )
 
 type cachedImage struct {

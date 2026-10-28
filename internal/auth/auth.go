@@ -44,7 +44,7 @@ func (u User) Public() map[string]any {
 }
 
 var (
-	mu  sync.Mutex
+	mu    sync.Mutex
 	store *database.DB
 )
 

@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"net/url"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -27,6 +26,7 @@ var localMediaExt = map[string]struct{}{
 }
 
 // IsLocalMediaURL 是否为本地文件/内容 URI；是则直喂播放器，不要包 HTTP 代理。
+// 引擎本机绝对路径也算（含 Windows 盘符路径，如下载目录里的文件）。
 func IsLocalMediaURL(u string) bool {
 	u = strings.TrimSpace(u)
 	if u == "" {
@@ -36,12 +36,8 @@ func IsLocalMediaURL(u string) bool {
 	if strings.HasPrefix(low, "file:") || strings.HasPrefix(low, "content:") {
 		return true
 	}
-	if strings.HasPrefix(u, "/") {
-		ext := strings.ToLower(path.Ext(u))
-		if ext == "" {
-			return false
-		}
-		_, ok := localMediaExt[ext]
+	if strings.HasPrefix(u, "/") || filepath.IsAbs(u) {
+		_, ok := localMediaExt[strings.ToLower(filepath.Ext(u))]
 		return ok
 	}
 	return false

@@ -21,9 +21,9 @@ type vodHeaderRule struct {
 }
 
 var (
-	vodNetMu     sync.RWMutex
-	vodHdrRules  []vodHeaderRule
-	vodHostMap   map[string]string // pattern -> target hostname
+	vodNetMu    sync.RWMutex
+	vodHdrRules []vodHeaderRule
+	vodHostMap  map[string]string // pattern -> target hostname
 )
 
 func setGoNetConfig(headersJSON, hostsJSON []byte) {

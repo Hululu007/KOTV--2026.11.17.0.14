@@ -49,7 +49,7 @@ func UnderMediaRoot(p string) bool {
 	return false
 }
 
-// ResolveMediaPath 
+// ResolveMediaPath
 // 1) 相对路径拼到 MediaRoots；
 // 2) 绝对路径若存在则直接允许（本地仓 / jar / py / js 同目录相对脚本依赖此回退）；
 // 3) /file/ 代理经 URL 清洗后常丢掉绝对路径前导 /（/file//storage/... → storage/...），此处还原。

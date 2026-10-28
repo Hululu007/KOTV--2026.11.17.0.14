@@ -94,11 +94,11 @@ type ytDLPSubTrack struct {
 }
 
 type ytDLPMeta struct {
-	Title              string                     `json:"title"`
-	Thumbnail          string                     `json:"thumbnail"`
-	Description        string                     `json:"description"`
-	Subtitles          map[string][]ytDLPSubTrack `json:"subtitles"`
-	AutomaticCaptions  map[string][]ytDLPSubTrack `json:"automatic_captions"`
+	Title             string                     `json:"title"`
+	Thumbnail         string                     `json:"thumbnail"`
+	Description       string                     `json:"description"`
+	Subtitles         map[string][]ytDLPSubTrack `json:"subtitles"`
+	AutomaticCaptions map[string][]ytDLPSubTrack `json:"automatic_captions"`
 }
 
 func fillYouTubeDesktopMeta(parent context.Context, bin, playURL string, info *Info) {

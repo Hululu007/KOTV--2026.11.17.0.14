@@ -95,11 +95,11 @@ func Search(query string, limit int) ([]Item, error) {
 		limit = 15
 	}
 	raw, err := util.HTTPGetParams(assrtBase+"/v1/sub/search", nil, map[string]string{
-		"token":     token,
-		"q":         query,
-		"cnt":       strconv.Itoa(limit),
-		"no_muxer":  "1",
-		"filelist":  "0",
+		"token":    token,
+		"q":        query,
+		"cnt":      strconv.Itoa(limit),
+		"no_muxer": "1",
+		"filelist": "0",
 	})
 	if err != nil {
 		return nil, err

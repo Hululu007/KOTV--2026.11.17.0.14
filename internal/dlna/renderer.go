@@ -17,25 +17,25 @@ const dmrPort = 17890
 
 // MediaState DMR 向控制端报告的播放态。
 type MediaState struct {
-	URI      string
-	State    string // PLAYING / PAUSED_PLAYBACK / STOPPED / NO_MEDIA_PRESENT
-	PosMs    int64
-	DurMs    int64
+	URI   string
+	State string // PLAYING / PAUSED_PLAYBACK / STOPPED / NO_MEDIA_PRESENT
+	PosMs int64
+	DurMs int64
 }
 
 // Renderer 最小 MediaRenderer：可被发现，接收投屏控制。
 type Renderer struct {
-	mu        sync.Mutex
-	ad        *ssdp.Advertiser
-	srv       *http.Server
-	uuid      string
-	onURI     func(uri string)
-	onStop    func()
-	onPause   func(pause bool)
-	onSeek    func(ms int64)
-	onNext    func()
-	stateFn   func() MediaState
-	location  string
+	mu         sync.Mutex
+	ad         *ssdp.Advertiser
+	srv        *http.Server
+	uuid       string
+	onURI      func(uri string)
+	onStop     func()
+	onPause    func(pause bool)
+	onSeek     func(ms int64)
+	onNext     func()
+	stateFn    func() MediaState
+	location   string
 	currentURI string
 	transport  string // PLAYING / PAUSED_PLAYBACK / STOPPED
 }

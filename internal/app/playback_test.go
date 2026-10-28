@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -26,10 +27,11 @@ func withAdFilter(t *testing.T, on bool) {
 
 func TestIsLocalMediaURL(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
+	type tc struct {
 		u    string
 		want bool
-	}{
+	}
+	cases := []tc{
 		{"file:///storage/emulated/0/Movies/a.mp4", true},
 		{"file:///storage/emulated/0/Movies/中文.mkv", true},
 		{"content://media/external/video/media/12", true},
@@ -37,7 +39,14 @@ func TestIsLocalMediaURL(t *testing.T) {
 		{"/storage/emulated/0/Download/show.mkv", true},
 		{"https://cdn.example.com/a.mp4", false},
 		{"/api/v1/vod", false},
+		{"/media/a.b/folder", false},
 		{"", false},
+	}
+	if runtime.GOOS == "windows" {
+		cases = append(cases,
+			tc{`C:\Users\me\Downloads\KOTV\剧 第01集.mp4`, true},
+			tc{`C:\Users\me\a.b\folder`, false},
+		)
 	}
 	for _, c := range cases {
 		if got := IsLocalMediaURL(c.u); got != c.want {

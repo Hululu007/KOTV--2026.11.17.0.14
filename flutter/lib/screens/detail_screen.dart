@@ -783,9 +783,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   void _onRemoteSubtitle(String path) {
-    if (!mounted || path.trim().isEmpty) return;
-    final name = path.split(RegExp(r'[/\\]')).last;
-    unawaited(_playback.addSubtitleFile(path.trim(), title: name));
+    if (!mounted) return;
+    unawaited(_playback.addSubtitlePath(path));
   }
 
   void _onRemoteDanmakuFile(String path) {
