@@ -157,6 +157,10 @@ class FvpPlayback extends KotvPlayback {
   @override
   String get engineLabel => '内置 FVP';
 
+  /// Android 上 Surface / Texture 决定 viewType 与解码器参数；桌面固定 Texture。
+  @override
+  bool get supportsRenderMode => kotvIsAndroid();
+
   @override
   Future<String?> activeDecoderLabel() async {
     final v = _fvpLastVideoDecoder;

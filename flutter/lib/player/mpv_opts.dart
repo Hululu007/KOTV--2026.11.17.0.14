@@ -34,14 +34,14 @@ const kotvImageExts = '';
 /// |------|-------------|----------------|
 /// | hwdec | 硬=直出；自动=直出硬解优先再软解 | 直出优先；Windows 直出不成退到硬解后拷贝 |
 /// | gpu-next | vo=gpu-next（Surface） | ❌（Texture/libmpv） |
-/// | gpu-api / Vulkan | 原生 Surface | setProperty（含 Win7） |
+/// | Vulkan | gpu-api=vulkan（设备支持时） | ❌（libmpv 渲染 API 由 media_kit 定为 OpenGL） |
+/// | 音频直通 | audio-spdif | ❌（不设 audio-spdif，音效照常写 af） |
 /// | AV3A | libmvcodec | 自带 FFmpeg+avs3a |
 class KotvMpvOpts {
   const KotvMpvOpts({
     this.decodeMode = 'auto',
     this.gpuNext = false,
     this.vulkan = false,
-    this.gpuApi = 'auto',
     this.conf = '',
     this.tlsVerify = true,
     this.audioPassThrough = true,
@@ -58,6 +58,7 @@ class KotvMpvOpts {
     this.audioPreamp = 0,
     this.audioLoudness = false,
     this.audioCenterGain = 0,
+    this.stableVolume = false,
     this.audioChannelMode = 'auto',
     this.audioOffsetMs = 0,
     this.subtitleFontScale = 1.0,
@@ -65,9 +66,8 @@ class KotvMpvOpts {
 
   final String decodeMode;
   final bool gpuNext;
+  /// Android 原生：Vulkan 渲染（Kotlin 端再看设备是否支持）。
   final bool vulkan;
-  /// Windows：`auto` / `d3d11` / `opengl` / `vulkan`。
-  final String gpuApi;
   final String conf;
   /// Android 原生：HTTPS 校验证书（cacert.pem）；坏 CA 可关。
   final bool tlsVerify;
@@ -90,6 +90,8 @@ class KotvMpvOpts {
   final int audioPreamp;
   final bool audioLoudness;
   final int audioCenterGain;
+  /// 播放菜单「稳定音量」：音效链里加 dynaudnorm。
+  final bool stableVolume;
   final String audioChannelMode;
   /// 音画偏移毫秒（正值声音滞后）。
   final int audioOffsetMs;
@@ -98,23 +100,14 @@ class KotvMpvOpts {
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
     final decode = (decodeMode ?? '${settings['playerDecode'] ?? 'auto'}').trim();
-    // Android 原生：gpu-next 仅 Surface 路径。
-    var gpuNext = '${settings['mpvGpuNext'] ?? ''}'.toLowerCase() == 'true';
-    if (!kotvIsAndroid()) gpuNext = false;
-    var vulkan = '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true';
-    var gpuApi = '${settings['mpvGpuApi'] ?? 'auto'}'.trim().toLowerCase();
-    if (gpuApi.isEmpty) gpuApi = 'auto';
-    // iOS Texture 软渲勿开 Vulkan。
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
-      gpuNext = false;
-      vulkan = false;
-      if (gpuApi == 'vulkan') gpuApi = 'auto';
-    }
-    if (gpuApi == 'vulkan') vulkan = true;
-    if (vulkan && gpuApi == 'auto') gpuApi = 'vulkan';
+    // gpu-next / Vulkan 只有 Android 原生 MPV 用得上；桌面和 iOS 的 media_kit 是 vo=libmpv。
+    final android = kotvIsAndroid();
+    final gpuNext = android && '${settings['mpvGpuNext'] ?? ''}'.toLowerCase() == 'true';
+    final vulkan = android && '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true';
     // 默认开；显式 false/off/0/no 才关。
     final tlsVerify = kotvSettingsFlag(settings['mpvTlsVerify'] ?? 'true', def: true);
-    final audioPassThrough = kotvSettingsFlag(settings['audioPassThrough'] ?? 'true', def: true);
+    // 只有 Android 原生 MPV 写 audio-spdif；其它平台没有直通，不能因此挡掉音效。
+    final audioPassThrough = android && kotvSettingsFlag(settings['audioPassThrough'] ?? 'true', def: true);
     final diskCache = kotvSettingsFlag(settings['mpvDiskCache'] ?? 'false', def: false);
     var dolby = kotvDolbyVisionFromSettings(settings);
     if (dolby < 0 || dolby > 2) dolby = 0;
@@ -125,7 +118,6 @@ class KotvMpvOpts {
       decodeMode: decode.isEmpty ? 'auto' : decode,
       gpuNext: gpuNext,
       vulkan: vulkan,
-      gpuApi: gpuApi,
       conf: '${settings['mpvConf'] ?? ''}',
       tlsVerify: tlsVerify,
       audioPassThrough: audioPassThrough,
@@ -142,6 +134,7 @@ class KotvMpvOpts {
       audioPreamp: kotvAudioPreampFromSettings(settings),
       audioLoudness: kotvAudioLoudnessFromSettings(settings),
       audioCenterGain: kotvAudioCenterGainFromSettings(settings),
+      stableVolume: kotvSettingsFlag(settings['playerStableVolume'] ?? 'false', def: false),
       audioChannelMode: kotvAudioChannelModeFromSettings(settings),
       audioOffsetMs: kotvAudioOffsetMsFromSettings(settings),
       subtitleFontScale: fontScale,
@@ -152,7 +145,6 @@ class KotvMpvOpts {
     String? decodeMode,
     bool? gpuNext,
     bool? vulkan,
-    String? gpuApi,
     String? conf,
     bool? tlsVerify,
     bool? audioPassThrough,
@@ -169,6 +161,7 @@ class KotvMpvOpts {
     int? audioPreamp,
     bool? audioLoudness,
     int? audioCenterGain,
+    bool? stableVolume,
     String? audioChannelMode,
     int? audioOffsetMs,
     double? subtitleFontScale,
@@ -177,7 +170,6 @@ class KotvMpvOpts {
       decodeMode: decodeMode ?? this.decodeMode,
       gpuNext: gpuNext ?? this.gpuNext,
       vulkan: vulkan ?? this.vulkan,
-      gpuApi: gpuApi ?? this.gpuApi,
       conf: conf ?? this.conf,
       tlsVerify: tlsVerify ?? this.tlsVerify,
       audioPassThrough: audioPassThrough ?? this.audioPassThrough,
@@ -194,6 +186,7 @@ class KotvMpvOpts {
       audioPreamp: audioPreamp ?? this.audioPreamp,
       audioLoudness: audioLoudness ?? this.audioLoudness,
       audioCenterGain: audioCenterGain ?? this.audioCenterGain,
+      stableVolume: stableVolume ?? this.stableVolume,
       audioChannelMode: audioChannelMode ?? this.audioChannelMode,
       audioOffsetMs: audioOffsetMs ?? this.audioOffsetMs,
       subtitleFontScale: subtitleFontScale ?? this.subtitleFontScale,
@@ -211,6 +204,7 @@ class KotvMpvOpts {
         preamp: audioPreamp,
         loudness: audioLoudness,
         centerGain: audioCenterGain,
+        dynamicNorm: stableVolume,
       );
 
   bool get soft => decodeMode == 'soft' || decodeMode == 'software' || decodeMode == 'sw';
@@ -295,22 +289,6 @@ class KotvMpvOpts {
         await set('image-exts', kotvImageExts);
       } catch (_) {}
 
-      // 桌面 media_kit：gpu-api 走 bundled libmpv（Vulkan 等）。
-      if (!kotvIsAndroid()) {
-        try {
-          if (gpuApi != 'auto') {
-            if (gpuApi == 'd3d11' ||
-                gpuApi == 'opengl' ||
-                gpuApi == 'vulkan' ||
-                gpuApi == 'metal') {
-              await set('gpu-api', gpuApi);
-            }
-          } else if (vulkan) {
-            await set('gpu-api', 'vulkan');
-          }
-        } catch (_) {}
-      }
-
       try {
         await KotvBufferBudget.warm(force: true);
         final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
@@ -383,22 +361,6 @@ class KotvMpvOpts {
     }
     if (gpuNext && kotvIsAndroid()) {
       out['vo'] = 'gpu-next';
-    }
-    // Windows / macOS：gpu-api 供 Android 原生 Surface 与桌面 media_kit 共用。
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      if (gpuApi == 'd3d11' || gpuApi == 'opengl' || gpuApi == 'vulkan') {
-        out['gpu-api'] = gpuApi;
-      } else if (vulkan) {
-        out['gpu-api'] = 'vulkan';
-      }
-    } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
-      if (gpuApi == 'opengl' || gpuApi == 'vulkan' || gpuApi == 'metal') {
-        out['gpu-api'] = gpuApi;
-      } else if (vulkan) {
-        out['gpu-api'] = 'vulkan';
-      }
-    } else if (vulkan && kotvIsAndroid()) {
-      out['gpu-api'] = 'vulkan';
     }
     out.addAll(KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes()));
     // Android 原生另有 diskCache 写 cache-on-disk + demuxer-cache-dir；

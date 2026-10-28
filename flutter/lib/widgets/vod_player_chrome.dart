@@ -628,8 +628,8 @@ const _decodeModes = <(String key, String label)>[
 ];
 
 const _renderModes = <(String key, String label)>[
-  ('surface', 'GPU 硬渲染'),
-  ('texture', 'CPU 软渲染'),
+  ('surface', 'Surface（推荐，HDR）'),
+  ('texture', 'Texture'),
 ];
 
 /// 全屏点播控制层状态（vodFullscreen 底栏）。
@@ -1995,8 +1995,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             unawaited(_persist('playerAmbient', v ? 'true' : 'false'));
                           },
                         ),
-                        // FVP 不支持稳定音量（见 FvpPlayback.setStableVolume）。
-                        if (_playerVal != 'innie#fvp')
+                        if (widget.player.supportsStableVolume)
                           toggleRow(
                             icon: Icons.graphic_eq,
                             label: '稳定音量',
@@ -2129,7 +2128,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               if (mounted && label.isNotEmpty) setState(() => _keepLabel = label);
                             },
                           ),
-                        if (kotvPlayerRenderApplies(_playerVal))
+                        if (widget.player.supportsRenderMode)
                           linkRow(
                             icon: Icons.layers_outlined,
                             label: '渲染方式',

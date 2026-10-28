@@ -27,7 +27,6 @@ class EngineLauncher {
   bool _noBundledEngine = false;
   String baseUrl = kotvDefaultLocalEngineBaseUrl;
   KotvApi? _api;
-  DateTime _lastStartAttempt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastResumeCheck = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// 远端不可达已切本机；由 [takeFellBackToLocal] 读取并清除。
@@ -166,7 +165,6 @@ class EngineLauncher {
     }
     if (_noBundledEngine && !Platform.isAndroid) return false;
     debugPrint('engine: unhealthy after resume → restart');
-    _lastStartAttempt = now;
     if (Platform.isAndroid) {
       await _startAndroidEngineService();
       await _ensureAndroidSpiderService(forceRestart: true);
@@ -422,7 +420,6 @@ class EngineLauncher {
       debugPrint('engine: skip local start; remote baseUrl=$baseUrl');
       return;
     }
-    _lastStartAttempt = DateTime.now();
     _noBundledEngine = false;
     try {
       await _ensureAndroidSpiderService();

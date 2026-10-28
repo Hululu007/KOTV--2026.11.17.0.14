@@ -5,6 +5,7 @@ go 1.27.2
 require (
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
 	github.com/anacrolix/torrent v1.61.0
+	github.com/andybalholm/brotli v1.2.7
 	github.com/antchfx/htmlquery v1.3.7
 	github.com/buger/jsonparser v1.6.1
 	github.com/buke/quickjs-go v0.7.7

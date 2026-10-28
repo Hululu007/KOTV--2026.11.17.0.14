@@ -19,9 +19,9 @@ func (a *App) danmakuSearchAPI() string {
 	return strings.TrimSpace(cfg.API().Danmaku)
 }
 
-// APIDanmakuLoad 拉取并解析一个弹幕源（http(s) 地址或引擎本机弹幕文件）。
-func (a *App) APIDanmakuLoad(ctx context.Context, src string) (map[string]any, error) {
-	items, err := danmaku.Load(ctx, src)
+// APIDanmakuLoad 拉取并解析一个弹幕源（视频页、弹幕地址或引擎本机弹幕文件）；durationMs 为片长，未知传 0。
+func (a *App) APIDanmakuLoad(ctx context.Context, src string, durationMs int64) (map[string]any, error) {
+	items, err := danmaku.Load(ctx, src, durationMs)
 	if err != nil {
 		return nil, err
 	}

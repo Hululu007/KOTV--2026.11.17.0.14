@@ -157,11 +157,7 @@ class DetailScreen extends ConsumerStatefulWidget {
     final active = _DetailScreenState._active;
     if (active == null) return;
     if (active._stoppedHard) {
-      if (active.mounted) {
-        active._allowPop = true;
-        active.setState(() {});
-        await WidgetsBinding.instance.endOfFrame;
-      }
+      await active._releasePopGuard();
       return;
     }
     final done = Completer<void>();
@@ -197,12 +193,7 @@ class DetailScreen extends ConsumerStatefulWidget {
           await MiniPlayerWindow.exit();
         } catch (_) {}
       }
-      if (active.mounted) {
-        // 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
-        active._allowPop = true;
-        active.setState(() {});
-        await WidgetsBinding.instance.endOfFrame;
-      }
+      await active._releasePopGuard();
     } finally {
       if (!done.isCompleted) done.complete();
       if (_DetailScreenState._leaveDone == done) {
@@ -799,6 +790,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (!mounted) return;
     _danmakuItems.value = kotvAppendLiveDanmaku(_danmakuItems.value, item, _playback.position);
     if (!_danmakuOn) setState(() => _danmakuOn = true);
+  }
+
+  /// 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
+  Future<void> _releasePopGuard() async {
+    if (!mounted) return;
+    setState(() => _allowPop = true);
+    await WidgetsBinding.instance.endOfFrame;
   }
 
   void _syncAndroidAutoPip() {
@@ -1837,21 +1835,31 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 加载弹幕源列表里第 [index] 条。
-  Future<void> _loadDanmakuSource(int index, {int? playSerial}) async {
+  /// 加载弹幕源列表里第 [index] 条。[notify]：用户手动选的源，失败或为空时提示。
+  Future<void> _loadDanmakuSource(int index, {int? playSerial, bool notify = false}) async {
     final serial = playSerial ?? _playAtSerial;
     if (index < 0 || index >= _danmakuSources.length) return;
-    final items = await _fetchDanmaku(_danmakuSources[index].url);
+    final items = await _fetchDanmaku(_danmakuSources[index].url, notify: notify);
     if (!mounted || serial != _playAtSerial) return;
     _danmakuItems.value = items ?? const [];
   }
 
   /// 引擎拉取并解析一个弹幕源，套上当前时轴偏移；失败返回 null。
-  Future<List<DanmakuItem>?> _fetchDanmaku(String url) async {
+  Future<List<DanmakuItem>?> _fetchDanmaku(String url, {bool notify = false}) async {
+    void tell(String msg) {
+      if (notify && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+
     try {
-      final res = await ref.read(apiProvider).danmakuLoad(url);
-      return kotvShiftDanmaku(kotvDanmakuItemsFrom(res['items']), _danmakuOffsetSec);
-    } catch (_) {
+      final res = await ref.read(apiProvider).danmakuLoad(
+            url,
+            duration: _existingPlayback?.duration ?? Duration.zero,
+          );
+      final items = kotvShiftDanmaku(kotvDanmakuItemsFrom(res['items']), _danmakuOffsetSec);
+      tell(items.isEmpty ? '这个弹幕源没有弹幕' : '已加载 ${items.length} 条弹幕');
+      return items;
+    } catch (e) {
+      tell('弹幕加载失败：$e');
       return null;
     }
   }
@@ -1883,7 +1891,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _danmakuSourceIdx = idx;
       _danmakuOn = true;
     });
-    await _loadDanmakuSource(idx);
+    await _loadDanmakuSource(idx, notify: true);
   }
 
   Future<void> _playAt(int epIdx, {bool fullscreen = false}) async {
@@ -2936,7 +2944,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         onDanmakuSourceChanged: (i) {
           if (!mounted || i < 0 || i >= _danmakuSources.length) return;
           setState(() => _danmakuSourceIdx = i);
-          unawaited(_loadDanmakuSource(i));
+          unawaited(_loadDanmakuSource(i, notify: true));
         },
         onDanmakuSearch: () => unawaited(_searchDanmaku()),
         onDanmakuSettingsChanged: () => unawaited(_refreshDanmakuPrefs()),

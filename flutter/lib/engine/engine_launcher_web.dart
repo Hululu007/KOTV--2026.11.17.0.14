@@ -56,7 +56,6 @@ class EngineLauncher {
     return _ping(baseUrl);
   }
 
-  Future<Map<String, dynamic>?> _health(String base) => kotvEngineHealth(base);
 
   Future<bool> _ping(String base) => kotvEnginePing(base);
 

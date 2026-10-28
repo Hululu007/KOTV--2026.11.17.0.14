@@ -167,8 +167,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** diskCache / bufferFactor 写入 LoadControl 与 CacheDataSource，变更须重建。 */
   private var playerBuiltDiskCache: Boolean? = null
   private var playerBuiltBufferFactor: Int? = null
-  /** 杜比视界策略写进渲染器工厂，变更须重建。 */
+  /** 杜比视界策略、音频直通、软解音/视轨优先写进渲染器工厂和轨道选择器，变更须重建。 */
   private var playerBuiltDolbyVision: Int? = null
+  private var playerBuiltPassThrough: Boolean? = null
+  private var playerBuiltSoftPrefer: Pair<Boolean, Boolean>? = null
   /** 最近一次初始化的视频解码器名（播放信息用）。 */
   private var lastVideoDecoder = ""
   private var subtitleOverlay: KotvSubtitleOverlay? = null
@@ -1068,7 +1070,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         playerBuiltSecondary != wantSecondary ||
         playerBuiltDiskCache != diskCacheEnabled ||
         playerBuiltBufferFactor != bufferFactor ||
-        playerBuiltDolbyVision != dolbyVisionPolicy
+        playerBuiltDolbyVision != dolbyVisionPolicy ||
+        playerBuiltPassThrough != audioPassThrough ||
+        playerBuiltSoftPrefer != (softAudioPrefer to softVideoPrefer)
 
     if (needRebuild) {
       rebuildPlayer(live, effective, nextDrmKey)
@@ -1300,6 +1304,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     playerBuiltDiskCache = diskCacheEnabled
     playerBuiltBufferFactor = bufferFactor
     playerBuiltDolbyVision = dolbyVisionPolicy
+    playerBuiltPassThrough = audioPassThrough
+    playerBuiltSoftPrefer = softAudioPrefer to softVideoPrefer
     preloadUpstream = smbAware
     preloadRenderers = renderers
     bindPlayerSurface()
@@ -2261,6 +2267,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     playerBuiltDiskCache = null
     playerBuiltBufferFactor = null
     playerBuiltDolbyVision = null
+    playerBuiltPassThrough = null
+    playerBuiltSoftPrefer = null
     lastVideoDecoder = ""
     try {
       subtitleOverlay?.setLibassEnabled(false)

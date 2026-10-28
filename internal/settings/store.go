@@ -87,7 +87,6 @@ const (
 	ExoDiskPreloadMs         Type = "exoDiskPreloadMs"
 	MpvTlsVerify             Type = "mpvTlsVerify"
 	MpvDiskCache             Type = "mpvDiskCache"
-	MpvGpuApi                Type = "mpvGpuApi"
 	VideoEq                  Type = "videoEq"
 	AudioEq                  Type = "audioEq"
 	VideoBrightness          Type = "videoBrightness"
@@ -299,7 +298,6 @@ func defaultFile() file {
 			{ID: "exoDiskPreloadMs", Label: "Exo磁盘预读毫秒", Value: "120000"},
 			{ID: "mpvTlsVerify", Label: "MPV TLS校验", Value: "true"},
 			{ID: "mpvDiskCache", Label: "MPV磁盘缓存", Value: "false"},
-			{ID: "mpvGpuApi", Label: "MPV gpu-api", Value: "auto"},
 			{ID: "videoEq", Label: "画面调色", Value: "off"},
 			{ID: "audioEq", Label: "音频均衡", Value: "off"},
 			{ID: "videoBrightness", Label: "画面亮度", Value: "0"},
@@ -472,7 +470,6 @@ func Load() error {
 	ensureSettingLocked(ExoDiskPreloadMs, "Exo磁盘预读毫秒", "120000")
 	ensureSettingLocked(MpvTlsVerify, "MPV TLS校验", "true")
 	ensureSettingLocked(MpvDiskCache, "MPV磁盘缓存", "false")
-	ensureSettingLocked(MpvGpuApi, "MPV gpu-api", "auto")
 	ensureSettingLocked(VideoEq, "画面调色", "off")
 	ensureSettingLocked(AudioEq, "音频均衡", "off")
 	ensureSettingLocked(VideoBrightness, "画面亮度", "0")

@@ -666,6 +666,7 @@ String kotvComposeMpvAf({
   int preamp = 0,
   bool loudness = false,
   int centerGain = 0,
+  bool dynamicNorm = false,
 }) {
   final inners = <String>[];
   void add(String s) {
@@ -690,6 +691,7 @@ String kotvComposeMpvAf({
   if (loudness) {
     add('loudnorm=I=-18:LRA=11:TP=-1.5');
   }
+  if (dynamicNorm) add('dynaudnorm=f=75:g=15:p=0.55');
 
   final stab = _stabilityLavfi(stability);
   if (stab.isNotEmpty) add(stab);

@@ -1163,7 +1163,7 @@ func (a *App) APIGetSettings() map[string]any {
 		settings.ExoSoftAudioPrefer, settings.ExoSoftVideoPrefer,
 		settings.ExoBuffer, settings.ExoLibass, settings.ExoSecondarySubtitle,
 		settings.ExoDolbyVision, settings.ExoPreferredTextLangs, settings.ExoDiskPreloadMs,
-		settings.MpvTlsVerify, settings.MpvDiskCache, settings.MpvGpuApi,
+		settings.MpvTlsVerify, settings.MpvDiskCache,
 		settings.VideoEq, settings.AudioEq,
 		settings.VideoBrightness, settings.VideoContrast, settings.VideoSaturation,
 		settings.VideoGamma, settings.VideoHue,

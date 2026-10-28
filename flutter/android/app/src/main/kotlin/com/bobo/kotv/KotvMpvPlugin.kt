@@ -493,6 +493,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             if (surfaceLayerEnabled) {
               surfaceHost?.setRender(renderTexture)
             }
+            // 杜比视界直出只在 Surface 方式下可用，换渲染方式后重新判断。
+            if (created.get()) applyDolbyVisionOptions()
             result.success(
               mapOf(
                 "ok" to true,

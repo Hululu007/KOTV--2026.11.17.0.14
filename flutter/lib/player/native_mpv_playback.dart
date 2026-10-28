@@ -109,6 +109,12 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   String get engineLabel => '内置 MPV';
 
+  @override
+  bool get supportsRenderMode => true;
+
+  @override
+  bool get supportsStableVolume => true;
+
   Future<Map<Object?, Object?>?> _videoInfo() async {
     try {
       return await _ch.invokeMethod<Map<Object?, Object?>>('videoInfo');
@@ -318,11 +324,10 @@ class NativeMpvPlayback extends KotvPlayback {
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
-        'gpuApi': _opts.gpuApi,
         'conf': _opts.conf,
         'tlsVerify': _opts.tlsVerify,
         'audioPassThrough': _opts.audioPassThrough,
-        'diskCache': _opts.diskCache,
+        'diskCache': _opts.diskCache && !live,
         'render': _renderMode,
         // 直播须在 create 时写入，磁盘缓存和 cache-pause 按这次会话来。
         'live': live,
@@ -485,7 +490,6 @@ class NativeMpvPlayback extends KotvPlayback {
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
-        'gpuApi': _opts.gpuApi,
         'conf': _opts.conf,
         'tlsVerify': _opts.tlsVerify,
         'audioPassThrough': _opts.audioPassThrough,
@@ -707,7 +711,6 @@ class NativeMpvPlayback extends KotvPlayback {
         'decode': opts.hwdecValue(),
         'gpuNext': opts.gpuNext,
         'vulkan': opts.vulkan,
-        'gpuApi': opts.gpuApi,
         'conf': opts.conf,
         'tlsVerify': opts.tlsVerify,
         'audioPassThrough': opts.audioPassThrough,
@@ -745,19 +748,11 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   Future<void> setStableVolume(bool on) async {
+    _opts = _opts.copyWith(stableVolume: on);
     try {
-      await _ch.invokeMethod('setProperty', {
-        'key': 'af',
-        'value': on ? 'dynaudnorm=f=75:g=15:p=0.55' : '',
-      });
-    } catch (_) {
-      try {
-        await _ch.invokeMethod('setProperty', {
-          'key': 'af',
-          'value': on ? 'loudnorm' : '',
-        });
-      } catch (_) {}
-    }
+      // 走 setEqualizer：和其它音效合成同一条 af，原生端直通时不写。
+      await _ch.invokeMethod('setEqualizer', _opts.equalizerChannelArgs());
+    } catch (_) {}
   }
 
   @override

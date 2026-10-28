@@ -343,9 +343,14 @@ class KotvApi {
         'qual': qual,
       });
 
-  /// 引擎拉取并解析一个弹幕源（http(s) 地址或引擎本机弹幕文件）→ `{items:[...]}`。
-  Future<Map<String, dynamic>> danmakuLoad(String url) =>
-      _get('/api/v1/danmaku', {'action': 'load', 'url': url});
+  /// 引擎拉取并解析一个弹幕源（视频页、弹幕地址或引擎本机弹幕文件）→ `{items:[...]}`。
+  /// [duration] 片长：视频页按 60 秒分段拉取时用来定段数，未知传 0。
+  Future<Map<String, dynamic>> danmakuLoad(String url, {Duration duration = Duration.zero}) =>
+      _get('/api/v1/danmaku', {
+        'action': 'load',
+        'url': url,
+        if (duration > Duration.zero) 'duration': '${duration.inMilliseconds}',
+      });
 
   /// 按片名/集名调弹幕搜索接口 → `{sources:[{name,url}]}`。
   Future<Map<String, dynamic>> danmakuSearch({required String name, required String episode}) =>

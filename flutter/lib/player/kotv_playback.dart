@@ -106,6 +106,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// Android Exo / 原生 MPV / FVP：Surface / Texture；其它后端忽略。
   Future<void> setRenderMode(String mode) async {}
 
+  /// 当前后端是否真的能切 Surface / Texture（播放菜单按实际后端显示入口）。
+  bool get supportsRenderMode => false;
+
   /// 后台「仅音频」时卸掉画面输出（音继续）；回前台再挂上。其它后端默认空实现。
   Future<void> setVideoOutputEnabled(bool enabled) async {}
 
@@ -115,6 +118,9 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// 音量归一（loudnorm / dynaudnorm）；不支持的引擎忽略。
   Future<void> setStableVolume(bool on) async {}
+
+  /// 当前后端是否实现了 [setStableVolume]。
+  bool get supportsStableVolume => false;
 
   /// 是否认为已挂上可用视频源（轨/元数据）。无法判断时返回 true。
   bool get hasVideoSourceHint => true;

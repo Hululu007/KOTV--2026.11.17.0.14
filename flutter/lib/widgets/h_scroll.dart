@@ -133,7 +133,8 @@ class _HScrollListState extends State<HScrollList> {
   void _keepVisible() {
     final index = _keepIndex;
     if (!mounted || _userOwnsOffset || index == null || index != widget.scrollToIndex) return;
-    if (_sc.hasClients && _sc.position.activity is DragScrollActivity) {
+    // 用户拖动/甩动时方向不是 idle；程序滚动（jumpTo/animateTo）保持 idle。
+    if (_sc.hasClients && _sc.position.userScrollDirection != ScrollDirection.idle) {
       _releaseToUser();
       return;
     }

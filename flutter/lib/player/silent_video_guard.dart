@@ -136,7 +136,7 @@ Future<void> kotvGuardSilentVideo({
     // 缓冲很久仍无画面：MPV/硬解卡死常见；勿因 isBuffering&&!alive 永久空转。
     if (isBuffering()) {
       bufferingNoVideoSince ??= now;
-      if (now.difference(bufferingNoVideoSince!) >= bufferingNoVideoTimeout) {
+      if (now.difference(bufferingNoVideoSince) >= bufferingNoVideoTimeout) {
         throw const KotvSilentVideoException('缓冲过久仍无画面');
       }
     } else {

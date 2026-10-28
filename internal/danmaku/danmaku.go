@@ -2,18 +2,17 @@
 package danmaku
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -25,37 +24,37 @@ import (
 // Item 单条弹幕。
 type Item struct {
 	Time    float64 `json:"time"` // 秒
-	Mode    int     `json:"mode"`
-	Size    int     `json:"size"`
+	Mode    int     `json:"mode"` // ModeScroll / ModeBottom / ModeTop / ModeReverse / ModePositioned
+	Size    int     `json:"size"` // B 站字号：18 以下小号，36 以上大号，其余默认
 	Color   int     `json:"color"`
 	Content string  `json:"content"`
+	Pool    int     `json:"pool,omitempty"`
+	// 定位弹幕：画面内相对坐标 0~1，停留时长。
+	X          float64 `json:"x,omitempty"`
+	Y          float64 `json:"y,omitempty"`
+	DurationMs int64   `json:"durationMs,omitempty"`
 }
 
 const (
-	itemsMax     = 20000   // 单次解析条数上限
-	bodyBytesMax = 8 << 20 // 读入字节上限（解码后同样拒绝更大正文）
-
-	defaultMode  = 1
-	defaultSize  = 25
-	defaultColor = 0xFFFFFF
+	itemsMax     = 200000   // 单个弹幕源条数上限（一集常见数万条）
+	bodyBytesMax = 32 << 20 // 读入字节上限（解码后同样拒绝更大正文）
 )
 
 // localExts 引擎本机弹幕文件只认这些后缀，避免借接口读其它文件。
 var localExts = map[string]bool{".xml": true, ".json": true, ".txt": true}
 
-// Load 拉取并解析一个弹幕源：http(s) 地址或引擎本机弹幕文件。
-// 正文若是源列表 [{name,url}]，跟进第一条。
-func Load(ctx context.Context, src string) ([]Item, error) {
+// Load 拉取并解析一个弹幕源：B 站/爱奇艺/芒果/腾讯/优酷视频页按平台分段拉取，
+// 其它 http(s) 地址或引擎本机弹幕文件按内容识别格式。durationMs 为片长，未知传 0（由平台接口补）。
+func Load(ctx context.Context, src string, durationMs int64) ([]Item, error) {
+	src = strings.TrimSpace(src)
+	if f := fetcherFor(src); f != nil {
+		return fetchAll(ctx, f, src, durationMs)
+	}
 	body, err := loadBody(ctx, src)
 	if err != nil {
 		return nil, err
 	}
-	if sources := ParseSources(body); len(sources) > 0 {
-		if body, err = loadBody(ctx, sources[0].URL); err != nil {
-			return nil, err
-		}
-	}
-	return Parse(body), nil
+	return Parse(body)
 }
 
 type searchSlot struct{ cancel context.CancelFunc }
@@ -98,10 +97,41 @@ func Search(ctx context.Context, scope, api, name, episode string) ([]model.Danm
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(body) == "" {
+	if len(bytes.TrimSpace(body)) == 0 {
 		return nil, errors.New("弹幕搜索接口返回为空")
 	}
-	return ParseSources(body), nil
+	return resolveLoopback(ParseSources(string(body)), req.URL), nil
+}
+
+// resolveLoopback 搜索接口给的 127.0.0.1/localhost 地址指接口所在那台机器（接口通常是那台的
+// /proxy?do=danmaku）。接口不在本机时换成接口的主机，否则引擎会去请求自己。
+func resolveLoopback(items []model.DanmakuItem, api *url.URL) []model.DanmakuItem {
+	if api == nil || isLoopbackHost(api.Hostname()) {
+		return items
+	}
+	for i, it := range items {
+		u, err := url.Parse(it.URL)
+		if err != nil || !isLoopbackHost(u.Hostname()) {
+			continue
+		}
+		host := api.Hostname()
+		if p := u.Port(); p != "" {
+			host = net.JoinHostPort(host, p)
+		} else if p := api.Port(); p != "" {
+			host = net.JoinHostPort(host, p)
+		}
+		u.Host = host
+		items[i].URL = u.String()
+	}
+	return items
+}
+
+func isLoopbackHost(h string) bool {
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
 }
 
 func searchRequest(ctx context.Context, api, name, episode string) (*http.Request, error) {
@@ -195,102 +225,15 @@ func valueOr(v, def any) any {
 // ParseLive 遥控即时弹幕：网页端发 [t,mode,size,color]text，也可能只有正文。
 func ParseLive(text string) Item {
 	text = strings.TrimSpace(text)
-	if m := textLineRe.FindStringSubmatch(text); m != nil {
-		if it, ok := itemFromMeta(m[1], m[2]); ok {
-			return it
-		}
+	if it, ok := parseTxtLine(text); ok {
+		return it
 	}
-	return Item{Mode: defaultMode, Size: defaultSize, Color: defaultColor, Content: text}
+	return Item{Mode: ModeScroll, Size: defaultSize, Color: defaultColor, Content: text}
 }
 
-// Parse 解析 B 站 XML 或 [t,mode,size,color]text 格式。
-func Parse(body string) []Item {
-	body = strings.TrimSpace(body)
-	if strings.Contains(body, "<d ") || strings.Contains(body, "<i>") {
-		return parseXML(body)
-	}
-	return parseText(body)
-}
-
-type danmakuD struct {
-	P    string `xml:"p,attr"`
-	Text string `xml:",chardata"`
-}
-
-func parseXML(body string) []Item {
-	dec := xml.NewDecoder(strings.NewReader(body))
-	dec.Strict = false
-	dec.Entity = xml.HTMLEntity
-	var out []Item
-	sawD := false
-	for len(out) < itemsMax {
-		tok, err := dec.Token()
-		if err != nil {
-			break
-		}
-		se, ok := tok.(xml.StartElement)
-		if !ok || se.Name.Local != "d" {
-			continue
-		}
-		var d danmakuD
-		if err := dec.DecodeElement(&d, &se); err != nil {
-			break
-		}
-		sawD = true
-		if it, ok := itemFromMeta(d.P, d.Text); ok {
-			out = append(out, it)
-		}
-	}
-	if !sawD {
-		return parseText(body)
-	}
-	return out
-}
-
-// itemFromMeta meta 为「时间,模式,字号,颜色,…」，缺项或解析失败用默认值。
-func itemFromMeta(meta, text string) (Item, bool) {
-	it := Item{Content: strings.TrimSpace(text), Mode: defaultMode, Size: defaultSize, Color: defaultColor}
-	if it.Content == "" {
-		return Item{}, false
-	}
-	parts := strings.Split(meta, ",")
-	if v, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64); err == nil {
-		it.Time = v
-	}
-	for i, dst := range []*int{&it.Mode, &it.Size, &it.Color} {
-		if len(parts) <= i+1 {
-			break
-		}
-		if v, err := strconv.Atoi(strings.TrimSpace(parts[i+1])); err == nil {
-			*dst = v
-		}
-	}
-	return it, true
-}
-
-var textLineRe = regexp.MustCompile(`^\[([^\]]+)\](.*)$`)
-
-func parseText(body string) []Item {
-	var out []Item
-	for _, line := range strings.Split(body, "\n") {
-		if len(out) >= itemsMax {
-			break
-		}
-		m := textLineRe.FindStringSubmatch(strings.TrimSpace(line))
-		if m == nil {
-			continue
-		}
-		if it, ok := itemFromMeta(m[1], m[2]); ok {
-			out = append(out, it)
-		}
-	}
-	return out
-}
-
-func loadBody(ctx context.Context, src string) (string, error) {
-	src = strings.TrimSpace(src)
+func loadBody(ctx context.Context, src string) ([]byte, error) {
 	if src == "" {
-		return "", errors.New("弹幕地址为空")
+		return nil, errors.New("弹幕地址为空")
 	}
 	if local, ok := util.FileURLPath(src); ok {
 		return readLocal(local)
@@ -300,53 +243,49 @@ func loadBody(ctx context.Context, src string) (string, error) {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	return doRequest(req)
 }
 
-func doRequest(req *http.Request) (string, error) {
+func doRequest(req *http.Request) ([]byte, error) {
 	req.Header.Set("User-Agent", util.OkHttpUA)
 	resp, err := util.GetClient().Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	raw, err := readLimited(resp.Body)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("弹幕请求失败: http=%d", resp.StatusCode)
+		return nil, fmt.Errorf("弹幕请求失败: http=%d", resp.StatusCode)
 	}
 	b := util.DecodeContentEncoding(resp.Header.Get("Content-Encoding"), raw)
 	if len(b) > bodyBytesMax {
-		return "", errBodyTooLarge()
+		return nil, errBodyTooLarge()
 	}
-	return string(b), nil
+	return b, nil
 }
 
-func readLocal(path string) (string, error) {
+func readLocal(path string) ([]byte, error) {
 	if !filepath.IsAbs(path) || !localExts[strings.ToLower(filepath.Ext(path))] {
-		return "", fmt.Errorf("不是弹幕文件: %s", path)
+		return nil, fmt.Errorf("不是弹幕文件: %s", path)
 	}
 	st, err := os.Stat(path)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if st.Size() > bodyBytesMax {
-		return "", errBodyTooLarge()
+		return nil, errBodyTooLarge()
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer f.Close()
-	b, err := readLimited(f)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	return readLimited(f)
 }
 
 func readLimited(r io.Reader) ([]byte, error) {

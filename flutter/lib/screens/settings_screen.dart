@@ -1592,9 +1592,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       title: '默认倍速',
       key: 'playerSpeed',
       fallback: 1.0,
-      min: 0.1,
-      max: 5.0,
-      divisions: 49,
+      // 各播放器（Exo / MPV / FVP / 系统播放器）都只接受 0.25–4 倍。
+      min: 0.25,
+      max: 4.0,
+      divisions: 75,
       saved: '默认倍速已更新',
     );
   }
@@ -1605,8 +1606,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       key: 'playerSpeedLongPress',
       fallback: 2.0,
       min: 2.0,
-      max: 5.0,
-      divisions: 30,
+      max: 4.0,
+      divisions: 20,
       saved: '长按倍速已更新',
     );
   }
@@ -2376,9 +2377,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         kotvEmbedBackend(livePlayerVal) == KotvEmbedBackend.mpv;
     final showMpvOpts =
         usesMpv && (kotvIsAndroid() || kotvIsDesktop() || kotvIsIOS());
-    final showMpvVulkan = usesMpv &&
-        ((kotvIsDesktop() || kotvIsIOS()) ||
-            (kotvIsAndroid() && _androidVulkanOk));
+    // 只有 Android 原生 MPV 能走 Vulkan；桌面/iOS 的 media_kit 渲染 API 固定为 OpenGL。
+    final showMpvVulkan = usesMpv && kotvIsAndroid() && _androidVulkanOk;
     final showMpvGpuNext = usesMpv && kotvIsAndroid();
     final showMpvTls = usesMpv && kotvIsAndroid();
     final canPickPlayer = kotvCanSwitchPlayer(live: false);
@@ -2764,11 +2764,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             msg: '开机进直播已更新',
                           )),
                         ),
+                        // 预加载写进 Exo 磁盘缓存，只有 Android 用得上。
+                        if (kotvIsAndroid())
                         KotvSettingsCell(
                           label: '预加载下一集',
-                          value: (g('preloadNextEpisode', 'false') == 'true')
-                              ? '开启'
-                              : '关闭',
+                          value: g('preloadNextEpisode', 'false') != 'true'
+                              ? '关闭'
+                              : (g('exoDiskCache', 'false') == 'true' ? '开启' : '开启（需开 Exo 磁盘缓存）'),
                           onTap: () => unawaited(_set(
                             'preloadNextEpisode',
                             g('preloadNextEpisode', 'false') == 'true'

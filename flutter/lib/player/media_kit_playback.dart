@@ -231,6 +231,9 @@ class MediaKitPlayback extends KotvPlayback {
   String get engineLabel => '内置 MPV';
 
   @override
+  bool get supportsStableVolume => true;
+
+  @override
   bool get playing => player.state.playing;
 
   @override
@@ -329,23 +332,17 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   String? get currentAudioId {
-    final t = player.state.track.audio;
-    if (t == null) return 'auto';
-    return '${t.id}';
+    return player.state.track.audio.id;
   }
 
   @override
   String? get currentVideoId {
-    final t = player.state.track.video;
-    if (t == null) return 'auto';
-    return '${t.id}';
+    return player.state.track.video.id;
   }
 
   @override
   String? get currentSubtitleId {
-    final t = player.state.track.subtitle;
-    if (t == null) return 'no';
-    return '${t.id}';
+    return player.state.track.subtitle.id;
   }
 
   @override
@@ -529,17 +526,11 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> setStableVolume(bool on) async {
-    // 优先 dynaudnorm：loudnorm 起播后热插易卡一下并把响度猛压。
+    _opts = _opts.copyWith(stableVolume: on);
     try {
-      await (player.platform as dynamic).setProperty(
-        'af',
-        on ? 'dynaudnorm=f=75:g=15:p=0.55' : '',
-      );
-    } catch (_) {
-      try {
-        await (player.platform as dynamic).setProperty('af', on ? 'loudnorm' : '');
-      } catch (_) {}
-    }
+      // 和其它音效合成同一条 af，后续 applyOpts 也不会把它冲掉。
+      await (player.platform as dynamic).setProperty('af', _opts.equalizerChannelArgs()['audioAf']);
+    } catch (_) {}
   }
 
   /// 桌面 libmpv：Texture 常与视口同尺寸，Flutter BoxFit 无效；须写 keepaspect/panscan/video-aspect-override。

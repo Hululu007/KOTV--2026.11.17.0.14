@@ -123,6 +123,13 @@ class ExoPlayback extends KotvPlayback {
   @override
   String get engineLabel => '内置 ExoPlayer';
 
+  @override
+  bool get supportsRenderMode => true;
+
+  /// 音频直通时 Exo 不套任何音效（Kotlin applyAudioEq 直接返回）。
+  @override
+  bool get supportsStableVolume => !_audioPassThrough;
+
   Future<Map<Object?, Object?>?> _videoInfo() async {
     try {
       return await _ch.invokeMethod<Map<Object?, Object?>>('videoInfo');
@@ -1017,7 +1024,7 @@ class ExoPlayback extends KotvPlayback {
       '$_tunneling|$_adblock|$_diskCache|$_audioPassThrough|'
       '$_softAudioPrefer|$_softVideoPrefer|$_bufferFactor|$_libass|'
       '$_dolbyVisionPolicy|$_secondarySubtitle|$_diskPreloadMs|'
-      '$_diskPreloadThreads|$_diskPreloadSizeMb';
+      '$_diskPreloadThreads';
 
   String? _appliedColdPlayerOptsKey;
 

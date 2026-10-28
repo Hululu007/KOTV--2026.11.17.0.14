@@ -30,7 +30,7 @@ type ContentAPI interface {
 	APIBtProgress() map[string]any
 	APISearch(keyword string, siteKeys []string, exact bool, exclude []model.VodKey) (map[string]any, error)
 	APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qualIdx int) (map[string]any, error)
-	APIDanmakuLoad(ctx context.Context, src string) (map[string]any, error)
+	APIDanmakuLoad(ctx context.Context, src string, durationMs int64) (map[string]any, error)
 	APIDanmakuSearch(ctx context.Context, name, episode string) (map[string]any, error)
 	APIDanmakuAuto(ctx context.Context, siteKey, name, episode string, spiderSources []model.DanmakuItem) map[string]any
 	APIRemotePoll() map[string]any
@@ -700,7 +700,7 @@ func (s *Server) handleAPIv1Play(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleAPIv1Danmaku 弹幕：GET ?action=load&url= 拉取解析；POST action=search 手动搜索；
+// handleAPIv1Danmaku 弹幕：GET ?action=load&url=&duration=(毫秒) 拉取解析；POST action=search 手动搜索；
 // POST action=auto 起播时决定弹幕源（body: site,name,episode,sources）。
 func (s *Server) handleAPIv1Danmaku(w http.ResponseWriter, r *http.Request) {
 	if wroteOptions(w, r) {
@@ -729,7 +729,8 @@ func (s *Server) handleAPIv1Danmaku(w http.ResponseWriter, r *http.Request) {
 	}
 	switch q.Get("action") {
 	case "", "load":
-		out, err := api.APIDanmakuLoad(r.Context(), pick(body.URL, "url"))
+		durationMs, _ := strconv.ParseInt(q.Get("duration"), 10, 64)
+		out, err := api.APIDanmakuLoad(r.Context(), pick(body.URL, "url"), durationMs)
 		if rejectBadGateway(w, err) {
 			return
 		}

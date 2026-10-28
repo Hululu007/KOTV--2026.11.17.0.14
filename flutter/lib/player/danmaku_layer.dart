@@ -20,6 +20,10 @@ class DanmakuItem {
     this.mode = 1,
     this.size = 25,
     this.color = 0xFFFFFF,
+    this.pool = 0,
+    this.x = 0,
+    this.y = 0,
+    this.durationMs = 0,
   });
 
   factory DanmakuItem.fromJson(Map<Object?, Object?> m) => DanmakuItem(
@@ -28,16 +32,39 @@ class DanmakuItem {
         mode: (m['mode'] as num?)?.toInt() ?? 1,
         size: (m['size'] as num?)?.toInt() ?? 25,
         color: (m['color'] as num?)?.toInt() ?? 0xFFFFFF,
+        pool: (m['pool'] as num?)?.toInt() ?? 0,
+        x: (m['x'] as num?)?.toDouble() ?? 0,
+        y: (m['y'] as num?)?.toDouble() ?? 0,
+        durationMs: (m['durationMs'] as num?)?.toInt() ?? 0,
       );
 
   final double time; // 秒
   final String content;
+  /// 1 滚动 / 4 底部 / 5 顶部 / 6 逆向 / 7 定位。
   final int mode;
   final int size;
   final int color;
+  /// 0 普通 / 1 字幕 / 2 特殊（「特效型」开关管这一池）。
+  final int pool;
+  /// 定位弹幕：画面内相对坐标 0~1 与停留时长（0 用固定弹幕时长）。
+  final double x;
+  final double y;
+  final int durationMs;
 
-  DanmakuItem withTime(double sec) =>
-      DanmakuItem(time: sec, content: content, mode: mode, size: size, color: color);
+  /// 相对设定字号的倍数：B 站字号 18 以下按小号 12/14，36 以上按大号 18/14。
+  double get sizeScale => size <= 18 ? 12 / 14 : (size >= 36 ? 18 / 14 : 1.0);
+
+  DanmakuItem withTime(double sec) => DanmakuItem(
+        time: sec,
+        content: content,
+        mode: mode,
+        size: size,
+        color: color,
+        pool: pool,
+        x: x,
+        y: y,
+        durationMs: durationMs,
+      );
 }
 
 /// 整体平移时轴（弹幕偏移设置）。
@@ -372,14 +399,15 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     }
   }
 
-  bool _allowMode(int mode) {
-    // bilibili / 常见 XML：1–3 滚动，4 底，5 顶，6 逆向，7 定位/高级，≥8 特殊。
-    if (mode == 4) return widget.showBottom;
-    if (mode == 5) return widget.showTop;
-    if (mode == 6) return widget.showReverse;
-    if (mode == 7) return widget.showPositioned;
-    if (mode >= 8) return widget.showSpecial;
-    return widget.showScroll;
+  bool _allow(DanmakuItem it) {
+    if (it.pool == 2 && !widget.showSpecial) return false;
+    return switch (it.mode) {
+      4 => widget.showBottom,
+      5 => widget.showTop,
+      6 => widget.showReverse,
+      7 => widget.showPositioned,
+      _ => widget.showScroll,
+    };
   }
 
   void _activate(double mediaSec, {required double viewW}) {
@@ -420,22 +448,22 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     while (i < _sorted.length) {
       final it = _sorted[i];
       if (it.time >= to) break;
-      if (it.time >= windowFrom && _allowMode(it.mode)) {
+      if (it.time >= windowFrom && _allow(it)) {
         if (_flying.length >= maxOn) break;
         final mode = it.mode;
-        final fixed = mode == 4 || mode == 5 || mode == 7 || mode >= 8;
-        final durationMs = fixed
-            ? fixedDur
-            : scrollDur + (it.content.length * 40).clamp(0, 3000);
-        final textW = _estimateTextWidth(it.content, fs);
+        final durationMs = switch (mode) {
+          7 when it.durationMs > 0 => it.durationMs,
+          4 || 5 || 7 => fixedDur,
+          _ => scrollDur + (it.content.length * 40).clamp(0, 3000),
+        };
+        final textW = _estimateTextWidth(it.content, fs * it.sizeScale);
         final int? lane;
         if (mode == 4) {
           lane = _pickFixedLane(bottomLanes, top: false, mediaSec: mediaSec);
         } else if (mode == 5) {
           lane = _pickFixedLane(topLanes, top: true, mediaSec: mediaSec);
-        } else if (mode == 7 || mode >= 8) {
-          // 定位/特殊：占位不强占滚动轨，用内容哈希落点。
-          lane = it.content.hashCode.abs() % 5;
+        } else if (mode == 7) {
+          lane = 0; // 定位弹幕按自身坐标绘制，不占轨道
         } else if (mode == 6) {
           lane = _pickScrollLane(
             lanes: lanes,
@@ -541,8 +569,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     for (final f in _flying) {
       final mode = f.item.mode;
       final fReverse = mode == 6;
-      final fScroll = mode != 4 && mode != 5 && mode != 7 && mode < 8;
-      if (mode != 6 && !fScroll) continue;
+      if (mode == 4 || mode == 5 || mode == 7) continue;
       if (fReverse != reverse) continue;
       if (f.lane != lane) continue;
       final durSec = f.durationMs / 1000.0;
@@ -550,7 +577,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
       final t = ((mediaSec - f.activatedSec) / durSec).clamp(0.0, 1.0);
       final existW = f.textWidth > 0
           ? f.textWidth
-          : _estimateTextWidth(f.item.content, widget.fontSize);
+          : _estimateTextWidth(f.item.content, widget.fontSize * f.item.sizeScale);
       final travel = viewW + existW;
       final x = reverse ? -existW + t * travel : viewW - t * travel;
       final right = x + existW;
@@ -828,7 +855,7 @@ class _DanmakuPainter extends CustomPainter {
       final t = (mediaSec - f.activatedSec) / durSec;
       if (t < 0 || t > 1) continue;
       final tp = f.painterFor(
-        fontSize: fs,
+        fontSize: fs * f.item.sizeScale,
         color: _resolveColor(f.item.color),
         bold: bold,
         fontFamily: family,
@@ -848,18 +875,11 @@ class _DanmakuPainter extends CustomPainter {
         x = (size.width - tp.width) / 2;
         y = 12.0 + (f.lane % topLanes) * (tp.height + 4);
       } else if (mode == 7) {
-        // 定位弹幕：按内容哈希落在画面中部附近。
-        x = (size.width * 0.15) +
-            (f.item.content.hashCode.abs() % 70) / 100.0 * size.width * 0.7 -
-            tp.width / 2;
-        y = (size.height * 0.2) + (f.lane % 5) / 5.0 * size.height * 0.5;
+        x = f.item.x * size.width;
+        y = f.item.y * size.height;
       } else if (mode == 6) {
         y = 12.0 + (f.lane % lanes) * laneH;
         x = -tp.width + t * (size.width + tp.width);
-      } else if (mode >= 8) {
-        // 特殊弹幕：居中短暂停留。
-        x = (size.width - tp.width) / 2;
-        y = size.height * 0.4 + (f.lane % 3) * (tp.height + 6);
       } else {
         y = 12.0 + (f.lane % lanes) * laneH;
         x = size.width - t * (size.width + tp.width);
