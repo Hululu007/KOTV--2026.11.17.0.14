@@ -133,16 +133,10 @@ func bootstrapAdminLocked(db *database.DB) error {
 }
 
 // RemoteAuthEnabled 是否强制远端鉴权。
-func RemoteAuthEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(settings.Get(settings.RemoteAuth)))
-	return v == "true" || v == "1" || v == "yes"
-}
+func RemoteAuthEnabled() bool { return settings.Bool(settings.RemoteAuth, false) }
 
 // AllowRegister 是否开放注册。
-func AllowRegister() bool {
-	v := strings.ToLower(strings.TrimSpace(settings.Get(settings.AllowRegister)))
-	return v == "true" || v == "1" || v == "yes"
-}
+func AllowRegister() bool { return settings.Bool(settings.AllowRegister, false) }
 
 // SetRemoteAuth / SetAllowRegister 供管理页写入。
 func SetRemoteAuth(on bool) error {

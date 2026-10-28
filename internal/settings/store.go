@@ -674,36 +674,34 @@ func Set(t Type, value string) {
 	persistDB(owner, id, value)
 }
 
-// IsAdFilterEnabled M3U8 广告过滤开关。
-func IsAdFilterEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(Get(AdFilter)))
-	return v == "" || v == "true" || v == "1" || v == "on"
-}
+// IsAdFilterEnabled M3U8 广告过滤开关（默认开）。
+func IsAdFilterEnabled() bool { return Bool(AdFilter, true) }
 
 // IsDanmakuLoad 加载弹幕（默认开）；关掉后片源弹幕和自动搜索都不加载。
-func IsDanmakuLoad() bool { return boolSetting(DanmakuLoad, true) }
+func IsDanmakuLoad() bool { return Bool(DanmakuLoad, true) }
 
 // IsDanmakuAuto 起播时按片名/集名自动搜索弹幕（默认开）。
-func IsDanmakuAuto() bool { return boolSetting(DanmakuAuto, true) }
+func IsDanmakuAuto() bool { return Bool(DanmakuAuto, true) }
 
 // IsDanmakuSpiderFirst 片源自带弹幕优先（默认开）：有片源弹幕时搜索结果只追加。
-func IsDanmakuSpiderFirst() bool { return boolSetting(DanmakuSpiderFirst, true) }
+func IsDanmakuSpiderFirst() bool { return Bool(DanmakuSpiderFirst, true) }
 
 // IsLiveAcross 跨分组换台（默认开）。
-func IsLiveAcross() bool { return boolSetting(LiveAcross, true) }
+func IsLiveAcross() bool { return Bool(LiveAcross, true) }
 
 // IsLiveChange 播放失败自动换线（默认开）。
-func IsLiveChange() bool { return boolSetting(LiveChange, true) }
+func IsLiveChange() bool { return Bool(LiveChange, true) }
 
 // IsLiveInvert 反转上下换台方向（默认关）。
-func IsLiveInvert() bool { return boolSetting(LiveInvert, false) }
+func IsLiveInvert() bool { return Bool(LiveInvert, false) }
 
-func boolSetting(t Type, def bool) bool {
+// Bool 布尔设置：空用 def；true/1/on/yes 为开，其余为关。
+func Bool(t Type, def bool) bool {
 	v := strings.ToLower(strings.TrimSpace(Get(t)))
 	if v == "" {
 		return def
 	}
-	return v == "true" || v == "1" || v == "on"
+	return v == "true" || v == "1" || v == "on" || v == "yes"
 }
 
 // SearchHistory 搜索历史。
@@ -744,10 +742,10 @@ func GetSearchHistory() []string {
 }
 
 // IsIncognito 无痕模式：不写观看历史。
-func IsIncognito() bool { return boolSetting(Incognito, false) }
+func IsIncognito() bool { return Bool(Incognito, false) }
 
 // IsDLNARenderer 是否作为局域网 DLNA 被投端。
-func IsDLNARenderer() bool { return boolSetting(DLNARenderer, false) }
+func IsDLNARenderer() bool { return Bool(DLNARenderer, false) }
 
 // Entry 设置项快照（备份/恢复）。
 type Entry struct {

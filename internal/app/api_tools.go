@@ -235,6 +235,7 @@ func (a *App) toolClearCache(params map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
+// boolParam 请求参数里的布尔：bool、数字、字符串（1/true/yes/on 与 0/false/no/off）都认，其它用 def。
 func boolParam(m map[string]any, key string, def bool) bool {
 	v, ok := m[key]
 	if !ok || v == nil {

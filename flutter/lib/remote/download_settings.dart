@@ -1,3 +1,5 @@
+import '../player/kotv_playback.dart';
+
 /// 下载设置选项（与引擎 download 包规则/并发键一致）。
 class DownloadSettings {
   DownloadSettings._();
@@ -72,7 +74,7 @@ class DownloadSettings {
   }
 
   static String classifyLabel(String raw) {
-    final on = raw.trim().isEmpty || raw == 'true' || raw == '1';
+    final on = kotvSettingsFlag(raw, def: true);
     return on ? classifyOptions.first.$1 : classifyOptions.last.$1;
   }
 

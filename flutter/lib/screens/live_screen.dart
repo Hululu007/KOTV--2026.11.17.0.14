@@ -735,12 +735,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _prefPlayerVal = _playerVal;
     final failoverMode = '${settings['playerFailover'] ?? 'auto'}'.trim().toLowerCase();
     _prefPlayerFailover = (failoverMode == 'off' || failoverMode == 'false') ? 'off' : 'auto';
-    final liveChange = '${settings['liveChange'] ?? settings['liveAutoChange'] ?? 'true'}'.trim().toLowerCase();
-    _liveAutoChange = liveChange != 'false' && liveChange != 'off' && liveChange != '0';
-    final across = '${settings['liveAcross'] ?? 'true'}'.trim().toLowerCase();
-    _liveAcross = across != 'false' && across != 'off' && across != '0';
-    final invert = '${settings['liveInvert'] ?? 'false'}'.trim().toLowerCase();
-    _liveInvert = invert == 'true' || invert == '1' || invert == 'on';
+    _liveAutoChange = kotvSettingsFlag(settings['liveChange'] ?? settings['liveAutoChange'], def: true);
+    _liveAcross = kotvSettingsMapFlag(settings, 'liveAcross', def: true);
+    _liveInvert = kotvSettingsMapFlag(settings, 'liveInvert');
     final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
     _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
     _liveAspect = kotvAspectFromScale(_liveScale);

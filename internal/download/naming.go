@@ -17,10 +17,7 @@ func destDir() string {
 	return paths.Ensure(d)
 }
 
-func classifyOn() bool {
-	v := strings.ToLower(strings.TrimSpace(settings.Get(settings.DownloadClassify)))
-	return v == "" || v == "true" || v == "1"
-}
+func classifyOn() bool { return settings.Bool(settings.DownloadClassify, true) }
 
 // nameTemplate 把设置里的规则 ID（或旧版手写模板）收成路径模板。
 func nameTemplate() string {

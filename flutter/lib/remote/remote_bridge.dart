@@ -8,6 +8,7 @@ import '../models/models.dart';
 import '../player/danmaku_layer.dart';
 import '../player/kotv_platform.dart';
 import 'engine_api.dart';
+import '../player/kotv_playback.dart';
 
 /// 轮询 Go 引擎遥控队列，并把播放状态回写给遥控页。
 class RemoteBridge {
@@ -177,8 +178,7 @@ class LocalHistory {
     try {
       final s = await api.getSettings();
       final map = KotvSettingsCache.settingsOf(s);
-      final v = '${map['incognito'] ?? ''}'.trim().toLowerCase();
-      return v == 'true' || v == '1' || v == 'on';
+      return kotvSettingsMapFlag(map, 'incognito');
     } catch (_) {
       return false;
     }

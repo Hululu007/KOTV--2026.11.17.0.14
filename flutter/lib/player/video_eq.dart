@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui' show PlatformDispatcher;
+import 'kotv_playback.dart';
 
 /// 画面调色（MPV / media_kit / FVP 全量；Exo：Surface/Texture 均走 Media3 setVideoEffects）。
 ///
@@ -350,10 +351,8 @@ int kotvAudioPreampFromSettings(Map<String, dynamic> settings) {
   return (int.tryParse('${settings['audioPreamp'] ?? '0'}') ?? 0).clamp(-1200, 0);
 }
 
-bool kotvAudioLoudnessFromSettings(Map<String, dynamic> settings) {
-  final v = '${settings['audioLoudness'] ?? ''}'.trim().toLowerCase();
-  return v == 'true' || v == '1' || v == 'on' || v == 'yes';
-}
+bool kotvAudioLoudnessFromSettings(Map<String, dynamic> settings) =>
+    kotvSettingsMapFlag(settings, 'audioLoudness');
 
 int kotvAudioCenterGainFromSettings(Map<String, dynamic> settings) {
   return (int.tryParse('${settings['audioCenterGain'] ?? '0'}') ?? 0).clamp(0, 1200);

@@ -8,6 +8,7 @@ import 'chrome.dart';
 import 'kotv_step_slider.dart';
 import 'dialogs.dart';
 import 'kotv_tv_text_field.dart';
+import '../player/kotv_playback.dart';
 
 /// 弹幕完整设置（设置页与播放页「更多」共用）。
 Future<void> showKotvDanmakuSettingsSheet({
@@ -56,12 +57,7 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
     return (v != null && v.isNotEmpty) ? v : d;
   }
 
-  bool flag(String key, [bool def = true]) {
-    final v = g(key, def ? 'true' : 'false').toLowerCase();
-    if (v == 'false' || v == '0' || v == 'off') return false;
-    if (v == 'true' || v == '1' || v == 'on') return true;
-    return def;
-  }
+  bool flag(String key, [bool def = true]) => kotvSettingsFlag(g(key), def: def);
 
   Future<void> _set(String key, String value) async {
     setState(() => _s[key] = value);

@@ -1267,8 +1267,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final failoverMode = '${settings['playerFailover'] ?? 'auto'}'.trim().toLowerCase();
     _prefPlayerFailover = (failoverMode == 'off' || failoverMode == 'false') ? 'off' : 'auto';
     _prefSpeed = double.tryParse('${settings['playerSpeed'] ?? ''}');
-    final skipRaw = '${settings['playerSkipOpeningEnding'] ?? 'true'}'.toLowerCase();
-    _skipOpeningEnding = skipRaw != 'false' && skipRaw != '0' && skipRaw != 'off';
+    _skipOpeningEnding = kotvSettingsMapFlag(settings, 'playerSkipOpeningEnding', def: true);
     _prefVolume = _normalizePlayerVolumePref(settings['playerVolume']);
     if (_prefVolume == 80) {
       final rawVol = double.tryParse('${settings['playerVolume'] ?? ''}');
@@ -2768,16 +2767,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     } catch (_) {}
   }
 
-  bool _flagFromSettings(Map<String, dynamic> settings, String key, [bool def = true]) {
-    final v = '${settings[key] ?? ''}'.trim().toLowerCase();
-    if (v.isEmpty) return def;
-    return v != 'false' && v != '0' && v != 'off';
-  }
-
   /// 把接口里的弹幕参数写进当前画面。
   /// [applyOffset] 只在起播时记下时轴；之后改偏移走增量平移，读回不再加一次。
   void _applyDanmakuPrefsFromSettings(Map<String, dynamic> settings, {bool applyOffset = false}) {
-    _danmakuOn = _flagFromSettings(settings, 'danmaku');
+    _danmakuOn = kotvSettingsMapFlag(settings, 'danmaku', def: true);
     _danmakuSize = double.tryParse('${settings['danmakuSize'] ?? ''}') ?? 18;
     final op = double.tryParse('${settings['danmakuOpacity'] ?? ''}');
     _danmakuOpacity = op == null ? 0.85 : (op > 1 ? op / 100.0 : op).clamp(0.15, 1.0);
@@ -2785,13 +2778,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _danmakuMaxOnScreen = int.tryParse('${settings['danmakuMaxOnScreen'] ?? '150'}') ?? 150;
     final sa = double.tryParse('${settings['danmakuScrollArea'] ?? '50'}');
     _danmakuScrollArea = sa == null ? 0.5 : (sa > 1 ? sa / 100.0 : sa).clamp(0.1, 1.0);
-    _danmakuShowScroll = _flagFromSettings(settings, 'danmakuShowScroll');
-    _danmakuShowTop = _flagFromSettings(settings, 'danmakuShowTop');
-    _danmakuShowBottom = _flagFromSettings(settings, 'danmakuShowBottom');
-    _danmakuShowReverse = _flagFromSettings(settings, 'danmakuShowReverse');
-    _danmakuShowSpecial = _flagFromSettings(settings, 'danmakuShowSpecial');
-    _danmakuShowPositioned = _flagFromSettings(settings, 'danmakuShowPositioned');
-    _danmakuBold = _flagFromSettings(settings, 'danmakuBold', false);
+    _danmakuShowScroll = kotvSettingsMapFlag(settings, 'danmakuShowScroll', def: true);
+    _danmakuShowTop = kotvSettingsMapFlag(settings, 'danmakuShowTop', def: true);
+    _danmakuShowBottom = kotvSettingsMapFlag(settings, 'danmakuShowBottom', def: true);
+    _danmakuShowReverse = kotvSettingsMapFlag(settings, 'danmakuShowReverse', def: true);
+    _danmakuShowSpecial = kotvSettingsMapFlag(settings, 'danmakuShowSpecial', def: true);
+    _danmakuShowPositioned = kotvSettingsMapFlag(settings, 'danmakuShowPositioned', def: true);
+    _danmakuBold = kotvSettingsMapFlag(settings, 'danmakuBold');
     _danmakuDurationMs = int.tryParse('${settings['danmakuDurationMs'] ?? '8000'}') ?? 8000;
     _danmakuFixedDurationMs = int.tryParse('${settings['danmakuFixedDurationMs'] ?? '5000'}') ?? 5000;
     _danmakuLineSpacing = double.tryParse('${settings['danmakuLineSpacing'] ?? '1.4'}') ?? 1.4;
@@ -2962,7 +2955,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           }
           if (k == 'playerSkipOpeningEnding') {
             setState(() {
-              _skipOpeningEnding = v.toLowerCase() != 'false' && v != '0' && v.toLowerCase() != 'off';
+              _skipOpeningEnding = kotvSettingsFlag(v, def: true);
             });
           }
           if (k == 'playerStableVolume') {

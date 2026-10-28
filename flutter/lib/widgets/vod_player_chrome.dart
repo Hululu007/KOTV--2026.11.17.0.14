@@ -853,8 +853,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   Future<void> _loadSkipOpeningEnding() async {
     try {
       final m = await _loadSettings();
-      final raw = (m['playerSkipOpeningEnding'] ?? 'true').toLowerCase();
-      final on = raw != 'false' && raw != '0' && raw != 'off';
+      final on = kotvSettingsFlag(m['playerSkipOpeningEnding'], def: true);
       if (!mounted) return;
       setState(() => _loopSkip = on);
     } catch (_) {}

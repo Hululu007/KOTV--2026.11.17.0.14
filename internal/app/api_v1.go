@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobo/KOTV/internal/auth"
 	"github.com/bobo/KOTV/internal/clientsession"
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/danmaku"
@@ -58,8 +59,8 @@ func (a *App) APIHealth() map[string]any {
 		"source":        strings.TrimSpace(source),
 		"port":          a.Server.Port(),
 		"version":       update.CurrentVersion,
-		"remoteAuth":    strings.EqualFold(settings.Get(settings.RemoteAuth), "true"),
-		"allowRegister": strings.EqualFold(settings.Get(settings.AllowRegister), "true"),
+		"remoteAuth":    auth.RemoteAuthEnabled(),
+		"allowRegister": auth.AllowRegister(),
 		"spiderOk":      spiderOk,
 		"spiderError":   spiderErr,
 		"hostRole":      "full", // 对外仅 9978；安卓对内仍可有本机 9979
@@ -442,8 +443,8 @@ func (a *App) APIBtProgress() map[string]any {
 //   - thunder: true 时 Stop 磁力 Fetch / 专用源；默认 false（离开详情不停；磁力起播路径显式传 true）
 func (a *App) APICancelPending(opts map[string]any) map[string]any {
 	_, sites, _ := a.scope()
-	hard := optBool(opts, "hard", false)
-	stopThunder := optBool(opts, "thunder", false)
+	hard := boolParam(opts, "hard", false)
+	stopThunder := boolParam(opts, "thunder", false)
 	if hard {
 		sites.CancelPendingContent()
 	} else {
@@ -454,27 +455,6 @@ func (a *App) APICancelPending(opts map[string]any) map[string]any {
 		source.Stop()
 	}
 	return map[string]any{"ok": true, "hard": hard, "thunder": stopThunder}
-}
-
-func optBool(opts map[string]any, key string, def bool) bool {
-	if opts == nil {
-		return def
-	}
-	v, ok := opts[key]
-	if !ok || v == nil {
-		return def
-	}
-	switch t := v.(type) {
-	case bool:
-		return t
-	case float64:
-		return t != 0
-	case string:
-		s := strings.TrimSpace(strings.ToLower(t))
-		return s == "1" || s == "true" || s == "yes"
-	default:
-		return def
-	}
 }
 
 func (a *App) APISessionPing() map[string]any {
@@ -1236,8 +1216,8 @@ func (a *App) APIGetSettings() map[string]any {
 	out["backdrop"] = a.APIBackdrop()
 	if !remoteUser {
 		out["pairCode"] = settings.EnsureSyncPairCode()
-		out["remoteAuth"] = strings.EqualFold(settings.Get(settings.RemoteAuth), "true")
-		out["allowRegister"] = strings.EqualFold(settings.Get(settings.AllowRegister), "true")
+		out["remoteAuth"] = auth.RemoteAuthEnabled()
+		out["allowRegister"] = auth.AllowRegister()
 	}
 	return out
 }

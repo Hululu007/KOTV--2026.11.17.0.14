@@ -1751,8 +1751,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       s.length <= n ? s : '${s.substring(0, n)}…';
 
   bool get _adOn {
-    final on = g('adFilter', 'true');
-    return on.isEmpty || on == 'true' || on == '1' || on == 'on';
+    return kotvSettingsFlag(g('adFilter'), def: true);
   }
 
   Future<void> _setAd(bool on) async {
@@ -1808,8 +1807,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       );
 
   Future<void> _pickDownloadClassify() async {
-    final cur = g('downloadClassify', 'true');
-    final on = cur.trim().isEmpty || cur == 'true' || cur == '1';
+    final on = kotvSettingsFlag(g('downloadClassify'), def: true);
     final v = await pickChoice(
       context,
       title: '目录分类',

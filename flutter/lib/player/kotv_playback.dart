@@ -431,17 +431,15 @@ bool kotvAudioIsAuto(String? id) {
   return id.toLowerCase().trim() == 'auto';
 }
 
-/// 设置项布尔：空串用 [def]；显式 false/off/0/no 为关，其余为开。
+/// 设置项布尔：null 或空串用 [def]；显式 false/off/0/no 为关，其余为开。
 bool kotvSettingsFlag(Object? raw, {bool def = false}) {
-  final t = '$raw'.trim().toLowerCase();
+  final t = (raw == null ? '' : '$raw').trim().toLowerCase();
   if (t.isEmpty) return def;
   return t != 'false' && t != 'off' && t != '0' && t != 'no';
 }
 
-bool kotvSettingsMapFlag(Map<String, dynamic> settings, String key, {bool def = false}) {
-  if (!settings.containsKey(key) || settings[key] == null) return def;
-  return kotvSettingsFlag(settings[key], def: def);
-}
+bool kotvSettingsMapFlag(Map<String, dynamic> settings, String key, {bool def = false}) =>
+    kotvSettingsFlag(settings[key], def: def);
 
 void kotvDisposePlaybackStreams({
   required Future<void> Function() stop,

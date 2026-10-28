@@ -31,6 +31,7 @@ import 'profile_screen.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
 import 'video_screen.dart';
+import '../player/kotv_playback.dart';
 
 export '../nav/kotv_page.dart';
 
@@ -96,8 +97,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     // 启动拉引擎设置（无痕等由引擎 settings 管理，历史写入时再读）。
     KotvSettingsCache.fetch(api, force: true).then((map) async {
       kotvApplyPlayUaSetting('${map['ua'] ?? ''}');
-      final bootLive = '${map['bootLive'] ?? ''}'.toLowerCase();
-      if (bootLive == 'true' || bootLive == '1' || bootLive == 'on') {
+      if (kotvSettingsMapFlag(map, 'bootLive')) {
         if (mounted) goKotvPage(ref, KotvPage.live);
       }
     }).catchError((_) {});
