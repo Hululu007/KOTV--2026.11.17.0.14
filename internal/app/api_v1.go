@@ -42,8 +42,13 @@ import (
 // --- ContentAPI（Flutter /api/v1）---
 
 func (a *App) APIHealth() map[string]any {
-	_, _, sess := a.scope()
-	ready, errMsg := a.Ready, a.ErrMsg
+	// 健康检查不能等配置加载：加载中只报 loading，不建远端会话。
+	loading := a.configLoading()
+	var sess *clientsession.Session
+	if !loading {
+		_, _, sess = a.scope()
+	}
+	ready, errMsg := a.configState()
 	source := settings.Get(settings.VOD)
 	if sess != nil {
 		ready, errMsg = sess.Ready, sess.ErrMsg
@@ -52,6 +57,7 @@ func (a *App) APIHealth() map[string]any {
 	spiderOk, spiderErr := spider.HostSpiderReady()
 	return map[string]any{
 		"ok":            true,
+		"loading":       loading,
 		"engine":        "kotv",
 		"platform":      runtime.GOOS,
 		"ready":         ready,
@@ -69,12 +75,13 @@ func (a *App) APIHealth() map[string]any {
 
 func (a *App) APIGetConfig() map[string]any {
 	cfg, _, sess := a.scope()
-	ready, errMsg := a.Ready, a.ErrMsg
+	ready, errMsg := a.configState()
+	hostReady := ready
 	source := settings.Get(settings.VOD)
 	if sess != nil {
 		ready, errMsg = sess.Ready, sess.ErrMsg
 		source = sess.Source
-		if !ready && a.Ready && len(cfg.Sites()) == 0 {
+		if !ready && hostReady && len(cfg.Sites()) == 0 {
 			bindSessionConfig(sess, a.Config.CloneEphemeral())
 			sess.Ready = true
 			sess.ErrMsg = ""
@@ -107,6 +114,7 @@ func (a *App) APIGetConfig() map[string]any {
 	spiderOk, spiderErr := spider.HostSpiderReady()
 	return map[string]any{
 		"ok":          true,
+		"loading":     a.configLoading(),
 		"ready":       ready,
 		"error":       errMsg,
 		"source":      source,
@@ -122,6 +130,8 @@ func (a *App) APIGetConfig() map[string]any {
 }
 
 func (a *App) APILoadConfig(source string) error {
+	// 等启动那次加载结束，否则它晚完成会盖掉这次换的源。
+	a.waitConfigLoaded()
 	cfg, sites, sess := a.scope()
 	sites.DropContentCache()
 	sites.SoftCancelPending()
@@ -135,6 +145,7 @@ func (a *App) APILoadConfig(source string) error {
 
 // APIRefreshConfig 重新请求当前 http(s) 仓库，并重新检查 jar 与 js/py。
 func (a *App) APIRefreshConfig() error {
+	a.waitConfigLoaded()
 	cfg, sites, sess := a.scope()
 	source := ""
 	if sess != nil {
@@ -179,8 +190,7 @@ func (a *App) finishConfigLoad(cfg *config.Manager, sess *clientsession.Session,
 			sess.Live.SyncFromConfig()
 		}
 	} else {
-		a.Ready = true
-		a.ErrMsg = ""
+		a.setConfigState(true, "")
 		a.Live.SyncFromConfig()
 	}
 	// Dedicated 下 settings.Set 写入 owner=userId；本机写入 owner=''。

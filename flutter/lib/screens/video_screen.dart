@@ -340,6 +340,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         return;
       }
       setState(() => _ready = ready);
+      // 引擎启动时点播源在后台加载，configProvider 可能缓存了加载中的空配置。
+      if (ready && ref.read(configProvider).valueOrNull?['ready'] != true) {
+        ref.invalidate(configProvider);
+      }
 
       if (!ready) {
         final source = '${cfg['source'] ?? ''}'.trim();

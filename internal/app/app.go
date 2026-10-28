@@ -40,8 +40,12 @@ type App struct {
 	Sites  *service.SiteService
 	Live   *live.Service
 	Server *server.Server
-	Ready  bool
-	ErrMsg string
+
+	// 本机点播配置的加载状态。启动时在后台加载，HTTP 不等它（见 New）。
+	cfgMu     sync.RWMutex
+	cfgReady  bool
+	cfgErr    string
+	cfgLoaded chan struct{} // 启动时那次加载结束后关闭
 
 	sessions *clientsession.Hub
 	presence *clientsession.Presence
@@ -129,21 +133,16 @@ func New() (*App, error) {
 		return server.ResolveCoreResp(append([]model.Live(nil), lv.Sources()...), lv.Current())
 	})
 
-	// 先加载点播配置再开 HTTP，避免首请求建出会话时 Cfg 仍为空、
-	// 随后只换 Cfg 不换 Sites 导致长期 Get ""。
+	// HTTP 先起：http(s) 点播源要联网，断网或没外网时会卡到请求超时（约 30 秒），
+	// 前端等不到端口就判定连不上本机后端。配置在后台加载，加载期间
+	// 健康检查/配置接口报 loading；远端会话在 scope 里等加载结束再克隆配置，避免克隆到空配置。
 	cfg.EnsureVodFromHistory()
-	if err := cfg.InitFromSettings(); err != nil {
-		a.ErrMsg = err.Error()
-		log.Printf("配置加载: %v", err)
-	} else {
-		a.Ready = true
-	}
-	liveSvc.SyncFromConfig()
-
+	a.cfgLoaded = make(chan struct{})
 	if err := a.Server.Start(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
+	go a.loadInitialConfig()
 	syncH := server.NewAppSyncHandler(db, func(code string) bool {
 		return code != "" && code == settings.Get(settings.SyncPairCode)
 	})
@@ -182,7 +181,9 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 	if cid == "" {
 		return a.Config, a.Sites, nil
 	}
+	a.waitConfigLoaded()
 	sess = a.sessions.GetOrCreate(cid, func() *clientsession.Session {
+		ready, errMsg := a.configState()
 		cloned := a.Config.CloneEphemeral()
 		liveSvc := live.NewService(cloned)
 		liveSvc.SyncFromConfig()
@@ -192,8 +193,8 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 			Sites:    service.NewSiteService(cloned),
 			Live:     liveSvc,
 			Source:   settings.Get(settings.VOD),
-			Ready:    a.Ready,
-			ErrMsg:   a.ErrMsg,
+			Ready:    ready,
+			ErrMsg:   errMsg,
 		}
 		s.SetRepoBaseline(a.siteRepoURLs())
 		cloned.SetRepoWriteHook(s.NoteRepo)
@@ -213,7 +214,52 @@ func (a *App) scopeReady() (*config.Manager, bool) {
 	if sess != nil {
 		return cfg, sess.Ready
 	}
-	return cfg, a.Ready
+	ready, _ := a.configState()
+	return cfg, ready
+}
+
+// loadInitialConfig 启动时加载点播配置；结束后关闭 cfgLoaded。
+func (a *App) loadInitialConfig() {
+	defer close(a.cfgLoaded)
+	if err := a.Config.InitFromSettings(); err != nil {
+		a.setConfigState(false, err.Error())
+		log.Printf("配置加载: %v", err)
+	} else {
+		a.setConfigState(true, "")
+	}
+	a.Live.SyncFromConfig()
+}
+
+// waitConfigLoaded 等启动时那次配置加载结束（之后立即返回）。
+func (a *App) waitConfigLoaded() {
+	if a.cfgLoaded != nil {
+		<-a.cfgLoaded
+	}
+}
+
+// configLoading 启动时那次配置加载是否还在进行。
+func (a *App) configLoading() bool {
+	if a.cfgLoaded == nil {
+		return false
+	}
+	select {
+	case <-a.cfgLoaded:
+		return false
+	default:
+		return true
+	}
+}
+
+func (a *App) configState() (ready bool, errMsg string) {
+	a.cfgMu.RLock()
+	defer a.cfgMu.RUnlock()
+	return a.cfgReady, a.cfgErr
+}
+
+func (a *App) setConfigState(ready bool, errMsg string) {
+	a.cfgMu.Lock()
+	a.cfgReady, a.cfgErr = ready, errMsg
+	a.cfgMu.Unlock()
 }
 
 // bindSessionConfig 替换会话配置时必须同步 Sites/Live，否则换源/换站只改 Cfg，
@@ -315,8 +361,9 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 			sess.Cfg.SetHome(*site)
 		}
 	}
+	hostReady, _ := a.configState()
 	adoptGlobal := func() {
-		if !a.Ready {
+		if !hostReady {
 			return
 		}
 		bindSessionConfig(sess, a.Config.CloneEphemeral())
@@ -338,7 +385,7 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 		return
 	}
 	if err := sess.Cfg.LoadFromSource(src); err != nil {
-		if a.Ready {
+		if hostReady {
 			adoptGlobal()
 			applyHome(homeKey)
 			return
@@ -547,21 +594,20 @@ func (a *App) LoadVodSource(source string) error {
 }
 
 func (a *App) reloadConfig(load func() error) error {
+	a.waitConfigLoaded()
 	util.SetProxy(settings.Get(settings.Proxy))
 	spider.SetUserProxy(settings.Get(settings.Proxy))
 	// 换仓前先不可用，避免 Clear 窗口内仍 Ready 去 Get ""。
-	a.Ready = false
-	a.ErrMsg = ""
+	a.setConfigState(false, "")
 	a.Sites.DropContentCache()
 	a.Config.Clear()
 	if err := load(); err != nil {
-		a.ErrMsg = err.Error()
+		a.setConfigState(false, err.Error())
 		a.switchConfigJars(model.Api{})
 		return err
 	}
 	a.switchConfigJars(a.Config.API())
-	a.Ready = true
-	a.ErrMsg = ""
+	a.setConfigState(true, "")
 	a.Live.SyncFromConfig()
 	a.syncSessionsFromGlobal()
 	return nil
@@ -569,7 +615,10 @@ func (a *App) reloadConfig(load func() error) error {
 
 // syncSessionsFromGlobal 宿主全局换源后：有独立 Source 的远端会话保持原仓重载，无则跟全局。
 func (a *App) syncSessionsFromGlobal() {
-	if a == nil || a.sessions == nil || !a.Ready {
+	if a == nil || a.sessions == nil {
+		return
+	}
+	if ready, _ := a.configState(); !ready {
 		return
 	}
 	a.sessions.ForEach(func(sess *clientsession.Session) {

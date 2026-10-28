@@ -77,6 +77,8 @@ class EngineLauncher {
       final h = await _health(baseUrl);
       if (h != null && h['ok'] == true && (remote || _acceptLocalHealth())) {
         if (h['ready'] == true) return true;
+        // 带 loading 的引擎：连上即可，点播源加载中/失败由首页等待和提示。
+        if (h.containsKey('loading')) return true;
         final source = '${h['source'] ?? ''}'.trim();
         final err = '${h['error'] ?? ''}';
         if (source.isEmpty && _looksLikeNoSource(err)) {

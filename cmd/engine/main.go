@@ -34,9 +34,6 @@ func main() {
 	dev := util.DeviceLocation()
 	log.Printf("KOTV engine ready http://127.0.0.1:%d (api=/api/v1) tz=%s local=%s now=%s",
 		a.Server.Port(), dev, time.Local, time.Now().In(dev).Format(time.RFC3339))
-	if a.ErrMsg != "" {
-		log.Printf("config: %s", a.ErrMsg)
-	}
 
 	apiStop := make(chan struct{}, 1)
 	a.Server.SetShutdownHook(func() {
