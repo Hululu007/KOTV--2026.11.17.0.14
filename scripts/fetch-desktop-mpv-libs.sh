@@ -32,6 +32,7 @@ fetch_windows() {
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
     && grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu' "$out" 2>/dev/null \
     && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null \
+    && grep -aq 'd3d11-egl' "$out" 2>/dev/null \
     && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "$want_kind" ]] \
     && windows_siblings_ok; then
     echo "ok windows/mpv-2.dll (cached AV3A + dovi + dav1d + sibling dlls, kind=$want_kind)"

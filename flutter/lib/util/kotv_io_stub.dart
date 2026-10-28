@@ -58,6 +58,15 @@ class FileSystemEntity {
   void deleteSync({bool recursive = false}) {}
 }
 
+class Process {
+  static Future<ProcessResult> run(String executable, List<String> arguments,
+          {String? workingDirectory, Map<String, String>? environment, bool includeParentEnvironment = true, bool runInShell = false, encoding, stderrEncoding}) async =>
+      ProcessResult(0, 1, '', 'unsupported on web');
+  static Future<Process> start(String executable, List<String> arguments,
+          {String? workingDirectory, Map<String, String>? environment, bool includeParentEnvironment = true, bool runInShell = false, ProcessStartMode mode = ProcessStartMode.normal}) async =>
+      throw UnsupportedError('Process.start unsupported on web');
+}
+
 class ProcessResult {
   ProcessResult(this.pid, this.exitCode, this.stdout, this.stderr);
   final int pid;
