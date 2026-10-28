@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Windows MinGW 构建用：去掉带空格 PATH，同时保留 cmake/ninja（装在 Program Files）。
-# 由 ensure-desktop-*.sh / ffmpeg 脚本 source。
+# 构建脚本共用函数：命令检查、sha256 校验、Windows MinGW 路径与 PATH 清理、macOS 目标 arch。
+# 由 build-*.sh / ensure-desktop-*.sh source；只定义函数，无副作用。
 # shellcheck shell=bash
 
 kotv_is_windows_build() {
@@ -8,6 +8,31 @@ kotv_is_windows_build() {
     MINGW*|MSYS*|CYGWIN*) return 0 ;;
   esac
   [[ "${OS:-}" == "Windows_NT" ]]
+}
+
+# 缺命令就退出。
+need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
+
+# Windows 下把 MSYS 路径转成 C:/… 形式（给 CMake / meson 用）；其它平台原样输出。
+kotv_native_path() {
+  local p="$1"
+  if kotv_is_windows_build && command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$p"
+  else
+    printf '%s' "$p"
+  fi
+}
+
+# 校验 sha256；本机既没有 shasum 也没有 sha256sum 时放行。
+kotv_verify_sha256() {
+  local f="$1" expect="$2"
+  if command -v shasum >/dev/null; then
+    echo "$expect  $f" | shasum -a 256 -c -
+  elif command -v sha256sum >/dev/null; then
+    echo "$expect  $f" | sha256sum -c -
+  else
+    return 0
+  fi
 }
 
 kotv_win7_cflags() {

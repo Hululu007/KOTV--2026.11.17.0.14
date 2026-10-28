@@ -4,6 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 FFMPEG_REPO="${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}"
@@ -31,22 +33,8 @@ resolve_ffmpeg_sha() {
 FFMPEG_COMMIT="$(resolve_ffmpeg_sha)"
 echo "ok FFmpeg ${FFMPEG_COMMIT:0:12} (ref=${FFMPEG_REF})"
 
-kotv_is_windows_build() {
-  case "$(uname -s 2>/dev/null)" in
-    MINGW*|MSYS*|CYGWIN*) return 0 ;;
-  esac
-  [[ "${OS:-}" == "Windows_NT" ]]
-}
 
 # gcc / FFmpeg 在 Windows 上更吃 D:/ 路径；MSYS 绝对路径 /d/ 偶发链接探测失败。
-kotv_native_path() {
-  local p="$1"
-  if kotv_is_windows_build && command -v cygpath >/dev/null 2>&1; then
-    cygpath -m "$p"
-  else
-    printf '%s' "$p"
-  fi
-}
 
 if kotv_is_windows_build; then
   if [[ -d "/c/mingw-msvcrt/mingw64/bin" ]]; then
@@ -62,7 +50,6 @@ else
   CMAKE_GENERATOR="${KOTV_CMAKE_GENERATOR:-Unix Makefiles}"
 fi
 
-need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 need git
 need cmake
 command -v "$MAKE" >/dev/null || need make

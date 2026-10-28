@@ -4,6 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 STAMP="$PREFIX/.kotv-parity-libs-v7"
@@ -20,34 +22,17 @@ ZLIB_SHA=9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
 RUBBER_VER=4.0.0
 RUBBER_SHA=24300f48a8014b7c863b573a9647e61b1b19b37875e2cdd92005e64c6424d266
 
-need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 need curl
 need tar
 need make
 need cmake
 need pkg-config
 
-is_windows() {
-  case "$(uname -s 2>/dev/null)" in
-    MINGW*|MSYS*|CYGWIN*) return 0 ;;
-  esac
-  [[ "${OS:-}" == "Windows_NT" ]]
-}
 
 fetch() {
   local url="$1" dest="$2" sha="$3"
-  verify_sha() {
-    local f="$1" expect="$2"
-    if command -v shasum >/dev/null; then
-      echo "$expect  $f" | shasum -a 256 -c -
-    elif command -v sha256sum >/dev/null; then
-      echo "$expect  $f" | sha256sum -c -
-    else
-      return 0
-    fi
-  }
   if [[ -f "$dest" ]]; then
-    if verify_sha "$dest" "$sha" >/dev/null 2>&1; then
+    if kotv_verify_sha256 "$dest" "$sha" >/dev/null 2>&1; then
       return 0
     fi
     echo "WARN: remove corrupt $dest (sha mismatch)" >&2
@@ -60,14 +45,14 @@ fetch() {
     return 1
   fi
   mv -f "$dest.partial" "$dest"
-  if ! verify_sha "$dest" "$sha"; then
+  if ! kotv_verify_sha256 "$dest" "$sha"; then
     rm -f "$dest"
     return 1
   fi
 }
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+if kotv_is_windows_build || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 fi
 
@@ -91,7 +76,7 @@ mkdir -p "$src" "$PREFIX"
 # 注意：带空格的 generator 必须是单个字符串；用数组 [0] 会变成只传 MinGW/Unix。
 cmake_gen="Ninja"
 command -v ninja >/dev/null || cmake_gen="Unix Makefiles"
-if is_windows; then
+if kotv_is_windows_build; then
   if command -v ninja >/dev/null; then
     cmake_gen="Ninja"
   else
@@ -100,7 +85,7 @@ if is_windows; then
 fi
 
 echo "==> parity libs -> $PREFIX"
-if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+if kotv_is_windows_build || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # ftp.gnu.org 经常连不上。镜像是同一份包，sha 不对会删掉再试下一源。
   fetch "https://mirrors.kernel.org/gnu/libiconv/libiconv-${ICONV_VER}.tar.gz" \
     "$src/libiconv-${ICONV_VER}.tar.gz" "$ICONV_SHA" \
@@ -115,7 +100,7 @@ if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
     cd "$BUILD_DIR/libiconv"
     # Git Bash「C:/Program Files/.../sh」空格会拆坏 Makefile 里 windres-options 反引号，
     # lib/*.rc 与 src/*.rc 均 syntax error。静态链不需要版本资源。
-    if is_windows; then
+    if kotv_is_windows_build; then
       export CONFIG_SHELL=/usr/bin/sh
       export SHELL=/usr/bin/sh
       mkdir -p "$BUILD_DIR/bin"
@@ -194,7 +179,7 @@ if [[ ! -f "$PREFIX/lib/libz.a" && ! -f "$PREFIX/lib/libzlibstatic.a" ]]; then
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DBUILD_SHARED_LIBS=OFF
   # zlib 的 Windows CMake 仍会编 shared+zlib1.rc；只编静态并手动安装。
-  if is_windows; then
+  if kotv_is_windows_build; then
     cmake --build "$BUILD_DIR/zlib-build" -j"$JOBS" --target zlibstatic
     mkdir -p "$PREFIX/lib" "$PREFIX/include"
     zstat=""

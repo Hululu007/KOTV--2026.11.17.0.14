@@ -11,6 +11,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 WEBHTV_REF="${KOTV_WEBHTV_MPV_PIN:-${KOTV_WEBHTV_MPV_REF:-main}}"
 FFMPEG_REPO="${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}"
 FFMPEG_REF="${KOTV_FFMPEG_REF:-release-9.0-fongmi}"
@@ -19,7 +21,6 @@ ASSET="$ROOT/flutter/android/app/src/main/assets/mpv-libs"
 STAMP="$ASSET/.kotv-source-build"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
-need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 for cmd in git curl python3 pkg-config perl cmake gperf make; do
   need "$cmd"
 done

@@ -5,6 +5,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 STAMP="$PREFIX/.kotv-iso-libs-v4"
@@ -17,18 +19,11 @@ DVDNAV_SHA=a2a18f5ad36d133c74bf9106b6445806fa253b09141a46392550394b647b221e
 BLURAY_VER=1.4.1
 BLURAY_SHA=76b5dc40097f28dca4ebb009c98ed51321b2927453f75cc72cf74acd09b9f449
 
-need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 need curl
 need tar
 need meson
 need ninja
 
-is_windows() {
-  case "$(uname -s 2>/dev/null)" in
-    MINGW*|MSYS*|CYGWIN*) return 0 ;;
-  esac
-  [[ "${OS:-}" == "Windows_NT" ]]
-}
 
 fetch() {
   local url="$1" dest="$2" sha="$3"
@@ -81,7 +76,7 @@ fetch_videolan() {
 MESON_NATIVE=()
 ensure_pkg_config() {
   mkdir -p "$PREFIX/lib/pkgconfig"
-  if is_windows; then
+  if kotv_is_windows_build; then
     local pkg_bin="$BUILD_DIR/bin" pc_win pkg_win
     mkdir -p "$pkg_bin"
     cp -f "$ROOT/scripts/kotv-pkg-config.py" "$pkg_bin/kotv-pkg-config.py"
@@ -186,7 +181,7 @@ fetch_videolan "libbluray/${BLURAY_VER}/libbluray-${BLURAY_VER}.tar.xz" \
   "$src/libbluray-${BLURAY_VER}.tar.xz" "$BLURAY_SHA"
 
 dvdread_opts=(-Denable_docs=false -Dlibdvdcss=disabled)
-if is_windows; then
+if kotv_is_windows_build; then
   dvdread_opts+=(-Ddlfcn=builtin)
 fi
 build_meson_lib dvdread "$src/libdvdread-${DVDREAD_VER}.tar.xz" "${dvdread_opts[@]}"
@@ -201,7 +196,7 @@ build_meson_lib dvdnav "$src/libdvdnav-${DVDNAV_VER}.tar.xz" -Denable_docs=false
 
 # MinGW libbluray 硬找 -lssp；部分 runner 的 toolchain 没有 libssp.a。
 # required:false 即可：有就链，没有也能编过（与功能无关）。
-if is_windows; then
+if kotv_is_windows_build; then
   rm -rf "$BUILD_DIR/libbluray" "$BUILD_DIR/libbluray-build"
   mkdir -p "$BUILD_DIR/libbluray"
   tar -xf "$src/libbluray-${BLURAY_VER}.tar.xz" -C "$BUILD_DIR/libbluray" --strip-components=1

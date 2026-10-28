@@ -8,6 +8,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 DOVI_REF="${KOTV_LIBDOVI_REF:-libdovi-3.3.2}"
@@ -20,21 +22,14 @@ WIN7_DOVI_REF="${KOTV_LIBDOVI_WIN7_REF:-libdovi-3.3.0}"
 WIN7_CARGO_C_VER="${KOTV_LIBDOVI_WIN7_CARGO_C:-0.9.32}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
-need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 
-is_windows() {
-  case "$(uname -s 2>/dev/null)" in
-    MINGW*|MSYS*|CYGWIN*) return 0 ;;
-  esac
-  [[ "${OS:-}" == "Windows_NT" ]]
-}
 
 is_win7_build() {
   [[ "${KOTV_MPV_WIN7:-${KOTV_WIN7:-0}}" == "1" ]]
 }
 
 # stamp 带工具链标签，避免 Win7 / 普通 Windows 共用 PREFIX 缓存串味。
-if is_windows && is_win7_build; then
+if kotv_is_windows_build && is_win7_build; then
   RUST_PIN="$WIN7_RUST_VER"
   DOVI_REF="${KOTV_LIBDOVI_REF:-$WIN7_DOVI_REF}"
   CARGO_C_VER="$WIN7_CARGO_C_VER"
@@ -47,7 +42,7 @@ STAMP="$PREFIX/.kotv-libdovi-v8-${STAMP_TAG}"
 WANT_STAMP="${DOVI_REF} rust=${RUST_PIN} cargo-c=${CARGO_C_VER} locked=1 target=gnu"
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+if kotv_is_windows_build || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 fi
 
@@ -161,7 +156,7 @@ ensure_cargo_c() {
   fi
   echo "==> fetch cargo-c v${CARGO_C_VER}"
   local url dest
-  if is_windows; then
+  if kotv_is_windows_build; then
     url="https://github.com/lu-zero/cargo-c/releases/download/v${CARGO_C_VER}/cargo-c-windows-gnu.zip"
     dest="$BUILD_DIR/cargo-c-v${CARGO_C_VER}-windows-gnu.zip"
     curl -fsSL --retry 5 --retry-delay 2 -o "$dest" "$url"
@@ -210,7 +205,7 @@ ensure_cargo_c() {
 }
 
 rust_target() {
-  if is_windows; then
+  if kotv_is_windows_build; then
     echo "x86_64-pc-windows-gnu"
     return
   fi
@@ -271,7 +266,7 @@ ensure_cargo_c
 TARGET="$(rust_target)"
 echo "==> build libdovi $DOVI_REF (target=$TARGET rust=$RUST_PIN → $PREFIX)"
 
-if is_windows; then
+if kotv_is_windows_build; then
   # MinGW：host/build-script 也必须走 gnu，否则默认 MSVC host 会找 link.exe，
   # 却命中 Git 的 /usr/bin/link（Unix link）而炸。
   if is_win7_build; then
@@ -331,7 +326,7 @@ echo "ok rustc=$(rustc --version 2>/dev/null || true) toolchain=${RUSTUP_TOOLCHA
 mkdir -p "$BUILD_DIR" "$PREFIX/lib/pkgconfig" "$PREFIX/include"
 cd "$BUILD_DIR"
 # Win7 换 tag/工具链时 shallow 仓库可能不含目标 tag，直接重建。
-if is_windows && is_win7_build && { [[ ! -f "$STAMP" ]] || [[ "$(cat "$STAMP" 2>/dev/null || true)" != "$WANT_STAMP" ]]; }; then
+if kotv_is_windows_build && is_win7_build && { [[ ! -f "$STAMP" ]] || [[ "$(cat "$STAMP" 2>/dev/null || true)" != "$WANT_STAMP" ]]; }; then
   rm -rf dovi_tool
 fi
 if [[ ! -d dovi_tool/.git ]]; then
@@ -348,7 +343,7 @@ rm -f "$PREFIX/lib/libdovi.a" "$PREFIX/lib/libdovi.dll.a" "$PREFIX/lib/dovi.lib"
   "$PREFIX/lib/pkgconfig/dovi.pc" 2>/dev/null || true
 
 CRATE_DIR="$BUILD_DIR/dovi_tool/dolby_vision"
-if is_windows && is_win7_build; then
+if kotv_is_windows_build && is_win7_build; then
   prepare_win7_dolby_vision
   CRATE_DIR="$BUILD_DIR/libdovi-win7-crate"
 fi
@@ -356,7 +351,7 @@ fi
 # 静态库：桌面 libplacebo/mpv 直接吃进产物，少一份运行时 DLL/so。
 (
   cd "$CRATE_DIR"
-  if is_windows && is_win7_build; then
+  if kotv_is_windows_build && is_win7_build; then
     # 必须 --locked：禁止回退到重新解析（会拉到 edition2024）。
     [[ -f Cargo.lock ]] || { echo "ERROR: missing $CRATE_DIR/Cargo.lock" >&2; exit 1; }
     cargo cinstall --release \
@@ -391,7 +386,7 @@ fi
 
 # Win7：静态库若硬链（undefined）Win8+ 导入，说明钉错了工具链。
 # 仅匹配 nm 的 U/u 未定义符号；.rdata 里 GetProcAddress 用的名字字符串不算失败。
-if is_windows && is_win7_build; then
+if kotv_is_windows_build && is_win7_build; then
   lib=""
   for cand in "$PREFIX/lib/libdovi.a" "$PREFIX/lib/libdovi.dll.a"; do
     [[ -f "$cand" ]] && lib="$cand" && break

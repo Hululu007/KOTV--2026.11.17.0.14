@@ -50,6 +50,36 @@ Future<void> _prepareLeavePlayback() async {
   return (width: width, height: height, inset: inset, compact: compact, ui: ui);
 }
 
+/// 弹窗外框：透明 Dialog 里放圆角描边面板。
+/// [fixedSize] 为 true 时用 [kotvDialogMetrics] 的宽高；否则只限宽（窄屏满宽，宽屏最多 [maxWidth]），高度随内容。
+Widget kotvDialogShell(
+  BuildContext context, {
+  required Widget child,
+  bool fixedSize = false,
+  double maxWidth = 520,
+  Color? background,
+  Color? border,
+  EdgeInsetsGeometry? padding,
+}) {
+  final m = kotvDialogMetrics(context);
+  final p = KotvPalette.of(context);
+  final panel = DecoratedBox(
+    decoration: BoxDecoration(
+      color: background ?? p.dialogBg,
+      borderRadius: BorderRadius.circular(18 * m.ui),
+      border: Border.all(color: border ?? p.outline),
+    ),
+    child: Padding(padding: padding ?? EdgeInsets.all(m.compact ? 14 : 24), child: child),
+  );
+  return Dialog(
+    backgroundColor: Colors.transparent,
+    insetPadding: m.inset,
+    child: fixedSize
+        ? SizedBox(width: m.width, height: m.height, child: panel)
+        : ConstrainedBox(constraints: BoxConstraints(maxWidth: m.compact ? m.width : maxWidth), child: panel),
+  );
+}
+
 // 添加源时选择本机配置文件。
 const _configFileTypes = XTypeGroup(
   label: '配置文件',
@@ -225,206 +255,193 @@ Future<void> showSitePicker(
           }
 
           final pal = KotvPalette.of(ctx);
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: m.inset,
-            child: SizedBox(
-              width: m.width,
-              height: m.height,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: pal.dialogBg,
-                  borderRadius: BorderRadius.circular(18 * m.ui),
-                  border: Border.all(color: pal.outline),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                      m.compact ? 14 : 28,
-                      m.compact ? 14 : 24,
-                      m.compact ? 14 : 28,
-                      m.compact ? 12 : 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '换源',
-                              style: TextStyle(
-                                color: pal.fg,
-                                fontSize: m.compact ? 20 : 26,
-                                fontWeight: FontWeight.w700,
-                                height: 1.2,
-                              ),
-                            ),
-                          ),
-                          AppPill(
-                              label: '关闭',
-                              width: m.compact ? 72 : 96,
-                              height: 36,
-                              onTap: () => Navigator.pop(ctx)),
-                        ],
-                      ),
-                      SizedBox(height: m.compact ? 6 : 8),
-                      Text(
-                        '点名称切换；右侧图标：可搜索 / 可换源（长按=全部）',
-                        maxLines: m.compact ? 1 : null,
-                        overflow: m.compact
-                            ? TextOverflow.ellipsis
-                            : TextOverflow.visible,
-                        softWrap: !m.compact,
+          return kotvDialogShell(
+            ctx,
+            fixedSize: true,
+            padding: EdgeInsets.fromLTRB(
+              m.compact ? 14 : 28,
+              m.compact ? 14 : 24,
+              m.compact ? 14 : 28,
+              m.compact ? 12 : 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '换源',
                         style: TextStyle(
-                          color: pal.muted,
-                          fontSize: m.compact ? 11 : 14,
-                          height: m.compact ? 1.1 : 1.35,
+                          color: pal.fg,
+                          fontSize: m.compact ? 20 : 26,
+                          fontWeight: FontWeight.w700,
+                          height: 1.2,
                         ),
                       ),
-                      SizedBox(height: m.compact ? 8 : 12),
-                      KotvTvTextField(
-                        controller: filterCtrl,
-                        style: TextStyle(color: pal.fg),
-                        cursorColor: pal.primary,
-                        decoration: InputDecoration(
-                          hintText: '搜索站源',
-                          hintStyle: TextStyle(color: pal.muted),
-                          filled: true,
-                          fillColor: pal.input,
-                          prefixIcon: Icon(Icons.search, color: pal.muted),
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: m.compact ? 10 : 12,
-                          ),
-                        ),
-                        onChanged: (v) => setLocal(() => filter = v),
-                      ),
-                      SizedBox(height: m.compact ? 8 : 12),
-                      Expanded(
-                        child: local.isEmpty
-                            ? Center(
-                                child: Text(
-                                  q.isEmpty ? '暂无站源' : '无匹配的站源',
-                                  style: TextStyle(color: pal.muted),
-                                ),
-                              )
-                            : ListView.separated(
-                          controller: scrollCtrl,
-                          itemCount: local.length,
-                          separatorBuilder: (_, __) =>
-                              SizedBox(height: m.compact ? 4 : 8),
-                          itemBuilder: (_, i) {
-                            final s = local[i];
-                            if (m.compact) {
-                              return Row(
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  Expanded(
-                                    child: AppPill(
-                                      label: s.name,
-                                      height: 40,
-                                      selected: s.home,
-                                      autofocus: i == focusIdx,
-                                      onTap: () {
-                                        Navigator.pop(ctx);
-                                        onSelect(s.key);
-                                      },
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  _CircleIcon(
-                                    icon: s.searchable
-                                        ? Icons.search
-                                        : Icons.visibility_off,
-                                    onTap: () async {
-                                      await ref.read(apiProvider).toggleSite(
-                                          field: 'searchable', key: s.key);
-                                      await reload();
-                                    },
-                                    onLongPress: () async {
-                                      await ref.read(apiProvider).toggleSite(
-                                          field: 'searchable',
-                                          all: !s.searchable);
-                                      await reload();
-                                    },
-                                  ),
-                                  const SizedBox(width: 8),
-                                  _CircleIcon(
-                                    icon: s.changeable
-                                        ? Icons.refresh
-                                        : Icons.visibility_off,
-                                    onTap: () async {
-                                      await ref.read(apiProvider).toggleSite(
-                                          field: 'changeable', key: s.key);
-                                      await reload();
-                                    },
-                                    onLongPress: () async {
-                                      await ref.read(apiProvider).toggleSite(
-                                          field: 'changeable',
-                                          all: !s.changeable);
-                                      await reload();
-                                    },
-                                  ),
-                                ],
-                              );
-                            }
-                            return Row(
-                              children: [
-                                Expanded(
-                                  child: AppPill(
-                                    label: s.name,
-                                    height: 44,
-                                    selected: s.home,
-                                    autofocus: i == focusIdx,
-                                    onTap: () {
-                                      Navigator.pop(ctx);
-                                      onSelect(s.key);
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _CircleIcon(
-                                  icon: s.searchable
-                                      ? Icons.search
-                                      : Icons.search_off,
-                                  onTap: () async {
-                                    await ref.read(apiProvider).toggleSite(
-                                        field: 'searchable', key: s.key);
-                                    await reload();
-                                  },
-                                  onLongPress: () async {
-                                    await ref.read(apiProvider).toggleSite(
-                                        field: 'searchable',
-                                        all: !s.searchable);
-                                    await reload();
-                                  },
-                                ),
-                                const SizedBox(width: 6),
-                                _CircleIcon(
-                                  icon: s.changeable
-                                      ? Icons.refresh
-                                      : Icons.visibility_off,
-                                  onTap: () async {
-                                    await ref.read(apiProvider).toggleSite(
-                                        field: 'changeable', key: s.key);
-                                    await reload();
-                                  },
-                                  onLongPress: () async {
-                                    await ref.read(apiProvider).toggleSite(
-                                        field: 'changeable',
-                                        all: !s.changeable);
-                                    await reload();
-                                  },
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
-                    ],
+                    ),
+                    AppPill(
+                        label: '关闭',
+                        width: m.compact ? 72 : 96,
+                        height: 36,
+                        onTap: () => Navigator.pop(ctx)),
+                  ],
+                ),
+                SizedBox(height: m.compact ? 6 : 8),
+                Text(
+                  '点名称切换；右侧图标：可搜索 / 可换源（长按=全部）',
+                  maxLines: m.compact ? 1 : null,
+                  overflow: m.compact
+                      ? TextOverflow.ellipsis
+                      : TextOverflow.visible,
+                  softWrap: !m.compact,
+                  style: TextStyle(
+                    color: pal.muted,
+                    fontSize: m.compact ? 11 : 14,
+                    height: m.compact ? 1.1 : 1.35,
                   ),
                 ),
-              ),
+                SizedBox(height: m.compact ? 8 : 12),
+                KotvTvTextField(
+                  controller: filterCtrl,
+                  style: TextStyle(color: pal.fg),
+                  cursorColor: pal.primary,
+                  decoration: InputDecoration(
+                    hintText: '搜索站源',
+                    hintStyle: TextStyle(color: pal.muted),
+                    filled: true,
+                    fillColor: pal.input,
+                    prefixIcon: Icon(Icons.search, color: pal.muted),
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: m.compact ? 10 : 12,
+                    ),
+                  ),
+                  onChanged: (v) => setLocal(() => filter = v),
+                ),
+                SizedBox(height: m.compact ? 8 : 12),
+                Expanded(
+                  child: local.isEmpty
+                      ? Center(
+                          child: Text(
+                            q.isEmpty ? '暂无站源' : '无匹配的站源',
+                            style: TextStyle(color: pal.muted),
+                          ),
+                        )
+                      : ListView.separated(
+                    controller: scrollCtrl,
+                    itemCount: local.length,
+                    separatorBuilder: (_, __) =>
+                        SizedBox(height: m.compact ? 4 : 8),
+                    itemBuilder: (_, i) {
+                      final s = local[i];
+                      if (m.compact) {
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: AppPill(
+                                label: s.name,
+                                height: 40,
+                                selected: s.home,
+                                autofocus: i == focusIdx,
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  onSelect(s.key);
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            _CircleIcon(
+                              icon: s.searchable
+                                  ? Icons.search
+                                  : Icons.visibility_off,
+                              onTap: () async {
+                                await ref.read(apiProvider).toggleSite(
+                                    field: 'searchable', key: s.key);
+                                await reload();
+                              },
+                              onLongPress: () async {
+                                await ref.read(apiProvider).toggleSite(
+                                    field: 'searchable',
+                                    all: !s.searchable);
+                                await reload();
+                              },
+                            ),
+                            const SizedBox(width: 8),
+                            _CircleIcon(
+                              icon: s.changeable
+                                  ? Icons.refresh
+                                  : Icons.visibility_off,
+                              onTap: () async {
+                                await ref.read(apiProvider).toggleSite(
+                                    field: 'changeable', key: s.key);
+                                await reload();
+                              },
+                              onLongPress: () async {
+                                await ref.read(apiProvider).toggleSite(
+                                    field: 'changeable',
+                                    all: !s.changeable);
+                                await reload();
+                              },
+                            ),
+                          ],
+                        );
+                      }
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: AppPill(
+                              label: s.name,
+                              height: 44,
+                              selected: s.home,
+                              autofocus: i == focusIdx,
+                              onTap: () {
+                                Navigator.pop(ctx);
+                                onSelect(s.key);
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          _CircleIcon(
+                            icon: s.searchable
+                                ? Icons.search
+                                : Icons.search_off,
+                            onTap: () async {
+                              await ref.read(apiProvider).toggleSite(
+                                  field: 'searchable', key: s.key);
+                              await reload();
+                            },
+                            onLongPress: () async {
+                              await ref.read(apiProvider).toggleSite(
+                                  field: 'searchable',
+                                  all: !s.searchable);
+                              await reload();
+                            },
+                          ),
+                          const SizedBox(width: 6),
+                          _CircleIcon(
+                            icon: s.changeable
+                                ? Icons.refresh
+                                : Icons.visibility_off,
+                            onTap: () async {
+                              await ref.read(apiProvider).toggleSite(
+                                  field: 'changeable', key: s.key);
+                              await reload();
+                            },
+                            onLongPress: () async {
+                              await ref.read(apiProvider).toggleSite(
+                                  field: 'changeable',
+                                  all: !s.changeable);
+                              await reload();
+                            },
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
           );
         },
@@ -494,63 +511,49 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
 
           final p = KotvPalette.of(ctx);
           final m = kotvDialogMetrics(ctx);
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: m.inset,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: m.compact ? m.width : 520),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: p.dialogBg,
-                  borderRadius: BorderRadius.circular(18 * m.ui),
-                  border: Border.all(color: p.outline),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.all(m.compact ? 14 : 24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text('添加点播源',
-                          style: TextStyle(
-                              color: p.fg,
-                              fontSize: m.compact ? 20 : 22,
-                              fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 8),
-                      Text('支持单线路、多仓索引、本地路径，或 {"sites":[…]} JSON',
-                          style: TextStyle(
-                              color: p.muted, fontSize: m.compact ? 12 : 13)),
-                      const SizedBox(height: 12),
-                      KotvTvTextField(
-                        controller: ctrl,
-                        maxLines: m.compact ? 3 : 4,
-                        enabled: !busy,
-                        style: TextStyle(color: p.fg),
-                        cursorColor: p.primary,
-                        decoration: InputDecoration(
-                          hintText: '配置地址、多仓索引，或粘贴 JSON…',
-                          hintStyle: TextStyle(color: p.muted),
-                          filled: true,
-                          fillColor: p.input,
-                        ),
-                      ),
-                      if (status.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Text(status,
-                            style: TextStyle(color: p.primary, fontSize: 13)),
-                      ],
-                      const SizedBox(height: 16),
-                      _configDialogActions(
-                        compact: m.compact,
-                        onPick: busy ? () {} : () => pick(),
-                        onCancel: () => Navigator.pop(ctx, false),
-                        onConfirm: busy ? () {} : () => load(ctrl.text),
-                        confirmLabel: busy ? '加载中…' : '加载',
-                      ),
-                    ],
+          return kotvDialogShell(
+            ctx,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('添加点播源',
+                    style: TextStyle(
+                        color: p.fg,
+                        fontSize: m.compact ? 20 : 22,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Text('支持单线路、多仓索引、本地路径，或 {"sites":[…]} JSON',
+                    style: TextStyle(
+                        color: p.muted, fontSize: m.compact ? 12 : 13)),
+                const SizedBox(height: 12),
+                KotvTvTextField(
+                  controller: ctrl,
+                  maxLines: m.compact ? 3 : 4,
+                  enabled: !busy,
+                  style: TextStyle(color: p.fg),
+                  cursorColor: p.primary,
+                  decoration: InputDecoration(
+                    hintText: '配置地址、多仓索引，或粘贴 JSON…',
+                    hintStyle: TextStyle(color: p.muted),
+                    filled: true,
+                    fillColor: p.input,
                   ),
                 ),
-              ),
+                if (status.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(status,
+                      style: TextStyle(color: p.primary, fontSize: 13)),
+                ],
+                const SizedBox(height: 16),
+                _configDialogActions(
+                  compact: m.compact,
+                  onPick: busy ? () {} : () => pick(),
+                  onCancel: () => Navigator.pop(ctx, false),
+                  onConfirm: busy ? () {} : () => load(ctrl.text),
+                  confirmLabel: busy ? '加载中…' : '加载',
+                ),
+              ],
             ),
           );
         },
@@ -744,81 +747,67 @@ Future<({String url, String name})?> _showEditSourceDialog(
 
           final p = KotvPalette.of(ctx);
           final m = kotvDialogMetrics(ctx);
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: m.inset,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: m.compact ? m.width : 520),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: p.dialogBg,
-                  borderRadius: BorderRadius.circular(18 * m.ui),
-                  border: Border.all(color: p.outline),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.all(m.compact ? 14 : 24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(kindTitle,
-                          style: TextStyle(
-                              color: p.fg,
-                              fontSize: m.compact ? 20 : 22,
-                              fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 8),
-                      Text(hint,
-                          style: TextStyle(color: p.muted, fontSize: 12)),
-                      const SizedBox(height: 12),
-                      KotvTvTextField(
-                        controller: nameCtrl,
-                        enabled: !busy,
-                        style: TextStyle(color: p.fg),
-                        cursorColor: p.primary,
-                        decoration: InputDecoration(
-                          hintText: '名称（可选）',
-                          hintStyle: TextStyle(color: p.muted),
-                          filled: true,
-                          fillColor: p.input,
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      KotvTvTextField(
-                        controller: urlCtrl,
-                        maxLines: m.compact ? 2 : 3,
-                        enabled: !busy,
-                        style: TextStyle(color: p.fg),
-                        cursorColor: p.primary,
-                        decoration: InputDecoration(
-                          hintText: '源地址',
-                          hintStyle: TextStyle(color: p.muted),
-                          filled: true,
-                          fillColor: p.input,
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none),
-                        ),
-                      ),
-                      if (status.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Text(status,
-                            style: TextStyle(color: p.primary, fontSize: 13)),
-                      ],
-                      const SizedBox(height: 16),
-                      _configDialogActions(
-                        compact: m.compact,
-                        onPick: busy ? () {} : pick,
-                        onCancel: () => Navigator.pop(ctx, false),
-                        onConfirm: busy ? () {} : save,
-                        confirmLabel: busy ? '保存中…' : '保存',
-                      ),
-                    ],
+          return kotvDialogShell(
+            ctx,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(kindTitle,
+                    style: TextStyle(
+                        color: p.fg,
+                        fontSize: m.compact ? 20 : 22,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Text(hint,
+                    style: TextStyle(color: p.muted, fontSize: 12)),
+                const SizedBox(height: 12),
+                KotvTvTextField(
+                  controller: nameCtrl,
+                  enabled: !busy,
+                  style: TextStyle(color: p.fg),
+                  cursorColor: p.primary,
+                  decoration: InputDecoration(
+                    hintText: '名称（可选）',
+                    hintStyle: TextStyle(color: p.muted),
+                    filled: true,
+                    fillColor: p.input,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none),
                   ),
                 ),
-              ),
+                const SizedBox(height: 10),
+                KotvTvTextField(
+                  controller: urlCtrl,
+                  maxLines: m.compact ? 2 : 3,
+                  enabled: !busy,
+                  style: TextStyle(color: p.fg),
+                  cursorColor: p.primary,
+                  decoration: InputDecoration(
+                    hintText: '源地址',
+                    hintStyle: TextStyle(color: p.muted),
+                    filled: true,
+                    fillColor: p.input,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none),
+                  ),
+                ),
+                if (status.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(status,
+                      style: TextStyle(color: p.primary, fontSize: 13)),
+                ],
+                const SizedBox(height: 16),
+                _configDialogActions(
+                  compact: m.compact,
+                  onPick: busy ? () {} : pick,
+                  onCancel: () => Navigator.pop(ctx, false),
+                  onConfirm: busy ? () {} : save,
+                  confirmLabel: busy ? '保存中…' : '保存',
+                ),
+              ],
             ),
           );
         },
@@ -858,56 +847,42 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
         }
       }
 
-      return Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: m.inset,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: m.compact ? m.width : 520),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: p.dialogBg,
-              borderRadius: BorderRadius.circular(18 * m.ui),
-              border: Border.all(color: p.outline),
-            ),
-            child: Padding(
-              padding: EdgeInsets.all(m.compact ? 14 : 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('直播源',
-                      style: TextStyle(
-                          color: p.fg,
-                          fontSize: m.compact ? 20 : 22,
-                          fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 8),
-                  Text('可填在线 M3U/TXT/JSON 地址，或本机路径',
-                      style: TextStyle(
-                          color: p.muted, fontSize: m.compact ? 12 : 13)),
-                  const SizedBox(height: 12),
-                  KotvTvTextField(
-                    controller: ctrl,
-                    style: TextStyle(color: p.fg),
-                    cursorColor: p.primary,
-                    decoration: InputDecoration(
-                      hintText: 'M3U/TXT/JSON URL 或本地路径',
-                      hintStyle: TextStyle(color: p.muted),
-                      filled: true,
-                      fillColor: p.input,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  _configDialogActions(
-                    compact: m.compact,
-                    onPick: () => pick(),
-                    onCancel: () => Navigator.pop(ctx, false),
-                    onConfirm: () => Navigator.pop(ctx, true),
-                    confirmLabel: '保存',
-                  ),
-                ],
+      return kotvDialogShell(
+        ctx,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('直播源',
+                style: TextStyle(
+                    color: p.fg,
+                    fontSize: m.compact ? 20 : 22,
+                    fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Text('可填在线 M3U/TXT/JSON 地址，或本机路径',
+                style: TextStyle(
+                    color: p.muted, fontSize: m.compact ? 12 : 13)),
+            const SizedBox(height: 12),
+            KotvTvTextField(
+              controller: ctrl,
+              style: TextStyle(color: p.fg),
+              cursorColor: p.primary,
+              decoration: InputDecoration(
+                hintText: 'M3U/TXT/JSON URL 或本地路径',
+                hintStyle: TextStyle(color: p.muted),
+                filled: true,
+                fillColor: p.input,
               ),
             ),
-          ),
+            const SizedBox(height: 16),
+            _configDialogActions(
+              compact: m.compact,
+              onPick: () => pick(),
+              onCancel: () => Navigator.pop(ctx, false),
+              onConfirm: () => Navigator.pop(ctx, true),
+              confirmLabel: '保存',
+            ),
+          ],
         ),
       );
     },
@@ -1300,93 +1275,81 @@ class _SourceListDialogState extends State<_SourceListDialog> {
     final border = p.outline;
     final titleColor = p.fg;
     final hintColor = p.muted;
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: m.inset,
-      child: SizedBox(
-        width: m.width,
-        height: m.height,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(18 * m.ui),
-            border: Border.all(color: border),
+    return kotvDialogShell(
+      context,
+      fixedSize: true,
+      background: bg,
+      border: border,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            widget.title,
+            style: TextStyle(
+                color: titleColor,
+                fontSize: m.compact ? 20 : 22,
+                fontWeight: FontWeight.w700),
           ),
-          child: Padding(
-            padding: EdgeInsets.all(m.compact ? 14 : 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  widget.title,
-                  style: TextStyle(
-                      color: titleColor,
-                      fontSize: m.compact ? 20 : 22,
-                      fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 6),
-                Text(widget.hint,
-                    style: TextStyle(color: hintColor, fontSize: 14)),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: ListView.separated(
-                    controller: _scroll,
-                    itemCount: list.length + 1,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (_, i) {
-                      if (i == list.length) {
-                        return _RepoRow(
-                          label: widget.addLabel,
-                          autofocus: list.isEmpty,
-                          onTap: () => Navigator.pop(context, const _SourceChoice('', '')),
-                          onDelete: null,
-                        );
-                      }
-                      final r = list[i];
-                      final url = '${r['url'] ?? ''}';
-                      final isCurrent = r['current'] == true || url == current;
-                      final name = '${r['name'] ?? url}';
-                      final title = '${r['title'] ?? ''}'.trim();
-                      return _RepoRow(
-                        key: ValueKey('$url|$name'),
-                        label: name,
-                        current: isCurrent,
-                        autofocus:
-                            widget.keepAtStart ? i == 0 : i == focusIndex,
-                        onTap: isCurrent
-                            ? () {}
-                            : () => Navigator.pop(
-                                context, _SourceChoice(url, title)),
-                        onLongPress: () async {
-                          final edited =
-                              await widget.onEdit(url, '${r['title'] ?? ''}');
-                          if (edited == null || !mounted) return;
-                          _applyLocalEdit(url, edited.url, edited.name);
+          const SizedBox(height: 6),
+          Text(widget.hint,
+              style: TextStyle(color: hintColor, fontSize: 14)),
+          const SizedBox(height: 12),
+          Expanded(
+            child: ListView.separated(
+              controller: _scroll,
+              itemCount: list.length + 1,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (_, i) {
+                if (i == list.length) {
+                  return _RepoRow(
+                    label: widget.addLabel,
+                    autofocus: list.isEmpty,
+                    onTap: () => Navigator.pop(context, const _SourceChoice('', '')),
+                    onDelete: null,
+                  );
+                }
+                final r = list[i];
+                final url = '${r['url'] ?? ''}';
+                final isCurrent = r['current'] == true || url == current;
+                final name = '${r['name'] ?? url}';
+                final title = '${r['title'] ?? ''}'.trim();
+                return _RepoRow(
+                  key: ValueKey('$url|$name'),
+                  label: name,
+                  current: isCurrent,
+                  autofocus:
+                      widget.keepAtStart ? i == 0 : i == focusIndex,
+                  onTap: isCurrent
+                      ? () {}
+                      : () => Navigator.pop(
+                          context, _SourceChoice(url, title)),
+                  onLongPress: () async {
+                    final edited =
+                        await widget.onEdit(url, '${r['title'] ?? ''}');
+                    if (edited == null || !mounted) return;
+                    _applyLocalEdit(url, edited.url, edited.name);
+                    await _reload();
+                  },
+                  onDelete: isCurrent
+                      ? null
+                      : () async {
+                          await widget.onDelete(url);
                           await _reload();
                         },
-                        onDelete: isCurrent
-                            ? null
-                            : () async {
-                                await widget.onDelete(url);
-                                await _reload();
-                              },
-                      );
-                    },
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: AppPill(
-                    label: '关闭',
-                    width: m.compact ? 72 : 96,
-                    height: 36,
-                    onTap: () => Navigator.pop(context),
-                  ),
-                ),
-              ],
+                );
+              },
             ),
           ),
-        ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: AppPill(
+              label: '关闭',
+              width: m.compact ? 72 : 96,
+              height: 36,
+              onTap: () => Navigator.pop(context),
+            ),
+          ),
+        ],
       ),
     );
   }

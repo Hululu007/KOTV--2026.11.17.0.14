@@ -132,87 +132,74 @@ Future<void> showSpiderCheckDialog(BuildContext context, WidgetRef ref) async {
                   : '检测完成：成功 $passed / 失败 ${failed.length}'
                       '${errors > 0 ? ' / 出错 $errors' : ''}';
           final pillH = m.compact ? 34.0 : 38.0;
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: m.inset,
-            child: SizedBox(
-              width: m.width,
-              height: m.height,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: pal.dialogBg,
-                  borderRadius: BorderRadius.circular(18 * m.ui),
-                  border: Border.all(color: pal.outline),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    m.compact ? 14 : 28,
-                    m.compact ? 14 : 24,
-                    m.compact ? 14 : 28,
-                    m.compact ? 12 : 24,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        '检测爬虫',
-                        style: TextStyle(
-                          color: pal.fg,
-                          fontSize: m.compact ? 20 : 26,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      SizedBox(height: m.compact ? 4 : 6),
-                      Text(
-                        summary,
-                        style: TextStyle(
-                            color: pal.muted, fontSize: m.compact ? 12 : 14),
-                      ),
-                      SizedBox(height: m.compact ? 8 : 12),
-                      Expanded(
-                        child: ListView.separated(
-                          itemCount: rows.length,
-                          separatorBuilder: (_, __) =>
-                              SizedBox(height: m.compact ? 4 : 6),
-                          itemBuilder: (_, i) => _SpiderRowView(
-                            row: rows[i],
-                            compact: m.compact,
-                            pillH: pillH,
-                            onToggle: () =>
-                                setDisabled([rows[i]], !rows[i].disabled),
-                            onRetry: checkable
-                                ? () => unawaited(checkOne(rows[i]))
-                                : null,
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: m.compact ? 8 : 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: AppPill(
-                              label: failedEnabled.isEmpty
-                                  ? '禁用失效'
-                                  : '禁用失效（${failedEnabled.length}）',
-                              height: pillH + 4,
-                              selected: failedEnabled.isNotEmpty,
-                              onTap: () => setDisabled(failedEnabled, true),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: AppPill(
-                              label: '关闭',
-                              height: pillH + 4,
-                              onTap: () => Navigator.pop(ctx),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+          return kotvDialogShell(
+            ctx,
+            fixedSize: true,
+            padding: EdgeInsets.fromLTRB(
+              m.compact ? 14 : 28,
+              m.compact ? 14 : 24,
+              m.compact ? 14 : 28,
+              m.compact ? 12 : 24,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  '检测爬虫',
+                  style: TextStyle(
+                    color: pal.fg,
+                    fontSize: m.compact ? 20 : 26,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-              ),
+                SizedBox(height: m.compact ? 4 : 6),
+                Text(
+                  summary,
+                  style: TextStyle(
+                      color: pal.muted, fontSize: m.compact ? 12 : 14),
+                ),
+                SizedBox(height: m.compact ? 8 : 12),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: rows.length,
+                    separatorBuilder: (_, __) =>
+                        SizedBox(height: m.compact ? 4 : 6),
+                    itemBuilder: (_, i) => _SpiderRowView(
+                      row: rows[i],
+                      compact: m.compact,
+                      pillH: pillH,
+                      onToggle: () =>
+                          setDisabled([rows[i]], !rows[i].disabled),
+                      onRetry: checkable
+                          ? () => unawaited(checkOne(rows[i]))
+                          : null,
+                    ),
+                  ),
+                ),
+                SizedBox(height: m.compact ? 8 : 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: AppPill(
+                        label: failedEnabled.isEmpty
+                            ? '禁用失效'
+                            : '禁用失效（${failedEnabled.length}）',
+                        height: pillH + 4,
+                        selected: failedEnabled.isNotEmpty,
+                        onTap: () => setDisabled(failedEnabled, true),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: AppPill(
+                        label: '关闭',
+                        height: pillH + 4,
+                        onTap: () => Navigator.pop(ctx),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           );
         },

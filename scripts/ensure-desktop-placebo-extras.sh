@@ -4,6 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 STAMP="$PREFIX/.kotv-placebo-extras-v1"
@@ -14,28 +16,11 @@ LCMS_SHA=d873d34ad8b9b4cea010631f1a6228d2087475e4dc5e763eb81acc23d9d45a51
 XXHASH_VER=0.8.3
 XXHASH_SHA=aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80
 
-need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 
-is_windows() {
-  case "$(uname -s 2>/dev/null)" in
-    MINGW*|MSYS*|CYGWIN*) return 0 ;;
-  esac
-  [[ "${OS:-}" == "Windows_NT" ]]
-}
 
 fetch() {
   local url="$1" dest="$2" sha="$3"
-  verify_sha() {
-    local f="$1" expect="$2"
-    if command -v shasum >/dev/null; then
-      echo "$expect  $f" | shasum -a 256 -c -
-    elif command -v sha256sum >/dev/null; then
-      echo "$expect  $f" | sha256sum -c -
-    else
-      return 0
-    fi
-  }
-  if [[ -f "$dest" ]] && verify_sha "$dest" "$sha" >/dev/null 2>&1; then
+  if [[ -f "$dest" ]] && kotv_verify_sha256 "$dest" "$sha" >/dev/null 2>&1; then
     return 0
   fi
   rm -f "$dest"
@@ -43,7 +28,7 @@ fetch() {
   curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$dest.partial" "$url" \
     || { rm -f "$dest.partial"; return 1; }
   mv -f "$dest.partial" "$dest"
-  verify_sha "$dest" "$sha" || { rm -f "$dest"; return 1; }
+  kotv_verify_sha256 "$dest" "$sha" || { rm -f "$dest"; return 1; }
 }
 
 need curl
@@ -52,7 +37,7 @@ need cmake
 need make
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+if kotv_is_windows_build || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 fi
 
@@ -75,7 +60,7 @@ mkdir -p "$src" "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib"
 
 cmake_gen="Ninja"
 command -v ninja >/dev/null || cmake_gen="Unix Makefiles"
-if is_windows; then
+if kotv_is_windows_build; then
   if command -v ninja >/dev/null; then
     cmake_gen="Ninja"
   else
@@ -88,7 +73,7 @@ echo "==> placebo extras (lcms2 + xxhash) -> $PREFIX"
 # --- lcms2 ---
 if ! pkg-config --exists lcms2 2>/dev/null || [[ ! -f "$PREFIX/lib/liblcms2.a" && ! -f "$PREFIX/lib/liblcms2.dll.a" ]]; then
   # Linux 可用系统 lcms2；若 PREFIX 未装且系统有，也接受（不强制自编）。
-  if ! is_windows && [[ "$(uname -s)" != "Darwin" ]] && pkg-config --exists lcms2 2>/dev/null; then
+  if ! kotv_is_windows_build && [[ "$(uname -s)" != "Darwin" ]] && pkg-config --exists lcms2 2>/dev/null; then
     echo "ok lcms2 $(pkg-config --modversion lcms2) (system)"
   else
     fetch "https://github.com/mm2/Little-CMS/releases/download/lcms2.${LCMS_VER#2.}/lcms2-${LCMS_VER}.tar.gz" \
@@ -122,7 +107,7 @@ fi
 
 # --- xxhash ---
 if ! pkg-config --exists libxxhash 2>/dev/null || [[ ! -f "$PREFIX/lib/libxxhash.a" && ! -f "$PREFIX/lib/libxxhash.dll.a" ]]; then
-  if ! is_windows && [[ "$(uname -s)" != "Darwin" ]] && pkg-config --exists libxxhash 2>/dev/null; then
+  if ! kotv_is_windows_build && [[ "$(uname -s)" != "Darwin" ]] && pkg-config --exists libxxhash 2>/dev/null; then
     echo "ok xxhash $(pkg-config --modversion libxxhash) (system)"
   else
     fetch "https://github.com/Cyan4973/xxHash/archive/refs/tags/v${XXHASH_VER}.tar.gz" \

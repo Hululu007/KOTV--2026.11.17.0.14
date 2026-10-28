@@ -7,6 +7,8 @@
 #   KOTV_MPV_JOBS             并行编译任务数
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 PLAT="${1:-}"
 ASSET="$ROOT/flutter/assets/mpv-libs"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
@@ -18,14 +20,7 @@ AV3A="${KOTV_BUILD_MPV_AV3A:-1}"
 
 mkdir -p "$ASSET/windows" "$ASSET/linux" "$ASSET/macos"
 
-need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 
-kotv_is_windows_build() {
-  case "$(uname -s 2>/dev/null)" in
-    MINGW*|MSYS*|CYGWIN*) return 0 ;;
-  esac
-  [[ "${OS:-}" == "Windows_NT" ]]
-}
 
 # Win7 发行包：子系统钉 6.01；与 Win10+ 同编 Vulkan + D3D11。
 kotv_is_mpv_win7_build() {

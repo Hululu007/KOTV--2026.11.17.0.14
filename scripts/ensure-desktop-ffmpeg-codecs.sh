@@ -4,6 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 # v9: Windows 注入 _WIN32_WINNT=0x0601，避免链进 Win8+ API。
@@ -29,14 +31,7 @@ ARIB_VER=1.1.1
 ARIB_URL="https://github.com/xqq/libaribcaption/archive/refs/tags/v${ARIB_VER}.tar.gz"
 ARIB_SHA=278d03a0a662d00a46178afc64f32535ede2d78c603842b6fd1c55fa9cd44683
 
-need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 
-is_windows() {
-  case "$(uname -s 2>/dev/null)" in
-    MINGW*|MSYS*|CYGWIN*) return 0 ;;
-  esac
-  [[ "${OS:-}" == "Windows_NT" ]]
-}
 
 # Windows 上系统 pkg-config 常是坏掉的 Strawberry；以 PREFIX 里 .pc/.a 为准。
 pc_ready() {
@@ -55,17 +50,7 @@ pc_ready() {
 
 fetch() {
   local url="$1" dest="$2" sha="$3"
-  verify_sha() {
-    local f="$1" expect="$2"
-    if command -v shasum >/dev/null; then
-      echo "$expect  $f" | shasum -a 256 -c -
-    elif command -v sha256sum >/dev/null; then
-      echo "$expect  $f" | sha256sum -c -
-    else
-      return 0
-    fi
-  }
-  if [[ -f "$dest" ]] && verify_sha "$dest" "$sha" >/dev/null 2>&1; then
+  if [[ -f "$dest" ]] && kotv_verify_sha256 "$dest" "$sha" >/dev/null 2>&1; then
     return 0
   fi
   rm -f "$dest"
@@ -73,7 +58,7 @@ fetch() {
   curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$dest.partial" "$url" \
     || { rm -f "$dest.partial"; return 1; }
   mv -f "$dest.partial" "$dest"
-  verify_sha "$dest" "$sha" || { rm -f "$dest"; return 1; }
+  kotv_verify_sha256 "$dest" "$sha" || { rm -f "$dest"; return 1; }
 }
 
 need curl
@@ -84,7 +69,7 @@ need meson
 need ninja
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+if kotv_is_windows_build || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 fi
 
@@ -117,9 +102,7 @@ cflags=""
 cmake_osx=()
 # meson 额外参数（交叉用 cross-file；勿对空数组用 [@] + set -u）
 dav1d_meson_extra=()
-# shellcheck source=scripts/kotv-win-build-env.sh
-source "$ROOT/scripts/kotv-win-build-env.sh"
-if is_windows; then
+if kotv_is_windows_build; then
   # 编进 PREFIX 的静态库也要 Win7 宏，否则链进 mpv 后可能硬链 Win8+ API。
   cflags="$(kotv_win7_cflags)"
 fi
@@ -166,7 +149,7 @@ mkdir -p "$src" "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib"
 
 cmake_gen="Ninja"
 command -v ninja >/dev/null || cmake_gen="Unix Makefiles"
-if is_windows; then
+if kotv_is_windows_build; then
   if command -v ninja >/dev/null; then
     cmake_gen="Ninja"
   else
@@ -394,7 +377,7 @@ if ! pc_ready libaribcaption; then
   mkdir -p "$BUILD_DIR/libaribcaption"
   tar -xf "$src/libaribcaption-${ARIB_VER}.tar.gz" -C "$BUILD_DIR/libaribcaption" --strip-components=1
   arib_extra=()
-  if is_windows; then
+  if kotv_is_windows_build; then
     arib_extra+=(-DARIBCC_USE_DIRECTWRITE=ON -DARIBCC_USE_CORETEXT=OFF -DARIBCC_USE_FREETYPE=OFF -DARIBCC_USE_FONTCONFIG=OFF)
   elif [[ "$(uname -s)" == "Darwin" ]]; then
     arib_extra+=(-DARIBCC_USE_CORETEXT=ON -DARIBCC_USE_DIRECTWRITE=OFF -DARIBCC_USE_FREETYPE=OFF -DARIBCC_USE_FONTCONFIG=OFF)
@@ -425,7 +408,7 @@ if ! pc_ready libaribcaption; then
   )
   # 始终重写 .pc：Windows DirectWrite 依赖放进 Libs（meson 不吃 Libs.private）。
   arib_libs="-laribcaption"
-  if is_windows; then
+  if kotv_is_windows_build; then
     arib_libs="-laribcaption -lstdc++ -ld2d1 -ldwrite -lole32 -luuid"
   elif [[ "$(uname -s)" != "Darwin" ]]; then
     arib_libs="-laribcaption -lstdc++ -lfontconfig"

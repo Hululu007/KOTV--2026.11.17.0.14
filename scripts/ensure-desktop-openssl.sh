@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# shellcheck source=kotv-win-build-env.sh
+# shellcheck source=scripts/kotv-win-build-env.sh
 source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
@@ -15,14 +15,6 @@ JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || e
 OPENSSL_VER="${KOTV_OPENSSL_VER:-3.5.2}"
 WIN7_CFLAGS="$(kotv_win7_cflags)"
 
-kotv_native_path() {
-  local p="$1"
-  if kotv_is_windows_build && command -v cygpath >/dev/null 2>&1; then
-    cygpath -m "$p"
-  else
-    printf '%s' "$p"
-  fi
-}
 
 openssl_ver_ok() {
   local v
@@ -418,7 +410,6 @@ EOF
 fi
 
 # ---------- 全平台源码 Configure ----------
-need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 need curl
 need tar
 need make
