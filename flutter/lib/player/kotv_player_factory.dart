@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -9,9 +11,31 @@ import 'html_playback.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'media_kit_playback.dart';
+import 'mpv_opts.dart';
 import 'native_mpv_playback.dart';
+import 'subtitle_style_util.dart';
 import 'xg_playback.dart';
 import 'zw_playback.dart';
+
+/// 把播放设置推给页面持有的后端：MPV 选项、Exo/FVP 选项，再给当前后端写字幕样式与偏移。
+/// 点播与直播页共用。
+void kotvPushPlayerSettings(
+  Map<String, dynamic> settings, {
+  required KotvMpvOpts mpvOpts,
+  required KotvPlayback current,
+  KotvPlayback? mpv,
+  ExoPlayback? exo,
+  FvpPlayback? fvp,
+}) {
+  if (mpv is NativeMpvPlayback) {
+    unawaited(mpv.applyOpts(mpvOpts));
+  } else if (mpv is MediaKitPlayback) {
+    unawaited(mpv.applyOpts(mpvOpts));
+  }
+  exo?.applyPlayerOptions(settings);
+  fvp?.applyPlayerOptions(settings);
+  unawaited(kotvApplySubtitleSettings(current, settings));
+}
 
 /// 根据播放器 ID 创建页内后端（不负责复用；由页面缓存实例）。
 KotvPlayback createKotvPlayback(String playerVal) {

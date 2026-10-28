@@ -16,6 +16,7 @@ class RemoteBridge {
   final KotvApi api;
   Timer? _timer;
   Timer? _pingTimer;
+  String _lastPollError = '';
   void Function(String type, int seekMs)? onControl;
   void Function(String keyword)? onSearch;
   /// 遥控推送的本地/URL 字幕文件。
@@ -109,8 +110,12 @@ class RemoteBridge {
         if (o is! Map) continue;
         onOpen?.call(Map<String, dynamic>.from(o));
       }
+      _lastPollError = '';
     } catch (e) {
-      debugPrint('remote poll: $e');
+      // 每 700ms 轮询一次：同一个错误只记一次，恢复后清掉。
+      final msg = '$e';
+      if (msg != _lastPollError) debugPrint('remote poll: $msg');
+      _lastPollError = msg;
     }
   }
 

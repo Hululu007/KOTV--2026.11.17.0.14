@@ -726,8 +726,7 @@ class EngineLauncher {
     _owned = true;
     _shuttingDown = false;
     final spawned = _proc!;
-    // stdout 以前直接丢弃；JS console 曾误走 fmt.Println→stdout，现已改 stderr，
-    // 两边都落到文件 + debugPrint，便于安卓/桌面排查。
+    // 引擎 stdout / stderr 都写进日志文件并 debugPrint，便于安卓/桌面排查。
     void pipe(List<int> chunk) {
       try {
         sink.add(chunk);

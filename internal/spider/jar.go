@@ -810,43 +810,53 @@ func (s *jarSpider) LiveContent(url string) (string, error) {
 	return s.call("liveContent", map[string]interface{}{"url": url})
 }
 
+// bridgeProxyResponse Java 桥 proxy / proxyGlobal 的返回。
+type bridgeProxyResponse struct {
+	Status      int               `json:"status"`
+	ContentType string            `json:"contentType"`
+	Body        string            `json:"body"`
+	BodyBase64  string            `json:"bodyBase64"`
+	BodyFile    string            `json:"bodyFile"`
+	BodyStream  string            `json:"bodyStream"`
+	Headers     map[string]string `json:"headers"`
+	Error       string            `json:"error"`
+}
+
+// result 转成 Proxy 返回值：bodyStream / bodyFile 放进响应头交给 HTTP 层，其余取 body（有 bodyBase64 时用它）。
+func (r bridgeProxyResponse) result() (int, string, []byte, map[string]string) {
+	if r.BodyStream != "" || r.BodyFile != "" {
+		headers := r.Headers
+		if headers == nil {
+			headers = map[string]string{}
+		}
+		if r.BodyStream != "" {
+			headers[ProxyBodyStreamHeader] = r.BodyStream
+		}
+		if r.BodyFile != "" {
+			headers[ProxyBodyFileHeader] = r.BodyFile
+		}
+		return r.Status, r.ContentType, nil, headers
+	}
+	body := []byte(r.Body)
+	if r.BodyBase64 != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(r.BodyBase64); err == nil {
+			body = decoded
+		}
+	}
+	return r.Status, r.ContentType, body, r.Headers
+}
+
 func (s *jarSpider) Proxy(params map[string]string) (int, string, []byte, map[string]string, error) {
 	raw, err := s.call("proxy", map[string]interface{}{"params": params})
 	if err != nil {
 		return 0, "", nil, nil, err
 	}
-	var resp struct {
-		Status      int               `json:"status"`
-		ContentType string            `json:"contentType"`
-		Body        string            `json:"body"`
-		BodyBase64  string            `json:"bodyBase64"`
-		BodyFile    string            `json:"bodyFile"`
-		BodyStream  string            `json:"bodyStream"`
-		Headers     map[string]string `json:"headers"`
-	}
+	var resp bridgeProxyResponse
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		return 200, "text/plain", []byte(raw), nil, nil
 	}
-	if resp.BodyStream != "" || resp.BodyFile != "" {
-		headers := resp.Headers
-		if headers == nil {
-			headers = map[string]string{}
-		}
-		if resp.BodyStream != "" {
-			headers[ProxyBodyStreamHeader] = resp.BodyStream
-		}
-		if resp.BodyFile != "" {
-			headers[ProxyBodyFileHeader] = resp.BodyFile
-		}
-		return resp.Status, resp.ContentType, nil, headers, nil
-	}
-	body := []byte(resp.Body)
-	if resp.BodyBase64 != "" {
-		if decoded, decErr := base64.StdEncoding.DecodeString(resp.BodyBase64); decErr == nil {
-			body = decoded
-		}
-	}
-	return resp.Status, resp.ContentType, body, resp.Headers, nil
+	status, ct, body, headers := resp.result()
+	return status, ct, body, headers, nil
 }
 
 func (s *jarSpider) Action(action string) (string, error) {
@@ -898,45 +908,19 @@ func jarProxy(params map[string]string) (int, string, []byte, map[string]string,
 		return 0, "", nil, nil, err
 	}
 	raw = trimCString(raw)
-	var resp struct {
-		Status      int               `json:"status"`
-		ContentType string            `json:"contentType"`
-		Body        string            `json:"body"`
-		BodyBase64  string            `json:"bodyBase64"`
-		BodyFile    string            `json:"bodyFile"`
-		BodyStream  string            `json:"bodyStream"`
-		Headers     map[string]string `json:"headers"`
-		Error       string            `json:"error"`
-	}
+	var resp bridgeProxyResponse
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		return 0, "", nil, nil, err
 	}
 	if resp.Error != "" {
 		return 0, "", nil, nil, fmt.Errorf("%s", resp.Error)
 	}
-	if resp.BodyStream != "" || resp.BodyFile != "" {
-		headers := resp.Headers
-		if headers == nil {
-			headers = map[string]string{}
-		}
-		if resp.BodyStream != "" {
-			headers[ProxyBodyStreamHeader] = resp.BodyStream
-		}
-		if resp.BodyFile != "" {
-			headers[ProxyBodyFileHeader] = resp.BodyFile
-		}
-		return resp.Status, resp.ContentType, nil, headers, nil
-	}
-	if resp.Status == 0 && resp.ContentType == "" && resp.Body == "" && resp.BodyBase64 == "" {
+	if resp.BodyStream == "" && resp.BodyFile == "" &&
+		resp.Status == 0 && resp.ContentType == "" && resp.Body == "" && resp.BodyBase64 == "" {
 		return 0, "", nil, nil, fmt.Errorf("invalid proxy response")
 	}
-	body := []byte(resp.Body)
-	if resp.BodyBase64 != "" {
-		if decoded, decodeErr := base64.StdEncoding.DecodeString(resp.BodyBase64); decodeErr == nil {
-			body = decoded
-		}
-	}
-	return resp.Status, resp.ContentType, body, resp.Headers, nil
+	status, ct, body, headers := resp.result()
+	return status, ct, body, headers, nil
 }
 
 func (s *jarSpider) Destroy() {}

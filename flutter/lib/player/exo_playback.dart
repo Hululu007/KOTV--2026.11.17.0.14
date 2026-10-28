@@ -504,31 +504,7 @@ class ExoPlayback extends KotvPlayback {
         'subtitleFont': _subtitleFont,
         'subtitleFontPath': _subtitleFontPath,
         'subs': _subs,
-        'audioEq': _previewAudioOriginal ? 'off' : kotvAudioEqExoMode(_audioEq),
-        'audioEqBands': _previewAudioOriginal
-            ? ''
-            : kotvAudioEqExoBandsPayload(
-                eq: _audioEq,
-                bands: _audioEqBands,
-                dialogue: _audioDialogue,
-              ),
-        'audioDialogue': _previewAudioOriginal ? 0 : _audioDialogue,
-        'audioBalance': _previewAudioOriginal ? 0 : _audioBalance,
-        'audioStability': _previewAudioOriginal ? 0 : _effectiveAudioStability(),
-        'audioBoost': _previewAudioOriginal ? 0 : _audioBoost,
-        'audioPreamp': _previewAudioOriginal ? 0 : _audioPreamp,
-        'audioLoudness': _previewAudioOriginal ? false : _effectiveAudioLoudness(),
-        'audioCenterGain': _previewAudioOriginal ? 0 : _audioCenterGain,
-        'audioChannelMode': _previewAudioOriginal ? 'auto' : _audioChannelMode,
-        'audioOffsetMs': _audioOffsetMs,
-        'eqBrightness': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.brightness : 0,
-        'eqContrast': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.contrast : 0,
-        'eqSaturation': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.saturation : 0,
-        'eqGamma': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.gamma : 0,
-        'eqHue': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.hue : 0,
-        'eqTemperature': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.temperature : 0,
-        'eqSharpness': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.sharpness : 0,
-        'eqShadow': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.shadow : 0,
+        ..._equalizerArgs(),
       });
       await _ch.invokeMethod('setVolume', {'volume': (_volume / 100).clamp(0.0, 1.0)});
       await _ch.invokeMethod('setRate', {'rate': _rate});
@@ -1066,38 +1042,41 @@ class ExoPlayback extends KotvPlayback {
     }
   }
 
+  /// open / setEqualizer 共用的音效与调色参数；「按住看原画/试听原音」时对应项归零。
+  Map<String, dynamic> _equalizerArgs() {
+    final audioOn = !_previewAudioOriginal;
+    final videoOn = _videoEq.enabled && !_previewVideoOriginal;
+    return {
+      'audioEq': audioOn ? kotvAudioEqExoMode(_audioEq) : 'off',
+      'audioEqBands': audioOn
+          ? kotvAudioEqExoBandsPayload(eq: _audioEq, bands: _audioEqBands, dialogue: _audioDialogue)
+          : '',
+      'audioDialogue': audioOn ? _audioDialogue : 0,
+      'audioBalance': audioOn ? _audioBalance : 0,
+      'audioStability': audioOn ? _effectiveAudioStability() : 0,
+      'audioBoost': audioOn ? _audioBoost : 0,
+      'audioPreamp': audioOn ? _audioPreamp : 0,
+      'audioLoudness': audioOn && _effectiveAudioLoudness(),
+      'audioCenterGain': audioOn ? _audioCenterGain : 0,
+      'audioChannelMode': audioOn ? _audioChannelMode : 'auto',
+      'audioOffsetMs': _audioOffsetMs,
+      'eqBrightness': videoOn ? _videoEq.brightness : 0,
+      'eqContrast': videoOn ? _videoEq.contrast : 0,
+      'eqSaturation': videoOn ? _videoEq.saturation : 0,
+      'eqGamma': videoOn ? _videoEq.gamma : 0,
+      'eqHue': videoOn ? _videoEq.hue : 0,
+      'eqTemperature': videoOn ? _videoEq.temperature : 0,
+      'eqSharpness': videoOn ? _videoEq.sharpness : 0,
+      'eqShadow': videoOn ? _videoEq.shadow : 0,
+    };
+  }
+
   Future<void> _pushEqualizer() async {
     try {
       await _ensureNative();
-      final videoOn = _videoEq.enabled && !_previewVideoOriginal;
-      final audioPass = _audioPassThrough;
       await _ch.invokeMethod('setEqualizer', {
-        'audioEq': _previewAudioOriginal ? 'off' : kotvAudioEqExoMode(_audioEq),
-        'audioEqBands': _previewAudioOriginal
-            ? ''
-            : kotvAudioEqExoBandsPayload(
-                eq: _audioEq,
-                bands: _audioEqBands,
-                dialogue: _audioDialogue,
-              ),
-        'audioDialogue': _previewAudioOriginal ? 0 : _audioDialogue,
-        'audioBalance': _previewAudioOriginal ? 0 : _audioBalance,
-        'audioStability': _previewAudioOriginal ? 0 : _effectiveAudioStability(),
-        'audioBoost': _previewAudioOriginal ? 0 : _audioBoost,
-        'audioPreamp': _previewAudioOriginal ? 0 : _audioPreamp,
-        'audioLoudness': _previewAudioOriginal ? false : _effectiveAudioLoudness(),
-        'audioCenterGain': _previewAudioOriginal ? 0 : _audioCenterGain,
-        'audioChannelMode': _previewAudioOriginal ? 'auto' : _audioChannelMode,
-        'audioOffsetMs': _audioOffsetMs,
-        'eqBrightness': videoOn ? _videoEq.brightness : 0,
-        'eqContrast': videoOn ? _videoEq.contrast : 0,
-        'eqSaturation': videoOn ? _videoEq.saturation : 0,
-        'eqGamma': videoOn ? _videoEq.gamma : 0,
-        'eqHue': videoOn ? _videoEq.hue : 0,
-        'eqTemperature': videoOn ? _videoEq.temperature : 0,
-        'eqSharpness': videoOn ? _videoEq.sharpness : 0,
-        'eqShadow': videoOn ? _videoEq.shadow : 0,
-        'audioPassThrough': audioPass,
+        ..._equalizerArgs(),
+        'audioPassThrough': _audioPassThrough,
       });
       notifyListeners();
     } catch (_) {}

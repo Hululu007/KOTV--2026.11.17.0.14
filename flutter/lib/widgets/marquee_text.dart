@@ -71,7 +71,7 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
         oldWidget.velocity != widget.velocity ||
         oldWidget.pause != widget.pause ||
         oldWidget.blankGap != widget.blankGap;
-    // 文案变了但父级宽度不变时，build 里旧逻辑不会重测 → 超长有时不滚。
+    // 文案变了但父级宽度不变时 build 不会重测，须在这里重测，否则超长文案可能不滚动。
     if (contentChanged && _viewW > 1) {
       _remeasure(_viewW, MediaQuery.maybeTextScalerOf(context) ?? TextScaler.noScaling);
     }

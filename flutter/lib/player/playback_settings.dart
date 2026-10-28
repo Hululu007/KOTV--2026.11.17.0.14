@@ -14,6 +14,12 @@ String kotvSecondarySubtitleModeFromSettings(Map<String, dynamic> settings) {
   };
 }
 
+/// 播放器切后台：off（停播）/ audio（仅声音）/ pip（画中画，默认）。
+String kotvPlayerBackgroundFromSettings(Map<String, dynamic> settings) {
+  final bg = '${settings['playerBackground'] ?? 'pip'}'.trim().toLowerCase();
+  return (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip';
+}
+
 String kotvPreferredTextLangsFromSettings(Map<String, dynamic> settings) {
   return '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
 }

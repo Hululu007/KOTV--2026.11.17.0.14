@@ -485,11 +485,11 @@ func ResolveRelativeURL(base, rel string) string {
 	base = ensureURLDirBase(base)
 	bu, err := url.Parse(EncodeURL(base))
 	if err != nil {
-		return ResolveRelativeURLLegacy(base, rel)
+		return joinURLText(base, rel)
 	}
 	ref, err := url.Parse(rel)
 	if err != nil {
-		return ResolveRelativeURLLegacy(base, rel)
+		return joinURLText(base, rel)
 	}
 	return bu.ResolveReference(ref).String()
 }
@@ -515,8 +515,8 @@ func ensureURLDirBase(base string) string {
 	return base + "/"
 }
 
-// ResolveRelativeURLLegacy 旧逻辑回落。
-func ResolveRelativeURLLegacy(base, rel string) string {
+// joinURLText url.Parse 失败时按字符串拼：/ 开头接到源站根，其余接到 base 最后一个 / 之后。
+func joinURLText(base, rel string) string {
 	if strings.HasPrefix(rel, "/") {
 		idx := strings.Index(base[8:], "/")
 		if idx < 0 {

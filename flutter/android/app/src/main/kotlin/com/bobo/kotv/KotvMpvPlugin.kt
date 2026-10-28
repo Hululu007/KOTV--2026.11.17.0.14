@@ -271,15 +271,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         result.success(ctx != null && MPVLib.isDeviceVulkanCapable(ctx))
       }
       "create" -> {
-        decodeMode = call.argument<String>("decode") ?: decodeMode
-        gpuNext = call.argument<Boolean>("gpuNext") == true
-        vulkanEnabled = call.argument<Boolean>("vulkan") == true
-        conf = call.argument<String>("conf") ?: conf
-        call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
-        call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
-        call.argument<Boolean>("diskCache")?.let { diskCache = it }
-        call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
-        call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
+        ingestPlayerArgs(call)
         // 直播须在 ensurePlayer 前写入，磁盘缓存和 cache-pause 按这次会话来。
         call.argument<Boolean>("live")?.let { livePlayback = it }
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
@@ -307,15 +299,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           .entries
           .associate { "${it.key}" to "${it.value}" }
         livePlayback = call.argument<Boolean>("live") == true
-        decodeMode = call.argument<String>("decode") ?: decodeMode
-        gpuNext = call.argument<Boolean>("gpuNext") == true
-        vulkanEnabled = call.argument<Boolean>("vulkan") == true
-        conf = call.argument<String>("conf") ?: conf
-        call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
-        call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
-        call.argument<Boolean>("diskCache")?.let { diskCache = it }
-        call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
-        call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
+        ingestPlayerArgs(call)
         ingestEqualizerArgs(call)
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           renderTexture = resolveRenderTexture(it)
@@ -519,15 +503,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
       "setOpts" -> {
-        gpuNext = call.argument<Boolean>("gpuNext") == true
-        vulkanEnabled = call.argument<Boolean>("vulkan") == true
-        conf = call.argument<String>("conf") ?: conf
-        decodeMode = call.argument<String>("decode") ?: decodeMode
-        call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
-        call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
-        call.argument<Boolean>("diskCache")?.let { diskCache = it }
-        call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
-        call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
+        ingestPlayerArgs(call)
         ingestEqualizerArgs(call)
         @Suppress("UNCHECKED_CAST")
         val props = (call.argument<Map<*, *>>("props") ?: emptyMap<Any, Any>())
@@ -1311,6 +1287,19 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       } catch (_: Throwable) {
       }
     }
+  }
+
+  /** create / open / setOpts 共用的播放选项。 */
+  private fun ingestPlayerArgs(call: MethodCall) {
+    decodeMode = call.argument<String>("decode") ?: decodeMode
+    gpuNext = call.argument<Boolean>("gpuNext") == true
+    vulkanEnabled = call.argument<Boolean>("vulkan") == true
+    conf = call.argument<String>("conf") ?: conf
+    call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
+    call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
+    call.argument<Boolean>("diskCache")?.let { diskCache = it }
+    call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
+    call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
   }
 
   private fun ingestEqualizerArgs(call: MethodCall) {
@@ -2099,7 +2088,7 @@ internal class KotvMpvSurfaceHost(context: Context) :
   }
 
   override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-    // 只更新尺寸；勿再 onSurface(true)——全屏缩放会反复触发，旧逻辑会重播。
+    // 只更新尺寸；勿再 onSurface(true)：全屏缩放会反复触发，每次都会重播。
     applySurfaceSize(width, height)
   }
 

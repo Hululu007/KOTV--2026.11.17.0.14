@@ -322,7 +322,7 @@ class PostMsgHost {
     }
     _dropOverlays(reportClosed: true);
 
-    // 已有窗：原地换内容（不 pop）。Win7 关开握手会闪死；macOS 快所以以前不易暴露。
+    // 已有窗：原地换内容（不 pop）。先关再开的握手在 Win7 上会闪退。
     if (_sessionActive || _opening) {
       final oldId = (_activeId ?? _lifecycleId ?? '').trim();
       _pendingDoc = null;

@@ -136,7 +136,7 @@ class DanmakuOverlay extends StatefulWidget {
     this.rowsBottom = 3,
     this.fontFamily = 'default',
 
-    /// 同轨水平间隙占屏宽比例（0–0.2）；原硬编码 0.08。
+    /// 同轨水平间隙占屏宽比例（0–0.2），默认 0.08。
     this.scrollGapRatio = 0.08,
 
     /// 描边宽度相对字号（outline）。

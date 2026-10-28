@@ -21,13 +21,12 @@ import '../player/kotv_platform.dart';
 import '../player/background_playback.dart';
 import '../player/kotv_playback.dart';
 import '../player/mini_playback.dart';
-import '../player/video_eq.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
+import '../player/playback_settings.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
-import '../player/subtitle_style_util.dart';
 import '../player/danmaku_layer.dart';
 import '../player/playback_failover.dart';
 import '../player/tv_remote_keys.dart';
@@ -745,8 +744,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
     _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
     _liveAspect = kotvAspectFromScale(_liveScale);
-    final bg = '${settings['playerBackground'] ?? 'pip'}'.trim().toLowerCase();
-    _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip';
+    _playerBackground = kotvPlayerBackgroundFromSettings(settings);
     kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
   }
 
@@ -754,51 +752,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   Future<void> _applyLiveBootstrapPlayback(Map<String, dynamic> settings) async {
     if (settings.isEmpty) return;
     try {
-      final mk = _mk;
-      if (mk is NativeMpvPlayback) {
-        unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
-      } else if (mk is MediaKitPlayback) {
-        unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
-      }
-      _exo?.applyPlayerOptions(settings);
-      _fvp?.applyPlayerOptions(settings);
-      final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
-      final subPos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
-      final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10.0;
-      final styleMode = '${settings['subtitleStyleMode'] ?? 'original'}'.trim().toLowerCase();
-      final forceStyle = styleMode == 'custom';
-      final useSystem = styleMode == 'system';
-      final subColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
-      final subBorder = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
-      final subBorderSize = double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2.0;
-      final subBg = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
-      final edgeType = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
-      final double textOp = (double.tryParse('${settings['subtitleTextOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
-      final double bgOp = (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
-      final double edgeOp = (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
-      final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
-      final shadowStrength = kotvSubtitleShadowStrength('${settings['subtitleShadowStrength'] ?? '50'}');
-      final subFont = kotvNormalizeSubtitleFont('${settings['subtitleFont'] ?? 'default'}');
-      final subFontPath = '${settings['subtitleFontPath'] ?? ''}'.trim();
-      unawaited(_playback.setSubtitleStyle(
-        scale: fontScale.toDouble(),
-        pos: subPos.clamp(-20, 30).toDouble(),
-        secondaryPos: subSecPos.clamp(0, 150).toDouble(),
-        color: forceStyle && subColor.isNotEmpty ? subColor : null,
-        borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
-        borderSize: forceStyle ? subBorderSize.clamp(0, 8).toDouble() : null,
-        bgColor: forceStyle && subBg.isNotEmpty ? subBg : null,
-        edgeType: forceStyle ? edgeType : null,
-        useSystemStyle: useSystem,
-        textOpacity: forceStyle || useSystem ? textOp : null,
-        bgOpacity: forceStyle || useSystem ? bgOp : null,
-        edgeOpacity: forceStyle || useSystem ? edgeOp : null,
-        shadowStrength: forceStyle || useSystem ? shadowStrength : null,
-        font: forceStyle || useSystem ? subFont : null,
-        fontPath: forceStyle || useSystem ? (subFontPath.isEmpty ? null : subFontPath) : null,
-        forceStyle: forceStyle,
-      ));
-      unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
+      kotvPushPlayerSettings(
+        settings,
+        mpvOpts: _mpvOpts.copyWith(decodeMode: _decodeMode),
+        current: _playback,
+        mpv: _mk,
+        exo: _exo,
+        fvp: _fvp,
+      );
       final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
       if (vol != null && vol > 0) {
         await _playback.setVolume(vol.clamp(1, 100));
