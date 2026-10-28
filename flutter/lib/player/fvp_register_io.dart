@@ -50,6 +50,16 @@ void kotvEnsureFvpRegistered({
   );
 }
 
+/// 系统播放器（[VideoPlayerController] 走平台实现，如 iOS AVPlayer）开播前调用：
+/// fvp 注册会全局替换 video_player 实现，这里还原成注册前的那个；下次用 FVP 再重新注册。
+/// 调用方须保证 FVP 的控制器已释放（video_player 换实现时会 init() 清掉旧实现的全部播放器）。
+void kotvUseSystemVideoPlayer() {
+  if (kIsWeb || !_kotvFvpRegistered) return;
+  // platforms 不含当前系统时，fvp 把 VideoPlayerPlatform.instance 还原为注册前的实现。
+  fvp.registerWith(options: <String, dynamic>{'platforms': const <String>[]});
+  _kotvFvpRegistered = false;
+}
+
 /// 注册 libmdk（由 [kotvEnsureFvpRegistered] 调用，勿在 main 里无条件注册）。
 ///
 /// fvp 的 [FVPControllerExtensions] 在 initialize 之前没有 player，setVideoDecoders /

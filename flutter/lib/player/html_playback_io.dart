@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import 'fvp_register.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 import 'video_player_toggle.dart';
@@ -125,6 +126,8 @@ class HtmlPlayback extends KotvPlayback {
         h['X-KOTV-Asset-Mime'] = 'application/vnd.apple.mpegurl';
       }
       final uri = Uri.parse(url);
+      // 用过 FVP 后全局实现是 mdk；系统播放器须走回平台实现。
+      kotvUseSystemVideoPlayer();
       final c = VideoPlayerController.networkUrl(uri, httpHeaders: h);
       _c = c;
       _listener = () {

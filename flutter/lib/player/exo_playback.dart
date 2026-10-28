@@ -948,10 +948,7 @@ class ExoPlayback extends KotvPlayback {
     _diskPreloadSizeMb = int.tryParse('${settings['exoDiskPreloadSizeMb'] ?? '128'}') ?? 128;
     if (_diskPreloadSizeMb < 128) _diskPreloadSizeMb = 128;
     if (_diskPreloadSizeMb > 4096) _diskPreloadSizeMb = 4096;
-    final sec = '${settings['exoSecondarySubtitle'] ?? 'default'}'.trim().toLowerCase();
-    _secondarySubtitle = (sec == 'auto' || sec == 'on' || sec == 'manual' || sec == 'default' || sec == 'player')
-        ? (sec == 'on' ? 'auto' : (sec == 'player' ? 'default' : sec))
-        : 'default';
+    _secondarySubtitle = kotvSecondarySubtitleModeFromSettings(settings);
     _subtitleFontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
     _subtitlePos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
     _subtitleSecondaryPos =

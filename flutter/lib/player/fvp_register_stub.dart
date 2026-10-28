@@ -7,6 +7,8 @@ void kotvEnsureFvpRegistered({
   bool? hlsInput,
 }) {}
 
+void kotvUseSystemVideoPlayer() {}
+
 void kotvRegisterFvp({
   String decodeMode = 'auto',
   String? clearKeyHex,

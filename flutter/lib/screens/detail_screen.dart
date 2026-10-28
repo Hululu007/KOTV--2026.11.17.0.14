@@ -225,6 +225,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _reversed = false;
   /// 起播续播 seek（毫秒）；仅当目标集 remarks/flag 与历史一致时并入 startAt。
   int _resumeSeekMs = 0;
+  /// 换 Player 重开本集时的起始进度；[_playAt] 读一次即清零。
+  int _reopenAtMs = 0;
   String _resumeSeekRemarks = '';
   String _resumeSeekFlag = '';
   DateTime? _lastProgressSave;
@@ -790,6 +792,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (!mounted) return;
     _danmakuItems.value = kotvAppendLiveDanmaku(_danmakuItems.value, item, _playback.position);
     if (!_danmakuOn) setState(() => _danmakuOn = true);
+  }
+
+  /// 换一个 media_kit Player，按当前进度重开本集（见 [kotvMediaKitNeedsNewPlayer]）。
+  Future<void> _reopenWithNewMpvPlayer() async {
+    if (_epIdx < 0 || _playUrl.isEmpty) return;
+    _reopenAtMs = _existingPlayback?.position.inMilliseconds ?? 0;
+    try {
+      await _flushWatchProgress(force: true);
+    } catch (_) {}
+    await _disposeDesktopMpvOwned(softStopFirst: true);
+    if (mounted) await _playAt(_epIdx);
   }
 
   /// 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
@@ -1910,6 +1923,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     // 换集：抬世代，关掉 READY/连播（BUFFERING 时 Clock=null）
     final gen = ++_playGen;
     final serial = ++_playAtSerial;
+    final reopenAtMs = _reopenAtMs;
+    _reopenAtMs = 0;
     _playbackLive = false;
     _sessionStartedAt = null;
     _boundMpvTextureId = null;
@@ -2101,7 +2116,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         startPlayer = _prefPlayerVal;
       }
       var openPlayer = startPlayer;
-      var handoffMs = 0;
+      var handoffMs = reopenAtMs;
       if (kotvIsExternalPlayer(startPlayer)) {
         if (serial != _playAtSerial || !mounted) return;
         final resumeOk = _resumeSeekMs > 0 &&
@@ -2970,11 +2985,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         onNext: () => unawaited(_advanceToNextEpisode(fromEnd: false)),
         onPrev: () => _playAt(_epIdx - 1),
         onDecodeChanged: (mode) {
+          final prev = _decodeMode;
           if (mounted) {
             setState(() {
               _decodeMode = mode;
               _prefDecodeMode = mode;
             });
+          }
+          if (_backend == KotvEmbedBackend.mpv && kotvMediaKitNeedsNewPlayer(prev, mode)) {
+            unawaited(_reopenWithNewMpvPlayer());
           }
         },
         onRenderChanged: (mode) {

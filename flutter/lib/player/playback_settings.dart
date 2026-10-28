@@ -4,6 +4,16 @@ int kotvDolbyVisionFromSettings(Map<String, dynamic> settings) {
   return int.tryParse('${settings['exoDolbyVision'] ?? '0'}') ?? 0;
 }
 
+/// 双字幕 `exoSecondarySubtitle`：off / auto（另一语言）/ default（跟随播放器）/ manual。
+String kotvSecondarySubtitleModeFromSettings(Map<String, dynamic> settings) {
+  return switch ('${settings['exoSecondarySubtitle'] ?? 'default'}'.trim().toLowerCase()) {
+    'off' || 'no' || 'false' || '0' || '' => 'off',
+    'auto' || 'on' => 'auto',
+    'manual' => 'manual',
+    _ => 'default',
+  };
+}
+
 String kotvPreferredTextLangsFromSettings(Map<String, dynamic> settings) {
   return '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
 }

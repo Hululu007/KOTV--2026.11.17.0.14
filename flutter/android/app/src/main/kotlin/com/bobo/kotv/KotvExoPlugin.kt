@@ -162,6 +162,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** 副字幕：off | auto | default | manual。 */
   private var secondarySubtitleMode: String = "default"
   private var secondarySubtitleId: String = ""
+  /** 本片源是否已按「自动」挑过副字幕。 */
+  private var secondaryAutoApplied = false
   private var playerBuiltLibass: Boolean? = null
   private var playerBuiltSecondary: Boolean? = null
   /** diskCache / bufferFactor 写入 LoadControl 与 CacheDataSource，变更须重建。 */
@@ -1048,6 +1050,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     startPositionMs: Long = C.TIME_UNSET,
   ) {
     formatRetried = false
+    secondaryAutoApplied = false
     livePlayback = live
     currentUrl = url
     currentHeaders = normalizeHeaders(headers)
@@ -1326,6 +1329,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
         override fun onTracksChanged(tracks: Tracks) {
           applyVideoEq()
+          applySecondaryAuto(tracks)
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -2458,7 +2462,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       return
     }
     subtitleOverlay?.setSecondaryEnabled(true)
-    // auto/default：保留第二 TextRenderer，由选择器自选，不强制 override。
+    // default：保留第二 TextRenderer，由选择器自选；auto 在 onTracksChanged 里挑另一语言。
     if (secondarySubtitleMode != "manual") return
     val id = secondarySubtitleId.trim()
     if (id.isEmpty() || id.equals("auto", true) || id.equals("default", true) || id.equals("player", true)) return
@@ -2469,7 +2473,40 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (gi !in groups.indices) return
     val g = groups[gi]
     if (g.type != C.TRACK_TYPE_TEXT || ti !in 0 until g.length || !g.isTrackSupported(ti)) return
-    // 保留主字幕 override，再叠加副字幕 override。
+    overrideSecondaryText(sel, g, ti)
+    p.play()
+  }
+
+  /** 双字幕「自动」：主字幕之外挑一条语言不同的字幕轨；每个片源只挑一次。 */
+  private fun applySecondaryAuto(tracks: Tracks) {
+    if (secondarySubtitleMode != "auto" || secondaryAutoApplied) return
+    val sel = trackSelector ?: return
+    val text = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+    var primaryLang: String? = null
+    for (g in text) {
+      for (i in 0 until g.length) {
+        if (g.isTrackSelected(i)) primaryLang = langKey(g.getTrackFormat(i).language)
+      }
+    }
+    val primary = primaryLang ?: return
+    for (g in text) {
+      for (i in 0 until g.length) {
+        if (g.isTrackSelected(i) || !g.isTrackSupported(i)) continue
+        val lang = langKey(g.getTrackFormat(i).language) ?: continue
+        if (lang == primary) continue
+        secondaryAutoApplied = true
+        overrideSecondaryText(sel, g, i)
+        return
+      }
+    }
+  }
+
+  /** 语言主标签（zh-Hans / zh_CN → zh）；未知为 null。 */
+  private fun langKey(lang: String?): String? =
+    lang?.trim()?.lowercase()?.split('-', '_')?.firstOrNull()?.takeIf { it.isNotEmpty() && it != "und" }
+
+  /** 保留主字幕 override，再叠加副字幕 override。 */
+  private fun overrideSecondaryText(sel: DecodeTrackSelector, g: Tracks.Group, ti: Int) {
     val builder = sel.buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
     val primaryOverride =
       sel.parameters.overrides.values.firstOrNull { it.type == C.TRACK_TYPE_TEXT }
@@ -2479,7 +2516,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     builder.addOverride(TrackSelectionOverride(g.mediaTrackGroup, ti))
     sel.setParameters(builder.build())
-    p.play()
   }
 
   private fun selectVideoTrackAt(index: Int) {

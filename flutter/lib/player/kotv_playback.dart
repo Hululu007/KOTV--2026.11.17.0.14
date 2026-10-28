@@ -362,9 +362,17 @@ String kotvFormatSpeed(int bytesPerSec, {bool showZero = false}) {
 }
 
 class KotvTrack {
-  const KotvTrack({required this.id, required this.label});
+  const KotvTrack({required this.id, required this.label, this.language = ''});
   final String id;
   final String label;
+  /// 轨道语言（容器元数据）；未知为空。
+  final String language;
+}
+
+/// 语言主标签（zh-Hans / zh_CN → zh）；未知或 und 为空串。
+String kotvLangKey(String lang) {
+  final k = lang.trim().toLowerCase().split(RegExp(r'[-_]')).first;
+  return k == 'und' ? '' : k;
 }
 
 /// 桌面端关窗前注册：先硬停页面内播放器，再销毁 FlutterEngine，

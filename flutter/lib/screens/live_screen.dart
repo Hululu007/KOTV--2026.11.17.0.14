@@ -192,23 +192,26 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return _mk!;
   }
 
+  /// 拆掉 MPV（Android 原生或桌面 media_kit Player）；下次 [_playback] 按当前设置新建。
+  Future<void> _releaseMpv() async {
+    final mk = _mk;
+    final mkPlayer = _mkPlayer;
+    try {
+      await mk?.release();
+    } catch (_) {}
+    _mkPlayer = null;
+    try {
+      mk?.dispose();
+    } catch (_) {}
+    _mk = null;
+    await kotvDisposeMpvPlayer(mkPlayer);
+  }
+
   /// 切到其它内置后端时停掉闲置引擎。
   /// 调用方须在改 [_playerVal] **之前**调用，以便旧 FVP/Surface 仍在树上时完成 release。
   /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
   Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
-    if (keep != KotvEmbedBackend.mpv) {
-      final mk = _mk;
-      final mkPlayer = _mkPlayer;
-      try {
-        await mk?.release();
-      } catch (_) {}
-      _mkPlayer = null;
-      try {
-        mk?.dispose();
-      } catch (_) {}
-      _mk = null;
-      await kotvDisposeMpvPlayer(mkPlayer);
-    }
+    if (keep != KotvEmbedBackend.mpv) await _releaseMpv();
     if (keep != KotvEmbedBackend.fvp) {
       // 先 stop/dispose 再置空，避免 [_playback] 在中途 new 出第二个 FVP。
       final fvp = _fvp;
@@ -2496,16 +2499,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       ('硬解码', 'hard'),
     ]);
     if (v == null) return;
+    final prev = _decodeMode;
+    final pos = _playUrl.isNotEmpty ? _playback.position : Duration.zero;
     setState(() {
       _decodeMode = v;
       _prefDecodeMode = v;
     });
-    await _playback.setDecodeMode(v);
+    if (_backend == KotvEmbedBackend.mpv && kotvMediaKitNeedsNewPlayer(prev, v)) {
+      // 下面按当前进度重开时由 [_playback] 用新的解码方式建 Player。
+      await _releaseMpv();
+    } else {
+      await _playback.setDecodeMode(v);
+    }
     try {
       await _persistLiveSetting('playerDecode', v);
     } catch (_) {}
     if (_playUrl.isNotEmpty) {
-      final pos = _playback.position;
       // 直播/回看均 live 起播；进度经 startAt 在首次 play 前恢复。
       final serial = ++_playSerial;
       await _openLiveUrl(

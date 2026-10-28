@@ -757,10 +757,7 @@ class FvpPlayback extends KotvPlayback {
   void applyPlayerOptions(Map<String, dynamic> settings) {
     _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
     _subtitleFontScale = _subtitleFontScale.clamp(0.5, 2.0);
-    final sec = '${settings['exoSecondarySubtitle'] ?? 'default'}'.trim().toLowerCase();
-    _secondarySubtitleMode = (sec == 'auto' || sec == 'on' || sec == 'manual' || sec == 'default' || sec == 'player')
-        ? (sec == 'on' ? 'auto' : (sec == 'player' ? 'default' : sec))
-        : 'default';
+    _secondarySubtitleMode = kotvSecondarySubtitleModeFromSettings(settings);
     _preferredTextLangs = kotvPreferredTextLangsFromSettings(settings);
     _videoEq = KotvVideoEq.fromSettings(settings);
     _audioEq = kotvAudioEqFromSettings(settings);
@@ -966,6 +963,7 @@ class FvpPlayback extends KotvPlayback {
           KotvTrack(
             id: '$index',
             label: _metaLabel(meta, codec: codec, w: w, h: h),
+            language: (meta['language'] ?? meta['lang'] ?? '').trim(),
           ),
         );
       } catch (_) {}
@@ -1003,8 +1001,18 @@ class FvpPlayback extends KotvPlayback {
     if (c == null || _subtitleTracks.length < 2) return;
     final primary = _parseTrackIndex(_currentSubtitleId ?? '') ??
         _parseTrackIndex(_subtitleTracks.first.id);
+    // 「自动」= 另一语言的字幕；「跟随默认」= 主字幕之外的下一条。
+    final byLanguage = _secondarySubtitleMode == 'auto';
+    final primaryLang = kotvLangKey(_subtitleTracks
+        .firstWhere((t) => _parseTrackIndex(t.id) == primary, orElse: () => const KotvTrack(id: '', label: ''))
+        .language);
+    if (byLanguage && primaryLang.isEmpty) return;
     for (final t in _subtitleTracks) {
       final idx = _parseTrackIndex(t.id);
+      if (byLanguage) {
+        final lang = kotvLangKey(t.language);
+        if (lang.isEmpty || lang == primaryLang) continue;
+      }
       if (idx != null && idx != primary) {
         _currentSecondarySubtitleId = t.id;
         _syncSubtitleTracks(c);
