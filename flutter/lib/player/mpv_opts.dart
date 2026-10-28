@@ -32,7 +32,7 @@ const kotvImageExts = '';
 /// ## 平台能力
 /// | 选项 | Android 原生 | 桌面 media_kit |
 /// |------|-------------|----------------|
-/// | hwdec | 硬=直出；自动=直出硬解优先再软解 | Windows 硬解后拷贝（无 ANGLE 互通）；其它直出 |
+/// | hwdec | 硬=直出；自动=直出硬解优先再软解 | 直出优先；Windows 直出不成退到硬解后拷贝 |
 /// | gpu-next | vo=gpu-next（Surface） | ❌（Texture/libmpv） |
 /// | gpu-api / Vulkan | 原生 Surface | setProperty（含 Win7） |
 /// | AV3A | libmvcodec | 自带 FFmpeg+avs3a |
@@ -221,7 +221,7 @@ class KotvMpvOpts {
   /// 供 setProperty / VideoController 使用的 hwdec 值。
   ///
   /// 「自动」= 优先硬解，失败再软解；UI 仍显示自动。不用 `auto` / `auto-safe`，按平台写死链。
-  /// Windows 是硬解后拷贝（见下）；Android / macOS / Linux 为直出，iOS 为 videotoolbox-copy。
+  /// Windows 直出优先、退到硬解后拷贝（见下）；Android / macOS / Linux 为直出，iOS 为 videotoolbox-copy。
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {
@@ -229,14 +229,16 @@ class KotvMpvOpts {
       return hard ? 'mediacodec' : 'mediacodec,no';
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      // media_kit 在 Windows 用 ANGLE(EGL) 给 libmpv 提供 OpenGL；自带 libmpv 未编 egl-angle，
-      // dxva2/d3d11va 直出找不到互通，会静默退回软解（4K 占满 CPU）。改用硬解后拷贝：
-      // 只要 FFmpeg 的 dxva2/d3d11va 解码器，不依赖渲染器互通。
+      // media_kit 在 Windows 用 ANGLE(EGL) 给 libmpv 提供 OpenGL。直出靠 libmpv 编进的
+      // egl-angle 互通（d3d11-egl / dxva2-egl）；互通建不起来（驱动/ANGLE 不支持）时
+      // mpv 跳到下一项硬解后拷贝，仍不行才软解。
       // Win7：仅 dxva2。d3d11va 依赖 ID3D11VideoDevice（MSDN 最低 Win8），摸到会卡 UI。
       if (kotvIsWindows7()) {
-        return hard ? 'dxva2-copy' : 'dxva2-copy,no';
+        return hard ? 'dxva2,dxva2-copy' : 'dxva2,dxva2-copy,no';
       }
-      return hard ? 'd3d11va-copy,dxva2-copy' : 'd3d11va-copy,dxva2-copy,no';
+      return hard
+          ? 'd3d11va,d3d11va-copy,dxva2-copy'
+          : 'd3d11va,d3d11va-copy,dxva2-copy,no';
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       // 画面经 OpenGL ES 画进 FBO。直出 videotoolbox 的帧进不了这块缓冲，只能拷贝后再画。

@@ -7,6 +7,7 @@ import '../remote/download_settings.dart';
 import '../remote/local_download.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
+import '../vod/vod_open.dart';
 import '../widgets/chrome.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
@@ -150,6 +151,21 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                 ),
               ),
       ),
+    );
+  }
+
+  /// 已下载完成：按文件路径直接播放（远端前端由引擎换成 /file/ 地址）。
+  Future<void> _playDownloaded(Map<String, dynamic> t) async {
+    final path = '${t['path'] ?? ''}'.trim();
+    if (path.isEmpty) return;
+    await openDirectPlay(
+      context,
+      ref,
+      url: path,
+      site: kotvLocalFileSite,
+      name: DownloadSettings.taskLabel(t),
+      pic: '${t['pic'] ?? ''}'.trim(),
+      flag: '本地',
     );
   }
 
@@ -322,6 +338,8 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                         final canResume = st == 'paused' ||
                             st == 'error' ||
                             st == 'cancelled';
+                        final playable = st == 'done' &&
+                            '${t['path'] ?? ''}'.trim().isNotEmpty;
                         return DecoratedBox(
                           decoration: BoxDecoration(
                             color: p.pillBg,
@@ -334,7 +352,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                             borderRadius: BorderRadius.circular(12),
                             onTap: _selectMode
                                 ? () => _toggleSelect(id)
-                                : null,
+                                : (playable ? () => _playDownloaded(t) : null),
                             onLongPress: () {
                               _setSelectMode(true);
                               _selected.add(id);
@@ -400,6 +418,13 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
                                     ),
                                   ),
                                   if (!_selectMode) ...[
+                                    if (playable)
+                                      _iconBtn(
+                                        icon: Icons.play_circle_fill,
+                                        tip: '播放',
+                                        color: p.primary,
+                                        onTap: () => _playDownloaded(t),
+                                      ),
                                     if (canPause || canResume)
                                       _iconBtn(
                                         icon: canPause

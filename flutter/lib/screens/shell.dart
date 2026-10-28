@@ -115,22 +115,16 @@ class _AppShellState extends ConsumerState<AppShell> {
     if (kind == 'play') {
       final url = '${open['url'] ?? open['id'] ?? ''}'.trim();
       if (url.isEmpty) return;
-      final site = '${open['site'] ?? 'push_agent'}'.trim();
+      final site = '${open['site'] ?? ''}'.trim();
       final id = '${open['id'] ?? url}'.trim();
-      final item = VodItem(
-        id: id.isEmpty ? url : id,
-        name: name.isEmpty ? '投屏播放' : name,
-        pic: pic,
-        // push_agent 单集名为「1」，空 remarks 会导致续播匹配失败。
-        remarks: remarks.isEmpty ? '1' : remarks,
-        site: site.isEmpty ? 'push_agent' : site,
-        flag: flag.isEmpty ? '推送' : flag,
-        positionMs: pos,
-      );
-      // 详情续播读 LocalHistory；投屏带入的进度需先写入。
-      await LocalHistory.push(item);
-      if (!mounted) return;
-      await openVodItem(ctx, ref, item, site: site.isEmpty ? 'push_agent' : site);
+      await openDirectPlay(ctx, ref,
+          url: id.isEmpty ? url : id,
+          site: site,
+          name: name.isEmpty ? '投屏播放' : name,
+          pic: pic,
+          remarks: remarks,
+          flag: flag,
+          positionMs: pos);
       return;
     }
     if (kind == 'detail') {

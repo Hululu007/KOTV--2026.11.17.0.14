@@ -24,9 +24,9 @@ fetch_windows() {
   mkdir -p "$ASSET/windows"
   local out="$ASSET/windows/mpv-2.dll"
   local kind_file="$ASSET/windows/.kind"
-  local want_kind="av3a-dav1d-vulkan-d3d11-opengl-osc-dovi-lcms-xxhash-v23"
+  local want_kind="av3a-dav1d-vulkan-d3d11-opengl-eglangle-osc-dovi-lcms-xxhash-v24"
   if [[ "${KOTV_WIN7:-}" == "1" || "${KOTV_MPV_WIN7:-}" == "1" ]]; then
-    want_kind="av3a-dav1d-vulkan-d3d11-opengl-osc-dovi-lcms-xxhash-win7-v24"
+    want_kind="av3a-dav1d-vulkan-d3d11-opengl-eglangle-osc-dovi-lcms-xxhash-win7-v25"
     export KOTV_MPV_WIN7=1
   fi
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \

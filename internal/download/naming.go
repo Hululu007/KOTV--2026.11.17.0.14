@@ -51,6 +51,9 @@ func sanitizeName(s string) string {
 		switch {
 		case r == '/' || r == '\\' || r == ':' || r == '*' || r == '?' || r == '"' || r == '<' || r == '>' || r == '|':
 			b.WriteByte('_')
+		// 下载列表按「集名$路径#下一集」播放串打开文件，# / $ / ＄ 会把路径拆坏。
+		case r == '#' || r == '$' || r == '＄':
+			b.WriteByte('_')
 		case unicode.IsControl(r):
 			continue
 		default:

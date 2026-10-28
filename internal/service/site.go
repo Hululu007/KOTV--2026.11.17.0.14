@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,22 @@ import (
 
 // PushAgentKey 无站点配置时的推送入口 key。
 const PushAgentKey = "push_agent"
+
+// LocalFileKey 引擎内置：影片 id 即引擎本机文件路径（下载列表点开已下载文件）。
+// 配置里不会有这个 key，因此不受配置里 Push 等爬虫影响。
+const LocalFileKey = "kotv_local_file"
+
+// IsDirectPlayKey id 直接当播放地址、不经爬虫的入口（配置未占用的推送入口 / 本机文件）。
+func IsDirectPlayKey(key string) bool {
+	return key == PushAgentKey || key == LocalFileKey
+}
+
+func directPlaySite(key string) *model.Site {
+	if key == LocalFileKey {
+		return &model.Site{Key: LocalFileKey, Name: "本地"}
+	}
+	return &model.Site{Key: PushAgentKey, Name: "推送"}
+}
 
 // PushAgentPic 推送详情占位图（TV R.string.push_image 等价 data URI，1x1 JPEG）。
 const PushAgentPic = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGfAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
@@ -320,16 +337,21 @@ func (s *SiteService) DetailContent(reqKey string, vod model.Vod) (model.Vod, er
 		site = &h
 	}
 
-	// 空站点且为推送入口：把 id 当播放地址。
-	if site.IsEmpty() && reqKey == PushAgentKey {
+	// 空站点的推送 / 本机文件入口：把 id 当播放地址。
+	if site.IsEmpty() && IsDirectPlayKey(reqKey) {
 		id := vod.VodID.String()
+		ds := directPlaySite(reqKey)
+		name := id
+		if reqKey == LocalFileKey {
+			name = filepath.Base(id)
+		}
 		detail := model.Vod{
 			VodID:       model.FlexString(id),
-			VodName:     id,
+			VodName:     name,
 			VodPic:      PushAgentPic,
 			VodPlayURL:  id,
-			VodPlayFrom: "推送",
-			Site:        &model.Site{Key: PushAgentKey, Name: "推送"},
+			VodPlayFrom: ds.Name,
+			Site:        ds,
 		}
 		detail.SetVodFlags()
 		result := model.Result{Success: true, List: []model.Vod{detail}}
@@ -443,8 +465,8 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 	source.Stop()
 	thunder.Stop()
 
-	// site.isEmpty() && push_agent：直接把 id 当 url，再走专用源预处理。
-	if site.IsEmpty() && reqKey == PushAgentKey {
+	// 空站点的推送 / 本机文件入口：直接把 id 当 url，再走专用源预处理。
+	if site.IsEmpty() && IsDirectPlayKey(reqKey) {
 		result = model.Result{
 			Success: true,
 			URL:     model.URL{URLs: []string{id}},

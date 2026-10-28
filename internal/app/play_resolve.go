@@ -31,13 +31,13 @@ func (a *App) resolvePlaySite(siteKey string) model.Site {
 	if siteKey != "" {
 		if s := cfg.GetSite(siteKey); s != nil {
 			site = *s
-		} else if siteKey != service.PushAgentKey {
+		} else if !service.IsDirectPlayKey(siteKey) {
 			site = cfg.Home()
 		}
 	} else {
 		site = cfg.Home()
 	}
-	if site.Key == "" && siteKey != service.PushAgentKey {
+	if site.Key == "" && !service.IsDirectPlayKey(siteKey) {
 		site = cfg.Home()
 	}
 	return site

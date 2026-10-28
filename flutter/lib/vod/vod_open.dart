@@ -12,6 +12,7 @@ import '../nav/kotv_routes.dart';
 import '../providers.dart';
 import '../desktop/mini_player_window.dart';
 import '../player/playback_guard.dart';
+import '../remote/remote_bridge.dart';
 import '../screens/detail_screen.dart';
 import '../widgets/auth_gate.dart';
 import '../screens/folder_screen.dart';
@@ -101,6 +102,42 @@ bool siteIsIndex(WidgetRef ref, String siteKey) {
 }
 
 Future<void>? _vodOpenSerial;
+
+/// 推送入口的站点 key：影片 id 即播放地址。配置里若有同名 Push 爬虫，则由它处理。
+const kotvPushAgentSite = 'push_agent';
+
+/// 引擎内置的本机文件入口：影片 id 即引擎本机文件路径，不经任何爬虫（下载列表用）。
+const kotvLocalFileSite = 'kotv_local_file';
+
+/// 把一个播放地址当影片打开播放（投屏/推送、下载列表里点开已下载文件）。
+/// [site] 为空走推送入口；本机文件用 [kotvLocalFileSite]，本机直接读，远端前端由引擎换成 /file/ 地址。
+/// 先写 LocalHistory：详情续播读它，带入的进度才能接上。
+Future<void> openDirectPlay(
+  BuildContext context,
+  WidgetRef ref, {
+  required String url,
+  String site = '',
+  String name = '',
+  String pic = '',
+  String remarks = '',
+  String flag = '',
+  int positionMs = 0,
+}) async {
+  final siteKey = site.isEmpty ? kotvPushAgentSite : site;
+  final item = VodItem(
+    id: url,
+    name: name.isEmpty ? url : name,
+    pic: pic,
+    // push_agent 单集名为「1」，空 remarks 会导致续播匹配失败。
+    remarks: remarks.isEmpty ? '1' : remarks,
+    site: siteKey,
+    flag: flag.isEmpty ? '推送' : flag,
+    positionMs: positionMs,
+  );
+  await LocalHistory.push(item);
+  if (!context.mounted) return;
+  await openVodItem(context, ref, item, site: siteKey);
+}
 
 /// 打开列表项：action → 站点 action；folder → 进目录；索引站可搜；否则进详情。
 /// [fromFolder] 带 mark 以便详情按文件名选中那一集。

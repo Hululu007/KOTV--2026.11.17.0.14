@@ -311,7 +311,7 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 	if siteKey != "" {
 		if site := cfg.GetSite(siteKey); site != nil {
 			vod.Site = site
-		} else if siteKey == service.PushAgentKey {
+		} else if service.IsDirectPlayKey(siteKey) {
 			vod.Site = &model.Site{} // 空站 → DetailContent stub
 		}
 	}
