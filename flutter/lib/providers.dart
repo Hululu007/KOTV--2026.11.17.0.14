@@ -93,6 +93,9 @@ final vodContentEpochProvider = StateProvider<int>((ref) => 0);
 /// 点播竖屏沉浸全屏：隐藏 shell 底栏，避免原位全屏时露出「首页/直播/搜索/我的」。
 final detailImmersiveFullscreenProvider = StateProvider<bool>((ref) => false);
 
+/// 直播页内全屏：壳层取消 SafeArea，画面铺满含刘海一侧（否则「适应屏幕」两侧黑边不等宽）。
+final liveImmersiveFullscreenProvider = StateProvider<bool>((ref) => false);
+
 /// 详情/文件浏览器等压在壳上的页：藏底栏并取消顶 SafeArea，让页内壁纸盖住壳层边条。
 final detailChromeCoverProvider = StateProvider<bool>((ref) => false);
 

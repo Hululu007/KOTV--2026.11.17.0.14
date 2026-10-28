@@ -2463,6 +2463,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _rightOpen = false;
       _chromeVisible = false;
     });
+    ref.read(liveImmersiveFullscreenProvider.notifier).state = true;
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     await kotvEnterSystemFullscreen(desktopFs);
@@ -2481,6 +2482,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         _rightOpen = false;
         _chromeVisible = false;
       });
+      ref.read(liveImmersiveFullscreenProvider.notifier).state = false;
     }
     await kotvExitSystemFullscreen(
       wasDisplayFullscreen: _desktopFs == KotvDesktopFullscreenKind.display,
@@ -3488,701 +3490,709 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   // Android Hybrid：起播/换台无帧时盖黑防叠影；桌面 Texture 不挂此层。
                   _buildLiveSurfaceCover(),
                   _buildLiveDanmakuOverlay(),
-                  KotvBufferingOverlay(
-                    player: _playback,
-                    force: _status.contains('解析') ||
-                        _status.contains('加载') ||
-                        _status.contains('缓冲') ||
-                        _loading,
-                  ),
-                  if (_zapDigits.isNotEmpty)
-                    Positioned(
-                      right: 36,
-                      top: 48,
-                      child: IgnorePointer(
-                        child: Text(
-                          _zapDigits,
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.92),
-                            fontSize: 56,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 2,
-                            shadows: const [Shadow(color: Colors.black54, blurRadius: 8)],
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (_error != null) Center(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
-                  // 点击分区：左 28% 频道 / 右 28% 设置 / 中 点画面播停（抖音式）
-                  Positioned.fill(
-                    child: Row(
+                  // 画面、挡帧、弹幕铺满（含刘海一侧）；控件放进 SafeArea 避开刘海与手势条。
+                  SafeArea(
+                    child: Stack(
+                      fit: StackFit.expand,
                       children: [
-                        Expanded(
-                          flex: 28,
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.translucent,
-                            onTap: _toggleLeft,
-                            onSecondaryTap: () => kotvHandleAppBack?.call(),
-                            onDoubleTap: _onLiveDoubleTap,
-                          ),
-                        ),
-                        Expanded(
-                          flex: 44,
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.translucent,
-                            onTap: _onCenterTap,
-                            onSecondaryTap: () => kotvHandleAppBack?.call(),
-                            onDoubleTap: _onLiveDoubleTap,
-                          ),
-                        ),
-                        Expanded(
-                          flex: 28,
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.translucent,
-                            onTap: _toggleRight,
-                            onSecondaryTap: () => kotvHandleAppBack?.call(),
-                            onDoubleTap: _onLiveDoubleTap,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_playUrl.isNotEmpty && !_leftOpen && !_rightOpen)
-                    if (_catchup)
-                      ExcludeFocus(
-                        child: CenterPlayPauseButton(
+                        KotvBufferingOverlay(
                           player: _playback,
-                          hideWhenBuffering: true,
-                          enabled: !_loading &&
-                              !_status.contains('解析') &&
-                              !_status.contains('加载') &&
-                              !_status.contains('缓冲'),
+                          force: _status.contains('解析') ||
+                              _status.contains('加载') ||
+                              _status.contains('缓冲') ||
+                              _loading,
                         ),
-                      ),
-                  if ((_catchup && _catchupChrome) && !_leftOpen && !_rightOpen)
-                    Positioned(
-                      left: KotvLayout.isLandscapeCompact(context) ? 10 : 16,
-                      top: KotvLayout.isLandscapeCompact(context) ? 8 : 12,
-                      child: AppPill(
-                        label: _immersive
-                            ? '退出全屏'
-                            : '返回直播',
-                        width: KotvLayout.isLandscapeCompact(context)
-                            ? (!_immersive ? 96.0 : 78.0)
-                            : (!_immersive ? 110.0 : 96.0),
-                        height: KotvLayout.isLandscapeCompact(context) ? 28 : 36,
-                        fontSize: KotvLayout.isLandscapeCompact(context) ? 12 : 14,
-                        onTap: () {
-                          if (_immersive) {
-                            unawaited(_exitImmersive());
-                          } else {
-                            unawaited(_exitCatchup());
-                          }
-                        },
-                      ),
-                    ),
-                  if (!_catchup && _immersive && _channelInfoVisible && !_leftOpen && !_rightOpen)
-                    Positioned(
-                      left: KotvLayout.isLandscapeCompact(context) ? 10 : 16,
-                      top: KotvLayout.isLandscapeCompact(context) ? 8 : 12,
-                      child: AppPill(
-                        label: '退出全屏',
-                        width: KotvLayout.isLandscapeCompact(context) ? 78.0 : 96.0,
-                        height: KotvLayout.isLandscapeCompact(context) ? 28 : 36,
-                        fontSize: KotvLayout.isLandscapeCompact(context) ? 12 : 14,
-                        onTap: () => unawaited(_exitImmersive()),
-                      ),
-                    ),
-                  if (_leftOpen)
-                    Positioned(
-                      left: 0,
-                      top: 0,
-                      bottom: 0,
-                      child: MouseRegion(
-                        onEnter: (_) => _cancelHideOverlays(),
-                        onExit: (_) => _scheduleHideOverlays(),
-                        child: Material(
-                          color: KotvPalette.of(context).dialogBg,
-                          child: Builder(builder: (context) {
-                            final p = KotvPalette.of(context);
-                            final screenW = c.maxWidth;
-                            final land = KotvLayout.isLandscapeCompact(context);
-                            final ui = LayoutScale.grow(context);
-                            var groupW = (land ? 112.0 : 136.0) * ui;
-                            var channelW = (land ? 248.0 : 280.0) * ui;
-                            var epgW = (land ? 200.0 : 260.0) * ui;
-                            var epgTabW = (land ? 28.0 : 32.0) * ui;
-                            final padH = (land ? 6.0 : 8.0) * 2 * ui;
-                            final gap1 = (land ? 4.0 : 6.0) * ui;
-                            final gapTab = (land ? 4.0 : 6.0) * ui;
-                            final gap2 = 6.0 * ui;
-                            final pillH = land ? 30.0 : 36.0;
-                            final chH = (land ? 36.0 : 48.0) * ui;
-                            final groupStride = pillH * LayoutScale.layoutOf(context) + (land ? 4.0 : 6.0) * ui;
-                            final channelStride = chH + (land ? 2.0 : 4.0) * ui;
-                            const epgFont = 12.0;
-                            final epgStride = _oneLine(
-                                  context,
-                                  const TextStyle(fontSize: epgFont, height: 1.2, fontWeight: FontWeight.w700),
-                                ) +
-                                (land ? 10.0 : 16.0) * ui +
-                                (land ? 2.0 : 4.0) * ui;
-                            _pinList(_groupScroll, _groupIdx, groupStride, _groupStride, _pinnedGroup);
-                            _pinList(_channelScroll, _channelListIndex(), channelStride, _channelStride, _pinnedChannel);
-                            _pinList(_epgScroll, _epgHighlightIndex(), epgStride, _epgStride, _pinnedEpg);
-                            _pinnedGroup = _groupIdx;
-                            _pinnedChannel = _channelListIndex();
-                            _pinnedEpg = _epgHighlightIndex();
-                            _groupStride = groupStride;
-                            _channelStride = channelStride;
-                            _epgStride = epgStride;
-                            final font = land ? 12.0 : 13.0;
-                            final logoW = (land ? 28.0 : 40.0) * ui;
-                            final logoH = (land ? 22.0 : 30.0) * ui;
-                            final numDigits = _channelNumDigitsFor(_channels);
-                            final numColW = _channelNumColWidth(font, digits: numDigits);
-                            final channelChrome = numColW + (land ? 4 : 12) * ui + logoW + (land ? 6 : 12) * ui;
-                            final channelFloor = channelChrome + 56 * ui;
-                            // 桌面全屏最多约占半屏，避免挡完画面；窄屏仍可到 92%
-                            final maxFrac = (_immersive && !land) ? 0.52 : 0.92;
-                            final contentW0 = groupW +
-                                gap1 +
-                                channelW +
-                                gapTab +
-                                epgTabW +
-                                (_epgOpen ? gap2 + epgW : 0);
-                            final leftW0 = contentW0 + padH;
-                            final panelW = leftW0.clamp(0.0, screenW * maxFrac);
-                            final innerMax = (panelW - padH).clamp(1.0, panelW);
-                            if (contentW0 > innerMax) {
-                              final fitted = _fitLivePanelCols(
-                                innerMax: innerMax,
-                                gap1: gap1,
-                                gapTab: gapTab,
-                                gap2: gap2,
-                                epgOpen: _epgOpen,
-                                channelFloor: channelFloor,
-                                groupFloor: (land ? 72.0 : 88.0) * ui,
-                                epgFloor: (land ? 120.0 : 140.0) * ui,
-                                epgTabFloor: (land ? 24.0 : 28.0) * ui,
-                                groupW: groupW,
-                                channelW: channelW,
-                                epgW: epgW,
-                                epgTabW: epgTabW,
-                              );
-                              groupW = fitted.groupW;
-                              channelW = fitted.channelW;
-                              epgW = fitted.epgW;
-                              epgTabW = fitted.epgTabW;
-                            }
-                            return SizedBox(
-                            width: panelW,
-                            child: ClipRect(
-                            child: Padding(
-                              padding: EdgeInsets.fromLTRB((land ? 6 : 8) * ui, (land ? 8 : 10) * ui, (land ? 6 : 8) * ui, (land ? 8 : 10) * ui),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: groupW,
-                                    child: ListView.builder(
-                                      controller: _groupScroll,
-                                      itemCount: _groups.length,
-                                      itemBuilder: (_, i) {
-                                        final g = _groups[i];
-                                        final locked = _groupLocked(i);
-                                        return Padding(
-                                          padding: EdgeInsets.only(bottom: (land ? 4 : 6) * ui),
-                                          child: AppPill(
-                                            label: '${locked ? '🔒 ' : ''}${g['name'] ?? ''}',
-                                            height: pillH,
-                                            fontSize: font,
-                                            selected: i == _groupIdx,
-                                            marqueeWhenSelected: true,
-                                            onTap: () {
-                                              _cancelHideOverlays();
-                                              _selectGroup(i);
+                        if (_zapDigits.isNotEmpty)
+                          Positioned(
+                            right: 36,
+                            top: 48,
+                            child: IgnorePointer(
+                              child: Text(
+                                _zapDigits,
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.92),
+                                  fontSize: 56,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 2,
+                                  shadows: const [Shadow(color: Colors.black54, blurRadius: 8)],
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (_error != null) Center(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
+                        // 点击分区：左 28% 频道 / 右 28% 设置 / 中 点画面播停（抖音式）
+                        Positioned.fill(
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 28,
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.translucent,
+                                  onTap: _toggleLeft,
+                                  onSecondaryTap: () => kotvHandleAppBack?.call(),
+                                  onDoubleTap: _onLiveDoubleTap,
+                                ),
+                              ),
+                              Expanded(
+                                flex: 44,
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.translucent,
+                                  onTap: _onCenterTap,
+                                  onSecondaryTap: () => kotvHandleAppBack?.call(),
+                                  onDoubleTap: _onLiveDoubleTap,
+                                ),
+                              ),
+                              Expanded(
+                                flex: 28,
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.translucent,
+                                  onTap: _toggleRight,
+                                  onSecondaryTap: () => kotvHandleAppBack?.call(),
+                                  onDoubleTap: _onLiveDoubleTap,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (_playUrl.isNotEmpty && !_leftOpen && !_rightOpen)
+                          if (_catchup)
+                            ExcludeFocus(
+                              child: CenterPlayPauseButton(
+                                player: _playback,
+                                hideWhenBuffering: true,
+                                enabled: !_loading &&
+                                    !_status.contains('解析') &&
+                                    !_status.contains('加载') &&
+                                    !_status.contains('缓冲'),
+                              ),
+                            ),
+                        if ((_catchup && _catchupChrome) && !_leftOpen && !_rightOpen)
+                          Positioned(
+                            left: KotvLayout.isLandscapeCompact(context) ? 10 : 16,
+                            top: KotvLayout.isLandscapeCompact(context) ? 8 : 12,
+                            child: AppPill(
+                              label: _immersive
+                                  ? '退出全屏'
+                                  : '返回直播',
+                              width: KotvLayout.isLandscapeCompact(context)
+                                  ? (!_immersive ? 96.0 : 78.0)
+                                  : (!_immersive ? 110.0 : 96.0),
+                              height: KotvLayout.isLandscapeCompact(context) ? 28 : 36,
+                              fontSize: KotvLayout.isLandscapeCompact(context) ? 12 : 14,
+                              onTap: () {
+                                if (_immersive) {
+                                  unawaited(_exitImmersive());
+                                } else {
+                                  unawaited(_exitCatchup());
+                                }
+                              },
+                            ),
+                          ),
+                        if (!_catchup && _immersive && _channelInfoVisible && !_leftOpen && !_rightOpen)
+                          Positioned(
+                            left: KotvLayout.isLandscapeCompact(context) ? 10 : 16,
+                            top: KotvLayout.isLandscapeCompact(context) ? 8 : 12,
+                            child: AppPill(
+                              label: '退出全屏',
+                              width: KotvLayout.isLandscapeCompact(context) ? 78.0 : 96.0,
+                              height: KotvLayout.isLandscapeCompact(context) ? 28 : 36,
+                              fontSize: KotvLayout.isLandscapeCompact(context) ? 12 : 14,
+                              onTap: () => unawaited(_exitImmersive()),
+                            ),
+                          ),
+                        if (_leftOpen)
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: MouseRegion(
+                              onEnter: (_) => _cancelHideOverlays(),
+                              onExit: (_) => _scheduleHideOverlays(),
+                              child: Material(
+                                color: KotvPalette.of(context).dialogBg,
+                                child: Builder(builder: (context) {
+                                  final p = KotvPalette.of(context);
+                                  final screenW = c.maxWidth;
+                                  final land = KotvLayout.isLandscapeCompact(context);
+                                  final ui = LayoutScale.grow(context);
+                                  var groupW = (land ? 112.0 : 136.0) * ui;
+                                  var channelW = (land ? 248.0 : 280.0) * ui;
+                                  var epgW = (land ? 200.0 : 260.0) * ui;
+                                  var epgTabW = (land ? 28.0 : 32.0) * ui;
+                                  final padH = (land ? 6.0 : 8.0) * 2 * ui;
+                                  final gap1 = (land ? 4.0 : 6.0) * ui;
+                                  final gapTab = (land ? 4.0 : 6.0) * ui;
+                                  final gap2 = 6.0 * ui;
+                                  final pillH = land ? 30.0 : 36.0;
+                                  final chH = (land ? 36.0 : 48.0) * ui;
+                                  final groupStride = pillH * LayoutScale.layoutOf(context) + (land ? 4.0 : 6.0) * ui;
+                                  final channelStride = chH + (land ? 2.0 : 4.0) * ui;
+                                  const epgFont = 12.0;
+                                  final epgStride = _oneLine(
+                                        context,
+                                        const TextStyle(fontSize: epgFont, height: 1.2, fontWeight: FontWeight.w700),
+                                      ) +
+                                      (land ? 10.0 : 16.0) * ui +
+                                      (land ? 2.0 : 4.0) * ui;
+                                  _pinList(_groupScroll, _groupIdx, groupStride, _groupStride, _pinnedGroup);
+                                  _pinList(_channelScroll, _channelListIndex(), channelStride, _channelStride, _pinnedChannel);
+                                  _pinList(_epgScroll, _epgHighlightIndex(), epgStride, _epgStride, _pinnedEpg);
+                                  _pinnedGroup = _groupIdx;
+                                  _pinnedChannel = _channelListIndex();
+                                  _pinnedEpg = _epgHighlightIndex();
+                                  _groupStride = groupStride;
+                                  _channelStride = channelStride;
+                                  _epgStride = epgStride;
+                                  final font = land ? 12.0 : 13.0;
+                                  final logoW = (land ? 28.0 : 40.0) * ui;
+                                  final logoH = (land ? 22.0 : 30.0) * ui;
+                                  final numDigits = _channelNumDigitsFor(_channels);
+                                  final numColW = _channelNumColWidth(font, digits: numDigits);
+                                  final channelChrome = numColW + (land ? 4 : 12) * ui + logoW + (land ? 6 : 12) * ui;
+                                  final channelFloor = channelChrome + 56 * ui;
+                                  // 桌面全屏最多约占半屏，避免挡完画面；窄屏仍可到 92%
+                                  final maxFrac = (_immersive && !land) ? 0.52 : 0.92;
+                                  final contentW0 = groupW +
+                                      gap1 +
+                                      channelW +
+                                      gapTab +
+                                      epgTabW +
+                                      (_epgOpen ? gap2 + epgW : 0);
+                                  final leftW0 = contentW0 + padH;
+                                  final panelW = leftW0.clamp(0.0, screenW * maxFrac);
+                                  final innerMax = (panelW - padH).clamp(1.0, panelW);
+                                  if (contentW0 > innerMax) {
+                                    final fitted = _fitLivePanelCols(
+                                      innerMax: innerMax,
+                                      gap1: gap1,
+                                      gapTab: gapTab,
+                                      gap2: gap2,
+                                      epgOpen: _epgOpen,
+                                      channelFloor: channelFloor,
+                                      groupFloor: (land ? 72.0 : 88.0) * ui,
+                                      epgFloor: (land ? 120.0 : 140.0) * ui,
+                                      epgTabFloor: (land ? 24.0 : 28.0) * ui,
+                                      groupW: groupW,
+                                      channelW: channelW,
+                                      epgW: epgW,
+                                      epgTabW: epgTabW,
+                                    );
+                                    groupW = fitted.groupW;
+                                    channelW = fitted.channelW;
+                                    epgW = fitted.epgW;
+                                    epgTabW = fitted.epgTabW;
+                                  }
+                                  return SizedBox(
+                                  width: panelW,
+                                  child: ClipRect(
+                                  child: Padding(
+                                    padding: EdgeInsets.fromLTRB((land ? 6 : 8) * ui, (land ? 8 : 10) * ui, (land ? 6 : 8) * ui, (land ? 8 : 10) * ui),
+                                    child: Row(
+                                      children: [
+                                        SizedBox(
+                                          width: groupW,
+                                          child: ListView.builder(
+                                            controller: _groupScroll,
+                                            itemCount: _groups.length,
+                                            itemBuilder: (_, i) {
+                                              final g = _groups[i];
+                                              final locked = _groupLocked(i);
+                                              return Padding(
+                                                padding: EdgeInsets.only(bottom: (land ? 4 : 6) * ui),
+                                                child: AppPill(
+                                                  label: '${locked ? '🔒 ' : ''}${g['name'] ?? ''}',
+                                                  height: pillH,
+                                                  fontSize: font,
+                                                  selected: i == _groupIdx,
+                                                  marqueeWhenSelected: true,
+                                                  onTap: () {
+                                                    _cancelHideOverlays();
+                                                    _selectGroup(i);
+                                                  },
+                                                ),
+                                              );
                                             },
                                           ),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                  SizedBox(width: gap1),
-                                  SizedBox(
-                                    width: channelW,
-                                    child: ListView.builder(
-                                      controller: _channelScroll,
-                                      itemExtent: channelStride,
-                                      itemCount: _channels.length,
-                                      itemBuilder: (_, i) {
-                                        final ch = _channels[i];
-                                        final name = '${ch['name'] ?? ''}';
-                                        final logo = '${ch['logo'] ?? ''}';
-                                        final sel = _chIdx >= 0 && i == _chIdx;
-                                        return Padding(
-                                          padding: EdgeInsets.only(bottom: (land ? 2 : 4) * ui),
+                                        ),
+                                        SizedBox(width: gap1),
+                                        SizedBox(
+                                          width: channelW,
+                                          child: ListView.builder(
+                                            controller: _channelScroll,
+                                            itemExtent: channelStride,
+                                            itemCount: _channels.length,
+                                            itemBuilder: (_, i) {
+                                              final ch = _channels[i];
+                                              final name = '${ch['name'] ?? ''}';
+                                              final logo = '${ch['logo'] ?? ''}';
+                                              final sel = _chIdx >= 0 && i == _chIdx;
+                                              return Padding(
+                                                padding: EdgeInsets.only(bottom: (land ? 2 : 4) * ui),
+                                                child: TvFocus(
+                                                  focusNode: _chFocus.of('ch:$i'),
+                                                  borderRadius: 8 * ui,
+                                                  onPressed: () => _selectChannelFromList(i),
+                                                  onLongPress: () => unawaited(_toggleChannelFav(i)),
+                                                  child: Material(
+                                                    color: _liveChannelColor(p, sel: sel),
+                                                    borderRadius: BorderRadius.circular(8 * ui),
+                                                    child: SizedBox(
+                                                      height: chH,
+                                                      child: Padding(
+                                                        padding: EdgeInsets.symmetric(horizontal: 6 * ui),
+                                                        child: Row(
+                                                          children: [
+                                                            SizedBox(
+                                                              width: numColW,
+                                                              child: Text(
+                                                                _channelNumberLabel(ch, i),
+                                                                softWrap: false,
+                                                                style: TextStyle(
+                                                                  color: p.muted,
+                                                                  fontSize: land ? 12 : 16,
+                                                                  fontFeatures: const [FontFeature.tabularFigures()],
+                                                                ),
+                                                              ),
+                                                            ),
+                                                            SizedBox(width: (land ? 4 : 12) * ui),
+                                                            _LiveChannelLogo(name: name, logo: logo, width: logoW, height: logoH),
+                                                            SizedBox(width: (land ? 6 : 12) * ui),
+                                                            Expanded(
+                                                              child: _liveListTitle(
+                                                                name,
+                                                                selected: sel,
+                                                                style: TextStyle(
+                                                                  color: p.fg,
+                                                                  fontSize: land ? 12 : 15,
+                                                                  height: 1.15,
+                                                                  fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                        SizedBox(width: gapTab),
+                                        SizedBox(
+                                          width: epgTabW,
                                           child: TvFocus(
-                                            focusNode: _chFocus.of('ch:$i'),
-                                            borderRadius: 8 * ui,
-                                            onPressed: () => _selectChannelFromList(i),
-                                            onLongPress: () => unawaited(_toggleChannelFav(i)),
+                                            focusNode: _epgTabFocus,
+                                            borderRadius: 8,
+                                            onPressed: () {
+                                              _cancelHideOverlays();
+                                              setState(() => _epgOpen = !_epgOpen);
+                                              if (_epgOpen && _programs.isEmpty && _chIdx >= 0) {
+                                                unawaited(_loadEpg());
+                                              }
+                                              if (_epgOpen) {
+                                                _scheduleScrollEpgToHighlight();
+                                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                                  if (mounted && _epgOpen) _focusProgramList();
+                                                });
+                                              } else {
+                                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                                  if (mounted && _leftOpen) _focusChannelList();
+                                                });
+                                              }
+                                            },
                                             child: Material(
-                                              color: _liveChannelColor(p, sel: sel),
-                                              borderRadius: BorderRadius.circular(8 * ui),
-                                              child: SizedBox(
-                                                height: chH,
-                                                child: Padding(
-                                                  padding: EdgeInsets.symmetric(horizontal: 6 * ui),
-                                                  child: Row(
-                                                    children: [
-                                                      SizedBox(
-                                                        width: numColW,
-                                                        child: Text(
-                                                          _channelNumberLabel(ch, i),
-                                                          softWrap: false,
-                                                          style: TextStyle(
-                                                            color: p.muted,
-                                                            fontSize: land ? 12 : 16,
-                                                            fontFeatures: const [FontFeature.tabularFigures()],
-                                                          ),
-                                                        ),
-                                                      ),
-                                                      SizedBox(width: (land ? 4 : 12) * ui),
-                                                      _LiveChannelLogo(name: name, logo: logo, width: logoW, height: logoH),
-                                                      SizedBox(width: (land ? 6 : 12) * ui),
-                                                      Expanded(
-                                                        child: _liveListTitle(
-                                                          name,
-                                                          selected: sel,
-                                                          style: TextStyle(
-                                                            color: p.fg,
-                                                            fontSize: land ? 12 : 15,
-                                                            height: 1.15,
-                                                            fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ],
+                                              color: _epgOpen
+                                                  ? p.selected.withOpacity(0.4)
+                                                  : p.pillBg,
+                                              borderRadius: BorderRadius.circular(8),
+                                              child: Center(
+                                                child: Text(
+                                                  (_epgOpen ? '收起' : '节目单').split('').join('\n'),
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(
+                                                    color: p.fg,
+                                                    fontSize: land ? 11 : 12,
+                                                    height: 1.25,
+                                                    fontWeight: FontWeight.w600,
                                                   ),
                                                 ),
                                               ),
                                             ),
                                           ),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                  SizedBox(width: gapTab),
-                                  SizedBox(
-                                    width: epgTabW,
-                                    child: TvFocus(
-                                      focusNode: _epgTabFocus,
-                                      borderRadius: 8,
-                                      onPressed: () {
-                                        _cancelHideOverlays();
-                                        setState(() => _epgOpen = !_epgOpen);
-                                        if (_epgOpen && _programs.isEmpty && _chIdx >= 0) {
-                                          unawaited(_loadEpg());
-                                        }
-                                        if (_epgOpen) {
-                                          _scheduleScrollEpgToHighlight();
-                                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                                            if (mounted && _epgOpen) _focusProgramList();
-                                          });
-                                        } else {
-                                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                                            if (mounted && _leftOpen) _focusChannelList();
-                                          });
-                                        }
-                                      },
-                                      child: Material(
-                                        color: _epgOpen
-                                            ? p.selected.withOpacity(0.4)
-                                            : p.pillBg,
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Center(
-                                          child: Text(
-                                            (_epgOpen ? '收起' : '节目单').split('').join('\n'),
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              color: p.fg,
-                                              fontSize: land ? 11 : 12,
-                                              height: 1.25,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
                                         ),
-                                      ),
-                                    ),
-                                  ),
-                                  if (_epgOpen) ...[
-                                  SizedBox(width: gap2),
-                                  SizedBox(
-                                    width: epgW,
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                                      children: [
-                                        Padding(
-                                          padding: EdgeInsets.only(bottom: (land ? 4 : 6) * ui, left: 2 * ui),
-                                          child: Text(
-                                            'EPG',
-                                            style: TextStyle(
-                                              color: p.muted,
-                                              fontSize: land ? 11 : 13,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ),
-                                        if (_epgDays.length > 1)
-                                          _epgDayTabs(
-                                            land: land,
-                                            resetHideOnSelect: true,
-                                          ),
-                                        SizedBox(height: (land ? 4 : 6) * ui),
-                                        Expanded(
-                                          child: _programs.isEmpty
-                                              ? Center(
-                                                  child: Text(
-                                                    '暂无节目单',
-                                                    style: TextStyle(color: p.muted, fontSize: land ? 11 : 13),
-                                                  ),
-                                                )
-                                              : ListView.builder(
-                                                  controller: _epgScroll,
-                                                  itemCount: _programs.length,
-                                                  itemBuilder: (_, i) => _epgProgramTile(
-                                                    i,
-                                                    land: land,
+                                        if (_epgOpen) ...[
+                                        SizedBox(width: gap2),
+                                        SizedBox(
+                                          width: epgW,
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                                            children: [
+                                              Padding(
+                                                padding: EdgeInsets.only(bottom: (land ? 4 : 6) * ui, left: 2 * ui),
+                                                child: Text(
+                                                  'EPG',
+                                                  style: TextStyle(
+                                                    color: p.muted,
+                                                    fontSize: land ? 11 : 13,
+                                                    fontWeight: FontWeight.w600,
                                                   ),
                                                 ),
+                                              ),
+                                              if (_epgDays.length > 1)
+                                                _epgDayTabs(
+                                                  land: land,
+                                                  resetHideOnSelect: true,
+                                                ),
+                                              SizedBox(height: (land ? 4 : 6) * ui),
+                                              Expanded(
+                                                child: _programs.isEmpty
+                                                    ? Center(
+                                                        child: Text(
+                                                          '暂无节目单',
+                                                          style: TextStyle(color: p.muted, fontSize: land ? 11 : 13),
+                                                        ),
+                                                      )
+                                                    : ListView.builder(
+                                                        controller: _epgScroll,
+                                                        itemCount: _programs.length,
+                                                        itemBuilder: (_, i) => _epgProgramTile(
+                                                          i,
+                                                          land: land,
+                                                        ),
+                                                      ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
+                                        ],
                                       ],
                                     ),
                                   ),
-                                  ],
-                                ],
+                                  ),
+                                );
+                                }),
                               ),
                             ),
-                            ),
-                          );
-                          }),
-                        ),
-                      ),
-                    ),
-                  if (_rightOpen)
-                    Positioned(
-                      right: 0,
-                      top: 0,
-                      bottom: 0,
-                      child: MouseRegion(
-                        onEnter: (_) => _cancelHideOverlays(),
-                        onExit: (_) => _scheduleHideOverlays(),
-                        child: Material(
-                          color: KotvPalette.of(context).dialogBg,
-                          child: Builder(builder: (context) {
-                            final p = KotvPalette.of(context);
-                            final land = KotvLayout.isLandscapeCompact(context);
-                            final ui = LayoutScale.grow(context);
-                            final rightW = land
-                                ? (c.maxWidth * 0.30).clamp(180.0, 240.0) * ui
-                                : 240.0 * ui;
-                            final pillH = land ? 30.0 : 40.0;
-                            return SizedBox(
-                            width: rightW,
-                            child: ListView(
-                              padding: EdgeInsets.all((land ? 8 : 14) * ui),
-                              children: [
-                                Text(
-                                  '直播设置',
-                                  style: TextStyle(
-                                    color: p.fg,
-                                    fontSize: land ? 14 : 18,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                SizedBox(height: (land ? 8 : 12) * ui),
-                                AppPill(
-                                  label: '上一频道',
-                                  height: pillH,
-                                  fontSize: land ? 12 : 14,
-                                  autofocus: true,
-                                  focusNode: _rightFocus,
-                                  onTap: () {
-                                    final chs = _channels;
-                                    if (chs.isEmpty) return;
-                                    unawaited(_stepChannel(delta: _liveInvert ? 1 : -1));
-                                  },
-                                ),
-                                SizedBox(height: 8 * ui),
-                                AppPill(
-                                  label: '下一频道',
-                                  height: 40,
-                                  onTap: () {
-                                    final chs = _channels;
-                                    if (chs.isEmpty) return;
-                                    unawaited(_stepChannel(delta: _liveInvert ? -1 : 1));
-                                  },
-                                ),
-                                SizedBox(height: 8 * ui),
-                                AppPill(
-                                  label: '换线路 (${_line + 1}/$_lines)',
-                                  height: 40,
-                                  onTap: () {
-                                    if (_chIdx < 0 || _lines <= 1) return;
-                                    _playChannel(_chIdx, line: (_line + 1) % _lines);
-                                  },
-                                ),
-                                SizedBox(height: 8 * ui),
-                                AppPill(label: '刷新 EPG', height: 40, onTap: _loadEpg),
-                                SizedBox(height: 8 * ui),
-                                AppPill(label: '投屏', height: 40, onTap: () => unawaited(_cast())),
-                                SizedBox(height: 8 * ui),
-                                AppPill(
-                                  label: '画面比例 · ${_liveScaleLabel(_liveScale)}',
-                                  height: 40,
-                                  onTap: () => unawaited(_cycleLiveScale()),
-                                ),
-                                SizedBox(height: 8 * ui),
-                                AppPill(
-                                  label: '跨组换台 · ${_liveAcross ? '开' : '关'}',
-                                  height: 40,
-                                  onTap: _onLiveAcross,
-                                ),
-                                SizedBox(height: 8 * ui),
-                                AppPill(
-                                  label: '反转换台 · ${_liveInvert ? '开' : '关'}',
-                                  height: 40,
-                                  onTap: _onLiveInvert,
-                                ),
-                                SizedBox(height: 8 * ui),
-                                AppPill(
-                                  label: '失败换线 · ${_liveAutoChange ? '开' : '关'}',
-                                  height: 40,
-                                  onTap: _onLiveFailSwitch,
-                                ),
-                                SizedBox(height: 8 * ui),
-                                AppPill(label: '迷你桌面播放', height: 40, onTap: () => unawaited(_enterMini())),
-                                SizedBox(height: 8 * ui),
-                                AppPill(
-                                  label: _immersive ? '退出全屏' : '全屏观看',
-                                  height: 40,
-                                  onTap: () => unawaited(_toggleLiveFullscreen()),
-                                ),
-                                SizedBox(height: 8 * ui),
-                                if (kotvCanSwitchPlayer(live: true)) ...[
-                                  AppPill(
-                                    label: '播放器 · ${flutterPlayerLabel(_playerVal)}',
-                                    height: 40,
-                                    onTap: () => unawaited(_pickPlayer()),
-                                  ),
-                                  SizedBox(height: 8 * ui),
-                                ],
-                                AppPill(
-                                  label: '解码 · $_decodeLabel',
-                                  height: 40,
-                                  onTap: () => unawaited(_pickDecode()),
-                                ),
-                                if (kotvPlayerRenderApplies(_playerVal)) ...[
-                                  SizedBox(height: 8 * ui),
-                                  AppPill(
-                                    label: '渲染 · ${kotvPlayerRenderLabel(_renderMode)}',
-                                    height: 40,
-                                    onTap: () => unawaited(_pickRender()),
-                                  ),
-                                ],
-                                SizedBox(height: 8 * ui),
-                                ListenableBuilder(
-                                  listenable: _playback,
-                                  builder: (context, _) {
-                                    final vol = _playback.volume.clamp(1, 100).toDouble();
-                                    return KotvStepSlider(
-                                      label: '音量',
-                                      value: vol,
-                                      min: 1,
-                                      max: 100,
-                                      divisions: 99,
-                                      format: (v) => '${v.round()}',
-                                      padding: const EdgeInsets.only(top: 4),
-                                      onChanging: (v) => unawaited(_playback.setVolume(v)),
-                                      onCommit: (v) async {
-                                        final n = v.round().clamp(1, 100);
-                                        try {
-                                          await _persistLiveSetting('playerVolume', '$n');
-                                        } catch (_) {}
-                                      },
-                                    );
-                                  },
-                                ),
-                                SizedBox(height: 8 * ui),
-                                AppPill(label: '打开设置页', height: 40, onTap: () => goKotvPage(ref, KotvPage.settings)),
-                                SizedBox(height: 16 * ui),
-                                Text('直播源', style: TextStyle(color: p.muted)),
-                                SizedBox(height: 8 * ui),
-                                for (var i = 0; i < _sources.length; i++)
-                                  Padding(
-                                    padding: EdgeInsets.only(bottom: 6 * ui),
-                                    child: AppPill(
-                                      // 仅一个源时换源位文案为「刷新」；再点当前源会 force 重拉频道表。
-                                      label: _sources.length == 1
-                                          ? '刷新'
-                                          : '${_sources[i]['name'] ?? _sources[i]['url']}',
-                                      suffix: _sources.length > 1 &&
-                                              (_sources[i]['current'] == true || i == _srcIdx)
-                                          ? '（当前）'
-                                          : null,
-                                      height: 36,
-                                      fontSize: 13,
-                                      selected: i == _srcIdx,
-                                      onTap: () => _loadSource(
-                                        i,
-                                        autoPlay: true,
-                                        force: _sources.length == 1 || i == _srcIdx,
-                                      ),
-                                    ),
-                                  ),
-                                SizedBox(height: 12 * ui),
-                                  AppPill(
-                                  label: '配置直播源',
-                                  height: 40,
-                                  onTap: () async {
-                                    await showLivePicker(context, ref);
-                                    await _bootstrap(forceLoad: true);
-                                  },
-                                ),
-                                SizedBox(height: 8 * ui),
-                                AppPill(label: '关闭面板', height: 40, onTap: () => setState(() => _rightOpen = false)),
-                              ],
-                            ),
-                          );
-                          }),
-                        ),
-                      ),
-                    ),
-                  // 底栏信息条（频道名）；无回看播控时贴底，不挡上下换台。
-                  if (_channelInfoVisible && !_leftOpen && !_rightOpen && (!_catchup || !_catchupChrome))
-                    Positioned(
-                      left: 16,
-                      right: 16,
-                      bottom: 16,
-                      child: Builder(builder: (context) {
-                        final pal = KotvPalette.of(context);
-                        return Material(
-                          color: pal.dialogBg,
-                          elevation: 0,
-                          shadowColor: Colors.transparent,
-                          surfaceTintColor: Colors.transparent,
-                          borderRadius: BorderRadius.circular(10),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: Row(
-                              children: [
-                                SizedBox(
-                                  width: _channelNumColWidth(20, digits: _channelNum.length),
-                                  child: Text(
-                                    _channelNum,
-                                    softWrap: false,
-                                    overflow: TextOverflow.clip,
-                                    style: TextStyle(
-                                      color: pal.muted,
-                                      fontSize: 20,
-                                      fontFeatures: const [FontFeature.tabularFigures()],
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                _LiveChannelLogo(name: _title, logo: _currentLogo),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                                    mainAxisSize: MainAxisSize.min,
+                          ),
+                        if (_rightOpen)
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: MouseRegion(
+                              onEnter: (_) => _cancelHideOverlays(),
+                              onExit: (_) => _scheduleHideOverlays(),
+                              child: Material(
+                                color: KotvPalette.of(context).dialogBg,
+                                child: Builder(builder: (context) {
+                                  final p = KotvPalette.of(context);
+                                  final land = KotvLayout.isLandscapeCompact(context);
+                                  final ui = LayoutScale.grow(context);
+                                  final rightW = land
+                                      ? (c.maxWidth * 0.30).clamp(180.0, 240.0) * ui
+                                      : 240.0 * ui;
+                                  final pillH = land ? 30.0 : 40.0;
+                                  return SizedBox(
+                                  width: rightW,
+                                  child: ListView(
+                                    padding: EdgeInsets.all((land ? 8 : 14) * ui),
                                     children: [
-                                      KotvMarqueeText(
-                                        _title,
-                                        active: true,
-                                        style: TextStyle(color: pal.fg, fontSize: 18, fontWeight: FontWeight.w600),
+                                      Text(
+                                        '直播设置',
+                                        style: TextStyle(
+                                          color: p.fg,
+                                          fontSize: land ? 14 : 18,
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
-                                      if (_programTimeLabel.isNotEmpty ||
-                                          _programTitleLabel.isNotEmpty ||
-                                          _status.isNotEmpty)
-                                        Row(
-                                          children: [
-                                            if (_programTimeLabel.isNotEmpty) ...[
-                                              Text(
-                                                _programTimeLabel,
-                                                maxLines: 1,
-                                                softWrap: false,
-                                                style: TextStyle(
-                                                  color: pal.muted,
-                                                  fontSize: 12,
-                                                  fontFeatures: const [FontFeature.tabularFigures()],
-                                                ),
-                                              ),
-                                              const SizedBox(width: 6),
-                                            ],
-                                            Expanded(
-                                              child: KotvMarqueeText(
-                                                [
-                                                  if (_programTitleLabel.isNotEmpty) _programTitleLabel,
-                                                  if (_programTitleLabel.isEmpty && _status.isNotEmpty) _status,
-                                                ].where((e) => e.isNotEmpty).join(' · '),
-                                                active: true,
-                                                style: TextStyle(color: pal.muted, fontSize: 13),
-                                              ),
+                                      SizedBox(height: (land ? 8 : 12) * ui),
+                                      AppPill(
+                                        label: '上一频道',
+                                        height: pillH,
+                                        fontSize: land ? 12 : 14,
+                                        autofocus: true,
+                                        focusNode: _rightFocus,
+                                        onTap: () {
+                                          final chs = _channels;
+                                          if (chs.isEmpty) return;
+                                          unawaited(_stepChannel(delta: _liveInvert ? 1 : -1));
+                                        },
+                                      ),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(
+                                        label: '下一频道',
+                                        height: 40,
+                                        onTap: () {
+                                          final chs = _channels;
+                                          if (chs.isEmpty) return;
+                                          unawaited(_stepChannel(delta: _liveInvert ? -1 : 1));
+                                        },
+                                      ),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(
+                                        label: '换线路 (${_line + 1}/$_lines)',
+                                        height: 40,
+                                        onTap: () {
+                                          if (_chIdx < 0 || _lines <= 1) return;
+                                          _playChannel(_chIdx, line: (_line + 1) % _lines);
+                                        },
+                                      ),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(label: '刷新 EPG', height: 40, onTap: _loadEpg),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(label: '投屏', height: 40, onTap: () => unawaited(_cast())),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(
+                                        label: '画面比例 · ${_liveScaleLabel(_liveScale)}',
+                                        height: 40,
+                                        onTap: () => unawaited(_cycleLiveScale()),
+                                      ),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(
+                                        label: '跨组换台 · ${_liveAcross ? '开' : '关'}',
+                                        height: 40,
+                                        onTap: _onLiveAcross,
+                                      ),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(
+                                        label: '反转换台 · ${_liveInvert ? '开' : '关'}',
+                                        height: 40,
+                                        onTap: _onLiveInvert,
+                                      ),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(
+                                        label: '失败换线 · ${_liveAutoChange ? '开' : '关'}',
+                                        height: 40,
+                                        onTap: _onLiveFailSwitch,
+                                      ),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(label: '迷你桌面播放', height: 40, onTap: () => unawaited(_enterMini())),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(
+                                        label: _immersive ? '退出全屏' : '全屏观看',
+                                        height: 40,
+                                        onTap: () => unawaited(_toggleLiveFullscreen()),
+                                      ),
+                                      SizedBox(height: 8 * ui),
+                                      if (kotvCanSwitchPlayer(live: true)) ...[
+                                        AppPill(
+                                          label: '播放器 · ${flutterPlayerLabel(_playerVal)}',
+                                          height: 40,
+                                          onTap: () => unawaited(_pickPlayer()),
+                                        ),
+                                        SizedBox(height: 8 * ui),
+                                      ],
+                                      AppPill(
+                                        label: '解码 · $_decodeLabel',
+                                        height: 40,
+                                        onTap: () => unawaited(_pickDecode()),
+                                      ),
+                                      if (kotvPlayerRenderApplies(_playerVal)) ...[
+                                        SizedBox(height: 8 * ui),
+                                        AppPill(
+                                          label: '渲染 · ${kotvPlayerRenderLabel(_renderMode)}',
+                                          height: 40,
+                                          onTap: () => unawaited(_pickRender()),
+                                        ),
+                                      ],
+                                      SizedBox(height: 8 * ui),
+                                      ListenableBuilder(
+                                        listenable: _playback,
+                                        builder: (context, _) {
+                                          final vol = _playback.volume.clamp(1, 100).toDouble();
+                                          return KotvStepSlider(
+                                            label: '音量',
+                                            value: vol,
+                                            min: 1,
+                                            max: 100,
+                                            divisions: 99,
+                                            format: (v) => '${v.round()}',
+                                            padding: const EdgeInsets.only(top: 4),
+                                            onChanging: (v) => unawaited(_playback.setVolume(v)),
+                                            onCommit: (v) async {
+                                              final n = v.round().clamp(1, 100);
+                                              try {
+                                                await _persistLiveSetting('playerVolume', '$n');
+                                              } catch (_) {}
+                                            },
+                                          );
+                                        },
+                                      ),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(label: '打开设置页', height: 40, onTap: () => goKotvPage(ref, KotvPage.settings)),
+                                      SizedBox(height: 16 * ui),
+                                      Text('直播源', style: TextStyle(color: p.muted)),
+                                      SizedBox(height: 8 * ui),
+                                      for (var i = 0; i < _sources.length; i++)
+                                        Padding(
+                                          padding: EdgeInsets.only(bottom: 6 * ui),
+                                          child: AppPill(
+                                            // 仅一个源时换源位文案为「刷新」；再点当前源会 force 重拉频道表。
+                                            label: _sources.length == 1
+                                                ? '刷新'
+                                                : '${_sources[i]['name'] ?? _sources[i]['url']}',
+                                            suffix: _sources.length > 1 &&
+                                                    (_sources[i]['current'] == true || i == _srcIdx)
+                                                ? '（当前）'
+                                                : null,
+                                            height: 36,
+                                            fontSize: 13,
+                                            selected: i == _srcIdx,
+                                            onTap: () => _loadSource(
+                                              i,
+                                              autoPlay: true,
+                                              force: _sources.length == 1 || i == _srcIdx,
                                             ),
+                                          ),
+                                        ),
+                                      SizedBox(height: 12 * ui),
+                                        AppPill(
+                                        label: '配置直播源',
+                                        height: 40,
+                                        onTap: () async {
+                                          await showLivePicker(context, ref);
+                                          await _bootstrap(forceLoad: true);
+                                        },
+                                      ),
+                                      SizedBox(height: 8 * ui),
+                                      AppPill(label: '关闭面板', height: 40, onTap: () => setState(() => _rightOpen = false)),
+                                    ],
+                                  ),
+                                );
+                                }),
+                              ),
+                            ),
+                          ),
+                        // 底栏信息条（频道名）；无回看播控时贴底，不挡上下换台。
+                        if (_channelInfoVisible && !_leftOpen && !_rightOpen && (!_catchup || !_catchupChrome))
+                          Positioned(
+                            left: 16,
+                            right: 16,
+                            bottom: 16,
+                            child: Builder(builder: (context) {
+                              final pal = KotvPalette.of(context);
+                              return Material(
+                                color: pal.dialogBg,
+                                elevation: 0,
+                                shadowColor: Colors.transparent,
+                                surfaceTintColor: Colors.transparent,
+                                borderRadius: BorderRadius.circular(10),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  child: Row(
+                                    children: [
+                                      SizedBox(
+                                        width: _channelNumColWidth(20, digits: _channelNum.length),
+                                        child: Text(
+                                          _channelNum,
+                                          softWrap: false,
+                                          overflow: TextOverflow.clip,
+                                          style: TextStyle(
+                                            color: pal.muted,
+                                            fontSize: 20,
+                                            fontFeatures: const [FontFeature.tabularFigures()],
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      _LiveChannelLogo(name: _title, logo: _currentLogo),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            KotvMarqueeText(
+                                              _title,
+                                              active: true,
+                                              style: TextStyle(color: pal.fg, fontSize: 18, fontWeight: FontWeight.w600),
+                                            ),
+                                            if (_programTimeLabel.isNotEmpty ||
+                                                _programTitleLabel.isNotEmpty ||
+                                                _status.isNotEmpty)
+                                              Row(
+                                                children: [
+                                                  if (_programTimeLabel.isNotEmpty) ...[
+                                                    Text(
+                                                      _programTimeLabel,
+                                                      maxLines: 1,
+                                                      softWrap: false,
+                                                      style: TextStyle(
+                                                        color: pal.muted,
+                                                        fontSize: 12,
+                                                        fontFeatures: const [FontFeature.tabularFigures()],
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                  ],
+                                                  Expanded(
+                                                    child: KotvMarqueeText(
+                                                      [
+                                                        if (_programTitleLabel.isNotEmpty) _programTitleLabel,
+                                                        if (_programTitleLabel.isEmpty && _status.isNotEmpty) _status,
+                                                      ].where((e) => e.isNotEmpty).join(' · '),
+                                                      active: true,
+                                                      style: TextStyle(color: pal.muted, fontSize: 13),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                           ],
                                         ),
+                                      ),
+                                      if (_lineLabel.isNotEmpty) ...[
+                                        const SizedBox(width: 8),
+                                        Flexible(
+                                          child: KotvMarqueeText(
+                                            _lineLabel,
+                                            active: true,
+                                            textAlign: TextAlign.right,
+                                            style: TextStyle(color: pal.muted, fontSize: 13),
+                                          ),
+                                        ),
+                                      ],
                                     ],
                                   ),
                                 ),
-                                if (_lineLabel.isNotEmpty) ...[
-                                  const SizedBox(width: 8),
-                                  Flexible(
-                                    child: KotvMarqueeText(
-                                      _lineLabel,
-                                      active: true,
-                                      textAlign: TextAlign.right,
-                                      style: TextStyle(color: pal.muted, fontSize: 13),
-                                    ),
-                                  ),
-                                ],
-                              ],
+                              );
+                            }),
+                          ),
+                        // 底栏播控：仅回看。
+                        if (_catchup && _catchupChrome && !_leftOpen && !_rightOpen)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: MouseRegion(
+                              onEnter: (_) {
+                                _pointerAtBottom = true;
+                                _keepMouseVisible();
+                                _catchupHideTimer?.cancel();
+                                _cancelHideOverlays();
+                              },
+                              onExit: (_) {
+                                _pointerAtBottom = false;
+                                if (_catchup) {
+                                  _pulseCatchupChrome();
+                                } else {
+                                  _scheduleHideOverlays();
+                                }
+                                _scheduleHideMouse();
+                              },
+                              child: _buildLiveCatchupChrome(
+                                autofocusPlay: true,
+                                offerFullscreen: false,
+                                onBump: _bumpLiveChrome,
+                                onMini: () => unawaited(_enterMini()),
+                                onExpand: (_) => unawaited(_toggleLiveFullscreen()),
+                              ),
                             ),
                           ),
-                        );
-                      }),
+                      ],
                     ),
-                  // 底栏播控：仅回看。
-                  if (_catchup && _catchupChrome && !_leftOpen && !_rightOpen)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: MouseRegion(
-                        onEnter: (_) {
-                          _pointerAtBottom = true;
-                          _keepMouseVisible();
-                          _catchupHideTimer?.cancel();
-                          _cancelHideOverlays();
-                        },
-                        onExit: (_) {
-                          _pointerAtBottom = false;
-                          if (_catchup) {
-                            _pulseCatchupChrome();
-                          } else {
-                            _scheduleHideOverlays();
-                          }
-                          _scheduleHideMouse();
-                        },
-                        child: _buildLiveCatchupChrome(
-                          autofocusPlay: true,
-                          offerFullscreen: false,
-                          onBump: _bumpLiveChrome,
-                          onMini: () => unawaited(_enterMini()),
-                          onExpand: (_) => unawaited(_toggleLiveFullscreen()),
-                        ),
-                      ),
-                    ),
+                  ),
                 ],
               ),
             );

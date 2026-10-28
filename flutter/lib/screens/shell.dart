@@ -311,6 +311,17 @@ class _AppShellState extends ConsumerState<AppShell> {
       });
     }
     final immersiveDetail = coverAlive && (immersiveFlag || DetailScreen.isImmersive);
+    // 直播页已不在（切 Tab 等）而标志残留时，同帧后清掉，壳层不再按全屏取消 SafeArea。
+    final liveImmersiveFlag = ref.watch(liveImmersiveFullscreenProvider);
+    final liveImmersive = liveImmersiveFlag && LiveScreen.isImmersive;
+    if (liveImmersiveFlag && !liveImmersive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || LiveScreen.isImmersive) return;
+        ref.read(liveImmersiveFullscreenProvider.notifier).state = false;
+      });
+    }
+    // 详情或直播沉浸全屏：铺满含刘海/手势条，控件自己按 viewPadding 避让。
+    final immersive = immersiveDetail || liveImmersive;
     final detailCover = coverAlive && coverFlag;
     // 详情/文件浏览器在栈上就不要底栏，不看盖层标志。转屏会重建壳，标志若被清掉也会把底栏露出来。
     final bottomNav = KotvLayout.useBottomNav(context) && !coverAlive;
@@ -351,15 +362,15 @@ class _AppShellState extends ConsumerState<AppShell> {
           backgroundColor: Colors.transparent,
           // Android edge-to-edge：顶栏按钮若画进状态栏区域会被系统吃掉点击
           // 不 extendBody：列表不画进底栏下面，避免海报透出来。
-          // 详情沉浸全屏：铺满含刘海/手势条，否则画面缩在 SafeArea 里不像全屏。
-          extendBody: immersiveDetail,
+          // 沉浸全屏：铺满含刘海/手势条，否则画面缩在 SafeArea 里不像全屏。
+          extendBody: immersive,
           body: SafeArea(
             // 首页顶栏自己垫状态栏，颜色铺到系统时间那一行；详情盖壳同样不留白。
-            top: !immersiveDetail && !detailCover && page != KotvPage.video,
-            left: !immersiveDetail,
-            right: !immersiveDetail,
+            top: !immersive && !detailCover && page != KotvPage.video,
+            left: !immersive,
+            right: !immersive,
             // 有底栏时由 Scaffold 占位；沉浸/详情盖壳不留底边；平板无底栏时仍避让手势条。
-            bottom: !immersiveDetail && !bottomNav && !detailCover,
+            bottom: !immersive && !bottomNav && !detailCover,
             child: Stack(
                 fit: StackFit.expand,
                 children: [

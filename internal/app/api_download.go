@@ -7,7 +7,6 @@ import (
 	"github.com/bobo/KOTV/internal/download"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/parse"
-	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/source"
 	"github.com/bobo/KOTV/internal/thunder"
 )
@@ -56,10 +55,8 @@ func (a *App) ResolveDownload(siteKey, vodID, flag, epURL string, epIndex int) (
 		playURL = localproxy.ConvertScheme(strings.TrimSpace(info.URL))
 	}
 
-	if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(playURL, headers); ok {
-		playURL = media
-		headers = hdrs
-	}
+	// 网盘等爬虫 /proxy 地址不展开成 CDN 直链：下载在引擎本机执行，和本机播放器一样经
+	// /proxy→jar 拉流，由爬虫处理 Cookie / 签名续期。直连 CDN 常因鉴权或时效失败。
 	if strings.TrimSpace(playURL) == "" {
 		return "", nil, "", fmt.Errorf("未解析到可下载地址")
 	}

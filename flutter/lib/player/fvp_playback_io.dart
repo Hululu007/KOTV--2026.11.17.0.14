@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:fvp/fvp.dart' show FVPControllerExtensions;
+import 'package:logging/logging.dart';
 import 'package:video_player/video_player.dart';
 
 import 'buffer_budget.dart';
@@ -18,6 +19,24 @@ import 'playback_settings.dart';
 import 'silent_video_guard.dart';
 import 'video_eq.dart';
 import 'video_scale_fit.dart';
+
+/// mdk 打开视频解码器时发 decoder.video 事件，fvp 以 fine 级别写进 Logger('fvp')：
+/// `… onEvent: decoder.video - <解码器名> - <code>`。记下最近一次，供「播放信息」显示实际解码。
+String? _fvpLastVideoDecoder;
+bool _fvpDecoderLogHooked = false;
+final _fvpDecoderEvent = RegExp(r'onEvent: decoder\.video - (.+?) - ');
+
+void _hookFvpDecoderLog() {
+  if (_fvpDecoderLogHooked) return;
+  _fvpDecoderLogHooked = true;
+  // 只给 fvp 这一个 logger 开 fine，其它 logger 仍随 root（默认 INFO）。
+  hierarchicalLoggingEnabled = true;
+  final log = Logger('fvp')..level = Level.FINE;
+  log.onRecord.listen((r) {
+    final m = _fvpDecoderEvent.firstMatch(r.message);
+    if (m != null) _fvpLastVideoDecoder = m.group(1)!.trim();
+  });
+}
 
 /// 页内 FVP（libmdk）：经 [video_player] + fvp 插件。
 ///
@@ -137,6 +156,15 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   String get engineLabel => '内置 FVP';
+
+  @override
+  Future<String?> activeDecoderLabel() async {
+    final v = _fvpLastVideoDecoder;
+    if (v == null || v.isEmpty) return null;
+    // 解码器列表里 FFmpeg / dav1d 只作软解兜底（见 kotvFvpVideoDecoders）。
+    final soft = v.startsWith('FFmpeg') || v.startsWith('dav1d');
+    return soft ? '软解（$v）' : '硬解（$v）';
+  }
 
   @override
   Stream<Duration> get positionStream => _posCtrl.stream;
@@ -278,6 +306,8 @@ class FvpPlayback extends KotvPlayback {
     _lastDrm = drm == null ? null : Map<String, dynamic>.from(drm);
     _lastLive = live;
     _lastFormat = format;
+    _hookFvpDecoderLog();
+    _fvpLastVideoDecoder = null;
     kotvEnsureFvpRegistered(
       decodeMode: _decodeMode,
       clearKeyHex: clearKeyHex,
