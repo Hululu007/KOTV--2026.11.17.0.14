@@ -187,9 +187,17 @@ class KotvEngineService : Service() {
 
   private fun ensureEngine() {
     relaxNicOffload()
-    if (engineHealthy()) {
-      Log.i(TAG, "engine already healthy on :9978")
-      return
+    when (probeEngine()) {
+      EnginePort.HEALTHY -> {
+        Log.i(TAG, "engine already healthy on :9978")
+        return
+      }
+      // 拉起也绑不上端口，退出后又会自动重拉，只会空转。
+      EnginePort.TAKEN -> {
+        Log.w(TAG, ":9978 taken by another app; engine not started")
+        return
+      }
+      EnginePort.DOWN -> {}
     }
     if (!starting.compareAndSet(false, true)) return
     try {
@@ -250,7 +258,7 @@ class KotvEngineService : Service() {
       }
       // 等 HTTP 起来
       for (i in 0 until 40) {
-        if (engineHealthy()) {
+        if (probeEngine() == EnginePort.HEALTHY) {
           Log.i(TAG, "engine ready after spawn")
           return
         }
@@ -348,25 +356,36 @@ class KotvEngineService : Service() {
     }
   }
 
-  private fun engineHealthy(): Boolean {
-    return try {
-      val url = URL("${KotvEngineDefaults.BASE_URL}/api/v1/health")
-      val conn = (url.openConnection() as HttpURLConnection).apply {
+  private enum class EnginePort { HEALTHY, TAKEN, DOWN }
+
+  /** 探 :9978：本引擎在听 / 有回应但不是本引擎（被别的程序占着）/ 没在听。 */
+  private fun probeEngine(): EnginePort {
+    val conn = try {
+      (URL("${KotvEngineDefaults.BASE_URL}/api/v1/health").openConnection() as HttpURLConnection).apply {
         connectTimeout = 800
         readTimeout = 800
         requestMethod = "GET"
       }
-      try {
-        val code = conn.responseCode
-        if (code !in 200..299) return false
-        val body = conn.inputStream.bufferedReader().use { it.readText() }
-        val ok = JSONObject(body).optBoolean("ok", false)
-        ok
-      } finally {
-        conn.disconnect()
+    } catch (_: Throwable) {
+      return EnginePort.DOWN
+    }
+    return try {
+      val code = conn.responseCode
+      val body = if (code in 200..299) conn.inputStream.bufferedReader().use { it.readText() } else ""
+      val json = try {
+        JSONObject(body)
+      } catch (_: Throwable) {
+        null
+      }
+      if (json != null && json.optString("engine") == "kotv" && json.optBoolean("ok", false)) {
+        EnginePort.HEALTHY
+      } else {
+        EnginePort.TAKEN
       }
     } catch (_: Throwable) {
-      false
+      EnginePort.DOWN
+    } finally {
+      conn.disconnect()
     }
   }
 

@@ -49,6 +49,8 @@ class EngineLauncher {
     _syncBaseUrl(kotvEffectiveEngineBaseUrl(url));
   }
 
+  static const _portTakenMessage = '本机 $kotvDefaultEnginePort 端口被其他程序占用';
+
   bool _acceptLocalHealth() {
     if (Platform.isAndroid) return true;
     return _owned && _proc != null;
@@ -83,10 +85,13 @@ class EngineLauncher {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       final h = await _health(baseUrl);
-      // 端口有响应但不是本引擎（被别的服务占用等）：直接失败。
+      // 端口有回应就立刻定论：不是本引擎（被别的程序占着、版本不同）直接失败，不再等。
       if (h != null) {
-        final ok = kotvEngineHealthProblem(h).isEmpty && _acceptLocalHealth();
-        lastError = ok ? '' : '本机 $kotvDefaultEnginePort 端口被其他程序占用';
+        final problem = kotvEngineHealthProblem(h);
+        final ok = problem.isEmpty && _acceptLocalHealth();
+        lastError = ok
+            ? ''
+            : (problem.isNotEmpty && !kotvEngineTakenByOther(h) ? problem : _portTakenMessage);
         return ok;
       }
       // 只在引擎还在启动时等端口：安卓服务模式，或自己拉起的进程仍存活。
@@ -107,9 +112,16 @@ class EngineLauncher {
   Future<bool> recoverIfNeeded({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
     if (!kotvIsLocalEngineBaseUrl(baseUrl)) return ensureReady();
+    final h = await _health(baseUrl);
+    // 被别的程序占着：重启本引擎和 spider 都没用，直接报错。
+    if (kotvEngineTakenByOther(h)) {
+      lastError = _portTakenMessage;
+      return false;
+    }
+    final healthy = kotvEngineHealthProblem(h).isEmpty;
     if (Platform.isAndroid) {
-      if (await _ping(baseUrl)) return true;
-    } else if (_owned && _proc != null && await _procAlive(_proc!) && await _ping(baseUrl)) {
+      if (healthy) return true;
+    } else if (healthy && _owned && _proc != null && await _procAlive(_proc!)) {
       return true;
     }
     if (_noBundledEngine && !Platform.isAndroid) return false;
@@ -406,11 +418,14 @@ class EngineLauncher {
       if (Platform.isAndroid) {
         await _startAndroidEngineService();
         for (var i = 0; i < 40; i++) {
-          if (await _ping(kotvDefaultLocalEngineBaseUrl)) {
+          final h = await _health(kotvDefaultLocalEngineBaseUrl);
+          if (kotvEngineHealthProblem(h).isEmpty) {
             _syncBaseUrl(kotvDefaultLocalEngineBaseUrl);
             debugPrint('engine android: service healthy on 9978');
             return;
           }
+          // 端口被别的程序占着：本引擎绑不上，不再等也不另起进程，由 ensureReady 报错。
+          if (kotvEngineTakenByOther(h)) return;
           await Future<void>.delayed(const Duration(milliseconds: 250));
         }
         debugPrint('engine android: service failed to bring :9978 up; fallback Process.start');
@@ -449,6 +464,11 @@ class EngineLauncher {
       if (bin == null) {
         _noBundledEngine = true;
         debugPrint('engine: no bundled kotv-engine, UI only');
+        return;
+      }
+      // 端口被别的程序占着：拉起的引擎绑不上就退出，退出后又自动重拉，会一直空转。
+      if (kotvEngineTakenByOther(await _health(kotvDefaultLocalEngineBaseUrl))) {
+        debugPrint('engine: :$kotvDefaultEnginePort taken by another program, skip start');
         return;
       }
 
