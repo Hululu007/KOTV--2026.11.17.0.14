@@ -442,6 +442,7 @@ class FvpPlayback extends KotvPlayback {
       _applyBufferRange(c);
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
+      await c.setLooping(_repeatOne);
       // startAt 已在 create→prepare(ms)；此处勿再 seekTo。
       await c.play();
       _applyRuntimeOptions(c);

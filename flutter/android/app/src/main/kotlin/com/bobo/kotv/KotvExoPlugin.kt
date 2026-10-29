@@ -139,6 +139,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var preferAac = false
   /** 跳过静音段。 */
   private var skipSilence = false
+  /** 单集循环：ExoPlayer 自己从头再播，不会进 STATE_ENDED，也就不报 completed。 */
+  private var repeatOne = false
+
+  private fun repeatMode(): Int = if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
   /** 软解时是否优先软解音轨（仅 mode=soft 生效；默认关）。 */
   private var softAudioPrefer = false
   /** 软解时是否优先软解视轨（仅 mode=soft 生效；默认关）。 */
@@ -402,6 +406,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
         call.argument<Boolean>("preferAac")?.let { preferAac = it }
         call.argument<Boolean>("skipSilence")?.let { skipSilence = it }
+        call.argument<Boolean>("repeatOne")?.let { repeatOne = it }
         call.argument<Boolean>("softAudioPrefer")?.let { softAudioPrefer = it }
         call.argument<Boolean>("softVideoPrefer")?.let { softVideoPrefer = it }
         call.argument<Number>("bufferFactor")?.toInt()?.let {
@@ -713,6 +718,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val r = (call.argument<Number>("rate")?.toFloat() ?: 1f).coerceIn(0.25f, 4f)
         main.post {
           player?.setPlaybackSpeed(r)
+          result.success(true)
+        }
+      }
+      "setRepeatOne" -> {
+        repeatOne = call.argument<Boolean>("on") == true
+        main.post {
+          player?.repeatMode = repeatMode()
           result.success(true)
         }
       }
@@ -1099,6 +1111,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       p.setSkipSilenceEnabled(skipSilence)
     } catch (_: Throwable) {
     }
+    p.repeatMode = repeatMode()
     val mediaItem = buildMediaItem(url, currentMime, currentDrm, currentHeaders)
     // 同实例 setMediaItem → prepare → play。错误恢复可带 startPositionMs。
     if (startPositionMs != C.TIME_UNSET && startPositionMs >= 0L) {

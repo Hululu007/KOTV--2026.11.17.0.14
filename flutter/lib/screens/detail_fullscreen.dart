@@ -85,6 +85,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.onDanmakuSettingsChanged,
     this.ambientOn = false,
     this.onAmbientChanged,
+    this.onRepeatOneChanged,
     this.stableVolumeOn = false,
     this.holdSpeed = 2.0,
     this.onAssrtSearch,
@@ -168,6 +169,7 @@ class DetailFullscreenPage extends StatefulWidget {
   final VoidCallback? onDanmakuSettingsChanged;
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
+  final ValueChanged<bool>? onRepeatOneChanged;
   final bool stableVolumeOn;
   final double holdSpeed;
   final Future<void> Function()? onAssrtSearch;
@@ -1043,6 +1045,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         setState(() => _ambientOn = v);
         widget.onAmbientChanged?.call(v);
       },
+      onRepeatOneChanged: widget.onRepeatOneChanged,
       stableVolumeOn: widget.stableVolumeOn,
       onAssrtSearch: widget.onAssrtSearch,
       offsetId: widget.offsetId,

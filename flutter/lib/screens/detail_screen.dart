@@ -347,6 +347,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// ≈ 在 STATE_READY 后才挂 Clock；开播/解析中为 false。
   bool _playbackLive = false;
   bool _advanceBusy = false;
+  /// 单集循环：本页只存这一份，每次起播下发给当前播放器，换集、换播放器都不丢。
+  bool _repeatOne = false;
   DateTime? _sessionStartedAt;
   KotvApi? _api;
   /// 下一集 play 预解析缓存（flag|index → 引擎 play 返回）。
@@ -730,7 +732,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         break;
       case 'repeat':
         if (_playUrl.isEmpty) return;
-        unawaited(_playback.setRepeatOne(!_playback.repeatOne));
+        unawaited(_setRepeatOne(!_repeatOne));
         break;
       case 'play':
         if (_playUrl.isEmpty) return;
@@ -1087,7 +1089,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       }
     }
     if (!_skipOpeningEnding) return;
-    if (_playback.repeatOne) return;
+    if (_repeatOne) return;
     if (dur.inMilliseconds <= 0) return;
     final openMs = _openingSec * 1000;
     final endMs = _endingSec * 1000;
@@ -1143,9 +1145,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     } catch (_) {}
   }
 
+  /// 遥控与全屏设置里的「循环播放视频」都走这里；播放器自己循环，到片尾也不报完成。
+  Future<void> _setRepeatOne(bool on) async {
+    _repeatOne = on;
+    try {
+      await _playback.setRepeatOne(on);
+    } catch (_) {}
+  }
+
   Future<void> _onPlaybackEnded() async {
     if (!mounted) return;
-    if (_playback.repeatOne) return;
+    if (_repeatOne) return;
     _markPlaybackLiveIfNeeded();
     if (!_playbackLive || _endConsumedGen == _playGen) return;
     final pos = _playback.position.inMilliseconds;
@@ -2238,6 +2248,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               await pb.setVolume(vol);
             } catch (_) {}
           }
+          try {
+            await pb.setRepeatOne(_repeatOne);
+          } catch (_) {}
           // 起播缓冲由守卫无限等待；仅黑屏/视源失败抛 SilentVideo 才 failover。
           // 勿再套墙钟 timeout：慢源会被误切播放器。
           // 续播与片头合成起点，经 open(startAt) 在首次 play 前定位。
@@ -3079,6 +3092,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         onAmbientChanged: (v) {
           if (mounted) setState(() => _ambientOn = v);
         },
+        onRepeatOneChanged: (v) => unawaited(_setRepeatOne(v)),
         onParse: () => unawaited(_pickParse()),
         onRefresh: () {
           if (_epIdx >= 0) unawaited(_playAt(_epIdx));

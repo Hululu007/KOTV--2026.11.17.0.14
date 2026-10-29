@@ -406,12 +406,7 @@ class ExoPlayback extends KotvPlayback {
       case 'completed':
         _completed = true;
         _playing = false;
-        if (_repeatOne && _url.isNotEmpty) {
-          // 单集循环：不通知上层切下一集
-          unawaited(open(_url, headers: _headers, drm: _drm, live: _live, format: _format));
-        } else if (!_endedCtrl.isClosed) {
-          _endedCtrl.add(true);
-        }
+        if (!_endedCtrl.isClosed) _endedCtrl.add(true);
         notifyListeners();
         break;
       case 'error':
@@ -475,6 +470,7 @@ class ExoPlayback extends KotvPlayback {
         'dolbyVisionPolicy': _dolbyVisionPolicy,
         'preferAac': _preferAac,
         'skipSilence': _skipSilence,
+        'repeatOne': _repeatOne,
         'softAudioPrefer': _softAudioPrefer,
         'softVideoPrefer': _softVideoPrefer,
         'bufferFactor': _bufferFactor,
@@ -718,6 +714,9 @@ class ExoPlayback extends KotvPlayback {
   @override
   Future<void> setRepeatOne(bool on) async {
     _repeatOne = on;
+    try {
+      await _ch.invokeMethod('setRepeatOne', {'on': on});
+    } catch (_) {}
   }
 
   @override

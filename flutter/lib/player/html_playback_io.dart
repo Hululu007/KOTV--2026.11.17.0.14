@@ -149,6 +149,7 @@ class HtmlPlayback extends KotvPlayback {
       await c.initialize();
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
+      await c.setLooping(_repeatOne);
       if (startAt > Duration.zero) {
         try {
           await c.seekTo(startAt);

@@ -675,6 +675,7 @@ class VodFullscreenChrome extends StatefulWidget {
     this.onDanmakuSettingsChanged,
     this.ambientOn = false,
     this.onAmbientChanged,
+    this.onRepeatOneChanged,
     this.stableVolumeOn = false,
     this.onAssrtSearch,
     this.offsetId = '',
@@ -732,6 +733,8 @@ class VodFullscreenChrome extends StatefulWidget {
   final VoidCallback? onDanmakuSettingsChanged;
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
+  /// 单集循环由详情页保存并下发给播放器，换播放器后仍生效。
+  final ValueChanged<bool>? onRepeatOneChanged;
   final bool stableVolumeOn;
   /// Assrt 在线搜字幕；空则隐藏入口。
   final Future<void> Function()? onAssrtSearch;
@@ -1971,7 +1974,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           label: '循环播放视频',
                           value: widget.player.repeatOne,
                           onChanged: (v) {
-                            unawaited(widget.player.setRepeatOne(v));
+                            widget.onRepeatOneChanged?.call(v);
                             sync(() {});
                           },
                         ),
