@@ -753,7 +753,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   int _openingSec = 0;
   int _endingSec = 0;
   bool _loopSkip = true; // 有片头/片尾值即生效；开关仅用于临时关闭
-  bool _repeatOne = false;
   bool _epOpen = false;
   bool _ambientOn = false;
   bool _stableVolume = false;
@@ -1970,10 +1969,10 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                         toggleRow(
                           icon: Icons.repeat,
                           label: '循环播放视频',
-                          value: _repeatOne,
+                          value: widget.player.repeatOne,
                           onChanged: (v) {
-                            sync(() => _repeatOne = v);
                             unawaited(widget.player.setRepeatOne(v));
+                            sync(() {});
                           },
                         ),
                         toggleRow(

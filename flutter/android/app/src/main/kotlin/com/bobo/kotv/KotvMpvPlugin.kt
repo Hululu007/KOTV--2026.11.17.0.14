@@ -62,6 +62,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var width = 0
   private var height = 0
   private var eof = false
+  /** 单集循环；重建 mpv 实例时要重新写入 loop-file。 */
+  private var repeatOne = false
   private var pendingUrl: String? = null
   private var pendingHeaders: Map<String, String> = emptyMap()
   private var surfaceReady = false
@@ -283,6 +285,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         ingestPlayerArgs(call)
         // 直播须在 ensurePlayer 前写入，磁盘缓存和 cache-pause 按这次会话来。
         call.argument<Boolean>("live")?.let { livePlayback = it }
+        call.argument<Boolean>("repeatOne")?.let { repeatOne = it }
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           renderTexture = resolveRenderTexture(it)
         }
@@ -294,6 +297,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               surfaceHost?.clearVideoLayer()
             }
             ensurePlayer()
+            applyRepeatOne()
             result.success(mapOf("ok" to true, "ready" to created.get()))
           } catch (e: Throwable) {
             emitLoadFailure(e)
@@ -453,12 +457,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
       "setRepeatOne" -> {
-        val on = call.argument<Boolean>("on") == true
+        repeatOne = call.argument<Boolean>("on") == true
         main.post {
           try {
-            if (created.get()) {
-              MPVLib.setPropertyString("loop-file", if (on) "inf" else "no")
-            }
+            applyRepeatOne()
             result.success(null)
           } catch (e: Throwable) {
             result.error("REPEAT_FAILED", e.message, null)
@@ -997,6 +999,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setOptionString("force-window", "no")
       MPVLib.setOptionString("idle", "yes")
       MPVLib.setOptionString("keep-open", "yes")
+      MPVLib.setOptionString("loop-file", loopFile())
       if (!livePlayback) {
         if (diskCache) {
           val dir = File(ctx.cacheDir, "mpv-cache").apply { mkdirs() }
@@ -1807,12 +1810,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         paused = value
         playing = !value
       }
-      "eof-reached" -> {
-        if (value) {
-          eof = true
-          playing = false
-        }
-      }
+      "eof-reached" -> if (value) markEnded() else eof = false
       "paused-for-cache", "seeking" -> buffering = value
     }
   }
@@ -1861,22 +1859,33 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         emitSize()
         emit(mapOf("event" to "ready", "width" to width, "height" to height))
       }
-      MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
-        // endFile 回调会带 reason；这里兜底
-      }
       MPVLib.MpvEvent.MPV_EVENT_SHUTDOWN -> {
         created.set(false)
       }
     }
   }
 
+  /** 单集循环时 mpv 自己从头再播，不会停在片尾，也就不报 completed。 */
+  private fun loopFile(): String = if (repeatOne) "inf" else "no"
+
+  private fun applyRepeatOne() {
+    if (created.get()) MPVLib.setPropertyString("loop-file", loopFile())
+  }
+
+  /**
+   * 播到片尾，每次加载只报一次 completed。
+   * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；EOF 结束文件也走这里。
+   */
+  private fun markEnded() {
+    if (eof) return
+    eof = true
+    playing = false
+    emit(mapOf("event" to "completed"))
+  }
+
   override fun endFile(reason: Int, error: Int, errorText: String?) {
     when (reason) {
-      MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_EOF -> {
-        eof = true
-        playing = false
-        emit(mapOf("event" to "completed"))
-      }
+      MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_EOF -> markEnded()
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
         val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
         if (!forceLavfHls && !ioHlsRetried && shouldRetryHls(url, error)) {

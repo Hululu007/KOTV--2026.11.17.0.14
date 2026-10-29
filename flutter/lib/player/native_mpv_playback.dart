@@ -331,6 +331,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'render': _renderMode,
         // 直播须在 create 时写入，磁盘缓存和 cache-pause 按这次会话来。
         'live': live,
+        'repeatOne': _repeatOne,
       });
       if (res is Map) {
         final tid = res['textureId'];
