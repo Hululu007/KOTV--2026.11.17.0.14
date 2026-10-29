@@ -9,6 +9,7 @@ import '../player/danmaku_layer.dart';
 import '../player/disc_play.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_playback.dart';
+import '../player/kotv_player_factory.dart';
 import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
 import '../player/tv_remote_keys.dart';
@@ -1978,6 +1979,16 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             sync(() {});
                           },
                         ),
+                        if (kotvShowDirectOutput(widget.player, _decodeModes[_decodeIdx].$1))
+                          toggleRow(
+                            icon: Icons.memory,
+                            label: '硬解直出',
+                            value: widget.player.directOutput,
+                            onChanged: (v) async {
+                              await _persist('mpvDirect', v ? 'true' : 'false');
+                              sync(() {});
+                            },
+                          ),
                         toggleRow(
                           icon: Icons.wb_sunny_outlined,
                           label: '氛围模式',

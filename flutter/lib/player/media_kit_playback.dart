@@ -5,6 +5,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import 'buffer_budget.dart';
 import 'drm_opts.dart';
+import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 import 'mpv_hls_timeline.dart';
 import 'mpv_opts.dart';
@@ -496,6 +497,18 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Future<void> setDecodeMode(String mode) async {
     _opts = _opts.copyWith(decodeMode: mode);
+    await applyOpts(_opts);
+  }
+
+  @override
+  bool get supportsDirectOutput => kotvIsWindows7();
+
+  @override
+  bool get directOutput => _opts.direct;
+
+  @override
+  Future<void> setDirectOutput(bool on) async {
+    _opts = _opts.copyWith(direct: on);
     await applyOpts(_opts);
   }
 

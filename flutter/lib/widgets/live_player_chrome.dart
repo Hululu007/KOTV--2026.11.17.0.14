@@ -11,7 +11,7 @@ import 'seek_slider.dart';
 import 'vod_player_chrome.dart';
 import 'volume_control.dart';
 
-/// 直播底栏控件：播放/暂停、投屏、迷你、全屏、播放器、软硬解、音量；（回看时含进度）。
+/// 直播底栏控件：播放/暂停、投屏、迷你、全屏、播放器、软硬解、硬解直出（Win7 MPV）、音量；（回看时含进度）。
 class LiveCatchupChrome extends StatefulWidget {
   const LiveCatchupChrome({
     super.key,
@@ -25,6 +25,8 @@ class LiveCatchupChrome extends StatefulWidget {
     this.onDecode,
     this.playerLabel = '',
     this.decodeLabel = '自动',
+    this.onDirectOutput,
+    this.directOutputOn = true,
     this.onScale,
     this.scaleLabel = '',
     this.onAcross,
@@ -58,6 +60,9 @@ class LiveCatchupChrome extends StatefulWidget {
   final VoidCallback? onDecode;
   final String playerLabel;
   final String decodeLabel;
+  /// 硬解直出开关；为 null 时不显示（非 Win7 MPV 或软解）。
+  final VoidCallback? onDirectOutput;
+  final bool directOutputOn;
   final VoidCallback? onScale;
   final String scaleLabel;
   final VoidCallback? onAcross;
@@ -166,6 +171,8 @@ class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
                           _textAct(resolvedPlayerLabel, () => _tap(widget.onPlayer)),
                         if (!compact && widget.onDecode != null)
                           _textAct(widget.decodeLabel, () => _tap(widget.onDecode)),
+                        if (!compact && widget.onDirectOutput != null)
+                          _textAct(widget.directOutputOn ? '直出开' : '直出关', () => _tap(widget.onDirectOutput)),
                         if (widget.onScale != null)
                           _textAct(
                             widget.scaleLabel.trim().isEmpty ? '比例' : widget.scaleLabel,

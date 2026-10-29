@@ -2943,6 +2943,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (k == 'playerAmbient') {
             setState(() => _ambientOn = v.toLowerCase() == 'true');
           }
+          if (k == 'mpvDirect') {
+            _mpvOpts = kotvApplyDirectOutput(_playback, _mpvOpts, kotvSettingsFlag(v, def: true));
+          }
           if (k == 'playerBackground') {
             final bg = v.trim().toLowerCase();
             setState(() => _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip');

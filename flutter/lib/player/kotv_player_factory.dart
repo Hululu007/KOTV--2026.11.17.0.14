@@ -37,6 +37,16 @@ void kotvPushPlayerSettings(
   if (!identical(current, exo)) unawaited(kotvApplySubtitleSettings(current, settings));
 }
 
+/// 播放菜单是否显示「硬解直出」：当前后端有这个开关，且没选软解。
+bool kotvShowDirectOutput(KotvPlayback playback, String decodeMode) =>
+    playback.supportsDirectOutput && !KotvMpvOpts(decodeMode: decodeMode).soft;
+
+/// 切换「硬解直出」：当前播放器立即生效；返回新的 MPV 选项，页面之后新建 Player 时用。
+KotvMpvOpts kotvApplyDirectOutput(KotvPlayback playback, KotvMpvOpts opts, bool on) {
+  unawaited(playback.setDirectOutput(on));
+  return opts.copyWith(direct: on);
+}
+
 /// 页内画面：Android 原生 MPV PlatformView；桌面/Windows/iOS media_kit Video；FVP 各平台独立。
 Widget kotvPlaybackView({
   required String playerVal,

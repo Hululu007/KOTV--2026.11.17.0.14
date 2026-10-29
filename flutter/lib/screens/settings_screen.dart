@@ -2331,7 +2331,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final showMpvVulkan = usesMpv && kotvIsAndroid() && _androidVulkanOk;
     final showMpvGpuNext = usesMpv && kotvIsAndroid();
     final showMpvTls = usesMpv && kotvIsAndroid();
-    final showMpvDirect = usesMpv && kotvIsWindows7();
+    // 软解没有硬解可言，与播放器页一致隐藏。
+    final showMpvDirect =
+        usesMpv && kotvIsWindows7() && !KotvMpvOpts(decodeMode: g('playerDecode', 'auto')).soft;
     final canPickPlayer = kotvCanSwitchPlayer(live: false);
     final canPickLivePlayer = kotvCanSwitchPlayer(live: true);
     final playerUnavailableHint =

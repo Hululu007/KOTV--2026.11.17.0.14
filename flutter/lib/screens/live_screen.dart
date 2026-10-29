@@ -2450,6 +2450,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _scheduleScrollToCurrent();
   }
 
+  bool get _showDirectOutput => kotvShowDirectOutput(_playback, _decodeMode);
+
+  Future<void> _toggleDirectOutput() async {
+    final on = !_playback.directOutput;
+    setState(() => _mpvOpts = kotvApplyDirectOutput(_playback, _mpvOpts, on));
+    try {
+      await _persistLiveSetting('mpvDirect', on ? 'true' : 'false');
+    } catch (_) {}
+  }
+
   Future<void> _pickDecode() async {
     final v = await pickChoice(context, title: '解码方式', current: _decodeMode, options: const [
       ('自动', 'auto'),
@@ -3364,6 +3374,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       onExpand: onExpand,
       onPlayer: kotvCanSwitchPlayer(live: true) ? () => unawaited(_pickPlayer()) : null,
       onDecode: () => unawaited(_pickDecode()),
+      onDirectOutput: _showDirectOutput ? () => unawaited(_toggleDirectOutput()) : null,
+      directOutputOn: _playback.directOutput,
       onScale: () => unawaited(_cycleLiveScale()),
       scaleLabel: _liveScaleLabel(_liveScale),
       onAcross: _onLiveAcross,
@@ -3953,6 +3965,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         height: 40,
                                         onTap: () => unawaited(_pickDecode()),
                                       ),
+                                      if (_showDirectOutput) ...[
+                                        SizedBox(height: 8 * ui),
+                                        AppPill(
+                                          label: '硬解直出 · ${_playback.directOutput ? '开' : '关'}',
+                                          height: 40,
+                                          onTap: () => unawaited(_toggleDirectOutput()),
+                                        ),
+                                      ],
                                       if (kotvPlayerRenderApplies(_playerVal)) ...[
                                         SizedBox(height: 8 * ui),
                                         AppPill(
@@ -4374,6 +4394,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                       fontSize: 12,
                       onTap: () => unawaited(_pickDecode()),
                     ),
+                    if (_showDirectOutput) ...[
+                      const SizedBox(width: 6),
+                      AppPill(
+                        label: '直出·${_playback.directOutput ? '开' : '关'}',
+                        height: 32,
+                        fontSize: 12,
+                        onTap: () => unawaited(_toggleDirectOutput()),
+                      ),
+                    ],
                   ],
                 ),
               ),
