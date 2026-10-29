@@ -208,3 +208,25 @@ diff -ruN video/out/gpu/d3d11_helpers.h video/out/gpu/d3d11_helpers.h
  #endif
  
  struct d3d11_device_opts {
+diff -ruN video/decode/vd_lavc.c video/decode/vd_lavc.c
+--- video/decode/vd_lavc.c
++++ video/decode/vd_lavc.c
+@@ -1076,6 +1076,18 @@
+ 
+     if (ctx->hwdec_opts->hwdec_image_format)
+         new_fctx->sw_format = imgfmt2pixfmt(ctx->hwdec_opts->hwdec_image_format);
++
++    // dxva2-egl turns surfaces into RGB with D3D9 StretchRect, which drivers
++    // only do reliably for NV12; P010 (10-bit) often comes out green. Fail
++    // here so the decoder moves on to the next method, normally dxva2-copy.
++    if (!ctx->hwdec.copying &&
++        new_fctx->device_ctx->type == AV_HWDEVICE_TYPE_DXVA2 &&
++        new_fctx->sw_format != AV_PIX_FMT_NV12)
++    {
++        MP_VERBOSE(ctx, "dxva2 interop maps nv12 only, got %s.\n",
++                   av_get_pix_fmt_name(new_fctx->sw_format));
++        goto error;
++    }
+ 
+     // 1 surface is already included by libavcodec. The field is 0 if the
+     // hwaccel supports dynamic surface allocation.

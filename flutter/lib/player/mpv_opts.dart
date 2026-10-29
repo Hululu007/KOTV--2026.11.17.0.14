@@ -232,7 +232,8 @@ class KotvMpvOpts {
       // media_kit 在 Windows 用 ANGLE(EGL) 给 libmpv 提供 OpenGL。直出靠 libmpv 编进的
       // egl-angle 互通（d3d11-egl / dxva2-egl）；互通建不起来（驱动/ANGLE 不支持）时
       // mpv 跳到下一项硬解后拷贝，仍不行才软解。
-      // Win7：仅 dxva2。d3d11va 依赖 ID3D11VideoDevice（MSDN 最低 Win8），摸到会卡 UI。
+      // Win7：仅 dxva2。d3d11va 依赖 ID3D11VideoDevice（MSDN 最低 Win8，装了 KB2670838 也没有），摸到会卡 UI。
+      // dxva2 直出只接 8 位（NV12）；10 位（P010）由 Win7 的 mpv 补丁转给 dxva2-copy，否则常绿屏。
       if (kotvIsWindows7()) {
         return hard ? 'dxva2,dxva2-copy' : 'dxva2,dxva2-copy,no';
       }
