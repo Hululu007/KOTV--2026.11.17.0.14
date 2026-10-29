@@ -75,8 +75,6 @@ type Action struct {
 
 var defaultServer *Server
 
-func Default() *Server { return defaultServer }
-
 func New() *Server {
 	s := &Server{events: NewEvents(), ui: newUIHub(), uiReply: newUIReplyStore()}
 	s.events.SetDeliver(s.ui.pushUI)

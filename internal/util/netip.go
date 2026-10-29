@@ -8,6 +8,16 @@ import (
 
 // LanIP 优先环境变量 KOTV_LAN_IP（安卓由 Java 注入，规避 netlinkrib）；
 // 再回退 net.Interfaces（桌面正常；安卓 11+ 常失败）。
+// IsLoopbackHost 主机名是否指本机：localhost、127.0.0.0/8、::1（可带方括号）。
+func IsLoopbackHost(host string) bool {
+	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func LanIP() string {
 	if v := strings.TrimSpace(os.Getenv("KOTV_LAN_IP")); v != "" {
 		if ip := net.ParseIP(v); ip != nil && ip.To4() != nil && !ip.IsLoopback() {

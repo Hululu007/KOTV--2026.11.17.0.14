@@ -60,7 +60,7 @@ func RegisterAlways(rawURL string, headers map[string]string, filter bool) strin
 // NeedsLocalRelay 回环地址是否标了非引擎端口。这种端口只在跑引擎的机器上听得到。
 func NeedsLocalRelay(rawURL string) bool {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || u.Host == "" || !isLoopbackHost(u.Hostname()) {
+	if err != nil || u.Host == "" || !util.IsLoopbackHost(u.Hostname()) {
 		return false
 	}
 	p := u.Port()
@@ -143,15 +143,6 @@ func Clear() {
 	mu.Unlock()
 }
 
-func isLoopbackHost(host string) bool {
-	host = strings.ToLower(strings.TrimSpace(host))
-	if host == "127.0.0.1" || host == "localhost" || host == "::1" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
 // LocalHTTPBase 本机默认 127.0.0.1:port；远端请求则用 hostclient.PublicBase。
 func LocalHTTPBase() string {
 	if b := hostclient.PublicBase(); b != "" {
@@ -217,15 +208,11 @@ func rewritePublicHost(raw string) string {
 }
 
 func isRewriteableProxyHost(host string) bool {
-	host = strings.ToLower(strings.TrimSpace(host))
-	if host == "" || host == "127.0.0.1" || host == "localhost" || host == "::1" {
+	if strings.TrimSpace(host) == "" || util.IsLoopbackHost(host) {
 		return true
 	}
 	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+	return ip != nil && (ip.IsPrivate() || ip.IsLinkLocalUnicast())
 }
 
 var engineRoutes atomic.Pointer[[]string]
@@ -279,7 +266,7 @@ func SplitMediaKey(path string) (key, rest string, ok bool) {
 // 本机回环地址、已带钥匙或不是媒体的地址原样返回。
 func WithMediaKey(raw, key string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || key == "" || isLoopbackHost(u.Hostname()) || !IsMediaPath(u.Path) {
+	if err != nil || key == "" || util.IsLoopbackHost(u.Hostname()) || !IsMediaPath(u.Path) {
 		return raw
 	}
 	u.Path = MediaKeyPrefix + key + u.Path
@@ -574,7 +561,7 @@ func mustProxyChild(abs string, inject bool) bool {
 	if err != nil {
 		return false
 	}
-	return isLoopbackHost(u.Hostname())
+	return util.IsLoopbackHost(u.Hostname())
 }
 
 func proxyChild(id, abs string) string {
@@ -595,9 +582,9 @@ func allowedChild(parent, target string) (string, bool) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return "", false
 	}
-	if isLoopbackHost(u.Hostname()) || isPrivateIP(u.Hostname()) {
+	if util.IsLoopbackHost(u.Hostname()) || isPrivateIP(u.Hostname()) {
 		p, err := url.Parse(parent)
-		if err != nil || p.Host == "" || (!isLoopbackHost(p.Hostname()) && !isPrivateIP(p.Hostname())) {
+		if err != nil || p.Host == "" || (!util.IsLoopbackHost(p.Hostname()) && !isPrivateIP(p.Hostname())) {
 			return "", false
 		}
 	}
@@ -1115,7 +1102,7 @@ func applyPlaybackHeaders(req *http.Request, r *http.Request, registered map[str
 	if ua == "" {
 		ua = headerValue(registered, "user-agent")
 	}
-	if ua == "" && req.URL != nil && !isLoopbackHost(req.URL.Hostname()) {
+	if ua == "" && req.URL != nil && !util.IsLoopbackHost(req.URL.Hostname()) {
 		ua = settings.PlayUA()
 	}
 	if ua != "" {

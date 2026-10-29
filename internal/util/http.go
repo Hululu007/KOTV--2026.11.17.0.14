@@ -124,28 +124,6 @@ func HTTPGetParamsBytes(rawURL string, headers map[string]string, params map[str
 	return doRequest(req)
 }
 
-// HTTPPostForm 以 application/x-www-form-urlencoded 提交，form body。
-func HTTPPostForm(rawURL string, headers map[string]string, params map[string]string) (string, error) {
-	rawURL = EncodeURL(rawURL)
-	form := url.Values{}
-	for k, v := range params {
-		form.Set(k, v)
-	}
-	req, err := http.NewRequest(http.MethodPost, rawURL, strings.NewReader(form.Encode()))
-	if err != nil {
-		return "", err
-	}
-	applyHeaders(req, headers)
-	if req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	}
-	b, err := doRequest(req)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
 // OkHttpUA 请求未带 User-Agent 时写入的缺省串。
 const OkHttpUA = "okhttp/5.5.0"
 
@@ -246,11 +224,6 @@ func doRequestCore(c *http.Client, req *http.Request, allowErrorStatus bool) ([]
 // GetClient 返回可配置代理的 HTTP 客户端。
 func GetClient() *http.Client {
 	return client
-}
-
-// InsecureClient 爬虫/CMS/jar 下载用客户端（跳过 TLS 校验，复用代理）。
-func InsecureClient() *http.Client {
-	return insecureClient
 }
 
 func newInsecureClient(proxy func(*http.Request) (*url.URL, error)) *http.Client {
@@ -374,8 +347,7 @@ func SetProxy(proxyURL string) {
 				fixed := http.ProxyURL(u)
 				proxy = func(req *http.Request) (*url.URL, error) {
 					if req != nil && req.URL != nil {
-						h := req.URL.Hostname()
-						if h == "127.0.0.1" || h == "localhost" {
+						if IsLoopbackHost(req.URL.Hostname()) {
 							return nil, nil
 						}
 					}

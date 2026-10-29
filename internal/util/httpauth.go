@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -257,13 +256,4 @@ func EncodeQueryOkHTTP(q url.Values) string {
 		return ""
 	}
 	return strings.ReplaceAll(q.Encode(), "+", "%20")
-}
-
-// DrainAndDecodeBody 读完 body，按 Content-Encoding 做 gzip/raw deflate 解码。
-func DrainAndDecodeBody(resp *http.Response) []byte {
-	if resp == nil || resp.Body == nil {
-		return nil
-	}
-	b, _ := io.ReadAll(resp.Body)
-	return DecodeContentEncoding(resp.Header.Get("Content-Encoding"), b)
 }

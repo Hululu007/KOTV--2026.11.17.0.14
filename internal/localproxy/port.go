@@ -3,7 +3,6 @@ package localproxy
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 	"sync/atomic"
 
@@ -46,11 +45,6 @@ func PortOrDefault(fn func() int) int {
 	return DefaultPort
 }
 
-// DefaultLocalBaseURL 本机引擎默认根（无 /proxy），供回落与客户端约定。
-func DefaultLocalBaseURL() string {
-	return fmt.Sprintf("http://127.0.0.1:%d", DefaultPort)
-}
-
 // LocalBaseURL 当前运行时本机引擎根（无 /proxy）。
 func LocalBaseURL() string {
 	return fmt.Sprintf("http://127.0.0.1:%d", Port())
@@ -72,12 +66,4 @@ func BaseURL(local bool) string {
 		}
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d/proxy", Port())
-}
-
-func URL(do, siteKey string, local bool) string {
-	u := BaseURL(local) + "?do=" + url.QueryEscape(do)
-	if siteKey != "" {
-		u += "&siteKey=" + url.QueryEscape(siteKey)
-	}
-	return u
 }

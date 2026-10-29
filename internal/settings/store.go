@@ -206,9 +206,6 @@ func isHostOnly(t Type) bool {
 	}
 }
 
-// IsHostOnly 宿主机专用键：远端普通用户不可读写。
-func IsHostOnly(t Type) bool { return isHostOnly(t) }
-
 // IsHostOnlyID 按设置 id 字符串判断。
 func IsHostOnlyID(id string) bool { return isHostOnly(Type(strings.TrimSpace(id))) }
 
@@ -391,24 +388,6 @@ func defaultLivePlayerValue() string {
 		return "innie#mpv"
 	}
 	return "innie#mpv"
-}
-
-// ResolvePlayerLive 直播播放器；空则平台默认。
-func ResolvePlayerLive() string {
-	v := strings.TrimSpace(Get(PlayerLive))
-	if v != "" {
-		return v
-	}
-	return defaultLivePlayerValue()
-}
-
-// ResolvePlayerVod 点播播放器。
-func ResolvePlayerVod() string {
-	v := strings.TrimSpace(Get(Player))
-	if v != "" {
-		return v
-	}
-	return defaultVodPlayerValue()
 }
 
 // Load 从数据库加载全局设置（owner 为空），并补齐缺省项。
@@ -686,15 +665,6 @@ func IsDanmakuAuto() bool { return Bool(DanmakuAuto, true) }
 // IsDanmakuSpiderFirst 片源自带弹幕优先（默认开）：有片源弹幕时搜索结果只追加。
 func IsDanmakuSpiderFirst() bool { return Bool(DanmakuSpiderFirst, true) }
 
-// IsLiveAcross 跨分组换台（默认开）。
-func IsLiveAcross() bool { return Bool(LiveAcross, true) }
-
-// IsLiveChange 播放失败自动换线（默认开）。
-func IsLiveChange() bool { return Bool(LiveChange, true) }
-
-// IsLiveInvert 反转上下换台方向（默认关）。
-func IsLiveInvert() bool { return Bool(LiveInvert, false) }
-
 // Bool 布尔设置：空用 def；true/1/on/yes 为开，其余为关。
 func Bool(t Type, def bool) bool {
 	v := strings.ToLower(strings.TrimSpace(Get(t)))
@@ -815,11 +785,6 @@ func ListEntriesForOwner(owner string, includeHostOnly bool) []Entry {
 		out = append(out, Entry{ID: id, Label: label, Value: v})
 	}
 	return out
-}
-
-// ReplaceEntries 替换内存设置列表（保留 cache）；并覆盖写入 owner 为空的全局行。
-func ReplaceEntries(entries []Entry) error {
-	return ReplaceEntriesForOwner("", entries)
 }
 
 // ReplaceEntriesForOwner 覆盖写入指定 owner 的设置行（DB 单事务先清后写）。

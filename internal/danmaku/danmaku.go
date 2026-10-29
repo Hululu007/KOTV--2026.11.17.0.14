@@ -106,12 +106,12 @@ func Search(ctx context.Context, scope, api, name, episode string) ([]model.Danm
 // resolveLoopback 搜索接口给的 127.0.0.1/localhost 地址指接口所在那台机器（接口通常是那台的
 // /proxy?do=danmaku）。接口不在本机时换成接口的主机，否则引擎会去请求自己。
 func resolveLoopback(items []model.DanmakuItem, api *url.URL) []model.DanmakuItem {
-	if api == nil || isLoopbackHost(api.Hostname()) {
+	if api == nil || util.IsLoopbackHost(api.Hostname()) {
 		return items
 	}
 	for i, it := range items {
 		u, err := url.Parse(it.URL)
-		if err != nil || !isLoopbackHost(u.Hostname()) {
+		if err != nil || !util.IsLoopbackHost(u.Hostname()) {
 			continue
 		}
 		host := api.Hostname()
@@ -124,14 +124,6 @@ func resolveLoopback(items []model.DanmakuItem, api *url.URL) []model.DanmakuIte
 		items[i].URL = u.String()
 	}
 	return items
-}
-
-func isLoopbackHost(h string) bool {
-	if strings.EqualFold(h, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(h)
-	return ip != nil && ip.IsLoopback()
 }
 
 func searchRequest(ctx context.Context, api, name, episode string) (*http.Request, error) {

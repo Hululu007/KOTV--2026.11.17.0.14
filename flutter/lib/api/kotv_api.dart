@@ -74,7 +74,7 @@ class KotvApi {
   }
 
   /// 确保已加载稳定 clientId（多前端 UI 路由用）。
-  Future<String> ensureClientId() async {
+  Future<String> _ensureClientId() async {
     if (_clientId.isNotEmpty) return _clientId;
     _clientId = await kotvClientId();
     return _clientId;
@@ -87,7 +87,7 @@ class KotvApi {
   Future<Map<String, String>> _headers([Map<String, String>? extra, bool withToken = true]) async {
     // 有 token 就带上（用户管理/远端租户）；本机内容会话服务端仍只用 clientId。
     final token = withToken ? await kotvAuthToken() : '';
-    final id = await ensureClientId();
+    final id = await _ensureClientId();
     final engineBase = kotvNormalizeEngineBaseUrl(baseUrl);
     return {
       if (id.isNotEmpty) 'X-Kotv-Client-Id': id,
@@ -590,7 +590,7 @@ class KotvApi {
 
   /// 界面套接字。浏览器不能带自定义头，身份放在查询参数里。
   Future<({String url, Map<String, String> headers})> uiSocket() async {
-    final id = await ensureClientId();
+    final id = await _ensureClientId();
     final headers = await _headers();
     final base = Uri.parse(baseUrl);
     final query = <String, String>{

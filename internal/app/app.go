@@ -72,10 +72,6 @@ type App struct {
 	liveLoadCached    map[string]any
 }
 
-var defaultApp *App
-
-func Default() *App { return defaultApp }
-
 func New() (*App, error) {
 	_ = os.MkdirAll(os.TempDir(), 0o755)
 	setupFileLog()
@@ -116,7 +112,6 @@ func New() (*App, error) {
 		parse.CancelUserSniffs(userID)
 		a.sessions.RemoveByUser(userID)
 	})
-	defaultApp = a
 
 	a.Server = server.New()
 	a.Server.SetContentAPI(a)
@@ -818,11 +813,6 @@ func (a *App) MediaTitle() string {
 	a.mediaMu.RLock()
 	defer a.mediaMu.RUnlock()
 	return a.mediaTitle
-}
-
-// PlayURL 统一播放入口。
-func PlayURL(url string) error {
-	return player.Play(url, "")
 }
 
 // PlayURLWithHistory 播放并绑定历史 key 以便续播写入。

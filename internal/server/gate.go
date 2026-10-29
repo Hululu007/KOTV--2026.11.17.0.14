@@ -11,6 +11,7 @@ import (
 	"github.com/bobo/KOTV/internal/auth"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/playproxy"
+	"github.com/bobo/KOTV/internal/util"
 )
 
 // ProtocolVersion 前后端接口协议号，接口或加密方式不兼容时加一。
@@ -228,7 +229,7 @@ func requestPublicBase(r *http.Request) string {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		hostname = h
 	}
-	if isLoopbackHostname(hostname) {
+	if util.IsLoopbackHost(hostname) {
 		return ""
 	}
 	scheme := "http"
@@ -250,13 +251,8 @@ func clientEngineBase(raw string) string {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return ""
 	}
-	if isLoopbackHostname(u.Hostname()) {
+	if util.IsLoopbackHost(u.Hostname()) {
 		return ""
 	}
 	return u.Scheme + "://" + u.Host
-}
-
-func isLoopbackHostname(hostname string) bool {
-	hostname = strings.Trim(strings.TrimSpace(hostname), "[]")
-	return hostname == "127.0.0.1" || strings.EqualFold(hostname, "localhost") || hostname == "::1"
 }

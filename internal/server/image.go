@@ -1,13 +1,9 @@
 package server
 
 import (
-	"crypto/md5"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -23,8 +19,6 @@ const (
 )
 
 var (
-	imageMIME = regexp.MustCompile(`(?i)^image/[a-z0-9.+-]+$`)
-
 	imageMu    sync.Mutex
 	imageByKey = map[string]cachedImage{}
 	imageOrder []string // 最旧在前
@@ -85,55 +79,6 @@ func imageLoad(key string) (cachedImage, bool) {
 		}
 	}
 	return img, true
-}
-
-// CacheDataURI 把 data: 图片写入内存并返回 /image/{md5}；其它地址原样返回。
-func CacheDataURI(url string) string {
-	url = strings.TrimSpace(url)
-	if url == "" {
-		return ""
-	}
-	if !strings.HasPrefix(strings.ToLower(url), "data:") {
-		return url
-	}
-	if len(url) > maxDataURILength {
-		return ""
-	}
-	sum := md5.Sum([]byte(url))
-	key := hex.EncodeToString(sum[:])
-	if key == "" {
-		return ""
-	}
-	if _, ok := imageLoad(key); !ok {
-		img := decodeDataURI(url)
-		if img == nil {
-			return ""
-		}
-		imageStore(key, *img)
-	}
-	return "/image/" + key
-}
-
-func decodeDataURI(url string) *cachedImage {
-	// data:[<mime>][;base64],<data>
-	if len(url) < 6 || !strings.HasPrefix(strings.ToLower(url), "data:") {
-		return nil
-	}
-	comma := strings.IndexByte(url, ',')
-	if comma < 0 {
-		return nil
-	}
-	metadata := strings.ToLower(url[5:comma])
-	parts := strings.SplitN(metadata, ";", 2)
-	mime := parts[0]
-	if !imageMIME.MatchString(mime) || !strings.HasSuffix(metadata, ";base64") {
-		return nil
-	}
-	raw, err := base64.StdEncoding.DecodeString(url[comma+1:])
-	if err != nil || len(raw) == 0 {
-		return nil
-	}
-	return &cachedImage{mime: mime, data: raw}
 }
 
 func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {

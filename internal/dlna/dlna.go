@@ -198,8 +198,7 @@ func RewriteLocalURL(raw string) string {
 	}
 	u, err := url.Parse(raw)
 	if err == nil {
-		host := u.Hostname()
-		if host == "127.0.0.1" || host == "localhost" || host == "::1" {
+		if util.IsLoopbackHost(u.Hostname()) {
 			port := u.Port()
 			if port != "" {
 				u.Host = ip + ":" + port
@@ -228,8 +227,7 @@ func IsLoopbackMediaURL(raw string) bool {
 			strings.Contains(strings.ToLower(raw), "://localhost") ||
 			strings.Contains(raw, "[::1]")
 	}
-	host := strings.ToLower(u.Hostname())
-	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+	return util.IsLoopbackHost(u.Hostname())
 }
 
 // LocalIP 获取首选局域网 IPv4（含安卓 / 桌面 KOTV_LAN_IP 注入路径）。
