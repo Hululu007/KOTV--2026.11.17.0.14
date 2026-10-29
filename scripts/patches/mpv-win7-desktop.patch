@@ -211,22 +211,116 @@ diff -ruN video/out/gpu/d3d11_helpers.h video/out/gpu/d3d11_helpers.h
 diff -ruN video/decode/vd_lavc.c video/decode/vd_lavc.c
 --- video/decode/vd_lavc.c
 +++ video/decode/vd_lavc.c
-@@ -1076,6 +1076,18 @@
+@@ -21,6 +21,8 @@
+ #include <assert.h>
+ #include <stdbool.h>
  
++#include "config.h"
++
+ #include <libavcodec/avcodec.h>
+ #include <libavformat/version.h>
+ #include <libavutil/common.h>
+@@ -53,6 +55,10 @@
+ #include "video/csputils.h"
+ #include "video/sws_utils.h"
+ #include "video/out/vo.h"
++
++#if HAVE_D3D9_HWACCEL
++#include "video/d3d.h"
++#endif
+ 
+ #include "options/m_option.h"
+ 
+@@ -1077,6 +1083,21 @@
      if (ctx->hwdec_opts->hwdec_image_format)
          new_fctx->sw_format = imgfmt2pixfmt(ctx->hwdec_opts->hwdec_image_format);
-+
-+    // dxva2-egl turns surfaces into RGB with D3D9 StretchRect, which drivers
-+    // only do reliably for NV12; P010 (10-bit) often comes out green. Fail
-+    // here so the decoder moves on to the next method, normally dxva2-copy.
+ 
++#if HAVE_D3D9_HWACCEL
++    // Fail here so the decoder moves on to the next method, normally
++    // dxva2-copy, which handles these frames correctly.
 +    if (!ctx->hwdec.copying &&
 +        new_fctx->device_ctx->type == AV_HWDEVICE_TYPE_DXVA2 &&
-+        new_fctx->sw_format != AV_PIX_FMT_NV12)
++        !d3d9_interop_allowed(new_fctx->device_ref, avctx->codec_id,
++                              new_fctx->sw_format))
 +    {
-+        MP_VERBOSE(ctx, "dxva2 interop maps nv12 only, got %s.\n",
++        MP_VERBOSE(ctx, "dxva2 interop not used for %s (%s) on this GPU.\n",
++                   avcodec_get_name(avctx->codec_id),
 +                   av_get_pix_fmt_name(new_fctx->sw_format));
 +        goto error;
 +    }
- 
++#endif
++
      // 1 surface is already included by libavcodec. The field is 0 if the
      // hwaccel supports dynamic surface allocation.
+     if (new_fctx->initial_pool_size)
+diff -ruN video/d3d.c video/d3d.c
+--- video/d3d.c
++++ video/d3d.c
+@@ -264,6 +264,56 @@
+     d3d9_free_av_device_ref(ctx);
+     av_buffer_unref(&device_ref);
+     return NULL;
++}
++
++// Haswell and Broadwell have no fixed-function HEVC decoder. The driver's
++// hybrid CPU+GPU HEVC decoder works with dxva2-copy, but its surfaces come
++// out green when converted with StretchRect for dxva2-egl.
++static bool d3d9_intel_hybrid_hevc(UINT device_id)
++{
++    switch (device_id & 0xff00) {
++    case 0x0400: case 0x0a00: case 0x0c00: case 0x0d00: // Haswell
++    case 0x1600:                                        // Broadwell
++        return true;
++    }
++    return false;
++}
++
++// Whether dxva2-egl can show these frames. It converts surfaces to RGB with
++// D3D9 StretchRect, which drivers only do reliably for NV12.
++bool d3d9_interop_allowed(struct AVBufferRef *device_ref, int av_codec_id,
++                          int av_sw_format)
++{
++    if (av_sw_format != AV_PIX_FMT_NV12)
++        return false;
++    if (av_codec_id != AV_CODEC_ID_HEVC)
++        return true;
++
++    AVHWDeviceContext *ctx = (void *)device_ref->data;
++    AVDXVA2DeviceContext *hwctx = ctx->hwctx;
++    HANDLE handle = NULL;
++    IDirect3DDevice9 *device = NULL;
++    IDirect3D9 *d3d9 = NULL;
++    D3DDEVICE_CREATION_PARAMETERS params;
++    D3DADAPTER_IDENTIFIER9 id;
++    bool allowed = true;
++
++    if (FAILED(IDirect3DDeviceManager9_OpenDeviceHandle(hwctx->devmgr, &handle)))
++        return true;
++    if (SUCCEEDED(IDirect3DDeviceManager9_LockDevice(hwctx->devmgr, handle,
++                                                     &device, TRUE)))
++    {
++        if (SUCCEEDED(IDirect3DDevice9_GetDirect3D(device, &d3d9)) &&
++            SUCCEEDED(IDirect3DDevice9_GetCreationParameters(device, &params)) &&
++            SUCCEEDED(IDirect3D9_GetAdapterIdentifier(d3d9, params.AdapterOrdinal,
++                                                      0, &id)))
++            allowed = !(id.VendorId == 0x8086 && d3d9_intel_hybrid_hevc(id.DeviceId));
++        SAFE_RELEASE(d3d9);
++        IDirect3DDeviceManager9_UnlockDevice(hwctx->devmgr, handle, FALSE);
++        SAFE_RELEASE(device);
++    }
++    IDirect3DDeviceManager9_CloseDeviceHandle(hwctx->devmgr, handle);
++    return allowed;
+ }
+ 
+ static struct AVBufferRef *d3d9_create_standalone(struct mpv_global *global,
+diff -ruN video/d3d.h video/d3d.h
+--- video/d3d.h
++++ video/d3d.h
+@@ -38,5 +38,7 @@
+ 
+ struct AVBufferRef *d3d11_wrap_device_ref(ID3D11Device *device);
+ struct AVBufferRef *d3d9_wrap_device_ref(struct IDirect3DDevice9 *device);
++bool d3d9_interop_allowed(struct AVBufferRef *device_ref, int av_codec_id,
++                          int av_sw_format);
+ 
+ #endif
