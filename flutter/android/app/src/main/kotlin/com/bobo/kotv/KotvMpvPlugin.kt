@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Gravity
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -33,6 +34,7 @@ import `is`.xyz.mpv.MPVLib
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.roundToInt
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -81,6 +83,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var dolbyVisionPolicy = 0
   /** 当前是否允许杜比视界直出（android-dolby-vision-output=direct）。 */
   private var dvDirect = false
+  /** 当前上下文是否以硬解直出建立（vo=mediacodec_embed）；null = 尚未建立。 */
+  private var createdDirect: Boolean? = null
+  /** mpv 正在用直出 vo（含杜比视界自动换成的直出）；此时画面比例由宿主摆放 SurfaceView。 */
+  private var directActive = false
+  /** 片源显示比例（video-params/aspect）。 */
+  private var videoAspect = 0.0
   /** 已交给 mpv 的 OSD Surface（android-osd-wid）。 */
   private var attachedOsdSurface: Surface? = null
   /** 首选字幕语言（BCP-47，逗号分隔）→ mpv slang。 */
@@ -203,7 +211,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     host.onSurfaceSize = { w, h -> if (surfaceHost === host) applySurfaceSize("${w}x$h") }
     host.onOsdSurface = { if (surfaceHost === host) syncOsdSurface() }
-    host.setOsdLayer(dvDirect)
+    host.setOsdLayer(osdWanted())
     if (surfaceLayerEnabled) {
       host.setRender(renderTexture)
       if (host.currentSurface() != null) {
@@ -460,8 +468,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         decodeMode = call.argument<String>("decode") ?: decodeMode
         main.post {
           try {
-            if (created.get()) {
-              MPVLib.setPropertyString("hwdec", resolveHwdec(decodeMode))
+            if (created.get() && createdDirect != wantDirectOutput()) {
+              ensurePlayerAndReload()
+            } else if (created.get()) {
+              MPVLib.setPropertyString("hwdec", playerHwdec(decodeMode))
             }
             result.success(null)
           } catch (e: Throwable) {
@@ -477,8 +487,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             if (surfaceLayerEnabled) {
               surfaceHost?.setRender(renderTexture)
             }
-            // 杜比视界直出只在 Surface 方式下可用，换渲染方式后重新判断。
-            if (created.get()) applyDolbyVisionOptions()
+            // 直出只在 Surface 方式下可用，换渲染方式后重新判断。
+            if (created.get() && createdDirect != wantDirectOutput()) {
+              ensurePlayerAndReload()
+            } else if (created.get()) {
+              applyDolbyVisionOptions()
+            }
             result.success(
               mapOf(
                 "ok" to true,
@@ -511,29 +525,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           .associate { "${it.key}" to "${it.value}" }
         main.post {
           try {
-            // tls / disk 在 init 写入，变更须重建；重建后若有已加载 URL 则按进度重载。
-            val url = loadedUrl
-            val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
-            val pos = positionSec
-            val rebuilt = ensurePlayer()
-            applyRuntimeOpts(props)
-            applyGpuApiIfNeeded()
-            applyDolbyVisionOptions()
-            applyPreferredSubtitleLangs()
-            applyEqualizer()
-            applySpdif()
-            if (rebuilt && url.isNotBlank()) {
-              retrySeekSec = pos.coerceAtLeast(0.0)
-              // 与 open 一致：先挂 Surface 再 loadfile，避免有声无画。
-              tryAttachSurface()
-              if (surfaceLayerEnabled && !surfaceAttached) {
-                pendingUrl = url
-                pendingHeaders = LinkedHashMap(headers)
-                maybeLoadPending()
-              } else {
-                startLoad(url, headers)
-              }
-            }
+            ensurePlayerAndReload(props)
             result.success(null)
           } catch (e: Throwable) {
             result.error("OPTS_FAILED", e.message, null)
@@ -569,6 +561,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           try {
             aspectMode = normalizeAspectMode(mode)
             applyAspectMode()
+            applyVideoFrame()
             result.success(true)
           } catch (e: Throwable) {
             result.error("ASPECT_FAILED", e.message, null)
@@ -889,6 +882,35 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
+  /**
+   * 冷选项或输出方式变了就重建上下文（tls、磁盘缓存、直出等在 init 写入），
+   * 重建后若有已加载的地址就按进度重载。
+   */
+  private fun ensurePlayerAndReload(props: Map<String, String> = emptyMap()) {
+    val url = loadedUrl
+    val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
+    val pos = positionSec
+    val rebuilt = ensurePlayer()
+    applyRuntimeOpts(props)
+    applyGpuApiIfNeeded()
+    applyDolbyVisionOptions()
+    applyPreferredSubtitleLangs()
+    applyEqualizer()
+    applySpdif()
+    if (rebuilt && url.isNotBlank()) {
+      retrySeekSec = pos.coerceAtLeast(0.0)
+      // 与 open 一致：先挂 Surface 再 loadfile，避免有声无画。
+      tryAttachSurface()
+      if (surfaceLayerEnabled && !surfaceAttached) {
+        pendingUrl = url
+        pendingHeaders = LinkedHashMap(headers)
+        maybeLoadPending()
+      } else {
+        startLoad(url, headers)
+      }
+    }
+  }
+
   /** @return true 若因冷选项/模式变更销毁并新建了上下文。 */
   private fun ensurePlayer(): Boolean {
     val ctx = appContext ?: throw IllegalStateException("no context")
@@ -920,6 +942,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       destroyPlayer()
       rebuilt = true
     }
+    if (created.get() && createdDirect != null && createdDirect != wantDirectOutput()) {
+      Log.i(TAG, "recreate MPV context: direct output $createdDirect -> ${wantDirectOutput()}")
+      destroyPlayer()
+      rebuilt = true
+    }
     if (created.get()) return rebuilt
     synchronized(this) {
       if (created.get()) return rebuilt
@@ -938,25 +965,17 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setOptionString("config-dir", configDir.absolutePath)
       MPVLib.setOptionString("gpu-shader-cache-dir", cacheDir.absolutePath)
       MPVLib.setOptionString("icc-cache-dir", cacheDir.absolutePath)
-      MPVLib.setOptionString("hwdec", resolveHwdec(decodeMode))
-      if (isRockchipMpp()) {
-        // RK3399/RK3588：auto-safe 会走 mediacodec-copy，Surface 未绑时必黑屏；直出 mediacodec + OMX 优化
-        val board = (Build.BOARD ?: "").lowercase()
-        val model = (Build.MODEL ?: "").lowercase()
-        val product = (Build.PRODUCT ?: "").lowercase()
+      val direct = wantDirectOutput()
+      createdDirect = direct
+      MPVLib.setOptionString("hwdec", playerHwdec(decodeMode))
+      if (direct) {
+        // 直出只能显示 MediaCodec 解出的帧：所有编码都先交给 MediaCodec。
         MPVLib.setOptionString("hwdec-codecs", "all")
-        val rk3399 = board.contains("rk3399") ||
-            model.contains("rk3399") ||
-            model.contains("cr19") ||
-            product.contains("rk3399") ||
-            product.contains("rk3399_box")
-        if (rk3399) {
-          MPVLib.setOptionString("hwdec-extraframes", "8")
-          MPVLib.setOptionString("mediacodec-hevc", "yes")
-          MPVLib.setOptionString("vd-lavc-dr", "no")
-        }
       }
-      MPVLib.setOptionString("vo", if (gpuNext) "gpu-next" else "gpu")
+      if (isRockchip()) {
+        MPVLib.setOptionString("vd-lavc-dr", "no")
+      }
+      MPVLib.setOptionString("vo", videoOutput())
       applyGpuApiOptions()
       // 默认 cacert 校验；坏 CA 可关。
       applyTlsOptions(ctx)
@@ -1098,13 +1117,16 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     setMpvOption("android-dolby-vision-output", if (direct) "direct" else "configured")
     setMpvOption("demuxer-dovi-profile7", profile7)
     dvDirect = direct
-    surfaceHost?.setOsdLayer(direct)
+    surfaceHost?.setOsdLayer(osdWanted())
     syncOsdSurface()
   }
 
+  /** 直出（硬解直出或杜比视界直出）时画面不经 mpv 渲染，字幕要叠层 OSD Surface。 */
+  private fun osdWanted(): Boolean = dvDirect || createdDirect == true
+
   /** 直出时画面不经 mpv 渲染，字幕画在叠在视频上方的透明 OSD Surface 上；须在视频 Surface 之后挂。 */
   private fun syncOsdSurface() {
-    val target = if (dvDirect && created.get() && surfaceAttached) {
+    val target = if (osdWanted() && created.get() && surfaceAttached) {
       surfaceHost?.currentOsdSurface()
     } else {
       null
@@ -1148,7 +1170,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "transfer" to transfer,
       "primaries" to prop("video-params/primaries").uppercase(),
       "dolbyVision" to if (dvProfile.isEmpty()) "" else "杜比视界 P$dvProfile",
-      "output" to if (prop("current-vo") == "mediacodec_embed") "杜比视界直出" else "",
+      "output" to when {
+        prop("current-vo") != "mediacodec_embed" -> ""
+        dvProfile.isNotEmpty() -> "杜比视界直出"
+        else -> "直出"
+      },
       "display" to display,
     )
   }
@@ -1222,38 +1248,56 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return arr.toString()
   }
 
-  /** RK3399 等 Rockchip 盒：auto → mediacodec（直出 Surface；Dart auto-safe 由原生覆盖）。 */
-  private fun isRockchipMpp(): Boolean {
+  /** Rockchip 芯片（RK3399、RK3588 等）。 */
+  private fun isRockchip(): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+      Build.SOC_MANUFACTURER.equals("Rockchip", ignoreCase = true)
+    ) {
+      return true
+    }
     val hw = (Build.HARDWARE ?: "").lowercase()
-    val board = (Build.BOARD ?: "").lowercase()
-    val model = (Build.MODEL ?: "").lowercase()
-    val product = (Build.PRODUCT ?: "").lowercase()
-    return hw.contains("rk") ||
-        board.contains("rk3399") ||
-        board.contains("rk3588") ||
-        model.contains("rk3399") ||
-        model.contains("cr19") ||
-        product.contains("rk3399") ||
-        product.contains("rk3399_box")
+    return hw.startsWith("rk") ||
+      listOf(Build.BOARD, Build.PRODUCT, Build.MODEL).any { (it ?: "").lowercase().contains("rk3") } ||
+      (Build.MODEL ?: "").lowercase().contains("cr19")
   }
 
-  /** 映射 Dart decode 字符串；自动 = 直出 mediacodec 优先再软解，勿 auto-safe/copy。 */
+  /**
+   * 硬解直出：MediaCodec 把画面直接交给 SurfaceView，由系统合成输出（HDR 也由系统送显），
+   * 不经 mpv 的 GL 渲染（vo=mediacodec_embed）。
+   * - Android 8.0 以下没有 AImageReader，GL 渲染拿不到硬解画面，硬解只能直出；
+   * - Rockchip 盒子默认直出。
+   * 要求 SurfaceView 和硬解；字幕画在叠层 OSD Surface 上，滤镜、着色器等 GL 处理不生效。
+   */
+  private fun wantDirectOutput(): Boolean =
+    !renderTexture && resolveHwdec(decodeMode) != "no" &&
+      (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || isRockchip())
+
+  /** 当前上下文的 vo。 */
+  private fun videoOutput(): String = when {
+    createdDirect == true -> "mediacodec_embed"
+    gpuNext -> "gpu-next"
+    else -> "gpu"
+  }
+
+  /** 交给 mpv 的 hwdec：直出固定 mediacodec，否则按解码设置。 */
+  private fun playerHwdec(raw: String?): String =
+    if (createdDirect == true) "mediacodec" else resolveHwdec(raw)
+
+  /**
+   * 解码设置 → GL 渲染用的 hwdec。8.0 以上 mediacodec 经 AImageReader 零拷贝；
+   * 以下只能 mediacodec-copy（拷回内存再上传）。自动 = 硬解优先、失败软解。
+   */
   private fun resolveHwdec(raw: String?): String {
     val mode = raw?.trim().orEmpty()
     if (mode == "no" || mode == "soft" || mode == "software" || mode == "sw") return "no"
-    if (mode == "mediacodec" || mode == "hard" || mode == "hardware" || mode == "hw") {
-      return "mediacodec"
+    // 已是逗号列表（如 mediacodec,no）原样交给 mpv。
+    if (mode.contains(",")) return mode
+    val hw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) "mediacodec" else "mediacodec-copy"
+    return when (mode) {
+      "mediacodec", "hard", "hardware", "hw" -> hw
+      "", "auto", "auto-safe" -> "$hw,no"
+      else -> mode
     }
-    // 已是逗号列表（如 mediacodec,no）交给 mpv；RK Surface 仍锁直出 mediacodec
-    if (mode.contains(",")) {
-      if (isRockchipMpp() && mode.startsWith("mediacodec")) return "mediacodec"
-      return mode
-    }
-    if (mode.isBlank() || mode == "auto" || mode == "auto-safe") {
-      // RK 直出 Surface 锁 mediacodec；其它机型允许软解兜底
-      return if (isRockchipMpp()) "mediacodec" else "mediacodec,no"
-    }
-    return mode
   }
 
   private fun applyConfOptions(text: String) {
@@ -1415,15 +1459,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun applyRuntimeOpts(props: Map<String, String>) {
     if (!created.get()) return
-    val hw = resolveHwdec(props["hwdec"] ?: decodeMode)
     try {
-      MPVLib.setPropertyString("hwdec", hw)
+      MPVLib.setPropertyString("hwdec", playerHwdec(props["hwdec"] ?: decodeMode))
     } catch (_: Throwable) {
     }
-    val vo = if (gpuNext || props["vo"] == "gpu-next") "gpu-next" else "gpu"
     if (surfaceReady) {
       try {
-        MPVLib.setPropertyString("vo", vo)
+        MPVLib.setPropertyString("vo", videoOutput())
       } catch (_: Throwable) {
       }
     }
@@ -1456,6 +1498,20 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
    * - Zoom：keepaspect + panscan 裁切铺满
    * - 16:9 / 4:3：强制片源画幅（如 4:3 片源选 16:9 会横向拉满）
    */
+  /**
+   * 直出时 mpv 不缩放画面，MediaCodec 会把画面拉满 Surface：按比例设置摆放视频 SurfaceView。
+   * GL 渲染时由 mpv 自己处理比例，SurfaceView 铺满。
+   */
+  private fun applyVideoFrame() {
+    val aspect = when {
+      !directActive -> 0.0
+      aspectMode == "16:9" -> 16.0 / 9.0
+      aspectMode == "4:3" -> 4.0 / 3.0
+      else -> videoAspect
+    }
+    surfaceHost?.setVideoFrame(aspect, aspectMode)
+  }
+
   private fun applyAspectMode() {
     if (!created.get()) return
     try {
@@ -1502,6 +1558,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.observeProperty("height", MPVLib.MpvFormat.MPV_FORMAT_INT64)
     MPVLib.observeProperty("video-params/w", MPVLib.MpvFormat.MPV_FORMAT_INT64)
     MPVLib.observeProperty("video-params/h", MPVLib.MpvFormat.MPV_FORMAT_INT64)
+    MPVLib.observeProperty("video-params/aspect", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
+    MPVLib.observeProperty("current-vo", MPVLib.MpvFormat.MPV_FORMAT_STRING)
   }
 
   private fun resolveRenderTexture(mode: String): Boolean {
@@ -1519,7 +1577,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val surface = surfaceHost?.currentSurface() ?: return
     if (!surface.isValid) return
     try {
-      val vo = if (gpuNext) "gpu-next" else "gpu"
       val size = surfaceSizeOf(surfaceHost)
       if (surfaceAttached && attachedSurface === surface) {
         if (size != null) applySurfaceSize(size)
@@ -1538,7 +1595,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       attachedSurface = surface
       appliedSurfaceSize = null
       if (size != null) applySurfaceSize(size)
-      MPVLib.setPropertyString("vo", vo)
+      MPVLib.setPropertyString("vo", videoOutput())
       syncOsdSurface()
       // 绑定输出时不强制 force-window / 不重播；保持 pause 与 time-pos。
       if (pendingUrl == null) {
@@ -1685,6 +1742,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     createdAsLive = null
     createdTlsVerify = null
     createdDiskCache = null
+    createdDirect = null
+    directActive = false
+    videoAspect = 0.0
     appliedSpdif = null
     if (!created.getAndSet(false)) return
     try {
@@ -1741,12 +1801,21 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  override fun eventProperty(property: String, value: String) {}
+  override fun eventProperty(property: String, value: String) {
+    if (property == "current-vo") {
+      directActive = value == "mediacodec_embed"
+      main.post { applyVideoFrame() }
+    }
+  }
 
   override fun eventProperty(property: String, value: Double) {
     when (property) {
       "time-pos", "playback-time" -> positionSec = value
       "duration" -> durationSec = value
+      "video-params/aspect" -> {
+        videoAspect = value
+        main.post { applyVideoFrame() }
+      }
     }
   }
 
@@ -1939,6 +2008,45 @@ internal class KotvMpvSurfaceHost(context: Context) :
     return if (s != null && s.isValid) s else null
   }
 
+  private var frameAspect = 0.0
+  private var frameMode = "default"
+
+  /**
+   * 直出时按画面比例摆放视频 SurfaceView（aspect ≤ 0 铺满）。
+   * fill 拉满；zoom 等比放大到铺满（超出部分在宿主外）；其余等比完整显示。
+   */
+  fun setVideoFrame(aspect: Double, mode: String) {
+    if (aspect == frameAspect && mode == frameMode) return
+    frameAspect = aspect
+    frameMode = mode
+    layoutVideoFrame()
+  }
+
+  private fun layoutVideoFrame() {
+    val sv = surfaceView ?: return
+    val w = width
+    val h = height
+    val lp = if (frameAspect <= 0.0 || frameMode == "fill" || w <= 0 || h <= 0) {
+      LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+    } else {
+      val cover = frameMode == "zoom"
+      val byWidth = (frameAspect >= w.toDouble() / h) != cover
+      if (byWidth) {
+        LayoutParams(w, (w / frameAspect).roundToInt(), Gravity.CENTER)
+      } else {
+        LayoutParams((h * frameAspect).roundToInt(), h, Gravity.CENTER)
+      }
+    }
+    val cur = sv.layoutParams
+    if (cur != null && cur.width == lp.width && cur.height == lp.height) return
+    sv.layoutParams = lp
+  }
+
+  override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+    super.onSizeChanged(w, h, oldw, oldh)
+    post { layoutVideoFrame() }
+  }
+
   fun currentOsdSurface(): Surface? {
     if (!osdReady) return null
     val s = osdView?.holder?.surface
@@ -2025,6 +2133,7 @@ internal class KotvMpvSurfaceHost(context: Context) :
       }
       surfaceView = sv
       addView(sv)
+      layoutVideoFrame()
       syncOsdView()
     }
     stripPlatformViewFocus()

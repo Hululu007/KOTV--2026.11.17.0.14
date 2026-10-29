@@ -365,9 +365,6 @@ class KotvMpvOpts {
     if (live) {
       out['cache-pause'] = 'no';
     }
-    if (gpuNext && kotvIsAndroid()) {
-      out['vo'] = 'gpu-next';
-    }
     out.addAll(KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes()));
     // Android 原生另有 diskCache 写 cache-on-disk + demuxer-cache-dir；
     // 桌面 media_kit 在 [applyAfterAttach] 写 cache-on-disk 与定点 demuxer-cache-dir。
