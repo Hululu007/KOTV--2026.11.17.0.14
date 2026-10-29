@@ -329,10 +329,13 @@ class VodInlineControls extends StatefulWidget {
     this.miniActive = false,
     this.translucent = false,
     this.autofocusPlay = false,
+    this.decodeMode = 'auto',
     this.onPersistSetting,
   });
 
   final KotvPlayback player;
+  /// 当前解码方式；软解时不显示「硬解直出」。
+  final String decodeMode;
   final ValueChanged<KotvDesktopFullscreenKind>? onExpand;
   final VoidCallback? onStop;
   final VoidCallback? onCast;
@@ -399,6 +402,15 @@ class _VodInlineControlsState extends State<VodInlineControls> {
                                 widget.onStop?.call();
                               },
                             ),
+                            if (widget.onPersistSetting != null &&
+                                kotvShowDirectOutput(player, widget.decodeMode))
+                              _directOutputIcon(
+                                player: player,
+                                size: iconSize,
+                                onToggle: () => unawaited(
+                                  widget.onPersistSetting!('mpvDirect', _directOutputNext(player)),
+                                ),
+                              ),
                             if (widget.onCast != null)
                               _IconAct(icon: Icons.cast, tip: '投屏', size: iconSize, onTap: widget.onCast!),
                             if (widget.onMini != null)
@@ -486,6 +498,27 @@ double _sliderBuffered(KotvPlayback player, double total) {
   final buf = player.buffered.inMilliseconds.toDouble().clamp(0.0, total);
   return buf < pos ? pos : buf;
 }
+
+/// 「硬解直出」图标：开=闪电；关=划掉的闪电，此时硬解后拷贝再显示。点一下切换并落盘 `mpvDirect`。
+_IconAct _directOutputIcon({
+  required KotvPlayback player,
+  required double size,
+  required VoidCallback onToggle,
+  FocusNode? focusNode,
+  bool scrollIntoView = false,
+}) {
+  final on = player.directOutput;
+  return _IconAct(
+    icon: on ? Icons.flash_on : Icons.flash_off,
+    tip: on ? '硬解直出：开' : '硬解直出：关（硬解后拷贝）',
+    size: size,
+    focusNode: focusNode,
+    scrollIntoView: scrollIntoView,
+    onTap: onToggle,
+  );
+}
+
+String _directOutputNext(KotvPlayback player) => player.directOutput ? 'false' : 'true';
 
 class _IconAct extends StatelessWidget {
   const _IconAct({
@@ -1979,16 +2012,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             sync(() {});
                           },
                         ),
-                        if (kotvShowDirectOutput(widget.player, _decodeModes[_decodeIdx].$1))
-                          toggleRow(
-                            icon: Icons.memory,
-                            label: '硬解直出',
-                            value: widget.player.directOutput,
-                            onChanged: (v) async {
-                              await _persist('mpvDirect', v ? 'true' : 'false');
-                              sync(() {});
-                            },
-                          ),
                         toggleRow(
                           icon: Icons.wb_sunny_outlined,
                           label: '氛围模式',
@@ -2521,6 +2544,18 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         focusNode: _iconNodes.of('decode'),
                                         onTap: _cycleDecode,
                                       ),
+                                      if (kotvShowDirectOutput(widget.player, _decodeModes[_decodeIdx].$1))
+                                        _directOutputIcon(
+                                          player: widget.player,
+                                          size: land ? 32.0 : 40.0,
+                                          scrollIntoView: true,
+                                          focusNode: _iconNodes.of('direct'),
+                                          onToggle: () => unawaited(() async {
+                                            await _persist('mpvDirect', _directOutputNext(widget.player));
+                                            if (mounted) setState(() {});
+                                            widget.onBump();
+                                          }()),
+                                        ),
                                       _IconAct(
                                         icon: Icons.closed_caption,
                                         tip: '字幕',

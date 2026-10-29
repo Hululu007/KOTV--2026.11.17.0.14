@@ -2933,132 +2933,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             setState(() => _renderMode = kotvNormalizePlayerRender(mode));
           }
         },
-        onPersistSetting: (k, v) async {
-          await KotvSettingsCache.set(api, k, v);
-          if (!mounted) return;
-          if (k == 'playerScale') {
-            setState(() => _aspect = kotvAspectFromScale(v));
-            unawaited(_playback.setVideoScale(v));
-          }
-          if (k == 'playerAmbient') {
-            setState(() => _ambientOn = v.toLowerCase() == 'true');
-          }
-          if (k == 'mpvDirect') {
-            _mpvOpts = kotvApplyDirectOutput(_playback, _mpvOpts, kotvSettingsFlag(v, def: true));
-          }
-          if (k == 'playerBackground') {
-            final bg = v.trim().toLowerCase();
-            setState(() => _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip');
-            _syncAndroidAutoPip();
-          }
-          if (k == 'playerSpeedLongPress') {
-            setState(() {
-              _holdSpeed = (double.tryParse(v) ?? _holdSpeed).clamp(2.0, 5.0).toDouble();
-            });
-          }
-          if (k == 'playerSpeed') {
-            final s = double.tryParse(v);
-            if (s != null && s > 0) {
-              setState(() => _prefSpeed = s.clamp(0.1, 5.0));
-              unawaited(_playback.setRate(_prefSpeed!));
-            }
-          }
-          if (k == 'playerVolume') {
-            final vol = _normalizePlayerVolumePref(v);
-            if (vol != null) {
-              setState(() => _prefVolume = vol);
-            }
-          }
-          if (k == 'playerSkipOpeningEnding') {
-            setState(() {
-              _skipOpeningEnding = kotvSettingsFlag(v, def: true);
-            });
-          }
-          if (k == 'playerStableVolume') {
-            final on = v.toLowerCase() == 'true';
-            setState(() => _stableVolumeOn = on);
-            if (_backend != KotvEmbedBackend.fvp) {
-              unawaited(_applyStableVolume(_playback, on));
-            }
-          }
-          if (k == 'danmaku') {
-            setState(() => _danmakuOn = v.toLowerCase() == 'true');
-          }
-          if (k == 'danmakuOffsetMs') {
-            final next = ((int.tryParse(v) ?? 0) / 1000.0);
-            final delta = next - _danmakuOffsetSec;
-            _danmakuOffsetSec = next;
-            _danmakuItems.value = kotvShiftDanmaku(_danmakuItems.value, delta);
-            if (mounted) setState(() {});
-          }
-          if (const {'danmakuLoad', 'danmakuAuto', 'danmakuSpiderFirst', 'danmakuApi'}.contains(k)) {
-            _reloadDanmakuForCurrentEpisode();
-          }
-          if (k == 'danmakuSize') {
-            setState(() => _danmakuSize = double.tryParse(v) ?? _danmakuSize);
-          }
-          if (k == 'danmakuOpacity') {
-            final op = double.tryParse(v);
-            if (op != null) {
-              setState(() => _danmakuOpacity = (op > 1 ? op / 100.0 : op).clamp(0.15, 1.0));
-            }
-          }
-          if (k == 'danmakuRows') {
-            setState(() => _danmakuRows = int.tryParse(v) ?? _danmakuRows);
-          }
-          if (k.startsWith('danmaku')) {
-            unawaited(_refreshDanmakuPrefs());
-          }
-          if (k == 'playerDecode') {
-            final next = v.trim().isEmpty ? 'auto' : v.trim();
-            setState(() {
-              _decodeMode = next;
-              _prefDecodeMode = next;
-            });
-          }
-          if (k == 'playerRender') {
-            final next = kotvNormalizePlayerRender(v);
-            unawaited(() async {
-              if (_renderMode != next) {
-                setState(() => _renderMode = next);
-                await _playback.setRenderMode(next);
-              }
-              // 渲染变更后再推 exo 冷选项（隧道仅 Surface；须等 setRenderMode 完成）。
-              await _reapplyPlayerFxSettings();
-            }());
-          }
-          if (k == 'player') {
-            final prev = _playerVal;
-            final next = kotvClampPlayerVal(v, live: false);
-            if (next != prev) {
-              if (kotvIsExternalPlayer(next)) {
-                setState(() {
-                  _playerVal = next;
-                  _prefPlayerVal = next;
-                });
-              } else {
-                unawaited(() async {
-                  // 先停旧后端画面，再切 _playerVal / 重播。
-                  await _stopInactiveBackends(kotvEmbedBackend(next));
-                  if (!mounted) return;
-                  setState(() {
-                    _playerVal = next;
-                    _prefPlayerVal = next;
-                  });
-                  if (_epIdx >= 0) await _playAt(_epIdx);
-                }());
-              }
-            }
-          }
-          // 画面/音频/字幕热更新
-          if (k.startsWith('video') ||
-              k.startsWith('audio') ||
-              k.startsWith('subtitle') ||
-              k.startsWith('exo') ||
-              k == 'audioPassThrough') {
-            unawaited(_reapplyPlayerFxSettings());
-          }
-        },
+        onPersistSetting: _persistPlayerSetting,
         onLoadSettings: () async {
           final map = await KotvSettingsCache.fetch(api);
           return {for (final e in map.entries) e.key: '${e.value}'};
@@ -3324,7 +3199,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       player: _playback,
       miniActive: _miniDesktop,
       autofocusPlay: _chromeRemoteFocus,
-      onPersistSetting: _persistInlineSetting,
+      decodeMode: _decodeMode,
+      onPersistSetting: _persistPlayerSetting,
       onCast: () => unawaited(_cast()),
       onMini: () => unawaited(_miniDesktop ? _exitMini() : _enterMini()),
       onExpand: (kind) => unawaited(_enterFullscreen(kind)),
@@ -3340,19 +3216,131 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
   }
 
-  /// 内联/迷你播控落盘：音量写回 [_prefVolume]，切集起播才不会还原旧偏好。
-  Future<void> _persistInlineSetting(String k, String v) async {
+  /// 播控（内嵌、迷你、全屏）设置落盘后按键名同步本页状态与当前播放器。
+  Future<void> _persistPlayerSetting(String k, String v) async {
     await KotvSettingsCache.set(ref.read(apiProvider), k, v);
     if (!mounted) return;
-    if (k == 'playerVolume') {
-      final vol = _normalizePlayerVolumePref(v);
-      if (vol != null) setState(() => _prefVolume = vol);
+    if (k == 'playerScale') {
+      setState(() => _aspect = kotvAspectFromScale(v));
+      unawaited(_playback.setVideoScale(v));
+    }
+    if (k == 'playerAmbient') {
+      setState(() => _ambientOn = v.toLowerCase() == 'true');
+    }
+    if (k == 'mpvDirect') {
+      setState(() => _mpvOpts = kotvApplyDirectOutput(_playback, _mpvOpts, kotvSettingsFlag(v, def: true)));
+    }
+    if (k == 'playerBackground') {
+      final bg = v.trim().toLowerCase();
+      setState(() => _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip');
+      _syncAndroidAutoPip();
+    }
+    if (k == 'playerSpeedLongPress') {
+      setState(() {
+        _holdSpeed = (double.tryParse(v) ?? _holdSpeed).clamp(2.0, 5.0).toDouble();
+      });
     }
     if (k == 'playerSpeed') {
       final s = double.tryParse(v);
       if (s != null && s > 0) {
         setState(() => _prefSpeed = s.clamp(0.1, 5.0));
+        unawaited(_playback.setRate(_prefSpeed!));
       }
+    }
+    if (k == 'playerVolume') {
+      final vol = _normalizePlayerVolumePref(v);
+      if (vol != null) {
+        setState(() => _prefVolume = vol);
+      }
+    }
+    if (k == 'playerSkipOpeningEnding') {
+      setState(() {
+        _skipOpeningEnding = kotvSettingsFlag(v, def: true);
+      });
+    }
+    if (k == 'playerStableVolume') {
+      final on = v.toLowerCase() == 'true';
+      setState(() => _stableVolumeOn = on);
+      if (_backend != KotvEmbedBackend.fvp) {
+        unawaited(_applyStableVolume(_playback, on));
+      }
+    }
+    if (k == 'danmaku') {
+      setState(() => _danmakuOn = v.toLowerCase() == 'true');
+    }
+    if (k == 'danmakuOffsetMs') {
+      final next = ((int.tryParse(v) ?? 0) / 1000.0);
+      final delta = next - _danmakuOffsetSec;
+      _danmakuOffsetSec = next;
+      _danmakuItems.value = kotvShiftDanmaku(_danmakuItems.value, delta);
+      if (mounted) setState(() {});
+    }
+    if (const {'danmakuLoad', 'danmakuAuto', 'danmakuSpiderFirst', 'danmakuApi'}.contains(k)) {
+      _reloadDanmakuForCurrentEpisode();
+    }
+    if (k == 'danmakuSize') {
+      setState(() => _danmakuSize = double.tryParse(v) ?? _danmakuSize);
+    }
+    if (k == 'danmakuOpacity') {
+      final op = double.tryParse(v);
+      if (op != null) {
+        setState(() => _danmakuOpacity = (op > 1 ? op / 100.0 : op).clamp(0.15, 1.0));
+      }
+    }
+    if (k == 'danmakuRows') {
+      setState(() => _danmakuRows = int.tryParse(v) ?? _danmakuRows);
+    }
+    if (k.startsWith('danmaku')) {
+      unawaited(_refreshDanmakuPrefs());
+    }
+    if (k == 'playerDecode') {
+      final next = v.trim().isEmpty ? 'auto' : v.trim();
+      setState(() {
+        _decodeMode = next;
+        _prefDecodeMode = next;
+      });
+    }
+    if (k == 'playerRender') {
+      final next = kotvNormalizePlayerRender(v);
+      unawaited(() async {
+        if (_renderMode != next) {
+          setState(() => _renderMode = next);
+          await _playback.setRenderMode(next);
+        }
+        // 渲染变更后再推 exo 冷选项（隧道仅 Surface；须等 setRenderMode 完成）。
+        await _reapplyPlayerFxSettings();
+      }());
+    }
+    if (k == 'player') {
+      final prev = _playerVal;
+      final next = kotvClampPlayerVal(v, live: false);
+      if (next != prev) {
+        if (kotvIsExternalPlayer(next)) {
+          setState(() {
+            _playerVal = next;
+            _prefPlayerVal = next;
+          });
+        } else {
+          unawaited(() async {
+            // 先停旧后端画面，再切 _playerVal / 重播。
+            await _stopInactiveBackends(kotvEmbedBackend(next));
+            if (!mounted) return;
+            setState(() {
+              _playerVal = next;
+              _prefPlayerVal = next;
+            });
+            if (_epIdx >= 0) await _playAt(_epIdx);
+          }());
+        }
+      }
+    }
+    // 画面/音频/字幕热更新
+    if (k.startsWith('video') ||
+        k.startsWith('audio') ||
+        k.startsWith('subtitle') ||
+        k.startsWith('exo') ||
+        k == 'audioPassThrough') {
+      unawaited(_reapplyPlayerFxSettings());
     }
   }
 
@@ -3439,7 +3427,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               player: _playback,
               miniActive: true,
               translucent: true,
-              onPersistSetting: _persistInlineSetting,
+              decodeMode: _decodeMode,
+              onPersistSetting: _persistPlayerSetting,
               onCast: () => unawaited(_cast()),
               onMini: () => unawaited(_exitMini()),
               onExpand: (kind) => unawaited(_enterFullscreen(kind)),
