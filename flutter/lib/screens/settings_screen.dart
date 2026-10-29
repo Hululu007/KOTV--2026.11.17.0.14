@@ -756,10 +756,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     required bool showGpuNext,
     required bool showVulkan,
     required bool showTls,
+    required bool showDirect,
   }) async {
     await _showPlayerSubSheet(
       title: 'MPV 设置',
       buildChildren: (setSheet) {
+        final mpvDirect = kotvSettingsFlag(g('mpvDirect', 'true'), def: true);
         final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
         final mpvVulkan = g('mpvVulkan', 'false') == 'true';
         final mpvTlsVerify =
@@ -768,6 +770,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             kotvSettingsFlag(g('mpvDiskCache', 'false'), def: false);
         final conf = g('mpvConf').trim();
         return [
+          if (showDirect)
+            _sheetToggle(
+              label: '硬解直出',
+              subtitle: '画面绿屏、花屏时关掉，改为硬解后拷贝',
+              value: mpvDirect,
+              onChanged: (v) async {
+                await _set('mpvDirect', v ? 'true' : 'false', msg: '重启播放生效');
+                setSheet(() {});
+              },
+            ),
           if (showGpuNext)
             _sheetToggle(
               label: 'gpu-next',
@@ -2319,6 +2331,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final showMpvVulkan = usesMpv && kotvIsAndroid() && _androidVulkanOk;
     final showMpvGpuNext = usesMpv && kotvIsAndroid();
     final showMpvTls = usesMpv && kotvIsAndroid();
+    final showMpvDirect = usesMpv && kotvIsWindows7();
     final canPickPlayer = kotvCanSwitchPlayer(live: false);
     final canPickLivePlayer = kotvCanSwitchPlayer(live: true);
     final playerUnavailableHint =
@@ -2743,6 +2756,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               showGpuNext: showMpvGpuNext,
                               showVulkan: showMpvVulkan,
                               showTls: showMpvTls,
+                              showDirect: showMpvDirect,
                             )),
                           ),
                         KotvSettingsCell(

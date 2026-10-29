@@ -52,6 +52,7 @@ class KotvMpvOpts {
     this.tlsVerify = true,
     this.audioPassThrough = true,
     this.diskCache = false,
+    this.direct = true,
     this.dolbyVisionPolicy = 0,
     this.preferredTextLangs = '',
     this.videoEq = KotvVideoEq.off,
@@ -79,6 +80,8 @@ class KotvMpvOpts {
   final bool tlsVerify;
   final bool audioPassThrough;
   final bool diskCache;
+  /// Win7 硬解直出（dxva2）；关掉一律硬解后拷贝（dxva2-copy），给名单外画面异常的显卡用。
+  final bool direct;
   /// 杜比视界策略：0=AUTO 1=假定支持 2=假定不支持（与 exoDolbyVision 枚举一致）。
   final int dolbyVisionPolicy;
   /// 首选字幕语言 → mpv slang。
@@ -128,6 +131,7 @@ class KotvMpvOpts {
       tlsVerify: tlsVerify,
       audioPassThrough: audioPassThrough,
       diskCache: diskCache,
+      direct: kotvSettingsFlag(settings['mpvDirect'] ?? 'true', def: true),
       dolbyVisionPolicy: dolby,
       preferredTextLangs: preferredTextLangs,
       videoEq: KotvVideoEq.fromSettings(settings),
@@ -155,6 +159,7 @@ class KotvMpvOpts {
     bool? tlsVerify,
     bool? audioPassThrough,
     bool? diskCache,
+    bool? direct,
     int? dolbyVisionPolicy,
     String? preferredTextLangs,
     KotvVideoEq? videoEq,
@@ -180,6 +185,7 @@ class KotvMpvOpts {
       tlsVerify: tlsVerify ?? this.tlsVerify,
       audioPassThrough: audioPassThrough ?? this.audioPassThrough,
       diskCache: diskCache ?? this.diskCache,
+      direct: direct ?? this.direct,
       dolbyVisionPolicy: dolbyVisionPolicy ?? this.dolbyVisionPolicy,
       preferredTextLangs: preferredTextLangs ?? this.preferredTextLangs,
       videoEq: videoEq ?? this.videoEq,
@@ -236,7 +242,8 @@ class KotvMpvOpts {
       // dxva2 直出靠驱动把解码面转成 RGB，Win7 的 mpv 补丁在下列情况自动改走 dxva2-copy，否则会绿屏：
       // 10 位（P010）片源；Intel Haswell/Broadwell（无整块 H265 硬解，驱动用混合解码）上的 H265。
       if (kotvIsWindows7()) {
-        return hard ? 'dxva2,dxva2-copy' : 'dxva2,dxva2-copy,no';
+        final chain = direct ? 'dxva2,dxva2-copy' : 'dxva2-copy';
+        return hard ? chain : '$chain,no';
       }
       return hard
           ? 'd3d11va,d3d11va-copy,dxva2-copy'

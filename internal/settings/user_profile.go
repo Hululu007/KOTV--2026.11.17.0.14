@@ -22,6 +22,7 @@ var clientProfileKeys = map[Type]bool{
 	UA:                 true,
 	MpvVulkan:          true,
 	MpvGpuNext:         true,
+	MpvDirect:          true,
 	MpvConf:            true,
 }
 
