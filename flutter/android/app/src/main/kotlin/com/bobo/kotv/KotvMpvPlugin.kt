@@ -91,6 +91,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var videoAspect = 0.0
   /** 已交给 mpv 的 OSD Surface（android-osd-wid）。 */
   private var attachedOsdSurface: Surface? = null
+  private var appliedOsdSize: String? = null
   /** 首选字幕语言（BCP-47，逗号分隔）→ mpv slang。 */
   private var preferredTextLangs = ""
   private var livePlayback = false
@@ -1131,18 +1132,33 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     } else {
       null
     }
-    if (target === attachedOsdSurface) return
-    detachOsdSurface()
-    if (target == null) return
+    if (target !== attachedOsdSurface) {
+      detachOsdSurface()
+      if (target == null) return
+      try {
+        MPVLib.attachOsdSurface(target)
+        attachedOsdSurface = target
+      } catch (t: Throwable) {
+        Log.w(TAG, "attachOsdSurface", t)
+        return
+      }
+    }
+    if (target != null) applyOsdSurfaceSize(surfaceHost?.osdSize)
+  }
+
+  /** OSD 层随视频画框缩放，尺寸变了要告诉 mpv（android-osd-surface-size）。 */
+  private fun applyOsdSurfaceSize(size: String?) {
+    if (size == null || size == appliedOsdSize) return
     try {
-      MPVLib.attachOsdSurface(target)
-      attachedOsdSurface = target
+      MPVLib.setPropertyString("android-osd-surface-size", size)
+      appliedOsdSize = size
     } catch (t: Throwable) {
-      Log.w(TAG, "attachOsdSurface", t)
+      Log.w(TAG, "android-osd-surface-size", t)
     }
   }
 
   private fun detachOsdSurface() {
+    appliedOsdSize = null
     if (attachedOsdSurface == null) return
     attachedOsdSurface = null
     if (!created.get()) return
@@ -1971,8 +1987,11 @@ internal class KotvMpvSurfaceHost(context: Context) :
   /** 最近一次回调的缓冲区宽高（"WxH"）；未知时为 null。 */
   var bufferSize: String? = null
     private set
-  /** OSD Surface 可用或失效时回调；插件据此挂/卸 android-osd-wid。 */
+  /** OSD Surface 可用、失效或尺寸变化时回调；插件据此挂/卸 android-osd-wid 并更新尺寸。 */
   var onOsdSurface: (() -> Unit)? = null
+  /** OSD 缓冲区宽高（"WxH"）；未知时为 null。 */
+  var osdSize: String? = null
+    private set
   private var osdWanted = false
   private var osdView: SurfaceView? = null
   private var osdReady = false
@@ -1982,10 +2001,15 @@ internal class KotvMpvSurfaceHost(context: Context) :
       onOsdSurface?.invoke()
     }
 
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+      if (width <= 0 || height <= 0) return
+      osdSize = "${width}x$height"
+      onOsdSurface?.invoke()
+    }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
       osdReady = false
+      osdSize = null
       onOsdSurface?.invoke()
     }
   }
@@ -2022,24 +2046,26 @@ internal class KotvMpvSurfaceHost(context: Context) :
     layoutVideoFrame()
   }
 
+  /**
+   * OSD 层与视频层同框：SurfaceView 会把整块区域从窗口挖空，
+   * OSD 若比视频大，黑边处就透出窗口下层的旧画面。
+   */
   private fun layoutVideoFrame() {
-    val sv = surfaceView ?: return
+    if (surfaceView == null) return
     val w = width
     val h = height
-    val lp = if (frameAspect <= 0.0 || frameMode == "fill" || w <= 0 || h <= 0) {
-      LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+    val (fw, fh) = if (frameAspect <= 0.0 || frameMode == "fill" || w <= 0 || h <= 0) {
+      LayoutParams.MATCH_PARENT to LayoutParams.MATCH_PARENT
     } else {
       val cover = frameMode == "zoom"
       val byWidth = (frameAspect >= w.toDouble() / h) != cover
-      if (byWidth) {
-        LayoutParams(w, (w / frameAspect).roundToInt(), Gravity.CENTER)
-      } else {
-        LayoutParams((h * frameAspect).roundToInt(), h, Gravity.CENTER)
-      }
+      if (byWidth) w to (w / frameAspect).roundToInt() else (h * frameAspect).roundToInt() to h
     }
-    val cur = sv.layoutParams
-    if (cur != null && cur.width == lp.width && cur.height == lp.height) return
-    sv.layoutParams = lp
+    for (v in listOfNotNull(surfaceView, osdView)) {
+      val cur = v.layoutParams
+      if (cur != null && cur.width == fw && cur.height == fh) continue
+      v.layoutParams = LayoutParams(fw, fh, Gravity.CENTER)
+    }
   }
 
   override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -2053,7 +2079,7 @@ internal class KotvMpvSurfaceHost(context: Context) :
     return if (s != null && s.isValid) s else null
   }
 
-  /** 杜比视界直出时在视频上方叠一层透明 SurfaceView 画字幕；Texture 方式不直出，不建。 */
+  /** 直出时在视频上方叠一层透明 SurfaceView 画字幕；Texture 方式不直出，不建。 */
   fun setOsdLayer(enabled: Boolean) {
     osdWanted = enabled
     syncOsdView()
@@ -2079,6 +2105,7 @@ internal class KotvMpvSurfaceHost(context: Context) :
     }
     osdView = v
     addView(v)
+    layoutVideoFrame()
     stripPlatformViewFocus()
   }
 
@@ -2091,6 +2118,7 @@ internal class KotvMpvSurfaceHost(context: Context) :
     removeView(v)
     osdView = null
     osdReady = false
+    osdSize = null
   }
 
   fun setRender(texture: Boolean) {

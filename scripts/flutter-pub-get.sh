@@ -228,4 +228,4 @@ fi
 # media_kit _setPropertyFlag 1 字节 Bool 传 MPV_FORMAT_FLAG(int)：Windows 上 play() 变 pause。
 # 两条线（主线 / Win7）media_kit 都是 1.2.6，同一补丁；失败即中止，禁止带 bug 出包。
 chmod +x "$ROOT/scripts/patch-media-kit.sh"
-"$ROOT/scripts/patch-media-kit.sh"
+KOTV_WIN7="$win7" "$ROOT/scripts/patch-media-kit.sh"

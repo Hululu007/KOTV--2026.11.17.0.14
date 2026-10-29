@@ -47,6 +47,11 @@
 # video_player 的 formatHint 只在 Android 生效。iOS 打开时若判断为 HLS，Dart 写入
 # X-KOTV-Asset-Mime，这里把它从 HTTP 头里拿掉，改成 AVURLAsset 的 MIME。
 #
+# Win7 线（KOTV_WIN7=1）：media_kit_video 的 ANGLE 依次试 D3D11 → D3D11 9_3 → D3D9 → WARP。
+# Win7 没有 D3D11VA，mpv 只能用 DXVA2；DXVA2 解出的 D3D9 表面要零拷贝交给 ANGLE（dxva2-egl），
+# 该路径按 ANGLE 的 D3D9Ex 后端设计；Win7 实测在 D3D11 后端上挂不上，播放信息只显示 dxva2-copy。
+# 补丁把 D3D9 提到最前，其余顺序不变。D3D9 后端只有 GLES 2.0，media_kit 本来就只要 2.0。
+#
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
 set -euo pipefail
@@ -1499,4 +1504,87 @@ if old not in text:
     sys.exit(0)
 swift.write_text(text.replace(old, new, 1), encoding="utf-8")
 print(f"patched avfoundation mime hint ({swift})")
+PY
+
+[[ "${KOTV_WIN7:-}" == "1" ]] || exit 0
+
+_kotv_python - "$PKG_CFG" <<'PY'
+import json, pathlib, sys
+from urllib.parse import urlparse
+from urllib.request import url2pathname
+
+cfg = pathlib.Path(sys.argv[1])
+data = json.loads(cfg.read_text(encoding="utf-8"))
+root = None
+for pkg in data.get("packages", []):
+    if pkg.get("name") != "media_kit_video":
+        continue
+    uri = pkg.get("rootUri") or ""
+    if uri.startswith("file:"):
+        root = pathlib.Path(url2pathname(urlparse(uri).path))
+    else:
+        root = (cfg.parent / uri).resolve()
+    break
+if root is None:
+    print("ERROR: media_kit_video not in package_config.json", file=sys.stderr)
+    sys.exit(1)
+cc = root / "windows" / "angle_surface_manager.cc"
+if not cc.is_file():
+    print(f"ERROR: {cc} missing", file=sys.stderr)
+    sys.exit(1)
+text = cc.read_text(encoding="utf-8")
+old = """      display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
+                                          EGL_DEFAULT_DISPLAY,
+                                          kD3D11DisplayAttributes);
+      if (eglInitialize(display_, 0, 0) == EGL_FALSE) {
+        display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
+                                            EGL_DEFAULT_DISPLAY,
+                                            kD3D11_9_3DisplayAttributes);
+        if (eglInitialize(display_, 0, 0) == EGL_FALSE) {
+          display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
+                                              EGL_DEFAULT_DISPLAY,
+                                              kD3D9DisplayAttributes);
+          if (eglInitialize(display_, 0, 0) == EGL_FALSE) {
+            display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
+                                                EGL_DEFAULT_DISPLAY,
+                                                kWrapDisplayAttributes);
+            if (eglInitialize(display_, 0, 0) == EGL_FALSE) {
+              FAIL("eglGetPlatformDisplayEXT");
+            }
+          }
+        }
+      }
+"""
+new = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): D3D9Ex first so mpv's
+      // dxva2-egl interop can share DXVA2 surfaces with ANGLE.
+      const EGLint* attributes[] = {
+          kD3D9DisplayAttributes,
+          kD3D11DisplayAttributes,
+          kD3D11_9_3DisplayAttributes,
+          kWrapDisplayAttributes,
+      };
+      for (auto attribute : attributes) {
+        display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
+                                            EGL_DEFAULT_DISPLAY, attribute);
+        if (eglInitialize(display_, 0, 0) == EGL_TRUE) {
+          break;
+        }
+        display_ = EGL_NO_DISPLAY;
+      }
+      if (display_ == EGL_NO_DISPLAY) {
+        FAIL("eglGetPlatformDisplayEXT");
+      }
+"""
+if "KOTV patch (scripts/patch-media-kit.sh, Win7)" in text:
+    print(f"ok media_kit_video ({root.name}) ANGLE D3D9 first already patched")
+    sys.exit(0)
+if text.count(old) != 1:
+    print(
+        f"ERROR: media_kit_video ({root.name}) ANGLE display order anchor missing; "
+        "upstream changed — update scripts/patch-media-kit.sh",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+cc.write_text(text.replace(old, new, 1), encoding="utf-8")
+print(f"patched media_kit_video ({root.name}): ANGLE D3D9 first")
 PY

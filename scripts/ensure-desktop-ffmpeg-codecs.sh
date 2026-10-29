@@ -20,6 +20,9 @@ DAV1D_REPO=https://github.com/videolan/dav1d.git
 XML2_VER=2.15.3
 XML2_URL="https://gitlab.gnome.org/GNOME/libxml2/-/archive/v${XML2_VER}/libxml2-v${XML2_VER}.tar.gz"
 XML2_SHA=0da50c1415f4ec0364569d2119b1436ba837b31df44af28569d234272c23cf1f
+# gitlab.gnome.org 在 CI 上偶尔解析不到；GitHub 官方镜像同一标签，压缩包字节不同，校验值单列。
+XML2_MIRROR_URL="https://github.com/GNOME/libxml2/archive/refs/tags/v${XML2_VER}.tar.gz"
+XML2_MIRROR_SHA=5c6060277173270356c3f1c321a640ab629bdabc5e5ba9095b99e00759ba0c39
 
 # libxml2 完整压缩：gzip（zlib）+ xz（liblzma），静态进 PREFIX，避免 Windows 缺 .pc。
 ZLIB_VER=1.3.1
@@ -319,7 +322,8 @@ fi
 # --- libxml2（完整：zlib + lzma）---
 if ! pc_ready libxml-2.0; then
   echo "==> build libxml2 $XML2_VER (zlib+lzma)"
-  fetch "$XML2_URL" "$src/libxml2-${XML2_VER}.tar.gz" "$XML2_SHA"
+  fetch "$XML2_URL" "$src/libxml2-${XML2_VER}.tar.gz" "$XML2_SHA" \
+    || fetch "$XML2_MIRROR_URL" "$src/libxml2-${XML2_VER}.tar.gz" "$XML2_MIRROR_SHA"
   rm -rf "$BUILD_DIR/libxml2"
   mkdir -p "$BUILD_DIR/libxml2"
   tar -xf "$src/libxml2-${XML2_VER}.tar.gz" -C "$BUILD_DIR/libxml2" --strip-components=1
