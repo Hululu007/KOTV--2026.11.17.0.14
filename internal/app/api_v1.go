@@ -83,12 +83,7 @@ func (a *App) APIGetConfig() map[string]any {
 		ready, errMsg = sess.Ready, sess.ErrMsg
 		source = sess.Source
 		if !ready && hostReady && len(cfg.Sites()) == 0 {
-			bindSessionConfig(sess, a.Config.CloneEphemeral())
-			sess.Ready = true
-			sess.ErrMsg = ""
-			if src := strings.TrimSpace(settings.Get(settings.VOD)); src != "" {
-				sess.Source = src
-			}
+			a.useHostConfig(sess)
 			cfg = sess.Cfg
 			ready, errMsg = sess.Ready, sess.ErrMsg
 			source = sess.Source
@@ -187,12 +182,14 @@ func (a *App) finishConfigLoad(cfg *config.Manager, sess *clientsession.Session,
 		sess.Ready = true
 		sess.ErrMsg = ""
 		sess.Source = u
+		sess.FollowHost = false
 		if sess.Live != nil {
 			sess.Live.SyncFromConfig()
 		}
 	} else {
 		a.setConfigState(true, "")
 		a.Live.SyncFromConfig()
+		a.followHostSessions()
 	}
 	// Dedicated 下 settings.Set 写入 owner=userId；本机写入 owner=''。
 	if u != "" {

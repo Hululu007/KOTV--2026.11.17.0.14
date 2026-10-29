@@ -59,6 +59,36 @@ func EnterSession(clientID, userID string, dedicated bool) func() {
 	}
 }
 
+// Request 一次 HTTP 请求绑定到 goroutine 的身份与上下文。
+type Request struct {
+	ClientID   string
+	UserID     string
+	Dedicated  bool   // 远端租户：独立运行时
+	Platform   string // 前端平台（android/windows/…）
+	PublicBase string // 非本机请求的对外根地址（可带媒体钥匙前缀），供改写代理地址；本机为空
+}
+
+// Bind 把 req 绑定到当前 goroutine，返回的函数恢复之前的绑定。
+func Bind(req Request) func() {
+	userID := strings.TrimSpace(req.UserID)
+	gid := goid()
+	prev, had := byG.Load(gid)
+	byG.Store(gid, binding{
+		ClientID:   strings.TrimSpace(req.ClientID),
+		UserID:     userID,
+		Platform:   strings.ToLower(strings.TrimSpace(req.Platform)),
+		PublicBase: strings.TrimRight(strings.TrimSpace(req.PublicBase), "/"),
+		Dedicated:  req.Dedicated && userID != "",
+	})
+	return func() {
+		if !had {
+			byG.Delete(gid)
+			return
+		}
+		byG.Store(gid, prev)
+	}
+}
+
 // Current 返回当前 goroutine 绑定的 clientId（无则空串）。
 // 新代码优先用 ScopeID() 做会话隔离。
 func Current() string {
@@ -85,26 +115,6 @@ func CurrentUserID() string {
 	return ""
 }
 
-// SetPlatform 写入当前请求的前端平台（android/windows/…）。
-func SetPlatform(platform string) {
-	platform = strings.ToLower(strings.TrimSpace(platform))
-	if platform == "" {
-		return
-	}
-	gid := goid()
-	v, ok := byG.Load(gid)
-	if !ok {
-		byG.Store(gid, binding{Platform: platform})
-		return
-	}
-	if b, ok := v.(binding); ok {
-		b.Platform = platform
-		byG.Store(gid, b)
-		return
-	}
-	byG.Store(gid, binding{Platform: platform})
-}
-
 // CurrentPlatform 当前请求前端平台。
 func CurrentPlatform() string {
 	v, ok := byG.Load(goid())
@@ -115,27 +125,6 @@ func CurrentPlatform() string {
 		return b.Platform
 	}
 	return ""
-}
-
-// SetPublicBase 写入当前请求的对外可达根地址（非 loopback 客户端拉 /proxy/* 用）。
-// 空串表示保持 127.0.0.1（本机同机播放）。
-func SetPublicBase(base string) {
-	base = strings.TrimRight(strings.TrimSpace(base), "/")
-	gid := goid()
-	v, ok := byG.Load(gid)
-	if !ok {
-		if base == "" {
-			return
-		}
-		byG.Store(gid, binding{PublicBase: base})
-		return
-	}
-	if b, ok := v.(binding); ok {
-		b.PublicBase = base
-		byG.Store(gid, b)
-		return
-	}
-	byG.Store(gid, binding{PublicBase: base})
 }
 
 // PublicBase 当前请求的对外根地址；本机请求通常为空。

@@ -6,13 +6,15 @@
   <meta name="theme-color" content="#243DD0">
   <title>KO影视 · 遥控</title>
   <link rel="stylesheet" href="css/ui.css">
+  <script src="js/noble.min.js" defer></script>
+  <script src="js/kotv-auth.js" defer></script>
   <script src="js/script.js" defer></script>
 </head>
 <body>
   <div class="bg-glow bg-glow-a"></div>
   <div class="bg-glow bg-glow-b"></div>
 
-  <div id="app">
+  <div id="app" class="locked">
     <header class="topbar">
       <div class="brand">
         <div class="brand-mark">KO</div>
@@ -23,6 +25,16 @@
       </div>
       <div class="status-pill" id="conn_state">在线</div>
     </header>
+
+    <section id="login_box" class="glass card login-box hidden">
+      <h2>登录</h2>
+      <div class="hint" id="login_hint">远端使用遥控需要以管理员登录</div>
+      <div id="login_form">
+        <input id="login_user" class="field" placeholder="用户名" autocomplete="username">
+        <input id="login_pass" class="field" type="password" placeholder="密码" autocomplete="current-password" style="margin-top:10px">
+        <button class="btn-primary" id="btn_login" type="button">登录</button>
+      </div>
+    </section>
 
     <main class="panels">
       <!-- 播放 -->

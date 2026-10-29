@@ -9,6 +9,8 @@ import (
 
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/localproxy"
+	"github.com/bobo/KOTV/internal/playproxy"
 )
 
 // SetLibraryDB 遥控片库列表用（历史/收藏）。
@@ -66,7 +68,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 				"site":       site,
 				"id":         id,
 				"name":       h.VodName,
-				"pic":        h.VodPic,
+				"pic":        libraryPic(h.VodPic),
 				"flag":       h.VodFlag,
 				"remarks":    h.VodRemarks,
 				"url":        url,
@@ -91,7 +93,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 				"site":       site,
 				"id":         id,
 				"name":       k.VodName,
-				"pic":        k.VodPic,
+				"pic":        libraryPic(k.VodPic),
 				"flag":       k.VodFlag,
 				"remarks":    k.VodRemarks,
 				"url":        "",
@@ -289,6 +291,11 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 
 func libraryOwnerFromRequest(_ *http.Request) string {
 	return hostclient.DataOwner()
+}
+
+// libraryPic 海报地址改成请求方打得开的形式（远端带媒体钥匙）。
+func libraryPic(raw string) string {
+	return playproxy.PublicizeURL(localproxy.ConvertScheme(strings.TrimSpace(raw)))
 }
 
 // splitLibraryKey：vodId@site 或 site$$$vodId → site, id。

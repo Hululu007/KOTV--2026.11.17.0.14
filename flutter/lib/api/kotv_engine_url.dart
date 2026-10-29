@@ -99,32 +99,49 @@ String kotvStoreEngineBaseUrl(String raw) {
   return effective;
 }
 
-/// 本进程 HTTP 服务提供的路径。其它回环路径是 jar 自己的监听。
+/// 远端后端的媒体钥匙（登录后由 /auth/me 下发；本机为空）。
+/// 播放器、图片加载带不了登录头，客户端自己拼出的媒体地址要带上它：/k/<钥匙>/proxy/…
+String kotvEngineMediaKey = '';
+
+/// 去掉地址路径里的媒体钥匙前缀 /k/<钥匙>。
+String kotvStripMediaKey(String path) {
+  if (!path.startsWith('/k/')) return path;
+  final i = path.indexOf('/', 3);
+  return i < 0 ? path : path.substring(i);
+}
+
+/// 媒体地址（与引擎 `playproxy.IsMediaPath` 一致）：凭媒体钥匙可以只读访问。
+bool kotvIsEngineMediaPath(String path) {
+  var p = path;
+  if (p.length > 1 && p.endsWith('/')) p = p.substring(0, p.length - 1);
+  return p == '/proxy' || p.startsWith('/proxy/') || p.startsWith('/file/') || p.startsWith('/image/') || p == '/tvbus';
+}
+
+/// 本进程 HTTP 服务提供的路径（与引擎 `playproxy.IsEngineRoute` 一致）。其它回环路径是 jar 自己的监听。
 bool kotvIsEngineServedPath(String path) {
   var p = path;
   if (p.length > 1 && p.endsWith('/')) {
     p = p.substring(0, p.length - 1);
   }
-  return p == '/proxy' ||
-      p.startsWith('/proxy/') ||
+  return kotvIsEngineMediaPath(p) ||
       p == '/file' ||
-      p.startsWith('/file/') ||
-      p.startsWith('/image/') ||
+      p == '/image' ||
       p == '/parse' ||
       p.startsWith('/parse/') ||
-      p == '/tvbus' ||
       p == '/cache' ||
       p.startsWith('/cache/') ||
       p == '/upload' ||
       p.startsWith('/upload/') ||
+      p == '/newFolder' ||
+      p == '/delFolder' ||
+      p == '/delFile' ||
       p == '/health' ||
       p == '/media' ||
       p == '/device' ||
       p == '/action' ||
       p == '/ui' ||
-      p == '/newFolder' ||
-      p == '/delFolder' ||
-      p == '/delFile' ||
+      p == '/library' ||
+      p == '/java' ||
       p.startsWith('/api/');
 }
 
@@ -150,7 +167,7 @@ bool _isPrivateOrLinkLocalIPv4(String host) {
   return false;
 }
 
-/// 将引擎回环/内网代理地址改写为客户端配置的引擎根。
+/// 将引擎回环/内网地址改写为客户端连接的引擎根；远端媒体地址补上媒体钥匙。
 /// - 原生：用 [engineBaseUrl]（远端或域名映射）
 /// - Web：优先用当前页面 [Uri.base.origin]
 String kotvRewriteEngineLocalUrl(String mediaUrl, String engineBaseUrl) {
@@ -174,32 +191,23 @@ String kotvRewriteEngineLocalUrl(String mediaUrl, String engineBaseUrl) {
   } catch (_) {
     return media;
   }
-  if (b.host.isEmpty) return media;
   final host = m.host.toLowerCase();
-  if (host.isEmpty) return media;
-  final baseHost = b.host.toLowerCase();
-  if (host == baseHost) {
-    final schemeDiff = b.scheme.isNotEmpty && m.scheme != b.scheme;
-    final portDiff = b.hasPort != m.hasPort || (b.hasPort && m.hasPort && b.port != m.port);
-    if (kotvIsEngineServedPath(m.path) && (schemeDiff || portDiff)) {
-      return m
-          .replace(
-            scheme: b.scheme.isEmpty ? m.scheme : b.scheme,
-            host: b.host,
-            port: b.hasPort ? b.port : null,
-          )
-          .toString();
-    }
+  if (b.host.isEmpty || host.isEmpty || !kotvIsEngineServedPath(m.path)) return media;
+  final sameHost = host == b.host.toLowerCase();
+  if (!sameHost && !_isLoopbackHost(host) && !_isPrivateOrLinkLocalIPv4(host)) return media;
+  final key = kotvEngineMediaKey;
+  final path = key.isNotEmpty && kotvIsEngineMediaPath(m.path) ? '/k/$key${m.path}' : m.path;
+  final scheme = b.scheme.isEmpty ? m.scheme : b.scheme;
+  final port = b.hasPort ? b.port : null;
+  if (sameHost && path == m.path && scheme == m.scheme && port == (m.hasPort ? m.port : null)) {
     return media;
   }
-  final rewrite = _isLoopbackHost(host) || _isPrivateOrLinkLocalIPv4(host);
-  if (!rewrite || !kotvIsEngineServedPath(m.path)) return media;
   return Uri(
-    scheme: b.scheme.isEmpty ? 'http' : b.scheme,
+    scheme: scheme,
     userInfo: m.userInfo.isEmpty ? null : m.userInfo,
     host: b.host,
-    port: b.hasPort ? b.port : null,
-    path: m.path,
+    port: port,
+    path: path,
     query: m.hasQuery ? m.query : null,
     fragment: m.hasFragment ? m.fragment : null,
   ).toString();

@@ -67,9 +67,7 @@ func TestHandleKeepsCookieAcrossRedirect(t *testing.T) {
 
 func TestTryHandleEmbeddedProxy(t *testing.T) {
 	t.Parallel()
-	done := hostclient.EnterSession("embedded-proxy", "", false)
-	defer done()
-	hostclient.SetPublicBase("http://192.168.1.8:9978")
+	defer hostclient.Bind(hostclient.Request{ClientID: "embedded-proxy", PublicBase: "http://192.168.1.8:9978"})()
 
 	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Cookie") != "qk=1" {
@@ -343,9 +341,7 @@ func TestHandleLeavesCDNPlaylistBytes(t *testing.T) {
 
 func TestHandleRewritesPlaylistWithoutM3U8InURL(t *testing.T) {
 	withAdFilter(t, false)
-	done := hostclient.EnterSession("playlist-rewrite", "", false)
-	defer done()
-	hostclient.SetPublicBase("http://192.168.1.8:9978")
+	defer hostclient.Bind(hostclient.Request{ClientID: "playlist-rewrite", PublicBase: "http://192.168.1.8:9978"})()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")

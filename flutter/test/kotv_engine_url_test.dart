@@ -108,4 +108,27 @@ void main() {
       'https://tv.example.com/proxy/play?id=abc',
     );
   });
+
+  test('remote media urls carry the media key', () {
+    kotvEngineMediaKey = 'KEY';
+    addTearDown(() => kotvEngineMediaKey = '');
+    expect(
+      kotvRewriteEngineLocalUrl('http://127.0.0.1:9978/proxy/play?id=a', 'http://192.168.1.8:9978'),
+      'http://192.168.1.8:9978/k/KEY/proxy/play?id=a',
+    );
+    expect(
+      kotvRewriteEngineLocalUrl('http://192.168.1.8:9978/image/x', 'http://192.168.1.8:9978'),
+      'http://192.168.1.8:9978/k/KEY/image/x',
+    );
+    expect(
+      kotvRewriteEngineLocalUrl('http://192.168.1.8:9978/k/KEY/file/a.mp4', 'http://192.168.1.8:9978'),
+      'http://192.168.1.8:9978/k/KEY/file/a.mp4',
+    );
+    expect(
+      kotvRewriteEngineLocalUrl('http://127.0.0.1:9978/api/v1/home', 'http://192.168.1.8:9978'),
+      'http://192.168.1.8:9978/api/v1/home',
+    );
+    expect(kotvStripMediaKey('/k/KEY/proxy'), '/proxy');
+    expect(kotvStripMediaKey('/proxy'), '/proxy');
+  });
 }

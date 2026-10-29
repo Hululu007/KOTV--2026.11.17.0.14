@@ -40,6 +40,24 @@ type Task struct {
 	Message   string  `json:"message,omitempty"`
 	CreatedAt int64   `json:"createdAt"`
 	UpdatedAt int64   `json:"updatedAt"`
+	// Owner 发起下载的远端用户 id，本机为空；OwnerName 是其用户名，远端下载落在下载目录下以它命名的子目录。
+	Owner     string `json:"owner,omitempty"`
+	OwnerName string `json:"ownerName,omitempty"`
+}
+
+// destPath 这一集的落盘路径。
+func (t *Task) destPath(ext string) string {
+	return ResolvePath(t.OwnerName, t.Title, t.Flag, t.EpName, ext)
+}
+
+// Viewer 操作下载列表的身份：All 看全部（本机、管理员），否则只看 Owner 自己的任务。
+type Viewer struct {
+	Owner string
+	All   bool
+}
+
+func (v Viewer) sees(t *Task) bool {
+	return t != nil && (v.All || t.Owner == v.Owner)
 }
 
 func nowMS() int64 { return time.Now().UnixMilli() }

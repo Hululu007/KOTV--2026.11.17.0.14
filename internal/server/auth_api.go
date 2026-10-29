@@ -4,286 +4,18 @@ import (
 	"encoding/json"
 	"io"
 	"log"
-	"net"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/bobo/KOTV/internal/auth"
-	"github.com/bobo/KOTV/internal/hostclient"
 )
 
-// ProtocolVersion 前后端接口协议号，接口或加密方式不兼容时加一。
-// 远端客户端在请求头 X-Kotv-Protocol 带上自己的协议号，不一致的请求一律拒绝；
-// 健康检查不拦，客户端据其中的 protocol 提示升级。
-const ProtocolVersion = 1
-
-// protocolMismatch 非本机的 /api/v1 请求协议号与后端不一致。
-func protocolMismatch(r *http.Request) bool {
-	if isLoopbackRequest(r) || !strings.HasPrefix(r.URL.Path, "/api/v1/") || r.URL.Path == "/api/v1/health" {
-		return false
-	}
-	return strings.TrimSpace(r.Header.Get("X-Kotv-Protocol")) != strconv.Itoa(ProtocolVersion)
-}
-
-func isLoopbackRequest(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
-// remoteAccessAllowed 是否允许该客户端连入（再谈是否要登录）。
-// - 本机 loopback：始终允许（PC/安卓免登录）
-// - Web：同源本站入口，始终允许（仍强制登录；不依赖 remoteAuth，也不用配远程后端）
-// - 其它非本机（PC/安卓连远端）：须开启 remoteAuth
-func remoteAccessAllowed(r *http.Request) bool {
-	if isLoopbackRequest(r) {
-		return true
-	}
-	if isWebClient(r) {
-		return true
-	}
-	return auth.RemoteAuthEnabled()
-}
-
-func isWebClient(r *http.Request) bool {
-	if r == nil {
-		return false
-	}
-	plat := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Kotv-Client-Platform")))
-	if plat == "" && r.URL != nil && r.URL.Path == "/ui" {
-		plat = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("platform")))
-	}
-	return plat == "web"
-}
-
-func authRequiredFor(r *http.Request) bool {
-	// Web：本站页面，必须登录后才能用业务（与 remoteAuth / 是否本机无关）。
-	if isWebClient(r) {
-		return true
-	}
-	if !auth.RemoteAuthEnabled() {
-		return false
-	}
-	// PC/安卓：本机访问永不鉴权；仅非本机连入才要账号。
-	if isLoopbackRequest(r) {
-		return false
-	}
-	return true
-}
-
-// probeOnlyPath 未开远端鉴权时，非本机仅允许探测（不能登录/用业务）。
-func probeOnlyPath(path string) bool {
-	switch path {
-	case "/api/v1/health",
-		"/api/v1/net",
-		"/api/v1/auth/status":
-		return true
-	default:
-		return false
-	}
-}
-
-func publicAuthPath(path string) bool {
-	switch path {
-	case "/api/v1/health",
-		"/api/v1/net",
-		"/api/v1/auth/login",
-		"/api/v1/auth/register",
-		"/api/v1/auth/status":
-		return true
-	default:
-		return false
-	}
-}
-
-// withAuth 鉴权中间件；成功后绑定 userId。
-// - Web：始终允许连入且必须登录（同源本站，不配远程后端、不依赖 remoteAuth）
-// - 本机 loopback 的 PC/安卓：免登录，会话只用 clientId
-// - 非本机 PC/安卓：须开 remoteAuth 且 Bearer，会话用 u:<userId>
-func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if wroteOptions(w, r) {
-			return
-		}
-		if protocolMismatch(r) {
-			writeAPIError(w, http.StatusUpgradeRequired, "客户端与后端版本不匹配，请升级到相同版本")
-			return
-		}
-		loopback := isLoopbackRequest(r)
-		tok := auth.BearerFromHeader(r.Header.Get("Authorization"))
-		plat := strings.TrimSpace(r.Header.Get("X-Kotv-Client-Platform"))
-		if r.URL.Path == "/ui" {
-			if tok == "" {
-				tok = strings.TrimSpace(r.URL.Query().Get("token"))
-			}
-			if plat == "" {
-				plat = strings.TrimSpace(r.URL.Query().Get("platform"))
-			}
-		}
-		webClient := strings.EqualFold(plat, "web")
-
-		bindPlat := func() {
-			if plat != "" {
-				hostclient.SetPlatform(plat)
-			}
-			hostclient.SetPublicBase(requestPublicBase(r))
-		}
-
-		// 本机 PC/安卓：忽略 token 对会话的影响，只走 clientId。
-		// Web 即使从本机浏览器打开也要走登录，不进此短路径。
-		if loopback && !webClient {
-			done := hostclient.EnterSession(clientIDFromRequest(r), "", false)
-			defer done()
-			bindPlat()
-			if tok != "" {
-				if u, err := auth.LookupToken(tok); err == nil {
-					r = r.WithContext(withAuthUser(r.Context(), u))
-				}
-			}
-			next(w, r)
-			return
-		}
-
-		// 非本机且非 Web、未开远端鉴权：禁止登录与业务；仅允许探测接口。
-		if !remoteAccessAllowed(r) {
-			if !probeOnlyPath(r.URL.Path) {
-				writeAPIError(w, http.StatusForbidden, "未开启远端鉴权")
-				return
-			}
-			done := hostclient.EnterSession(clientIDFromRequest(r), "", false)
-			defer done()
-			bindPlat()
-			next(w, r)
-			return
-		}
-
-		need := authRequiredFor(r) && !publicAuthPath(r.URL.Path)
-		if need {
-			if tok == "" {
-				writeAPIError(w, http.StatusUnauthorized, "需要登录")
-				return
-			}
-			u, err := auth.LookupToken(tok)
-			if err != nil {
-				writeAPIError(w, http.StatusUnauthorized, err.Error())
-				return
-			}
-			done := hostclient.EnterSession("", u.ID, true)
-			defer done()
-			bindPlat()
-			r = r.WithContext(withAuthUser(r.Context(), u))
-			next(w, r)
-			return
-		}
-		if tok != "" {
-			if u, err := auth.LookupToken(tok); err == nil {
-				dedicated := auth.RemoteAuthEnabled() || webClient
-				cid := ""
-				if !dedicated {
-					cid = clientIDFromRequest(r)
-				}
-				done := hostclient.EnterSession(cid, u.ID, dedicated)
-				defer done()
-				bindPlat()
-				r = r.WithContext(withAuthUser(r.Context(), u))
-				next(w, r)
-				return
-			}
-		}
-		done := hostclient.EnterSession(clientIDFromRequest(r), "", false)
-		defer done()
-		bindPlat()
-		next(w, r)
-	}
-}
-
-// requestPublicBase 优先用前端填写的连接根；没有则用请求 Host 或反代转发头。
-// 回环主机不改写，本机播放继续用 127.0.0.1。
-func requestPublicBase(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	if b := clientEngineBase(r.Header.Get("X-Kotv-Engine-Base")); b != "" {
-		return b
-	}
-	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
-	if host != "" {
-		host = strings.TrimSpace(strings.Split(host, ",")[0])
-	}
-	if host == "" {
-		host = strings.TrimSpace(r.Host)
-	}
-	if host == "" {
-		return ""
-	}
-	hostname := host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		hostname = h
-	}
-	hostname = strings.Trim(hostname, "[]")
-	if isLoopbackHostname(hostname) {
-		return ""
-	}
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if xf := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); xf != "" {
-		scheme = strings.ToLower(strings.TrimSpace(strings.Split(xf, ",")[0]))
-	}
-	return scheme + "://" + host
-}
-
-func clientEngineBase(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return ""
-	}
-	if isLoopbackHostname(u.Hostname()) {
-		return ""
-	}
-	return u.Scheme + "://" + u.Host
-}
-
-func isLoopbackHostname(hostname string) bool {
-	hostname = strings.Trim(strings.TrimSpace(hostname), "[]")
-	return hostname == "127.0.0.1" || strings.EqualFold(hostname, "localhost") || hostname == "::1"
-}
-
-func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
-	return s.withAuth(func(w http.ResponseWriter, r *http.Request) {
-		// 本机管理免登录；非本机：用已登录会话中的管理员身份（连接时登录一次即可）。
-		if isLoopbackRequest(r) {
-			next(w, r)
-			return
-		}
-		u := authUserFrom(r.Context())
-		if u == nil || u.Role != auth.RoleAdmin {
-			writeAPIError(w, http.StatusForbidden, "需要管理员")
-			return
-		}
-		next(w, r)
-	})
-}
-
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
-	if wroteOptions(w, r) {
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":            true,
 		"remoteAuth":    auth.RemoteAuthEnabled(),
 		"allowRegister": auth.AllowRegister(),
-		"authRequired":  authRequiredFor(r),
+		"authRequired":  loginRequired(r),
 		"remoteAccess":  remoteAccessAllowed(r),
 		"adminRequired": !isLoopbackRequest(r) && auth.RemoteAuthEnabled(),
 		"loopback":      isLoopbackRequest(r),
@@ -327,14 +59,6 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 	writeSealed(w, reply, map[string]any{"ok": true, "user": user.Public()})
 }
 
-// clientLabel 请求方客户端「平台 架构 版本」，记日志用。
-func clientLabel(r *http.Request) string {
-	h := r.Header
-	return strings.Join(strings.Fields(strings.Join([]string{
-		h.Get("X-Kotv-Client-Platform"), h.Get("X-Kotv-Client-Arch"), h.Get("X-Kotv-Client-Version"),
-	}, " ")), " ")
-}
-
 type loginForm struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -342,7 +66,7 @@ type loginForm struct {
 
 func readLoginForm(w http.ResponseWriter, r *http.Request) (loginForm, *auth.SealReply, bool) {
 	var body loginForm
-	if wroteOptions(w, r) || rejectUnlessPost(w, r) {
+	if rejectUnlessPost(w, r) {
 		return body, nil, false
 	}
 	if !remoteAccessAllowed(r) {
@@ -382,9 +106,6 @@ func writeSealed(w http.ResponseWriter, reply *auth.SealReply, v map[string]any)
 }
 
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	if wroteOptions(w, r) {
-		return
-	}
 	if rejectUnlessPost(w, r) {
 		return
 	}
@@ -393,52 +114,41 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
-	if wroteOptions(w, r) {
-		return
-	}
 	u := authUserFrom(r.Context())
 	if u == nil {
-		tok := auth.BearerFromHeader(r.Header.Get("Authorization"))
-		var err error
-		u, err = auth.LookupToken(tok)
-		if err != nil {
-			// 本机无 token：机主视图，供用户管理免登录。
-			if isLoopbackRequest(r) {
-				writeJSON(w, http.StatusOK, map[string]any{
-					"ok":    true,
-					"local": true,
-					"user": map[string]any{
-						"id":                 "",
-						"username":           "本机",
-						"role":               auth.RoleAdmin,
-						"mustChangePassword": false,
-					},
-				})
-				return
-			}
-			writeAPIError(w, http.StatusUnauthorized, err.Error())
+		// 本机未登录：机主视图，供用户管理免登录。
+		if isLoopbackRequest(r) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":    true,
+				"local": true,
+				"user": map[string]any{
+					"id":                 "",
+					"username":           "本机",
+					"role":               auth.RoleAdmin,
+					"mustChangePassword": false,
+				},
+			})
 			return
 		}
+		writeAPIError(w, http.StatusUnauthorized, "需要登录")
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": u.Public()})
+	out := map[string]any{"ok": true, "user": u.Public()}
+	if !isLoopbackRequest(r) {
+		// 远端客户端自己拼引擎媒体地址（海报相对路径等）时带上它。
+		out["mediaKey"] = auth.MediaKey()
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
-	if wroteOptions(w, r) {
-		return
-	}
 	if rejectUnlessPost(w, r) {
 		return
 	}
 	u := authUserFrom(r.Context())
 	if u == nil {
-		tok := auth.BearerFromHeader(r.Header.Get("Authorization"))
-		var err error
-		u, err = auth.LookupToken(tok)
-		if err != nil {
-			writeAPIError(w, http.StatusUnauthorized, err.Error())
-			return
-		}
+		writeAPIError(w, http.StatusUnauthorized, "需要登录")
+		return
 	}
 	var body struct {
 		OldPassword string `json:"oldPassword"`
@@ -457,9 +167,6 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
-	if wroteOptions(w, r) {
-		return
-	}
 	switch r.Method {
 	case http.MethodGet:
 		list := auth.ListUsers()
@@ -495,9 +202,6 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminUserAction(w http.ResponseWriter, r *http.Request) {
-	if wroteOptions(w, r) {
-		return
-	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/admin/users/")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
@@ -550,9 +254,6 @@ func (s *Server) handleAdminUserAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
-	if wroteOptions(w, r) {
-		return
-	}
 	if rejectUnlessPost(w, r) {
 		return
 	}

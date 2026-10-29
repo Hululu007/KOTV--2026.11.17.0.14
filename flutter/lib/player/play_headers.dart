@@ -8,6 +8,7 @@
 /// 5. 其它平台用 [kotvDefaultPlayUA]
 library;
 
+import '../api/kotv_engine_url.dart';
 import 'hls_js_support.dart';
 import 'kotv_platform.dart';
 import 'mpv_hls_timeline.dart';
@@ -50,9 +51,8 @@ bool kotvIsLocalProxyUrl(String url) {
   // spider 本地代理：改写到局域网 IP 后仍是 /proxy?...，不能再带 CDN 头。
   try {
     final uri = Uri.parse(url);
-    final path = uri.path.endsWith('/') && uri.path.length > 1
-        ? uri.path.substring(0, uri.path.length - 1)
-        : uri.path;
+    var path = kotvStripMediaKey(uri.path);
+    if (path.endsWith('/') && path.length > 1) path = path.substring(0, path.length - 1);
     if (path == '/proxy') return true;
   } catch (_) {}
   return u.contains('127.0.0.1:') && u.contains('/proxy');

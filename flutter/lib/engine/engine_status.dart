@@ -40,6 +40,7 @@ bool kotvEngineNeedsSignIn(String baseUrl) => kIsWeb || !kotvIsLocalEngineBaseUr
 /// 检查当前引擎：本机连上即可；远端须是同协议、身份未变、开放了远端访问的 KOTV 后端，
 /// 且记住的登录态仍有效。核对身份之前的请求都不带登录令牌。
 Future<KotvEngineStatus> kotvCheckEngine(EngineLauncher launcher) async {
+  kotvEngineMediaKey = '';
   if (!await launcher.recoverIfNeeded()) {
     return KotvEngineStatus(KotvEngineState.offline, error: launcher.lastError);
   }
@@ -58,7 +59,8 @@ Future<KotvEngineStatus> kotvCheckEngine(EngineLauncher launcher) async {
     }
     if ((await kotvAuthToken()).isNotEmpty) {
       try {
-        await api.authMe();
+        final me = await api.authMe();
+        kotvEngineMediaKey = '${me['mediaKey'] ?? ''}';
         await api.rememberEngineIdentity('${h['identity'] ?? ''}');
         return const KotvEngineStatus(KotvEngineState.ready);
       } on KotvApiException {

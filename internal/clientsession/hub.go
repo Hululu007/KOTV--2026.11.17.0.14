@@ -21,6 +21,8 @@ type Session struct {
 	Source   string
 	Ready    bool
 	ErrMsg   string
+	// FollowHost 用户没选过自己的点播源，会话用主机配置的副本，主机换源时跟着换。
+	FollowHost bool
 	// Bootstrapped 是否已尝试从磁盘恢复上次源（只做一次）。
 	Bootstrapped bool
 

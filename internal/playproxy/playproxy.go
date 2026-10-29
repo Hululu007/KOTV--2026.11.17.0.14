@@ -189,31 +189,30 @@ func rewritePublicHost(raw string) string {
 		return raw
 	}
 	u, err := url.Parse(raw)
-	if err != nil {
-		return raw
-	}
-	host := strings.ToLower(u.Hostname())
-	if host == "" {
+	if err != nil || u.Hostname() == "" || !IsEngineRoute(u.Path) {
 		return raw
 	}
 	pb, err := url.Parse(base)
 	if err != nil || pb.Host == "" {
 		return raw
 	}
-	pubHost := strings.ToLower(pb.Hostname())
-	if host == pubHost {
-		if adoptPublicOrigin(u, pb) {
-			u.Scheme = pb.Scheme
-			u.Host = pb.Host
-			return u.String()
+	if !strings.EqualFold(u.Hostname(), pb.Hostname()) && !isRewriteableProxyHost(u.Hostname()) {
+		return raw
+	}
+	prefix := ""
+	if IsMediaPath(u.Path) {
+		prefix = strings.TrimRight(pb.Path, "/")
+	}
+	if u.Scheme == pb.Scheme && u.Host == pb.Host && prefix == "" {
+		return raw
+	}
+	u.Scheme, u.Host = pb.Scheme, pb.Host
+	if prefix != "" {
+		u.Path = prefix + u.Path
+		if u.RawPath != "" {
+			u.RawPath = prefix + u.RawPath
 		}
-		return raw
 	}
-	if !isRewriteableProxyHost(host) || !isEngineServedPath(u.Path) {
-		return raw
-	}
-	u.Scheme = pb.Scheme
-	u.Host = pb.Host
 	return u.String()
 }
 
@@ -229,43 +228,65 @@ func isRewriteableProxyHost(host string) bool {
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
-// adoptPublicOrigin 引擎自己的路径改成前端这次连接用的 scheme 和端口。
-func adoptPublicOrigin(u, pb *url.URL) bool {
-	if u == nil || pb == nil || pb.Scheme == "" || !isEngineServedPath(u.Path) {
-		return false
+var engineRoutes atomic.Pointer[[]string]
+
+// SetEngineRoutes 记下引擎自己处理的路由（server 注册路由时调用）。以 / 结尾的是前缀；nil 表示清空。
+func SetEngineRoutes(patterns []string) {
+	if patterns == nil {
+		engineRoutes.Store(nil)
+		return
 	}
-	if u.Scheme != pb.Scheme {
-		return true
-	}
-	return u.Host != pb.Host
+	engineRoutes.Store(&patterns)
 }
 
-func isEngineServedPath(path string) bool {
-	path = strings.TrimSuffix(path, "/")
-	switch {
-	case path == "/proxy" || strings.HasPrefix(path, "/proxy/"):
-		return true
-	case path == "/file" || strings.HasPrefix(path, "/file/"):
-		return true
-	case strings.HasPrefix(path, "/image/"):
-		return true
-	case path == "/parse" || strings.HasPrefix(path, "/parse/"):
-		return true
-	case path == "/tvbus" || path == "/cache" || strings.HasPrefix(path, "/cache/"):
-		return true
-	case path == "/upload" || strings.HasPrefix(path, "/upload/"):
-		return true
-	case path == "/health" || path == "/media" || path == "/device":
-		return true
-	case path == "/action" || path == "/ui":
-		return true
-	case path == "/newFolder" || path == "/delFolder" || path == "/delFile":
-		return true
-	case strings.HasPrefix(path, "/api/"):
-		return true
-	default:
-		return false
+// IsEngineRoute 引擎自己处理的路径（静态页面以外）。路由尚未注册时只认媒体地址。
+func IsEngineRoute(path string) bool {
+	routes := engineRoutes.Load()
+	if routes == nil {
+		return IsMediaPath(path)
 	}
+	for _, p := range *routes {
+		if path == p || (strings.HasSuffix(p, "/") && strings.HasPrefix(path, p)) {
+			return true
+		}
+	}
+	return false
+}
+
+// MediaKeyPrefix 媒体钥匙在地址里的路径前缀：/k/<钥匙>/proxy/…
+const MediaKeyPrefix = "/k/"
+
+// IsMediaPath 播放器、图片加载直接请求的媒体地址；凭媒体钥匙可以只读访问。
+func IsMediaPath(path string) bool {
+	path = strings.TrimSuffix(path, "/")
+	return path == "/proxy" || strings.HasPrefix(path, "/proxy/") ||
+		strings.HasPrefix(path, "/file/") || strings.HasPrefix(path, "/image/") || path == "/tvbus"
+}
+
+// SplitMediaKey 拆开 /k/<钥匙>/<路径>；不是这种形式时 ok 为 false。
+func SplitMediaKey(path string) (key, rest string, ok bool) {
+	if !strings.HasPrefix(path, MediaKeyPrefix) {
+		return "", "", false
+	}
+	key, rest, found := strings.Cut(strings.TrimPrefix(path, MediaKeyPrefix), "/")
+	if !found || key == "" {
+		return "", "", false
+	}
+	return key, "/" + rest, true
+}
+
+// WithMediaKey 给交给其它设备（电视、投屏接收端）的本引擎媒体地址加上媒体钥匙；
+// 本机回环地址、已带钥匙或不是媒体的地址原样返回。
+func WithMediaKey(raw, key string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || key == "" || isLoopbackHost(u.Hostname()) || !IsMediaPath(u.Path) {
+		return raw
+	}
+	u.Path = MediaKeyPrefix + key + u.Path
+	if u.RawPath != "" {
+		u.RawPath = MediaKeyPrefix + key + u.RawPath
+	}
+	return u.String()
 }
 
 func newID() string {

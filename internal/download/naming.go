@@ -80,8 +80,8 @@ func extFromURL(raw, fallback string) string {
 	return ext
 }
 
-// ResolvePath 按命名规则生成落盘绝对路径。
-func ResolvePath(title, flag, ep, ext string) string {
+// ResolvePath 按命名规则生成落盘绝对路径；owner 非空时落在下载目录下以它命名的子目录。
+func ResolvePath(owner, title, flag, ep, ext string) string {
 	title = sanitizeName(title)
 	flag = sanitizeName(flag)
 	ep = sanitizeName(ep)
@@ -103,6 +103,9 @@ func ResolvePath(title, flag, ep, ext string) string {
 		rel = base
 	}
 	dir := destDir()
+	if strings.TrimSpace(owner) != "" {
+		dir = filepath.Join(dir, sanitizeName(owner))
+	}
 	full := filepath.Join(dir, rel)
 	_ = paths.Ensure(filepath.Dir(full))
 	return full

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobo/KOTV/internal/auth"
 	"github.com/bobo/KOTV/internal/backup"
 	"github.com/bobo/KOTV/internal/btstream"
 	"github.com/bobo/KOTV/internal/cacheclean"
@@ -522,11 +523,12 @@ func (a *App) toolCast(index int, params map[string]any) (map[string]any, error)
 		headers = nil
 	}
 	castURL = playproxy.PublicizeURL(castURL)
-	// 电视无法访问本机回环：改成局域网 IP；失败则禁止投屏。
+	// 电视无法访问本机回环：改成局域网 IP；失败则禁止投屏。电视不能登录，本引擎媒体地址带上媒体钥匙。
 	castURL = dlna.RewriteLocalURL(castURL)
 	if dlna.IsLoopbackMediaURL(castURL) {
 		return nil, fmt.Errorf("无法获取局域网 IP，投屏地址仍是本机回环，电视无法拉流")
 	}
+	castURL = playproxy.WithMediaKey(castURL, auth.MediaKey())
 	title := a.MediaTitle()
 	opt := cast.CastOptions{
 		Title:      title,

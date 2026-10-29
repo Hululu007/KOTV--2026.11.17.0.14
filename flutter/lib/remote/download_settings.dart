@@ -149,7 +149,14 @@ class DownloadSettings {
   }
 
   /// 任务列表状态行文案（进度/错误优先用引擎 message、error）。
+  /// 状态文字；别人的任务（管理员看全部时）前面带上用户名。
   static String statusLabel(Map<String, dynamic> t) {
+    final owner = '${t['ownerName'] ?? ''}'.trim();
+    final label = _statusText(t);
+    return owner.isEmpty ? label : '$owner · $label';
+  }
+
+  static String _statusText(Map<String, dynamic> t) {
     final st = '${t['status'] ?? ''}';
     final msg = '${t['message'] ?? ''}'.trim();
     final err = '${t['error'] ?? ''}'.trim();

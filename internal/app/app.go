@@ -183,21 +183,9 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 	}
 	a.waitConfigLoaded()
 	sess = a.sessions.GetOrCreate(cid, func() *clientsession.Session {
-		ready, errMsg := a.configState()
-		cloned := a.Config.CloneEphemeral()
-		liveSvc := live.NewService(cloned)
-		liveSvc.SyncFromConfig()
-		s := &clientsession.Session{
-			ClientID: cid,
-			Cfg:      cloned,
-			Sites:    service.NewSiteService(cloned),
-			Live:     liveSvc,
-			Source:   settings.Get(settings.VOD),
-			Ready:    ready,
-			ErrMsg:   errMsg,
-		}
+		s := &clientsession.Session{ClientID: cid}
 		s.SetRepoBaseline(a.siteRepoURLs())
-		cloned.SetRepoWriteHook(s.NoteRepo)
+		a.useHostConfig(s)
 		return s
 	})
 	if sess.Sites == nil || sess.Sites.Config() != sess.Cfg {
@@ -260,6 +248,30 @@ func (a *App) setConfigState(ready bool, errMsg string) {
 	a.cfgMu.Lock()
 	a.cfgReady, a.cfgErr = ready, errMsg
 	a.cfgMu.Unlock()
+}
+
+// useHostConfig 会话改用主机当前点播配置的副本：来源、就绪状态都跟主机一致，之后随主机换源。
+func (a *App) useHostConfig(sess *clientsession.Session) {
+	bindSessionConfig(sess, a.Config.CloneEphemeral())
+	sess.Source = strings.TrimSpace(a.Config.API().URL)
+	sess.Ready, sess.ErrMsg = a.configState()
+	sess.FollowHost = true
+}
+
+// loadSessionSource 会话加载用户自己的点播源。失败时主机配置可用就退回主机的，否则记下错误。
+func (a *App) loadSessionSource(sess *clientsession.Session, src string) {
+	if err := sess.Cfg.LoadFromSource(src); err != nil {
+		if ready, _ := a.configState(); ready {
+			a.useHostConfig(sess)
+			return
+		}
+		sess.Ready, sess.ErrMsg = false, err.Error()
+		return
+	}
+	sess.Source, sess.Ready, sess.ErrMsg, sess.FollowHost = src, true, "", false
+	if sess.Live != nil {
+		sess.Live.SyncFromConfig()
+	}
 }
 
 // bindSessionConfig 替换会话配置时必须同步 Sites/Live，否则换源/换站只改 Cfg，
@@ -346,60 +358,24 @@ func (a *App) dropReposForUser(userID string) {
 	}
 }
 
-// bootstrapSession 远端会话首次进入时从 setting(owner=userId) 恢复选中仓库与首页。
+// bootstrapSession 远端会话首次进入时恢复该用户上次选的点播源与首页站（scope 下 settings 已按用户分开）。
+// 用户没选过就跟随主机。
 func (a *App) bootstrapSession(sess *clientsession.Session) {
 	if sess == nil || sess.Bootstrapped {
 		return
 	}
 	sess.Bootstrapped = true
-	applyHome := func(homeKey string) {
-		homeKey = strings.TrimSpace(homeKey)
-		if homeKey == "" || sess.Cfg == nil {
-			return
+	if src := strings.TrimSpace(settings.Get(settings.VOD)); src != "" {
+		if src == sess.Source {
+			sess.FollowHost = false
+		} else {
+			a.loadSessionSource(sess, src)
 		}
+	}
+	if homeKey := strings.TrimSpace(settings.Get(settings.Home)); homeKey != "" && sess.Cfg != nil {
 		if site := sess.Cfg.GetSite(homeKey); site != nil {
 			sess.Cfg.SetHome(*site)
 		}
-	}
-	hostReady, _ := a.configState()
-	adoptGlobal := func() {
-		if !hostReady {
-			return
-		}
-		bindSessionConfig(sess, a.Config.CloneEphemeral())
-		sess.Ready = true
-		sess.ErrMsg = ""
-		sess.Source = strings.TrimSpace(a.Config.API().URL)
-	}
-	// Dedicated 请求下 settings.Get 已按 DataOwner 分桶。
-	src := strings.TrimSpace(settings.Get(settings.VOD))
-	homeKey := strings.TrimSpace(settings.Get(settings.Home))
-	if src == "" {
-		adoptGlobal()
-		applyHome(homeKey)
-		return
-	}
-	cur := strings.TrimSpace(sess.Source)
-	if cur != "" && cur == src && sess.Ready {
-		applyHome(homeKey)
-		return
-	}
-	if err := sess.Cfg.LoadFromSource(src); err != nil {
-		if hostReady {
-			adoptGlobal()
-			applyHome(homeKey)
-			return
-		}
-		sess.Ready = false
-		sess.ErrMsg = err.Error()
-		return
-	}
-	sess.Source = src
-	sess.Ready = true
-	sess.ErrMsg = ""
-	applyHome(homeKey)
-	if sess.Live != nil {
-		sess.Live.SyncFromConfig()
 	}
 }
 
@@ -609,41 +585,18 @@ func (a *App) reloadConfig(load func() error) error {
 	a.switchConfigJars(a.Config.API())
 	a.setConfigState(true, "")
 	a.Live.SyncFromConfig()
-	a.syncSessionsFromGlobal()
+	a.followHostSessions()
 	return nil
 }
 
-// syncSessionsFromGlobal 宿主全局换源后：有独立 Source 的远端会话保持原仓重载，无则跟全局。
-func (a *App) syncSessionsFromGlobal() {
-	if a == nil || a.sessions == nil {
-		return
-	}
-	if ready, _ := a.configState(); !ready {
+// followHostSessions 主机配置变了：跟随主机的远端会话换成主机的新配置；选过自己源的会话不动。
+func (a *App) followHostSessions() {
+	if a.sessions == nil {
 		return
 	}
 	a.sessions.ForEach(func(sess *clientsession.Session) {
-		if sess == nil {
-			return
-		}
-		src := strings.TrimSpace(sess.Source)
-		if src == "" {
-			bindSessionConfig(sess, a.Config.CloneEphemeral())
-			sess.Ready = true
-			sess.ErrMsg = ""
-			sess.Source = strings.TrimSpace(a.Config.API().URL)
-			return
-		}
-		if err := sess.Cfg.LoadFromSource(src); err != nil {
-			bindSessionConfig(sess, a.Config.CloneEphemeral())
-			sess.Ready = true
-			sess.ErrMsg = ""
-			sess.Source = strings.TrimSpace(a.Config.API().URL)
-			return
-		}
-		sess.Ready = true
-		sess.ErrMsg = ""
-		if sess.Live != nil {
-			sess.Live.SyncFromConfig()
+		if sess != nil && sess.FollowHost {
+			a.useHostConfig(sess)
 		}
 	})
 }
@@ -654,13 +607,14 @@ type sessionSourceSnap struct {
 	home string
 }
 
+// snapshotSessionSources 记下选过自己源的远端会话（清理爬虫包后按此重拉；跟随主机的随主机重载）。
 func (a *App) snapshotSessionSources() []sessionSourceSnap {
 	if a == nil || a.sessions == nil {
 		return nil
 	}
 	var out []sessionSourceSnap
 	a.sessions.ForEach(func(sess *clientsession.Session) {
-		if sess == nil {
+		if sess == nil || sess.FollowHost {
 			return
 		}
 		src := strings.TrimSpace(sess.Source)

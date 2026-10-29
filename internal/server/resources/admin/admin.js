@@ -1,7 +1,8 @@
 (() => {
   'use strict';
   const $ = (s) => document.querySelector(s);
-  let token = localStorage.getItem('kotv_admin_token') || '';
+  const api = (path, opts) => kotvAuth.json(path, opts);
+  const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 
   function toast(msg) {
     const el = $('#toast');
@@ -10,29 +11,15 @@
     setTimeout(() => el.classList.remove('show'), 1800);
   }
 
-  async function api(path, opts = {}) {
-    const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
-    if (token) headers.Authorization = 'Bearer ' + token;
-    const res = await fetch(path, Object.assign({}, opts, { headers }));
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 401 || res.status === 403) {
-      const authPublic = path.indexOf('/api/v1/auth/login') === 0 || path.indexOf('/api/v1/auth/register') === 0;
-      if (!authPublic) clearSession();
-      throw new Error(data.error || (res.status === 403 ? '需要管理员' : '需要登录'));
-    }
-    if (!res.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + res.status));
-    return data;
+  function esc(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  function clearSession() {
-    token = '';
-    localStorage.removeItem('kotv_admin_token');
-    showLoggedIn(false);
-  }
-
-  function showLoggedIn(on) {
+  function showPanel(on, hint) {
     $('#login_box').classList.toggle('hidden', on);
     $('#panel').classList.toggle('hidden', !on);
+    $('#login_form').classList.toggle('hidden', !!hint);
+    $('#login_hint').textContent = hint || '远端管理需要管理员账号';
   }
 
   async function refresh() {
@@ -50,7 +37,7 @@
       btnEn.textContent = u.enabled ? '禁用' : '启用';
       btnEn.onclick = async () => {
         try {
-          await api('/api/v1/admin/users/' + u.id + '/' + (u.enabled ? 'disable' : 'enable'), { method: 'POST', body: '{}' });
+          await post('/api/v1/admin/users/' + u.id + '/' + (u.enabled ? 'disable' : 'enable'));
           refresh();
         } catch (e) { toast(e.message); }
       };
@@ -61,7 +48,7 @@
         const p = prompt('新密码');
         if (!p) return;
         try {
-          await api('/api/v1/admin/users/' + u.id + '/password', { method: 'POST', body: JSON.stringify({ password: p }) });
+          await kotvAuth.postSealed('/api/v1/admin/users/' + u.id + '/password', { password: p });
           toast('已重置');
         } catch (e) { toast(e.message); }
       };
@@ -80,51 +67,53 @@
     });
   }
 
-  function esc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
-
-  async function enterAdmin(tok, user) {
-    if (!user || user.role !== 'admin') {
-      clearSession();
-      throw new Error('需要管理员账号');
-    }
-    token = tok;
-    localStorage.setItem('kotv_admin_token', token);
-    showLoggedIn(true);
-    await refresh();
-  }
-
-  $('#btn_login').onclick = async () => {
+  // 本机直接进入；远端须以管理员登录。
+  async function enter() {
+    let state;
     try {
-      const data = await api('/api/v1/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ username: $('#login_user').value.trim(), password: $('#login_pass').value }),
-      });
-      await enterAdmin(data.token, data.user);
-      if (data.user && data.user.mustChangePassword) {
-        toast('请尽快修改默认密码');
-      }
-    } catch (e) { toast(e.message); }
-  };
+      state = await kotvAuth.check(true);
+    } catch (_) {
+      return showPanel(false, '无法连接主机');
+    }
+    if (state === 'denied') return showPanel(false, '主机未开放远端访问，请在主机上打开远端鉴权');
+    if (state !== 'ok') {
+      showPanel(false);
+      if (state === 'notAdmin') $('#login_hint').textContent = '当前账号不是管理员，请换管理员账号登录';
+      return;
+    }
+    $('#btn_logout').classList.toggle('hidden', !kotvAuth.hasToken());
+    showPanel(true);
+    try {
+      await refresh();
+    } catch (e) {
+      toast(e.message);
+    }
+  }
 
+  async function login() {
+    try {
+      const data = await kotvAuth.login($('#login_user').value.trim(), $('#login_pass').value);
+      $('#login_pass').value = '';
+      if (data.user && data.user.mustChangePassword) toast('请尽快修改默认密码');
+      await enter();
+    } catch (e) { toast(e.message); }
+  }
+
+  $('#btn_login').onclick = login;
   $('#login_pass').addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') $('#btn_login').click();
+    if (ev.key === 'Enter') login();
   });
 
   $('#btn_logout').onclick = async () => {
-    try { await api('/api/v1/auth/logout', { method: 'POST', body: '{}' }); } catch (_) {}
-    clearSession();
+    await kotvAuth.logout();
+    enter();
   };
 
   $('#btn_save_opts').onclick = async () => {
     try {
-      await api('/api/v1/admin/settings', {
-        method: 'POST',
-        body: JSON.stringify({
-          remoteAuth: $('#opt_remote').checked,
-          allowRegister: $('#opt_register').checked,
-        }),
+      await post('/api/v1/admin/settings', {
+        remoteAuth: $('#opt_remote').checked,
+        allowRegister: $('#opt_register').checked,
       });
       toast('已保存');
     } catch (e) { toast(e.message); }
@@ -132,13 +121,10 @@
 
   $('#btn_create').onclick = async () => {
     try {
-      await api('/api/v1/admin/users', {
-        method: 'POST',
-        body: JSON.stringify({
-          username: $('#new_user').value.trim(),
-          password: $('#new_pass').value,
-          role: $('#new_role').value,
-        }),
+      await kotvAuth.postSealed('/api/v1/admin/users', {
+        username: $('#new_user').value.trim(),
+        password: $('#new_pass').value,
+        role: $('#new_role').value,
       });
       $('#new_user').value = '';
       $('#new_pass').value = '';
@@ -147,16 +133,6 @@
     } catch (e) { toast(e.message); }
   };
 
-  (async () => {
-    if (!token) {
-      showLoggedIn(false);
-      return;
-    }
-    try {
-      const me = await api('/api/v1/auth/me');
-      await enterAdmin(token, me.user);
-    } catch (_) {
-      clearSession();
-    }
-  })();
+  window.addEventListener('kotv-login-required', enter);
+  enter();
 })();

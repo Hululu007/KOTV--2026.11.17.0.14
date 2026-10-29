@@ -44,7 +44,7 @@
   async function postAction(params) {
     const body = new URLSearchParams(params);
     applyTargetParams(body);
-    const res = await fetch('/action', { method: 'POST', body });
+    const res = await kotvAuth.request('/action', { method: 'POST', body });
     if (!res.ok) throw new Error('请求失败');
     return res.text();
   }
@@ -79,7 +79,7 @@
     try {
       const q = new URLSearchParams({ list: '1', users: '1' });
       applyTargetParams(q);
-      const res = await fetch('/media?' + q.toString());
+      const res = await kotvAuth.request('/media?' + q.toString());
       const payload = await res.json();
       const info = payload.media || payload;
       const users = payload.users || payload.clients;
@@ -142,7 +142,7 @@
 
   async function loadDevice() {
     try {
-      const res = await fetch('/device');
+      const res = await kotvAuth.request('/device');
       const info = await res.json();
       $('#device_info').textContent = `${info.name || 'KO影视'} · ${info.ip || ''}`;
       $('#conn_state').textContent = '在线';
@@ -210,7 +210,7 @@
     try {
       const q = new URLSearchParams({ type: libraryType, limit: '80' });
       applyTargetParams(q);
-      const res = await fetch('/library?' + q.toString());
+      const res = await kotvAuth.request('/library?' + q.toString());
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'load failed');
       const items = Array.isArray(data.items) ? data.items : [];
@@ -382,7 +382,7 @@
     const list = $('#file_list');
     list.innerHTML = '<div class="file-empty">加载中…</div>';
     try {
-      const res = await fetch(fileUrlPath(path));
+      const res = await kotvAuth.request(fileUrlPath(path));
       if (!res.ok) throw new Error('load failed');
       const info = await res.json();
       fileRoot = path || '';
@@ -428,7 +428,7 @@
           try {
             const endpoint = dir ? '/delFolder' : '/delFile';
             const body = new URLSearchParams({ path: node.path || '' });
-            const res = await fetch(endpoint, { method: 'POST', body });
+            const res = await kotvAuth.request(endpoint, { method: 'POST', body });
             if (!res.ok) throw new Error('del failed');
             toast('已删除');
             listFiles(fileRoot);
@@ -451,7 +451,7 @@
     if (!name || !name.trim()) return;
     try {
       const body = new URLSearchParams({ path: fileRoot, name: name.trim() });
-      const res = await fetch('/newFolder', { method: 'POST', body });
+      const res = await kotvAuth.request('/newFolder', { method: 'POST', body });
       if (!res.ok) throw new Error('mkdir failed');
       toast('已创建');
       listFiles(fileRoot);
@@ -470,7 +470,7 @@
       form.append(i === 0 ? 'file' : `files-${i}`, f);
     });
     try {
-      const res = await fetch('/upload', { method: 'POST', body: form });
+      const res = await kotvAuth.request('/upload', { method: 'POST', body: form });
       if (!res.ok) throw new Error('upload failed');
       toast('上传完成');
       listFiles(fileRoot);
@@ -492,10 +492,6 @@
       if (libPanel && libPanel.classList.contains('active')) loadLibrary();
     });
   }
-  loadDevice();
-  startMediaPoll();
-  const tab = new URLSearchParams(location.search).get('tab');
-  if (tab && $(`#panel-${tab}`)) showTab(tab);
   const qs = new URLSearchParams(location.search);
   const uid = qs.get('userId');
   const cid = qs.get('clientId');
@@ -506,4 +502,45 @@
     targetScopeId = cid.startsWith('u:') || cid.startsWith('c:') ? cid : ('c:' + cid);
     localStorage.setItem('kotv_remote_user', targetScopeId);
   }
+
+  // 本机直接可用；远端须以管理员登录，未开放远端访问时说明原因。
+  async function enter() {
+    let state;
+    try {
+      state = await kotvAuth.check(true);
+    } catch (_) {
+      state = 'offline';
+    }
+    const ok = state === 'ok';
+    $('#app').classList.toggle('locked', !ok);
+    $('#login_box').classList.toggle('hidden', ok);
+    $('#login_form').classList.toggle('hidden', state !== 'login' && state !== 'notAdmin');
+    $('#login_hint').textContent = {
+      login: '远端使用遥控需要以管理员登录',
+      notAdmin: '当前账号不是管理员，请换管理员账号登录',
+      denied: '主机未开放远端访问，请在主机「用户管理」中打开远端鉴权',
+      offline: '无法连接主机',
+    }[state] || '';
+    if (!ok) {
+      clearInterval(mediaTimer);
+      return;
+    }
+    loadDevice();
+    const tab = qs.get('tab');
+    showTab(tab && $(`#panel-${tab}`) ? tab : 'play');
+  }
+
+  async function login() {
+    try {
+      await kotvAuth.login($('#login_user').value.trim(), $('#login_pass').value);
+      $('#login_pass').value = '';
+      enter();
+    } catch (e) {
+      toast(e.message || '登录失败');
+    }
+  }
+  $('#btn_login').addEventListener('click', login);
+  $('#login_pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+  window.addEventListener('kotv-login-required', enter);
+  enter();
 })();

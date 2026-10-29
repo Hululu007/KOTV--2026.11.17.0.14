@@ -25,9 +25,6 @@ func browseRootEntries() []any {
 
 // APIFsList 列出引擎本机目录。path 空则返回浏览根列表。
 func (a *App) APIFsList(raw string) (map[string]any, error) {
-	if !canBrowseEngineFS() {
-		return nil, fmt.Errorf("需要管理员")
-	}
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return map[string]any{

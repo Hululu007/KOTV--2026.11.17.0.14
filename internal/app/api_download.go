@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/bobo/KOTV/internal/auth"
 	"github.com/bobo/KOTV/internal/download"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/parse"
 	"github.com/bobo/KOTV/internal/source"
@@ -63,8 +65,13 @@ func (a *App) ResolveDownload(siteKey, vodID, flag, epURL string, epIndex int) (
 	return playURL, headers, format, nil
 }
 
+// downloadViewer 当前请求操作下载列表的身份：本机与管理员看全部，其他远端用户只看自己的。
+func downloadViewer() download.Viewer {
+	return download.Viewer{Owner: hostclient.DataOwner(), All: currentRequestIsAdmin()}
+}
+
 func (a *App) APIDownloadList() map[string]any {
-	list := download.List()
+	list := download.List(downloadViewer())
 	items := make([]any, 0, len(list))
 	for _, t := range list {
 		items = append(items, t)
@@ -79,6 +86,10 @@ func (a *App) APIDownloadEnqueue(body map[string]any) (map[string]any, error) {
 		Title: strings.TrimSpace(fmt.Sprint(body["title"])),
 		Flag:  strings.TrimSpace(fmt.Sprint(body["flag"])),
 		Pic:   strings.TrimSpace(fmt.Sprint(body["pic"])),
+		Owner: hostclient.DataOwner(),
+	}
+	if u := auth.GetUser(req.Owner); u != nil {
+		req.OwnerName = u.Username
 	}
 	rawEps, _ := body["episodes"].([]any)
 	for _, e := range rawEps {
@@ -111,42 +122,42 @@ func (a *App) APIDownloadEnqueue(body map[string]any) (map[string]any, error) {
 }
 
 func (a *App) APIDownloadCancel(id string) map[string]any {
-	if err := download.Cancel(strings.TrimSpace(id)); err != nil {
+	if err := download.Cancel(strings.TrimSpace(id), downloadViewer()); err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	return map[string]any{"ok": true}
 }
 
 func (a *App) APIDownloadPause(id string) map[string]any {
-	if err := download.Pause(strings.TrimSpace(id)); err != nil {
+	if err := download.Pause(strings.TrimSpace(id), downloadViewer()); err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	return map[string]any{"ok": true}
 }
 
 func (a *App) APIDownloadResume(id string) map[string]any {
-	if err := download.Resume(strings.TrimSpace(id)); err != nil {
+	if err := download.Resume(strings.TrimSpace(id), downloadViewer()); err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	return map[string]any{"ok": true}
 }
 
 func (a *App) APIDownloadPauseAll() map[string]any {
-	return map[string]any{"ok": true, "count": download.PauseAll()}
+	return map[string]any{"ok": true, "count": download.PauseAll(downloadViewer())}
 }
 
 func (a *App) APIDownloadResumeAll() map[string]any {
-	return map[string]any{"ok": true, "count": download.ResumeAll()}
+	return map[string]any{"ok": true, "count": download.ResumeAll(downloadViewer())}
 }
 
 func (a *App) APIDownloadRemove(id string, deleteFile bool) map[string]any {
-	if err := download.Remove(strings.TrimSpace(id), deleteFile); err != nil {
+	if err := download.Remove(strings.TrimSpace(id), deleteFile, downloadViewer()); err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	return map[string]any{"ok": true}
 }
 
 func (a *App) APIDownloadClearFinished() map[string]any {
-	n := download.ClearFinished()
+	n := download.ClearFinished(downloadViewer())
 	return map[string]any{"ok": true, "removed": n}
 }

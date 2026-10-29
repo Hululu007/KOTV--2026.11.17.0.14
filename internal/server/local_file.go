@@ -59,6 +59,11 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.IsDir() {
+		// 列目录：远端须是管理员；媒体钥匙只能读单个文件。
+		if requestAccess(r) != accessFull || !isAdmin(r, authUserFrom(r.Context())) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		s.writeFolderJSON(w, name)
 		return
 	}

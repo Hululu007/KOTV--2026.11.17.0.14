@@ -104,9 +104,7 @@ func TestRawSpliceRewritesLoopbackPlaylist(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		done := hostclient.EnterSession("splice-playlist", "", false)
-		defer done()
-		hostclient.SetPublicBase("http://192.168.1.8:9978")
+		defer hostclient.Bind(hostclient.Request{ClientID: "splice-playlist", PublicBase: "http://192.168.1.8:9978"})()
 		playproxy.Handle(w, r)
 	}))
 	defer srv.Close()

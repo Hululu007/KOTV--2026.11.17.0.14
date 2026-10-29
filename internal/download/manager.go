@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/thunder"
 )
@@ -38,6 +39,9 @@ type EnqueueReq struct {
 	Flag     string        `json:"flag"`
 	Pic      string        `json:"pic"`
 	Episodes []EpisodeSpec `json:"episodes"`
+	// 发起人（远端用户 id 与用户名；本机为空），由 app 按当前请求填写。
+	Owner     string `json:"-"`
+	OwnerName string `json:"-"`
 }
 
 type Manager struct {
@@ -150,7 +154,10 @@ func (m *Manager) runOne(id string) {
 	snap := *t
 	m.mu.Unlock()
 
+	// 远端用户的任务按他的身份解析，用他自己选的点播源。
+	restore := hostclient.Bind(hostclient.Request{UserID: snap.Owner, Dedicated: snap.Owner != ""})
 	err := m.execute(ctx, &snap)
+	restore()
 	cancel()
 
 	m.mu.Lock()
@@ -228,7 +235,7 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 	epURL := strings.TrimSpace(t.EpURL)
 	if thunder.Match(epURL) {
 		t.Kind = KindMagnet
-		dest := ResolvePath(t.Title, t.Flag, t.EpName, "mp4")
+		dest := t.destPath("mp4")
 		t.Path = dest
 		onProg(0.01, 0, 0, "磁力下载中…")
 		err := thunder.SaveToFile(ctx, epURL, dest, func(bytes, total int64, msg string) {
@@ -260,7 +267,7 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 	}
 	if thunder.Match(playURL) {
 		t.Kind = KindMagnet
-		dest := ResolvePath(t.Title, t.Flag, t.EpName, "mp4")
+		dest := t.destPath("mp4")
 		t.Path = dest
 		return thunder.SaveToFile(ctx, playURL, dest, func(bytes, total int64, msg string) {
 			p := 0.0
@@ -273,14 +280,14 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 
 	if isHLSURL(playURL, format) {
 		t.Kind = KindHLS
-		dest := ResolvePath(t.Title, t.Flag, t.EpName, "mp4")
+		dest := t.destPath("mp4")
 		t.Path = dest
 		return downloadHLS(ctx, playURL, headers, dest, threads, onProg)
 	}
 
 	t.Kind = KindHTTP
 	ext := extFromURL(playURL, "mp4")
-	dest := ResolvePath(t.Title, t.Flag, t.EpName, ext)
+	dest := t.destPath(ext)
 	t.Path = dest
 	n, total, err := downloadHTTP(ctx, playURL, headers, dest, threads, func(bytes, total int64) {
 		p := 0.0
@@ -296,19 +303,19 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 	return nil
 }
 
-func (m *Manager) hasEpisodeLocked(site, vodID, flag string, epIndex int) bool {
+func (m *Manager) hasEpisodeLocked(owner, site, vodID, flag string, epIndex int) bool {
 	for _, t := range m.tasks {
 		if t == nil {
 			continue
 		}
-		if t.Site == site && t.VodID == vodID && t.Flag == flag && t.EpIndex == epIndex {
+		if t.Owner == owner && t.Site == site && t.VodID == vodID && t.Flag == flag && t.EpIndex == epIndex {
 			return true
 		}
 	}
 	return false
 }
 
-// Enqueue 批量入队；同站同片同线路同集若已有任务则跳过（删记录后才可再入队）。
+// Enqueue 批量入队；同一发起人同站同片同线路同集若已有任务则跳过（删记录后才可再入队）。
 func Enqueue(req EnqueueReq) ([]*Task, error) {
 	m := defaultMgr
 	m.start()
@@ -326,7 +333,7 @@ func Enqueue(req EnqueueReq) ([]*Task, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, ep := range req.Episodes {
-		if m.hasEpisodeLocked(site, vodID, flag, ep.Index) {
+		if m.hasEpisodeLocked(req.Owner, site, vodID, flag, ep.Index) {
 			continue
 		}
 		name := strings.TrimSpace(ep.Name)
@@ -352,6 +359,8 @@ func Enqueue(req EnqueueReq) ([]*Task, error) {
 			Message:   "排队中",
 			CreatedAt: nowMS(),
 			UpdatedAt: nowMS(),
+			Owner:     req.Owner,
+			OwnerName: req.OwnerName,
 		}
 		m.tasks = append(m.tasks, t)
 		m.byID[t.ID] = t
@@ -365,15 +374,23 @@ func Enqueue(req EnqueueReq) ([]*Task, error) {
 	return out, nil
 }
 
-// List 按状态优先级排序后返回快照。
-func List() []*Task {
+// List v 能看到的任务，按状态优先级排序后返回快照。只有别人的任务带用户名（管理员看全部时用）。
+func List(v Viewer) []*Task {
 	m := defaultMgr
 	m.start()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]*Task, 0, len(m.tasks))
 	for _, t := range m.tasks {
-		out = append(out, cloneTask(t))
+		if !v.sees(t) {
+			continue
+		}
+		c := cloneTask(t)
+		if c.Owner == v.Owner {
+			c.OwnerName = ""
+		}
+		c.Owner = ""
+		out = append(out, c)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		ri, rj := statusRank(out[i].Status), statusRank(out[j].Status)
@@ -385,15 +402,23 @@ func List() []*Task {
 	return out
 }
 
+// visibleLocked v 能看到的任务；看不到的按不存在处理。
+func (m *Manager) visibleLocked(id string, v Viewer) (*Task, error) {
+	if t := m.byID[id]; v.sees(t) {
+		return t, nil
+	}
+	return nil, fmt.Errorf("任务不存在")
+}
+
 // Pause 暂停排队或运行中任务。
-func Pause(id string) error {
+func Pause(id string, v Viewer) error {
 	m := defaultMgr
 	m.start()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	t := m.byID[id]
-	if t == nil {
-		return fmt.Errorf("任务不存在")
+	t, err := m.visibleLocked(id, v)
+	if err != nil {
+		return err
 	}
 	switch t.Status {
 	case StatusDone, StatusCancelled, StatusPaused:
@@ -423,14 +448,14 @@ func Pause(id string) error {
 }
 
 // Resume 继续暂停或失败任务。
-func Resume(id string) error {
+func Resume(id string, v Viewer) error {
 	m := defaultMgr
 	m.start()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	t := m.byID[id]
-	if t == nil {
-		return fmt.Errorf("任务不存在")
+	t, err := m.visibleLocked(id, v)
+	if err != nil {
+		return err
 	}
 	switch t.Status {
 	case StatusPaused, StatusError, StatusCancelled:
@@ -446,42 +471,42 @@ func Resume(id string) error {
 	}
 }
 
-// PauseAll 暂停全部可暂停任务。
-func PauseAll() int {
+// PauseAll 暂停 v 能看到的全部可暂停任务。
+func PauseAll(v Viewer) int {
 	m := defaultMgr
 	m.start()
 	ids := []string{}
 	m.mu.Lock()
 	for _, t := range m.tasks {
-		if t.Status == StatusQueued || t.Status == StatusRunning {
+		if v.sees(t) && (t.Status == StatusQueued || t.Status == StatusRunning) {
 			ids = append(ids, t.ID)
 		}
 	}
 	m.mu.Unlock()
 	n := 0
 	for _, id := range ids {
-		if Pause(id) == nil {
+		if Pause(id, v) == nil {
 			n++
 		}
 	}
 	return n
 }
 
-// ResumeAll 恢复全部暂停/失败。
-func ResumeAll() int {
+// ResumeAll 恢复 v 能看到的全部暂停/失败任务。
+func ResumeAll(v Viewer) int {
 	m := defaultMgr
 	m.start()
 	ids := []string{}
 	m.mu.Lock()
 	for _, t := range m.tasks {
-		if t.Status == StatusPaused || t.Status == StatusError || t.Status == StatusCancelled {
+		if v.sees(t) && (t.Status == StatusPaused || t.Status == StatusError || t.Status == StatusCancelled) {
 			ids = append(ids, t.ID)
 		}
 	}
 	m.mu.Unlock()
 	n := 0
 	for _, id := range ids {
-		if Resume(id) == nil {
+		if Resume(id, v) == nil {
 			n++
 		}
 	}
@@ -489,14 +514,14 @@ func ResumeAll() int {
 }
 
 // Cancel 取消排队或运行中任务。
-func Cancel(id string) error {
+func Cancel(id string, v Viewer) error {
 	m := defaultMgr
 	m.start()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	t := m.byID[id]
-	if t == nil {
-		return fmt.Errorf("任务不存在")
+	t, err := m.visibleLocked(id, v)
+	if err != nil {
+		return err
 	}
 	if t.Status == StatusDone || t.Status == StatusCancelled {
 		return nil
@@ -513,14 +538,14 @@ func Cancel(id string) error {
 }
 
 // Remove 删除任务记录（可选删文件）。
-func Remove(id string, deleteFile bool) error {
+func Remove(id string, deleteFile bool, v Viewer) error {
 	m := defaultMgr
 	m.start()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	t := m.byID[id]
-	if t == nil {
-		return fmt.Errorf("任务不存在")
+	t, err := m.visibleLocked(id, v)
+	if err != nil {
+		return err
 	}
 	if c := m.cancels[id]; c != nil {
 		c()
@@ -541,8 +566,8 @@ func Remove(id string, deleteFile bool) error {
 	return nil
 }
 
-// ClearFinished 清除已完成/失败/取消。
-func ClearFinished() int {
+// ClearFinished 清除 v 能看到的已完成/失败/取消任务。
+func ClearFinished(v Viewer) int {
 	m := defaultMgr
 	m.start()
 	m.mu.Lock()
@@ -550,7 +575,7 @@ func ClearFinished() int {
 	n := 0
 	kept := m.tasks[:0]
 	for _, t := range m.tasks {
-		if t.Status == StatusDone || t.Status == StatusError || t.Status == StatusCancelled {
+		if v.sees(t) && (t.Status == StatusDone || t.Status == StatusError || t.Status == StatusCancelled) {
 			delete(m.byID, t.ID)
 			n++
 			continue

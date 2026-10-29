@@ -84,7 +84,6 @@ func TestPreparePlaybackURLSkipsLocal(t *testing.T) {
 }
 
 func TestPreparePlaybackURLLocalFileStaysPath(t *testing.T) {
-	hostclient.SetPublicBase("")
 	f, err := os.CreateTemp("", "kotv-local-*.mp4")
 	if err != nil {
 		t.Fatal(err)
@@ -102,8 +101,7 @@ func TestPreparePlaybackURLLocalFileStaysPath(t *testing.T) {
 }
 
 func TestPreparePlaybackURLRemoteLocalFile(t *testing.T) {
-	hostclient.SetPublicBase("http://203.0.113.8:9978")
-	defer hostclient.SetPublicBase("")
+	defer hostclient.Bind(hostclient.Request{PublicBase: "http://203.0.113.8:9978"})()
 	f, err := os.CreateTemp("", "kotv-remote-*.mp4")
 	if err != nil {
 		t.Fatal(err)
@@ -146,9 +144,7 @@ func TestPreparePlaybackURLLocalKeepsQuarkSpiderProxy(t *testing.T) {
 }
 
 func TestPreparePlaybackURLRemoteExpandsQuarkProxy(t *testing.T) {
-	done := hostclient.EnterSession("test-client", "", false)
-	defer done()
-	hostclient.SetPublicBase("http://192.168.1.8:9978")
+	defer hostclient.Bind(hostclient.Request{ClientID: "test-client", PublicBase: "http://192.168.1.8:9978"})()
 
 	a := &App{}
 	cdn := "https://cdn-quark.example/01.mkv"
@@ -172,9 +168,7 @@ func TestPreparePlaybackURLRemoteExpandsQuarkProxy(t *testing.T) {
 }
 
 func TestPreparePlaybackURLRelaysOtherLoopbackPort(t *testing.T) {
-	done := hostclient.EnterSession("relay-client", "", false)
-	defer done()
-	hostclient.SetPublicBase("http://192.168.1.8:9978")
+	defer hostclient.Bind(hostclient.Request{ClientID: "relay-client", PublicBase: "http://192.168.1.8:9978"})()
 
 	a := &App{}
 	raw := "http://127.0.0.1:5266/fishplay/go/quark/32t/abc"
@@ -189,9 +183,7 @@ func TestPreparePlaybackURLRelaysOtherLoopbackPort(t *testing.T) {
 }
 
 func TestPreparePlaybackURLRemoteKeepsEnginePort(t *testing.T) {
-	done := hostclient.EnterSession("engine-port", "", false)
-	defer done()
-	hostclient.SetPublicBase("http://192.168.1.8:9978")
+	defer hostclient.Bind(hostclient.Request{ClientID: "engine-port", PublicBase: "http://192.168.1.8:9978"})()
 
 	a := &App{}
 	raw := "http://127.0.0.1:9978/file/a.jpg"
@@ -205,9 +197,7 @@ func TestPreparePlaybackURLRemoteKeepsEnginePort(t *testing.T) {
 }
 
 func TestPreparePlaybackURLLocalKeepsOtherLoopbackPort(t *testing.T) {
-	done := hostclient.EnterSession("local-side", "", false)
-	defer done()
-	hostclient.SetPublicBase("")
+	defer hostclient.Bind(hostclient.Request{ClientID: "local-side", PublicBase: ""})()
 
 	a := &App{}
 	raw := "http://127.0.0.1:5266/fishplay/go/quark/32t/abc"
@@ -218,9 +208,7 @@ func TestPreparePlaybackURLLocalKeepsOtherLoopbackPort(t *testing.T) {
 
 func TestPreparePlaybackURLRemoteExpandsM3U8Proxy(t *testing.T) {
 	withAdFilter(t, false)
-	done := hostclient.EnterSession("m3u8-proxy", "", false)
-	defer done()
-	hostclient.SetPublicBase("http://192.168.1.8:9978")
+	defer hostclient.Bind(hostclient.Request{ClientID: "m3u8-proxy", PublicBase: "http://192.168.1.8:9978"})()
 
 	a := &App{}
 	cdn := "http://127.0.0.1:1/a.m3u8"
@@ -303,9 +291,7 @@ func TestPreparePlaybackAdFilterUsesRoute(t *testing.T) {
 		t.Fatalf("headers=%v", headers)
 	}
 
-	done := hostclient.EnterSession("ad-remote", "", false)
-	defer done()
-	hostclient.SetPublicBase("http://192.168.1.8:9978")
+	defer hostclient.Bind(hostclient.Request{ClientID: "ad-remote", PublicBase: "http://192.168.1.8:9978"})()
 	remote, remoteDirect, _ := a.PreparePlayback(raw, map[string]string{"User-Agent": "Quark"})
 	if !strings.HasPrefix(remote, "http://192.168.1.8:9978/proxy/play?id=") {
 		t.Fatalf("remote=%q", remote)

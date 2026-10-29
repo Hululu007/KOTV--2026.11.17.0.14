@@ -9,13 +9,16 @@ import (
 	"github.com/bobo/KOTV/internal/settings"
 )
 
-func TestProbeOnlyPath(t *testing.T) {
+func TestLoopbackBehindProxyIsRemote(t *testing.T) {
 	t.Parallel()
-	if !probeOnlyPath("/api/v1/health") || !probeOnlyPath("/api/v1/auth/status") {
-		t.Fatal("probe paths should be allowed")
+	r, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:9978/api/v1/home", nil)
+	r.RemoteAddr = "127.0.0.1:5000"
+	if !isLoopbackRequest(r) {
+		t.Fatal("direct loopback is local")
 	}
-	if probeOnlyPath("/api/v1/auth/login") || probeOnlyPath("/api/v1/home") {
-		t.Fatal("login/home must not be probe-only")
+	r.Header.Set("X-Forwarded-For", "203.0.113.9")
+	if isLoopbackRequest(r) {
+		t.Fatal("request forwarded by a reverse proxy must count as remote")
 	}
 }
 
@@ -65,22 +68,27 @@ func TestRemoteAccessAllowed(t *testing.T) {
 	settings.Set(settings.RemoteAuth, "false")
 	defer settings.Set(settings.RemoteAuth, "false")
 
-	loop := &http.Request{RemoteAddr: "127.0.0.1:12345"}
+	newReq := func(addr string, h http.Header) *http.Request {
+		r, _ := http.NewRequest(http.MethodGet, "http://h:9978/api/v1/home", nil)
+		r.RemoteAddr = addr
+		for k, v := range h {
+			r.Header[k] = v
+		}
+		return r
+	}
+	loop := newReq("127.0.0.1:12345", nil)
 	if !remoteAccessAllowed(loop) {
 		t.Fatal("loopback always allowed")
 	}
-	lan := &http.Request{RemoteAddr: "192.168.1.8:54321"}
+	lan := newReq("192.168.1.8:54321", nil)
 	if remoteAccessAllowed(lan) {
 		t.Fatal("LAN without remoteAuth must be denied")
 	}
-	webLan := &http.Request{
-		RemoteAddr: "192.168.1.8:54321",
-		Header:     http.Header{"X-Kotv-Client-Platform": []string{"web"}},
-	}
+	webLan := newReq("192.168.1.8:54321", http.Header{"X-Kotv-Client-Platform": []string{"web"}})
 	if !remoteAccessAllowed(webLan) {
 		t.Fatal("Web same-origin must be allowed without remoteAuth")
 	}
-	if !authRequiredFor(webLan) {
+	if !loginRequired(webLan) {
 		t.Fatal("Web must still require login")
 	}
 
@@ -108,7 +116,7 @@ func TestWebUiQueryPlatform(t *testing.T) {
 	if !remoteAccessAllowed(req) {
 		t.Fatal("web ui socket should be allowed without remoteAuth")
 	}
-	if !authRequiredFor(req) {
+	if !loginRequired(req) {
 		t.Fatal("web ui still requires login")
 	}
 }

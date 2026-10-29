@@ -24,7 +24,6 @@ import (
 	"github.com/bobo/KOTV/internal/playproxy"
 	remotectl "github.com/bobo/KOTV/internal/remote"
 	"github.com/bobo/KOTV/internal/settings"
-	"github.com/bobo/KOTV/internal/smbproxy"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/thunder"
 	"github.com/bobo/KOTV/internal/util"
@@ -47,6 +46,8 @@ type Server struct {
 	contentAPI    ContentAPI
 	libraryDB     *database.DB
 	onShutdown    func()
+	mux           *http.ServeMux
+	needs         map[string]need // 路由 → 远端访问要求，见 routes.go
 }
 
 type Action struct {
@@ -113,82 +114,8 @@ func (s *Server) SetTvbusProvider(fn func() string) {
 }
 
 func (s *Server) Start() error {
-	mux := http.NewServeMux()
 	remote, _ := fs.Sub(remoteFS, "resources")
-	// Web 包：旁路 webapp/ 时同端口 / 放出 Flutter Web；否则 / 为遥控页。
-	// PC/安卓/iOS 发行包不含 webapp，行为不变。
-	mountWebOrRemote(mux, remote)
-	mux.HandleFunc("/proxy/play", playproxy.Handle)
-	mux.HandleFunc("/proxy/bt/", thunder.Handle)
-	mux.HandleFunc("/proxy/smb/", smbproxy.Handle)
-	mux.HandleFunc("/proxy", s.handleSpiderProxy)
-	mux.HandleFunc("/parse", s.handleParsePage)
-	mux.HandleFunc("/file", s.handleFile)
-	mux.HandleFunc("/file/", s.handleFile)
-	mux.HandleFunc("/image/", s.handleImage)
-	mux.HandleFunc("/tvbus", s.handleTvbus)
-	mux.HandleFunc("/upload", s.handleUpload)
-	mux.HandleFunc("/newFolder", s.handleNewFolder)
-	mux.HandleFunc("/delFolder", s.handleDelPath)
-	mux.HandleFunc("/delFile", s.handleDelPath)
-	mux.HandleFunc("/cache", s.handleCache)
-	mux.HandleFunc("/action", s.handleAction)
-	mux.HandleFunc("/library", s.withAuth(s.handleLibrary))
-	mux.HandleFunc("/ui", s.withAuth(s.handleUI))
-	mux.HandleFunc("/java", s.handleJavaInvoke)
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	s.registerAPIv1(mux)
-	mux.HandleFunc("/media", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		target := hostclient.ResolveScopeKey(
-			r.URL.Query().Get("userId"),
-			r.URL.Query().Get("scopeId"),
-			first(r.URL.Query().Get("clientId"), r.Header.Get("X-Kotv-Client-Id")),
-		)
-		data := remotectl.SnapshotMediaFor(target)
-		if data == nil {
-			data = map[string]string{"state": "idle", "title": "未播放", "position": "0", "duration": "0", "playing": "false"}
-		}
-		if _, ok := data["playing"]; !ok {
-			playing := strings.EqualFold(data["state"], "playing")
-			if playing {
-				data["playing"] = "true"
-			} else {
-				data["playing"] = "false"
-			}
-		}
-		if r.URL.Query().Get("list") == "1" || r.URL.Query().Get("clients") == "1" || r.URL.Query().Get("users") == "1" {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ok":      true,
-				"media":   data,
-				"clients": remotectl.ListMediaClients(), // 远端实为用户列表（含 userId/scopeId）
-				"users":   remotectl.ListMediaClients(),
-			})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(data)
-	})
-	mux.HandleFunc("/device", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		info := collectDeviceAddrs()
-		// ip 为可直拼 /action 的根地址（兼容对端投屏/同步）；裸 IP 见 ipv4。
-		addr := strings.TrimSpace(info.Primary)
-		if addr != "" && !strings.Contains(addr, "://") {
-			addr = fmt.Sprintf("http://%s:%d", addr, localproxy.DefaultPort)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"name":     "KO影视",
-			"ip":       addr,
-			"type":     1,
-			"ipv4":     info.IPv4,
-			"ipv6":     info.IPv6,
-			"publicIp": info.PublicIP,
-			"uuid":     settings.EnsureDeviceUUID(),
-		})
-	})
+	mux := s.buildMux(remote)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", localproxy.DefaultPort))
 	if err != nil {
@@ -202,7 +129,7 @@ func (s *Server) Start() error {
 	thunder.SetPortFunc(func() int { return localproxy.DefaultPort })
 	spider.SetLocalProxyPort(localproxy.DefaultPort)
 
-	s.http = &http.Server{Handler: cors(mux)}
+	s.http = &http.Server{Handler: cors(s.gate(mux))}
 	go func() {
 		log.Printf("HTTP 遥控服务已启动: http://127.0.0.1:%d", s.port)
 		if err := s.http.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -210,6 +137,64 @@ func (s *Server) Start() error {
 		}
 	}()
 	return nil
+}
+
+// handleHealth 纯文本探活。
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+}
+
+// handleMedia 遥控页轮询：目标客户端的播放状态，可带在线客户端列表。
+func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	target := hostclient.ResolveScopeKey(
+		r.URL.Query().Get("userId"),
+		r.URL.Query().Get("scopeId"),
+		first(r.URL.Query().Get("clientId"), r.Header.Get("X-Kotv-Client-Id")),
+	)
+	data := remotectl.SnapshotMediaFor(target)
+	if data == nil {
+		data = map[string]string{"state": "idle", "title": "未播放", "position": "0", "duration": "0", "playing": "false"}
+	}
+	if _, ok := data["playing"]; !ok {
+		playing := strings.EqualFold(data["state"], "playing")
+		if playing {
+			data["playing"] = "true"
+		} else {
+			data["playing"] = "false"
+		}
+	}
+	if r.URL.Query().Get("list") == "1" || r.URL.Query().Get("clients") == "1" || r.URL.Query().Get("users") == "1" {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":      true,
+			"media":   data,
+			"clients": remotectl.ListMediaClients(), // 远端实为用户列表（含 userId/scopeId）
+			"users":   remotectl.ListMediaClients(),
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(data)
+}
+
+// handleDevice 本机设备信息：名称、可直拼 /action 的地址、各网卡地址。
+func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	info := collectDeviceAddrs()
+	// ip 为可直拼 /action 的根地址（兼容对端投屏/同步）；裸 IP 见 ipv4。
+	addr := strings.TrimSpace(info.Primary)
+	if addr != "" && !strings.Contains(addr, "://") {
+		addr = fmt.Sprintf("http://%s:%d", addr, localproxy.DefaultPort)
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"name":     "KO影视",
+		"ip":       addr,
+		"type":     1,
+		"ipv4":     info.IPv4,
+		"ipv6":     info.IPv6,
+		"publicIp": info.PublicIP,
+		"uuid":     settings.EnsureDeviceUUID(),
+	})
 }
 
 // safeAssetPath 把相对路径解析到本地 assets 根内，防止路径穿越。
