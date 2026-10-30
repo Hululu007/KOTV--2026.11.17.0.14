@@ -73,7 +73,8 @@ import java.util.concurrent.atomic.AtomicLong
  * 勿再因 API&lt;26 强制 Texture：RK 盒上 Flutter Texture + HDR 呈绿条花屏。
  *
  * 软硬解（DecodeTrackSelector + 扩展渲染）：
- * - auto / hard：MediaCodec 硬解优先；解码器建不起来时由 Exo 自带的解码器回退换下一个
+ * - auto：MediaCodec 硬解优先，软件 MediaCodec 与 FFmpeg 兜底；解码器建不起来时由 Exo 自带的回退换下一个
+ * - hard：视频只用硬件 MediaCodec、不挂 FFmpeg 视频；没有可用硬解就出不了画，由页面改 auto 重试
  * - soft：按 softAudioPrefer / softVideoPrefer 决定 nextlib FFmpeg 音/视轨是否优先
  *
  * Media3 须用 scripts/build-fongmi-media3.sh 产出的完整 AAR（覆盖 webhtv 残缺包）。
@@ -1470,8 +1471,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun buildRenderersFactory(ctx: Context, mode: String): KotvFfmpegRenderersFactory {
-    // 扩展恒 ON；软解靠 DECODE_SOFTWARE / track prefer 选 FFmpeg，勿 PREFER 抢轨。
-    val videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+    // 扩展默认 ON；软解靠 DECODE_SOFTWARE / track prefer 选 FFmpeg，勿 PREFER 抢轨。硬解不挂 FFmpeg 视频。
+    val videoMode =
+      if (mode == "hard") DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+      else DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
     val audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
     val secondaryOut =
       if (secondarySubtitleMode != "off") {
@@ -1499,6 +1502,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           factory.setMediaCodecSelector(HARD_PREFER_SELECTOR)
         }
       }
+      "hard" -> factory.setMediaCodecSelector(HARD_ONLY_SELECTOR)
       else -> factory.setMediaCodecSelector(HARD_PREFER_SELECTOR)
     }
     return factory
@@ -2557,6 +2561,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       val hard = infos.filter { it.hardwareAccelerated }
       val soft = infos.filter { !it.hardwareAccelerated }
       if (hard.isEmpty()) infos else hard + soft
+    }
+
+    /** 硬解：视频只留硬件 MediaCodec。选择器音视频共用，音频解码器多为软件实现，不能一起过滤。 */
+    private val HARD_ONLY_SELECTOR = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+      val infos = MediaCodecUtil.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+      if (MimeTypes.isVideo(mimeType)) infos.filter { it.hardwareAccelerated } else infos
     }
 
     /** 软解：优先软件 MediaCodec；无软件实现时回落原列表。 */
