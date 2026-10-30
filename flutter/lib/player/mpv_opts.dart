@@ -241,7 +241,8 @@ class KotvMpvOpts {
       // 所以也不用 auto-copy（它会先试 d3d11va-copy）。
       // 直出时 ANGLE 用 D3D9 后端，dxva2 靠驱动把解码面转成 RGB，Win7 的 mpv 补丁在下列情况自动改走
       // dxva2-copy，否则会绿屏：10 位（P010）片源；Intel Haswell/Broadwell（驱动用混合解码）上的 H265。
-      // 关掉直出时 ANGLE 用 D3D11 后端，只硬解后拷贝（后端在建播放器时选，见 MediaKitPlayback）。
+      // 关掉直出时 ANGLE 用 D3D11 后端，只硬解后拷贝。后端由 media_kit_video 补丁在建播放器时按这里的 hwdec 选：
+      // 列表里有 dxva2 就 D3D9 优先，否则 D3D11 优先（见 scripts/patch-media-kit.sh）。
       if (kotvIsWindows7()) {
         final chain = direct ? 'dxva2,dxva2-copy' : 'dxva2-copy';
         return hard ? chain : '$chain,no';

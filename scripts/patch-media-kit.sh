@@ -50,8 +50,8 @@
 # Win7 线（KOTV_WIN7=1）：media_kit_video 的 ANGLE 依次试 D3D11 → D3D11 9_3 → D3D9 → WARP。
 # Win7 没有 D3D11VA，mpv 只能用 DXVA2；DXVA2 解出的 D3D9 表面要零拷贝交给 ANGLE（dxva2-egl），
 # 该路径按 ANGLE 的 D3D9Ex 后端设计；Win7 实测在 D3D11 后端上挂不上，播放信息只显示 dxva2-copy。
-# 但 D3D9 后端只有 GLES 2.0，不直出时渲染不如 D3D11。补丁让顺序由进程环境变量 KOTV_ANGLE_BACKEND
-# 决定：前端在 Win7 开「硬解直出」时建播放器前设 d3d9（D3D9 提到最前），关掉时设 d3d11（保持原顺序）。
+# 但 D3D9 后端只有 GLES 2.0，不直出时渲染不如 D3D11。补丁在建播放器时读这个播放器的 hwdec：
+# 列表里有 dxva2（开「硬解直出」）就把 D3D9 提到最前，否则（只有 dxva2-copy 或软解）保持原顺序。
 #
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
@@ -73,30 +73,40 @@ _kotv_python() {
   fi
 }
 
-_kotv_python - "$PKG_CFG" <<'PY'
-import json, pathlib, re, sys
+# 各段补丁共用的 Python 开头：读 package_config.json，pkg_root(名字) 给出包根目录（没有该包时为 None）。
+_KOTV_PKG_ROOT_PY='
+import json, pathlib, sys
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 cfg = pathlib.Path(sys.argv[1])
 data = json.loads(cfg.read_text(encoding="utf-8"))
 
-root = None
-version = "?"
-for pkg in data.get("packages", []):
-    if pkg.get("name") != "media_kit":
-        continue
-    uri = pkg.get("rootUri") or ""
-    if uri.startswith("file:"):
-        root = pathlib.Path(url2pathname(urlparse(uri).path))
-    else:
-        root = (cfg.parent / uri).resolve()
-    version = root.name
-    break
 
+def pkg_root(name):
+    for pkg in data.get("packages", []):
+        if pkg.get("name") != name:
+            continue
+        uri = pkg.get("rootUri") or ""
+        if uri.startswith("file:"):
+            return pathlib.Path(url2pathname(urlparse(uri).path))
+        return (cfg.parent / uri).resolve()
+    return None
+'
+
+# 从标准输入读一段补丁脚本，接在共用开头后面运行。
+_kotv_patch_py() {
+  { printf '%s\n' "$_KOTV_PKG_ROOT_PY"; cat; } | _kotv_python - "$PKG_CFG"
+}
+
+_kotv_patch_py <<'PY'
+import re
+
+root = pkg_root("media_kit")
 if root is None:
     print("media_kit not in package_config.json; nothing to patch")
     sys.exit(0)
+version = root.name
 
 target = root / "lib" / "src" / "player" / "native" / "player" / "real.dart"
 if not target.is_file():
@@ -196,18 +206,8 @@ if "'cache-on-disk'" in check:
 print(f"ok media_kit ({version}) patches applied ({target})")
 
 # fvp：width/height <= 0 时不要等视频尺寸，并等播放器真正删掉。
-fvp_root = None
-fvp_version = "?"
-for pkg in data.get("packages", []):
-    if pkg.get("name") != "fvp":
-        continue
-    uri = pkg.get("rootUri") or ""
-    if uri.startswith("file:"):
-        fvp_root = pathlib.Path(url2pathname(urlparse(uri).path))
-    else:
-        fvp_root = (cfg.parent / uri).resolve()
-    fvp_version = fvp_root.name
-    break
+fvp_root = pkg_root("fvp")
+fvp_version = fvp_root.name if fvp_root is not None else "?"
 
 if fvp_root is None:
     print("fvp not in package_config.json; skip fvp patch")
@@ -1191,18 +1191,8 @@ if "releasePlayer(nativeHandle)" not in player_check or "Platform.isAndroid" not
 
 print(f"ok fvp ({fvp_version}) patches applied ({player_dart})")
 
-wm_root = None
-wm_version = "?"
-for pkg in data.get("packages", []):
-    if pkg.get("name") != "window_manager":
-        continue
-    uri = pkg.get("rootUri") or ""
-    if uri.startswith("file:"):
-        wm_root = pathlib.Path(url2pathname(urlparse(uri).path))
-    else:
-        wm_root = (cfg.parent / uri).resolve()
-    wm_version = wm_root.name
-    break
+wm_root = pkg_root("window_manager")
+wm_version = wm_root.name if wm_root is not None else "?"
 if wm_root is None:
     print("ERROR: window_manager not in package_config.json", file=sys.stderr)
     sys.exit(1)
@@ -1441,40 +1431,22 @@ if plugin_leave_old in plugin_check:
     sys.exit(1)
 PY
 
-_kotv_python - "$PKG_CFG" <<'PY'
-import json, pathlib, sys
-from urllib.parse import urlparse
-from urllib.request import url2pathname
-
-cfg = pathlib.Path(sys.argv[1])
-data = json.loads(cfg.read_text(encoding="utf-8"))
-root = None
-for pkg in data.get("packages", []):
-    if pkg.get("name") != "video_player_avfoundation":
-        continue
-    uri = pkg.get("rootUri") or ""
-    if uri.startswith("file:"):
-        root = pathlib.Path(url2pathname(urlparse(uri).path))
-    break
+_kotv_patch_py <<'PY'
+root = pkg_root("video_player_avfoundation")
 if root is None:
     print("skip avfoundation mime hint: package not in package_config")
     sys.exit(0)
 candidates = list(root.rglob("VideoPlayerPlugin.swift"))
 if not candidates:
+    # Win7 线（Dart 3.3）只能解出 Objective-C 版的 avfoundation，那条线不出 iOS 包。
     print(f"skip avfoundation mime hint: no VideoPlayerPlugin.swift under {root}")
     sys.exit(0)
 swift = candidates[0]
 text = swift.read_text(encoding="utf-8")
 if "X-KOTV-Asset-Mime" in text:
-    old_key = "itemOptions[AVURLAssetOutOfBandMIMETypeKey] = assetMime"
-    new_key = 'itemOptions["AVURLAssetOverrideMIMETypeKey"] = assetMime'
-    if old_key in text:
-        swift.write_text(text.replace(old_key, new_key, 1), encoding="utf-8")
-        print(f"updated avfoundation mime key ({swift})")
-    else:
-        print(f"avfoundation mime hint already patched ({swift})")
+    print(f"avfoundation mime hint already patched ({swift})")
     sys.exit(0)
-old = """  private func playerItem(with options: CreationOptions) throws -> FVPAVPlayerItem {
+old = """  @MainActor private func playerItem(with options: CreationOptions) throws -> WrappedAVPlayerItem {
     let headers = options.httpHeaders
     let itemOptions = headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers]
     guard let url = URL(string: options.uri) else {
@@ -1483,7 +1455,7 @@ old = """  private func playerItem(with options: CreationOptions) throws -> FVPA
     let asset = avFactory.urlAsset(with: url, options: itemOptions)
     return avFactory.playerItem(with: asset)
   }"""
-new = """  private func playerItem(with options: CreationOptions) throws -> FVPAVPlayerItem {
+new = """  @MainActor private func playerItem(with options: CreationOptions) throws -> WrappedAVPlayerItem {
     var headers = options.httpHeaders
     let assetMime = headers.removeValue(forKey: "X-KOTV-Asset-Mime")
     var itemOptions: [String: Any] = [:]
@@ -1500,41 +1472,27 @@ new = """  private func playerItem(with options: CreationOptions) throws -> FVPA
     let asset = avFactory.urlAsset(with: url, options: opts)
     return avFactory.playerItem(with: asset)
   }"""
-if old not in text:
-    print(f"skip avfoundation mime hint: playerItem shape differs ({swift})")
-    sys.exit(0)
+if text.count(old) != 1:
+    print(
+        f"ERROR: avfoundation ({root.name}) playerItem anchor missing; "
+        "upstream changed — update scripts/patch-media-kit.sh",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 swift.write_text(text.replace(old, new, 1), encoding="utf-8")
 print(f"patched avfoundation mime hint ({swift})")
 PY
 
 [[ "${KOTV_WIN7:-}" == "1" ]] || exit 0
 
-_kotv_python - "$PKG_CFG" <<'PY'
-import json, pathlib, sys
-from urllib.parse import urlparse
-from urllib.request import url2pathname
-
-cfg = pathlib.Path(sys.argv[1])
-data = json.loads(cfg.read_text(encoding="utf-8"))
-root = None
-for pkg in data.get("packages", []):
-    if pkg.get("name") != "media_kit_video":
-        continue
-    uri = pkg.get("rootUri") or ""
-    if uri.startswith("file:"):
-        root = pathlib.Path(url2pathname(urlparse(uri).path))
-    else:
-        root = (cfg.parent / uri).resolve()
-    break
+_kotv_patch_py <<'PY'
+root = pkg_root("media_kit_video")
 if root is None:
     print("ERROR: media_kit_video not in package_config.json", file=sys.stderr)
     sys.exit(1)
-cc = root / "windows" / "angle_surface_manager.cc"
-if not cc.is_file():
-    print(f"ERROR: {cc} missing", file=sys.stderr)
-    sys.exit(1)
-text = cc.read_text(encoding="utf-8")
-old = """      display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
+win = root / "windows"
+
+display_stock = """      display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
                                           EGL_DEFAULT_DISPLAY,
                                           kD3D11DisplayAttributes);
       if (eglInitialize(display_, 0, 0) == EGL_FALSE) {
@@ -1556,7 +1514,8 @@ old = """      display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
         }
       }
 """
-patched_d3d9_first = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): D3D9Ex first so mpv's
+# 之前出过的包写死了 D3D9 优先；CI 的 pub 缓存里可能还是它。
+display_d3d9_first = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): D3D9Ex first so mpv's
       // dxva2-egl interop can share DXVA2 surfaces with ANGLE.
       const EGLint* attributes[] = {
           kD3D9DisplayAttributes,
@@ -1576,12 +1535,9 @@ patched_d3d9_first = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): 
         FAIL("eglGetPlatformDisplayEXT");
       }
 """
-new = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): KOTV_ANGLE_BACKEND=d3d9
-      // puts D3D9Ex first so mpv's dxva2-egl interop can share DXVA2 surfaces
-      // with ANGLE (hardware-decode direct output); otherwise keep the stock
-      // order, D3D11 first.
-      char backend[8] = {};
-      GetEnvironmentVariableA("KOTV_ANGLE_BACKEND", backend, sizeof(backend));
+display_new = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): D3D9Ex first when the
+      // player decodes with dxva2 directly, so mpv's dxva2-egl interop can share
+      // DXVA2 surfaces with ANGLE; otherwise the stock order, D3D11 first.
       const EGLint* d3d9_first[] = {
           kD3D9DisplayAttributes,
           kD3D11DisplayAttributes,
@@ -1594,11 +1550,9 @@ new = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): KOTV_ANGLE_BACK
           kD3D9DisplayAttributes,
           kWrapDisplayAttributes,
       };
-      const EGLint* const* attributes =
-          lstrcmpiA(backend, "d3d9") == 0 ? d3d9_first : d3d11_first;
-      for (int i = 0; i < 4; i++) {
+      for (auto attribute : prefer_d3d9_ ? d3d9_first : d3d11_first) {
         display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
-                                            EGL_DEFAULT_DISPLAY, attributes[i]);
+                                            EGL_DEFAULT_DISPLAY, attribute);
         if (eglInitialize(display_, 0, 0) == EGL_TRUE) {
           break;
         }
@@ -1608,19 +1562,62 @@ new = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): KOTV_ANGLE_BACK
         FAIL("eglGetPlatformDisplayEXT");
       }
 """
-if "KOTV_ANGLE_BACKEND" in text:
-    print(f"ok media_kit_video ({root.name}) ANGLE backend by KOTV_ANGLE_BACKEND already patched")
-    sys.exit(0)
-# 上一版补丁写死 D3D9 优先；pub 缓存里可能还是它，一并换成按环境变量选。
-for anchor in (patched_d3d9_first, old):
-    if text.count(anchor) == 1:
-        cc.write_text(text.replace(anchor, new, 1), encoding="utf-8")
-        print(f"patched media_kit_video ({root.name}): ANGLE backend by KOTV_ANGLE_BACKEND")
-        sys.exit(0)
-print(
-    f"ERROR: media_kit_video ({root.name}) ANGLE display order anchor missing; "
-    "upstream changed — update scripts/patch-media-kit.sh",
-    file=sys.stderr,
-)
-sys.exit(1)
+
+# (文件, [(可能的原文…), 新文]) ；同一文件可有多处。
+edits = {
+    "angle_surface_manager.h": [
+        (("  ANGLESurfaceManager(int32_t width, int32_t height);\n",),
+         "  ANGLESurfaceManager(int32_t width, int32_t height, bool prefer_d3d9);\n"),
+        (("  int32_t height_ = 1;\n",),
+         "  int32_t height_ = 1;\n  bool prefer_d3d9_ = false;\n"),
+    ],
+    "angle_surface_manager.cc": [
+        (("ANGLESurfaceManager::ANGLESurfaceManager(int32_t width, int32_t height)\n"
+          "    : width_(width), height_(height) {\n",),
+         "ANGLESurfaceManager::ANGLESurfaceManager(int32_t width,\n"
+         "                                         int32_t height,\n"
+         "                                         bool prefer_d3d9)\n"
+         "    : width_(width), height_(height), prefer_d3d9_(prefer_d3d9) {\n"),
+        ((display_stock, display_d3d9_first), display_new),
+    ],
+    "video_output.cc": [
+        (("        surface_manager_ = std::make_unique<ANGLESurfaceManager>(\n"
+          "            static_cast<int32_t>(width_.value_or(1)),\n"
+          "            static_cast<int32_t>(height_.value_or(1)));\n",),
+         "        // KOTV patch (scripts/patch-media-kit.sh, Win7): the ANGLE backend\n"
+         "        // follows this player's hwdec, which Dart sets before\n"
+         "        // VideoOutputManager.Create: dxva2 (direct output) needs D3D9.\n"
+         "        auto prefer_d3d9 = false;\n"
+         "        if (auto hwdec = mpv_get_property_string(handle_, \"hwdec\")) {\n"
+         "          prefer_d3d9 = (\",\" + std::string(hwdec) + \",\").find(\",dxva2,\") !=\n"
+         "                        std::string::npos;\n"
+         "          mpv_free(hwdec);\n"
+         "        }\n"
+         "        surface_manager_ = std::make_unique<ANGLESurfaceManager>(\n"
+         "            static_cast<int32_t>(width_.value_or(1)),\n"
+         "            static_cast<int32_t>(height_.value_or(1)), prefer_d3d9);\n"),
+    ],
+}
+
+for name, pairs in edits.items():
+    path = win / name
+    if not path.is_file():
+        print(f"ERROR: {path} missing", file=sys.stderr)
+        sys.exit(1)
+    text = path.read_text(encoding="utf-8")
+    if "prefer_d3d9" in text:
+        print(f"ok media_kit_video ({root.name}) {name}: ANGLE backend by hwdec already patched")
+        continue
+    for olds, new in pairs:
+        hit = next((o for o in olds if text.count(o) == 1), None)
+        if hit is None:
+            print(
+                f"ERROR: media_kit_video ({root.name}) {name} anchor missing; "
+                "upstream changed — update scripts/patch-media-kit.sh",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        text = text.replace(hit, new, 1)
+    path.write_text(text, encoding="utf-8")
+    print(f"patched media_kit_video ({root.name}) {name}: ANGLE backend by hwdec")
 PY

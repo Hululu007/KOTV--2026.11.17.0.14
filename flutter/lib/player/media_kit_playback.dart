@@ -5,7 +5,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import 'buffer_budget.dart';
 import 'drm_opts.dart';
-import '../util/kotv_io.dart' show kotvSetProcessEnv;
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 import 'mpv_hls_timeline.dart';
@@ -54,7 +53,10 @@ class MediaKitPlayback extends KotvPlayback {
     bool live = false,
   })  : _opts = opts ?? const KotvMpvOpts(),
         _live = live,
-        controller = _newVideoController(player, opts ?? const KotvMpvOpts()) {
+        controller = VideoController(
+          player,
+          configuration: (opts ?? const KotvMpvOpts()).videoControllerConfiguration(),
+        ) {
     _subs.add(player.stream.playing.listen((_) => notifyListeners()));
     // 进度走 positionStream 直通 player.stream.position；勿每帧 notifyListeners。
     _subs.add(player.stream.duration.listen((_) => notifyListeners()));
@@ -219,7 +221,7 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   Future<void> applyOpts(KotvMpvOpts opts) async {
-    // Win7 的直出与否跟着建控制器时选定的 ANGLE 后端走，改它要换 Player（见 [kotvMediaKitNeedsNewPlayer]）。
+    // Win7 建控制器时已按 hwdec 选定 ANGLE 后端，直出与否不能再改，改它要换 Player（见 [kotvMediaKitNeedsNewPlayer]）。
     _opts = kotvIsWindows7() ? opts.copyWith(direct: _opts.direct) : opts;
     await _opts.applyAfterAttach(player, live: _live);
     notifyListeners();
@@ -502,15 +504,6 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   bool get directOutput => _opts.direct;
-
-  /// Win7：ANGLE 后端在建 VideoController 时选定，之后改不了；media_kit_video 的补丁读这个环境变量。
-  /// 硬解直出用 D3D9（dxva2 解码面可零拷贝交给 ANGLE），关掉用 D3D11（GLES 3，渲染兼容性更好）。
-  static VideoController _newVideoController(Player player, KotvMpvOpts opts) {
-    if (kotvIsWindows7()) {
-      kotvSetProcessEnv('KOTV_ANGLE_BACKEND', opts.direct ? 'd3d9' : 'd3d11');
-    }
-    return VideoController(player, configuration: opts.videoControllerConfiguration());
-  }
 
   @override
   Future<void> setFxPreview({bool? videoOriginal, bool? audioOriginal}) async {
