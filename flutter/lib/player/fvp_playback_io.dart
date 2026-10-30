@@ -167,7 +167,7 @@ class FvpPlayback extends KotvPlayback {
     if (v == null || v.isEmpty) return null;
     // 解码器列表里 FFmpeg / dav1d 只作软解兜底（见 kotvFvpVideoDecoders）。
     final soft = v.startsWith('FFmpeg') || v.startsWith('dav1d');
-    return soft ? '软解（$v）' : '硬解（$v）';
+    return '${soft ? '软解' : '硬解'}（${kotvDecoderName(v)}）';
   }
 
   @override

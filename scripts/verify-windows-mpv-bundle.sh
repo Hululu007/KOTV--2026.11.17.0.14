@@ -24,7 +24,7 @@ _is_system_dll() {
     dnsapi.dll|normaliz.dll|winhttp.dll|wininet.dll|avrt.dll|avicap32.dll|ncrypt.dll|secur32.dll| \
     uxtheme.dll|mfplat.dll|mf.dll|mfreadwrite.dll|d2d1.dll|dwrite.dll| \
     msvcp*.dll|vcruntime*.dll|concrt*.dll|api-ms-*|ext-ms-*|kernelbase.dll|userenv.dll| \
-    powrprof.dll|wtsapi32.dll|dbghelp.dll|psapi.dll|oleacc.dll) return 0 ;;
+    powrprof.dll|wtsapi32.dll|dbghelp.dll|psapi.dll|oleacc.dll|shcore.dll) return 0 ;;
   esac
   return 1
 }

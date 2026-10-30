@@ -140,7 +140,7 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<String?> activeDecoderLabel() async {
-    final name = '${(await _videoInfo())?['decoder'] ?? ''}'.trim();
+    final name = kotvDecoderName('${(await _videoInfo())?['decoder'] ?? ''}');
     return name.isEmpty ? null : name;
   }
 

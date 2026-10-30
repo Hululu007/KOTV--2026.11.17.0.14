@@ -3,14 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kotv/player/playback_failover.dart';
 
 void main() {
-  test('hard flips soft then next player restores settings decode', () {
+  test('hard falls back to auto then next player restores settings decode', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'hard');
     f.markAttempt();
-    final flip = f.nextStep();
-    expect(flip, isNotNull);
-    expect(flip!.kind, KotvFailoverKind.flipDecode);
-    expect(flip.decodeMode, 'soft');
-    expect(f.decodeMode, 'soft');
+    final step = f.nextStep();
+    expect(step, isNotNull);
+    expect(step!.kind, KotvFailoverKind.autoDecode);
+    expect(step.decodeMode, 'auto');
+    expect(f.decodeMode, 'auto');
 
     final next = f.nextStep();
     expect(next, isNotNull);
@@ -19,15 +19,9 @@ void main() {
     expect(next.decodeMode, 'hard');
   });
 
-  test('auto flips soft then next player restores settings decode', () {
+  test('auto goes straight to the next player', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'auto');
     f.markAttempt();
-    final flip = f.nextStep();
-    expect(flip, isNotNull);
-    expect(flip!.kind, KotvFailoverKind.flipDecode);
-    expect(flip.decodeMode, 'soft');
-    expect(f.decodeMode, 'soft');
-
     final next = f.nextStep();
     expect(next, isNotNull);
     expect(next!.kind, KotvFailoverKind.nextPlayer);
@@ -45,12 +39,9 @@ void main() {
     expect(f.nextStep(), isNull);
   });
 
-  test('soft flips hard', () {
+  test('soft goes straight to the next player', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#fvp', decodeMode: 'soft');
     f.markAttempt();
-    final flip = f.nextStep();
-    expect(flip!.kind, KotvFailoverKind.flipDecode);
-    expect(flip.decodeMode, 'hard');
     final next = f.nextStep();
     expect(next!.playerVal, 'innie#mpv');
     expect(next.decodeMode, 'soft');

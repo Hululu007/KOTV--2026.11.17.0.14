@@ -48,7 +48,7 @@
 # X-KOTV-Asset-Mime，这里把它从 HTTP 头里拿掉，改成 AVURLAsset 的 MIME。
 #
 # Win7 线（KOTV_WIN7=1）：media_kit_video 的 ANGLE 依次试 D3D11 → D3D11 9_3 → D3D9 → WARP。
-# Win7 没有 D3D11 视频接口，硬解直出只能用 DXVA2；DXVA2 解出的 D3D9 表面要零拷贝交给 ANGLE（dxva2-egl），
+# Win7 上 d3d11va 直出挂不上（实测只到 d3d11va-copy），硬解直出只能用 DXVA2；DXVA2 解出的 D3D9 表面要零拷贝交给 ANGLE（dxva2-egl），
 # 该路径按 ANGLE 的 D3D9Ex 后端设计；Win7 实测在 D3D11 后端上挂不上，播放信息只显示 dxva2-copy。
 # 但 D3D9 后端只有 GLES 2.0，不直出时渲染不如 D3D11。补丁在建播放器时读这个播放器的 hwdec：
 # 列表里有 dxva2（开「硬解直出」）就把 D3D9 提到最前，否则（auto 或软解）保持原顺序。

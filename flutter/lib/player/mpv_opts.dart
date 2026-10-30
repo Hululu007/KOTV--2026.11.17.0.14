@@ -244,7 +244,7 @@ class KotvMpvOpts {
         return hard ? 'dxva2,dxva2-copy' : 'dxva2,dxva2-copy,no';
       }
       // 其余情况交给 mpv 的 auto：依次试 d3d11va、d3d11va-copy、dxva2-copy，都不行再软解。
-      // Win7 没有 D3D11 视频接口（ID3D11VideoDevice 最低 Win8），前两项建不起来，落到 dxva2-copy。
+      // Win7（装了平台更新）实测落到 d3d11va-copy。
       return 'auto';
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {

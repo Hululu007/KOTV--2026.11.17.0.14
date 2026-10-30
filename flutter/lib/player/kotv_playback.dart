@@ -5,12 +5,15 @@ import 'package:flutter/widgets.dart';
 
 import 'keep_awake.dart';
 
+/// 播放信息里的解码器名，一律大写（D3D11VA-COPY、DXVA2、FFMPEG…）。
+String kotvDecoderName(String raw) => raw.trim().toUpperCase();
+
 /// mpv `hwdec-current` → 播放信息文案（桌面 media_kit 与安卓原生 MPV 共用）。
 String? kotvMpvHwdecLabel(String raw) {
   final v = raw.trim();
   if (v.isEmpty) return null;
   if (v == 'no') return '软解';
-  return v.endsWith('-copy') ? '硬解后拷贝（$v）' : '硬解直出（$v）';
+  return '${v.endsWith('-copy') ? '硬解后拷贝' : '硬解直出'}（${kotvDecoderName(v)}）';
 }
 
 /// 原生播放器 videoInfo → 「PQ · BT.2020 · 杜比视界 P8 · 杜比视界直出（显示器：HDR10/HLG）」。

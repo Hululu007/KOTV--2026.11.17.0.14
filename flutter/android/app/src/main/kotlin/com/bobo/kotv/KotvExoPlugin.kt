@@ -73,8 +73,7 @@ import java.util.concurrent.atomic.AtomicLong
  * 勿再因 API&lt;26 强制 Texture：RK 盒上 Flutter Texture + HDR 呈绿条花屏。
  *
  * 软硬解（DecodeTrackSelector + 扩展渲染）：
- * - hard：视频 MediaCodec 硬解优先；音轨 MediaCodec 优先、FFmpeg（AV3A）可回退
- * - auto：硬解优先；解码失败再整实例软解重建一次
+ * - auto / hard：MediaCodec 硬解优先；解码器建不起来时由 Exo 自带的解码器回退换下一个
  * - soft：按 softAudioPrefer / softVideoPrefer 决定 nextlib FFmpeg 音/视轨是否优先
  *
  * Media3 须用 scripts/build-fongmi-media3.sh 产出的完整 AAR（覆盖 webhtv 残缺包）。
@@ -121,8 +120,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var videoHeight: Int = 0
   /** 直播：不做点播磁盘预读。内存缓冲与点播同一条比例。 */
   private var livePlayback: Boolean = false
-  /** auto 下硬解失败后仅软解重建一次。 */
-  private var decodeFallbackTried = false
   /** Surface 隧道模式；Texture 强制关闭。 */
   private var tunnelingEnabled = false
   /** HLS 广告过滤（MediaItem.setAdblock）。 */
@@ -451,7 +448,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               if (renderTexture) tunnelingEnabled = false
               syncOutputPath()
             }
-            decodeFallbackTried = false
             openInternal(
               url,
               headers,
@@ -594,7 +590,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         main.post {
           try {
             decodeMode = mode
-            decodeFallbackTried = false
             if (currentUrl.isNotEmpty()) {
               val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
               openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback, pos)
@@ -1073,13 +1068,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     speedLastAtMs = 0
     transferredBytes.set(0)
 
-    val effective = effectiveDecodeMode()
     val nextDrmKey = drmKey(drm)
     val wantSecondary = secondarySubtitleMode != "off"
     val needRebuild =
       player == null ||
         playerBuiltLive != live ||
-        playerBuiltDecode != effective ||
+        playerBuiltDecode != decodeMode ||
         playerBuiltDrmKey != nextDrmKey ||
         playerBuiltLibass != libassEnabled ||
         playerBuiltSecondary != wantSecondary ||
@@ -1090,7 +1084,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         playerBuiltSoftPrefer != (softAudioPrefer to softVideoPrefer)
 
     if (needRebuild) {
-      rebuildPlayer(live, effective, nextDrmKey)
+      rebuildPlayer(live, decodeMode, nextDrmKey)
     } else {
       httpFactory
         ?.setUserAgent(null)
@@ -1174,7 +1168,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /** 首次或配置变化时创建；换集复用路径不走这里。 */
-  private fun rebuildPlayer(live: Boolean, effective: String, nextDrmKey: String) {
+  private fun rebuildPlayer(live: Boolean, mode: String, nextDrmKey: String) {
     val ctx = appContext ?: error("no context")
     releasePlayerInstance()
 
@@ -1216,7 +1210,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         extractorsBase
       }
     val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, extractors)
-    val baseRenderers = buildRenderersFactory(ctx, effective)
+    val baseRenderers = buildRenderersFactory(ctx, mode)
     val renderers: androidx.media3.exoplayer.RenderersFactory =
       if (assHandler != null) {
         try {
@@ -1228,7 +1222,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       } else {
         baseRenderers
       }
-    val selector = buildTrackSelector(ctx, effective)
+    val selector = buildTrackSelector(ctx, mode)
     trackSelector = selector
     // 时长倍率是用户设置。字节顶用 open 传来的那一份，未满时长时也不再继续堆缓冲。
     val factor = bufferFactor.coerceIn(1, 10)
@@ -1289,7 +1283,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             lastVideoDecoder = decoderName
             Log.i(
               TAG,
-              "videoDecoder=$decoderName decodeMode=${playerBuiltDecode ?: effectiveDecodeMode()} initMs=$initializationDurationMs",
+              "videoDecoder=$decoderName decodeMode=${playerBuiltDecode ?: decodeMode} initMs=$initializationDurationMs",
             )
           }
 
@@ -1313,7 +1307,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     player = p
     playerBuiltLive = live
-    playerBuiltDecode = effective
+    playerBuiltDecode = mode
     playerBuiltDrmKey = nextDrmKey
     playerBuiltLibass = libassEnabled
     playerBuiltSecondary = secondarySubtitleMode != "off"
@@ -1363,7 +1357,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
                 "height" to f.height,
                 "pixelRatio" to f.pixelWidthHeightRatio,
                 "durationMs" to cur.duration.coerceAtLeast(0),
-                "decodeMode" to (playerBuiltDecode ?: effectiveDecodeMode()),
+                "decodeMode" to (playerBuiltDecode ?: decodeMode),
                 "videoTrackCount" to videoTrackCandidates().size,
                 "audioTrackCount" to audioTrackCount(),
               ),
@@ -1372,7 +1366,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
 
         override fun onPlayerError(error: PlaybackException) {
-          val mode = playerBuiltDecode ?: effectiveDecodeMode()
+          val mode = playerBuiltDecode ?: decodeMode
           Log.e(TAG, "exo error code=${error.errorCode} mode=$mode ${error.message}", error)
           // 直播窗口落后：追到默认直播点，不上报 error。
           if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
@@ -1405,17 +1399,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               }
             }
           }
-          if (decodeMode == "auto" && !decodeFallbackTried && isDecoderError(error.errorCode)) {
-            decodeFallbackTried = true
-            Log.w(TAG, "exo decoder failed → soft rebuild")
-            try {
-              val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
-              openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback, pos)
-              return
-            } catch (t: Throwable) {
-              Log.e(TAG, "exo soft rebuild failed", t)
-            }
-          }
           emit(mapOf("event" to "error", "message" to (error.message ?: error.errorCodeName)))
         }
 
@@ -1438,11 +1421,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     playerListener = listener
     p.addListener(listener)
-  }
-
-  private fun effectiveDecodeMode(): String {
-    if (decodeMode == "auto" && decodeFallbackTried) return "soft"
-    return decodeMode
   }
 
   /**
@@ -2300,7 +2278,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentMime = null
     currentDrm = null
     formatRetried = false
-    decodeFallbackTried = false
     // Flutter Texture 跨 open 复用；仅 dispose/detach 时 releaseFlutterTexture。
   }
 
@@ -2640,14 +2617,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         return Uri.parse(t)
       }
       return Uri.parse(t)
-    }
-
-    fun isDecoderError(errorCode: Int): Boolean {
-      return errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
-        errorCode == PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED ||
-        errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
-        errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ||
-        errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
     }
 
     fun subtitleMimeFromPath(url: String): String {

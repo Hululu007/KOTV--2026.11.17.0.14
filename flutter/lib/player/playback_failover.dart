@@ -4,7 +4,7 @@ import '../util/kotv_io.dart';
 import 'kotv_platform.dart';
 
 /// 开播黑屏/超时后的会话内回退（各平台同一套，不写死某一引擎）：
-/// 1. hard↔soft 翻转；**auto 先改软解重试**（直出硬解失败时的会话内回退）
+/// 1. 硬解失败改「自动」再试一次（自动 = 交给播放器自己选硬解或软解）
 /// 2. 再按 [innieRing] 换下一个内置播放器，并恢复用户设置的解码
 /// 不写回设置里的 `player` / `playerLive` / `playerDecode`。
 class KotvPlaybackFailover {
@@ -42,7 +42,6 @@ class KotvPlaybackFailover {
   final Set<String> _triedPlayers = {};
   String _playerVal;
   String _decodeMode;
-  bool _flippedDecodeForCurrent = false;
 
   String get playerVal => _playerVal;
   String get decodeMode => _decodeMode;
@@ -52,7 +51,6 @@ class KotvPlaybackFailover {
     _triedPlayers.clear();
     _playerVal = playerVal.trim();
     _decodeMode = normDecode(decodeMode);
-    _flippedDecodeForCurrent = false;
   }
 
   /// 开始用当前播放器尝试（计入已试集合）。
@@ -68,19 +66,14 @@ class KotvPlaybackFailover {
     if (lockExoForDrm) return null;
     if (!_playerVal.startsWith('innie#')) return null;
 
-    if (!_flippedDecodeForCurrent) {
-      final flipped = _flipDecodeForFailover(_decodeMode);
-      if (flipped != null) {
-        _flippedDecodeForCurrent = true;
-        _decodeMode = flipped;
-        final label = flipped == 'soft' ? '软解' : '硬解';
-        return KotvFailoverStep(
-          kind: KotvFailoverKind.flipDecode,
-          playerVal: _playerVal,
-          decodeMode: flipped,
-          status: '无画面，已改$label重试',
-        );
-      }
+    if (_decodeMode == 'hard') {
+      _decodeMode = 'auto';
+      return KotvFailoverStep(
+        kind: KotvFailoverKind.autoDecode,
+        playerVal: _playerVal,
+        decodeMode: _decodeMode,
+        status: '硬解无画面，已改自动解码重试',
+      );
     }
 
     final next = _nextUntriedInnie(_playerVal);
@@ -88,7 +81,6 @@ class KotvPlaybackFailover {
 
     _playerVal = next;
     _decodeMode = settingsDecodeMode;
-    _flippedDecodeForCurrent = false;
     _triedPlayers.add(next);
     return KotvFailoverStep(
       kind: KotvFailoverKind.nextPlayer,
@@ -110,20 +102,6 @@ class KotvPlaybackFailover {
         return 'hard';
       default:
         return 'auto';
-    }
-  }
-
-  /// auto：协商失败 → 软解；hard/soft：互翻。
-  static String? _flipDecodeForFailover(String mode) {
-    switch (mode) {
-      case 'auto':
-        return 'soft';
-      case 'hard':
-        return 'soft';
-      case 'soft':
-        return 'hard';
-      default:
-        return null;
     }
   }
 
@@ -180,7 +158,7 @@ class KotvPlaybackFailover {
   }
 }
 
-enum KotvFailoverKind { flipDecode, nextPlayer }
+enum KotvFailoverKind { autoDecode, nextPlayer }
 
 class KotvFailoverStep {
   const KotvFailoverStep({

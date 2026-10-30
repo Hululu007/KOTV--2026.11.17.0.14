@@ -42,10 +42,9 @@ List<String> kotvFvpVideoDecoders(
     return appendSoft(const ['VAAPI', 'CUDA', 'VDPAU', 'hap']);
   }
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-    // Win7：先 DXVA（d3d9）。勿把 FFmpeg D3D11/d3d11va 放进列表——ID3D11VideoDevice
-    // 最低 Win8（MSDN），在 Win7 上摸到会黑屏/卡平台线程。MFT:d3d=11 为 mdk 自研且文档
-    // 标 win7+，但 shared/shader_resource 仅 win8+；fallback=0 失败必须返回，才能试下
-    // 一个或落到自动模式的 FFmpeg/dav1d。渲染侧 d3d11.device/copy=0 与 Win7 无关（图形 API）。
+    // Win7：先 DXVA（d3d9），再试不共享纹理的 MFT（mdk 文档标 win7+，shared/shader_resource
+    // 仅 win8+）。FVP 的 D3D11 解码器没在 Win7 上验证过，不放进列表。fallback=0：失败必须返回，
+    // 才能试下一个或落到自动模式的 FFmpeg/dav1d。
     if (kotvIsWindows7()) {
       return appendSoft(const [
         'DXVA',
