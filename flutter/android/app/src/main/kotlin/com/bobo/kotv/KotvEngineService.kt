@@ -291,8 +291,13 @@ class KotvEngineService : Service() {
     } catch (_: Throwable) {
     }
     // 等它真正退出、放开端口；否则新引擎会以「端口被占」退出。
+    waitUntil { !processAlive(p) }
+  }
+
+  /** 最多等 1.5 秒直到 [done] 为真。 */
+  private fun waitUntil(done: () -> Boolean) {
     repeat(15) {
-      if (!processAlive(p)) return
+      if (done()) return
       Thread.sleep(100)
     }
   }
@@ -317,10 +322,7 @@ class KotvEngineService : Service() {
     if (left.isEmpty()) return
     Log.w(TAG, "killing stray engine pids=$left")
     left.forEach { android.os.Process.killProcess(it) }
-    repeat(15) {
-      if (strays().isEmpty()) return
-      Thread.sleep(100)
-    }
+    waitUntil { strays().isEmpty() }
   }
 
   /**

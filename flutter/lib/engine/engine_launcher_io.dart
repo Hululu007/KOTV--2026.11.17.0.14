@@ -134,6 +134,7 @@ class EngineLauncher {
     if (!kotvIsLocalEngineBaseUrl(baseUrl)) return ensureReady();
     final h = await _health(baseUrl);
     // 端口上回应的不是 KOTV：被别的程序占着，重启本引擎和 spider 都没用，直接报错。
+    // 不看上次「引擎因端口被占退出」的记录：用户关掉占用的程序后点重试，要真的重新拉起。
     if (kotvEngineTakenByOther(h)) {
       lastError = _portTakenMessage;
       return false;
