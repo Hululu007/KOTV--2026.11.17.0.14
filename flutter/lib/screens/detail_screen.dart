@@ -796,15 +796,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (!_danmakuOn) setState(() => _danmakuOn = true);
   }
 
-  /// 换一个 media_kit Player，按当前进度重开本集（见 [kotvMediaKitNeedsNewPlayer]）。
+  /// 换一个 media_kit Player（见 [kotvMediaKitNeedsNewPlayer]）；正在播就按当前进度重开本集。
+  /// 没在播也要拆掉旧的，否则下次起播仍复用按旧选项建的 Player。
   Future<void> _reopenWithNewMpvPlayer() async {
-    if (_epIdx < 0 || _playUrl.isEmpty) return;
-    _reopenAtMs = _existingPlayback?.position.inMilliseconds ?? 0;
-    try {
-      await _flushWatchProgress(force: true);
-    } catch (_) {}
+    final playing = _epIdx >= 0 && _playUrl.isNotEmpty;
+    if (playing) {
+      _reopenAtMs = _existingPlayback?.position.inMilliseconds ?? 0;
+      try {
+        await _flushWatchProgress(force: true);
+      } catch (_) {}
+    }
     await _disposeDesktopMpvOwned(softStopFirst: true);
-    if (mounted) await _playAt(_epIdx);
+    if (playing && mounted) await _playAt(_epIdx);
   }
 
   /// 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
@@ -2923,7 +2926,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               _prefDecodeMode = mode;
             });
           }
-          if (_backend == KotvEmbedBackend.mpv && kotvMediaKitNeedsNewPlayer(prev, mode)) {
+          if (_backend == KotvEmbedBackend.mpv &&
+              kotvMediaKitNeedsNewPlayer(
+                _mpvOpts.copyWith(decodeMode: prev),
+                _mpvOpts.copyWith(decodeMode: mode),
+              )) {
             unawaited(_reopenWithNewMpvPlayer());
           }
         },
@@ -3228,7 +3235,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       setState(() => _ambientOn = v.toLowerCase() == 'true');
     }
     if (k == 'mpvDirect') {
-      setState(() => _mpvOpts = kotvApplyDirectOutput(_playback, _mpvOpts, kotvSettingsFlag(v, def: true)));
+      final prev = _mpvOpts;
+      setState(() => _mpvOpts = _mpvOpts.copyWith(direct: kotvSettingsFlag(v, def: true)));
+      if (_backend == KotvEmbedBackend.mpv && kotvMediaKitNeedsNewPlayer(prev, _mpvOpts)) {
+        unawaited(_reopenWithNewMpvPlayer());
+      }
     }
     if (k == 'playerBackground') {
       final bg = v.trim().toLowerCase();

@@ -104,9 +104,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setDecodeMode(String mode);
 
   /// 硬解直出开关（关掉一律硬解后拷贝）；目前只有 Win7 的内置 MPV 有，其它后端不显示。
+  /// 切换要换播放器（见 [kotvMediaKitNeedsNewPlayer]），由页面按新选项重建。
   bool get supportsDirectOutput => false;
   bool get directOutput => true;
-  Future<void> setDirectOutput(bool on) async {}
 
   /// Android Exo / 原生 MPV / FVP：Surface / Texture；其它后端忽略。
   Future<void> setRenderMode(String mode) async {}

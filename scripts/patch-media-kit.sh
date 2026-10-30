@@ -50,7 +50,8 @@
 # Win7 线（KOTV_WIN7=1）：media_kit_video 的 ANGLE 依次试 D3D11 → D3D11 9_3 → D3D9 → WARP。
 # Win7 没有 D3D11VA，mpv 只能用 DXVA2；DXVA2 解出的 D3D9 表面要零拷贝交给 ANGLE（dxva2-egl），
 # 该路径按 ANGLE 的 D3D9Ex 后端设计；Win7 实测在 D3D11 后端上挂不上，播放信息只显示 dxva2-copy。
-# 补丁把 D3D9 提到最前，其余顺序不变。D3D9 后端只有 GLES 2.0，media_kit 本来就只要 2.0。
+# 但 D3D9 后端只有 GLES 2.0，不直出时渲染不如 D3D11。补丁让顺序由进程环境变量 KOTV_ANGLE_BACKEND
+# 决定：前端在 Win7 开「硬解直出」时建播放器前设 d3d9（D3D9 提到最前），关掉时设 d3d11（保持原顺序）。
 #
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
@@ -1555,7 +1556,7 @@ old = """      display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
         }
       }
 """
-new = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): D3D9Ex first so mpv's
+patched_d3d9_first = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): D3D9Ex first so mpv's
       // dxva2-egl interop can share DXVA2 surfaces with ANGLE.
       const EGLint* attributes[] = {
           kD3D9DisplayAttributes,
@@ -1575,16 +1576,51 @@ new = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): D3D9Ex first so
         FAIL("eglGetPlatformDisplayEXT");
       }
 """
-if "KOTV patch (scripts/patch-media-kit.sh, Win7)" in text:
-    print(f"ok media_kit_video ({root.name}) ANGLE D3D9 first already patched")
+new = """      // KOTV patch (scripts/patch-media-kit.sh, Win7): KOTV_ANGLE_BACKEND=d3d9
+      // puts D3D9Ex first so mpv's dxva2-egl interop can share DXVA2 surfaces
+      // with ANGLE (hardware-decode direct output); otherwise keep the stock
+      // order, D3D11 first.
+      char backend[8] = {};
+      GetEnvironmentVariableA("KOTV_ANGLE_BACKEND", backend, sizeof(backend));
+      const EGLint* d3d9_first[] = {
+          kD3D9DisplayAttributes,
+          kD3D11DisplayAttributes,
+          kD3D11_9_3DisplayAttributes,
+          kWrapDisplayAttributes,
+      };
+      const EGLint* d3d11_first[] = {
+          kD3D11DisplayAttributes,
+          kD3D11_9_3DisplayAttributes,
+          kD3D9DisplayAttributes,
+          kWrapDisplayAttributes,
+      };
+      const EGLint* const* attributes =
+          lstrcmpiA(backend, "d3d9") == 0 ? d3d9_first : d3d11_first;
+      for (int i = 0; i < 4; i++) {
+        display_ = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
+                                            EGL_DEFAULT_DISPLAY, attributes[i]);
+        if (eglInitialize(display_, 0, 0) == EGL_TRUE) {
+          break;
+        }
+        display_ = EGL_NO_DISPLAY;
+      }
+      if (display_ == EGL_NO_DISPLAY) {
+        FAIL("eglGetPlatformDisplayEXT");
+      }
+"""
+if "KOTV_ANGLE_BACKEND" in text:
+    print(f"ok media_kit_video ({root.name}) ANGLE backend by KOTV_ANGLE_BACKEND already patched")
     sys.exit(0)
-if text.count(old) != 1:
-    print(
-        f"ERROR: media_kit_video ({root.name}) ANGLE display order anchor missing; "
-        "upstream changed — update scripts/patch-media-kit.sh",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-cc.write_text(text.replace(old, new, 1), encoding="utf-8")
-print(f"patched media_kit_video ({root.name}): ANGLE D3D9 first")
+# 上一版补丁写死 D3D9 优先；pub 缓存里可能还是它，一并换成按环境变量选。
+for anchor in (patched_d3d9_first, old):
+    if text.count(anchor) == 1:
+        cc.write_text(text.replace(anchor, new, 1), encoding="utf-8")
+        print(f"patched media_kit_video ({root.name}): ANGLE backend by KOTV_ANGLE_BACKEND")
+        sys.exit(0)
+print(
+    f"ERROR: media_kit_video ({root.name}) ANGLE display order anchor missing; "
+    "upstream changed — update scripts/patch-media-kit.sh",
+    file=sys.stderr,
+)
+sys.exit(1)
 PY

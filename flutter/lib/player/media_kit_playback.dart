@@ -5,6 +5,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import 'buffer_budget.dart';
 import 'drm_opts.dart';
+import '../util/kotv_io.dart' show kotvSetProcessEnv;
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 import 'mpv_hls_timeline.dart';
@@ -49,16 +50,11 @@ class MediaKitPlayback extends KotvPlayback {
   /// [live]=true：构造期就关 cache-pause，并且不打开磁盘缓存。字节上限与点播相同。
   MediaKitPlayback(
     this.player, {
-    VideoController? controller,
     KotvMpvOpts? opts,
     bool live = false,
   })  : _opts = opts ?? const KotvMpvOpts(),
         _live = live,
-        controller = controller ??
-            VideoController(
-              player,
-              configuration: (opts ?? const KotvMpvOpts()).videoControllerConfiguration(),
-            ) {
+        controller = _newVideoController(player, opts ?? const KotvMpvOpts()) {
     _subs.add(player.stream.playing.listen((_) => notifyListeners()));
     // 进度走 positionStream 直通 player.stream.position；勿每帧 notifyListeners。
     _subs.add(player.stream.duration.listen((_) => notifyListeners()));
@@ -223,7 +219,8 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   Future<void> applyOpts(KotvMpvOpts opts) async {
-    _opts = opts;
+    // Win7 的直出与否跟着建控制器时选定的 ANGLE 后端走，改它要换 Player（见 [kotvMediaKitNeedsNewPlayer]）。
+    _opts = kotvIsWindows7() ? opts.copyWith(direct: _opts.direct) : opts;
     await _opts.applyAfterAttach(player, live: _live);
     notifyListeners();
   }
@@ -506,10 +503,13 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   bool get directOutput => _opts.direct;
 
-  @override
-  Future<void> setDirectOutput(bool on) async {
-    _opts = _opts.copyWith(direct: on);
-    await applyOpts(_opts);
+  /// Win7：ANGLE 后端在建 VideoController 时选定，之后改不了；media_kit_video 的补丁读这个环境变量。
+  /// 硬解直出用 D3D9（dxva2 解码面可零拷贝交给 ANGLE），关掉用 D3D11（GLES 3，渲染兼容性更好）。
+  static VideoController _newVideoController(Player player, KotvMpvOpts opts) {
+    if (kotvIsWindows7()) {
+      kotvSetProcessEnv('KOTV_ANGLE_BACKEND', opts.direct ? 'd3d9' : 'd3d11');
+    }
+    return VideoController(player, configuration: opts.videoControllerConfiguration());
   }
 
   @override

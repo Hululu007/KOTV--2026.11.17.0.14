@@ -42,6 +42,8 @@ dependencies:
   # 0.15.6 仍导出 query_selector.matches(Element, String)。0.15.7 删了这个函数，且 SDK 升到 ^3.6.0，Win7 的 Dart 3.3.4 解不开。
   html: 0.15.6
   cryptography: ^2.9.0
+  # Win7：建 VideoController 前写进程环境变量，选 media_kit_video 的 ANGLE 后端（Win7 线钉 2.1.3）。
+  ffi: ^2.1.3
 
 dependency_overrides:
   # 2.12.1 Messages.kt 重复声明 MessagesPigeonMethodCodec，Kotlin 编不过

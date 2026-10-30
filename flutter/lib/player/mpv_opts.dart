@@ -37,11 +37,10 @@ const kotvImageExts = '';
 /// | Vulkan | gpu-api=vulkan（设备支持时） | ❌（libmpv 渲染 API 由 media_kit 定为 OpenGL） |
 /// | 音频直通 | audio-spdif | ❌（不设 audio-spdif，音效照常写 af） |
 /// | AV3A | libmvcodec | 自带 FFmpeg+avs3a |
-/// 桌面/iOS media_kit：软解用 CPU 渲染、其它用 GPU 渲染，在创建 VideoController 时定死
-/// （同一 Player 再建控制器拿到的仍是旧的）。软解与非软解之间切换须换一个 Player。
-bool kotvMediaKitNeedsNewPlayer(String fromDecode, String toDecode) =>
-    !kotvIsAndroid() &&
-    KotvMpvOpts(decodeMode: fromDecode).soft != KotvMpvOpts(decodeMode: toDecode).soft;
+/// 桌面/iOS media_kit：下面两样在创建 VideoController 时定死（同一 Player 再建控制器拿到的仍是旧的），
+/// 变了须换一个 Player：软解用 CPU 渲染、其它用 GPU 渲染；Win7 硬解直出用 ANGLE 的 D3D9 后端，关掉用 D3D11。
+bool kotvMediaKitNeedsNewPlayer(KotvMpvOpts from, KotvMpvOpts to) =>
+    !kotvIsAndroid() && (from.soft != to.soft || (kotvIsWindows7() && from.direct != to.direct));
 
 class KotvMpvOpts {
   const KotvMpvOpts({
@@ -80,7 +79,7 @@ class KotvMpvOpts {
   final bool tlsVerify;
   final bool audioPassThrough;
   final bool diskCache;
-  /// Win7 硬解直出（dxva2）；关掉一律硬解后拷贝（dxva2-copy），给名单外画面异常的显卡用。
+  /// Win7 硬解直出：开 = ANGLE 用 D3D9 后端 + dxva2 零拷贝；关 = ANGLE 用 D3D11 后端 + 硬解后拷贝（dxva2-copy）。
   final bool direct;
   /// 杜比视界策略：0=AUTO 1=假定支持 2=假定不支持（与 exoDolbyVision 枚举一致）。
   final int dolbyVisionPolicy;
@@ -238,9 +237,11 @@ class KotvMpvOpts {
       // media_kit 在 Windows 用 ANGLE(EGL) 给 libmpv 提供 OpenGL。直出靠 libmpv 编进的
       // egl-angle 互通（d3d11-egl / dxva2-egl）；互通建不起来（驱动/ANGLE 不支持）时
       // mpv 跳到下一项硬解后拷贝，仍不行才软解。
-      // Win7：仅 dxva2。d3d11va 依赖 ID3D11VideoDevice（MSDN 最低 Win8，装了 KB2670838 也没有），摸到会卡 UI。
-      // dxva2 直出靠驱动把解码面转成 RGB，Win7 的 mpv 补丁在下列情况自动改走 dxva2-copy，否则会绿屏：
-      // 10 位（P010）片源；Intel Haswell/Broadwell（无整块 H265 硬解，驱动用混合解码）上的 H265。
+      // Win7：仅 dxva2。d3d11va 依赖 ID3D11VideoDevice（MSDN 最低 Win8，装了 KB2670838 也没有），摸到会卡 UI，
+      // 所以也不用 auto-copy（它会先试 d3d11va-copy）。
+      // 直出时 ANGLE 用 D3D9 后端，dxva2 靠驱动把解码面转成 RGB，Win7 的 mpv 补丁在下列情况自动改走
+      // dxva2-copy，否则会绿屏：10 位（P010）片源；Intel Haswell/Broadwell（驱动用混合解码）上的 H265。
+      // 关掉直出时 ANGLE 用 D3D11 后端，只硬解后拷贝（后端在建播放器时选，见 MediaKitPlayback）。
       if (kotvIsWindows7()) {
         final chain = direct ? 'dxva2,dxva2-copy' : 'dxva2-copy';
         return hard ? chain : '$chain,no';

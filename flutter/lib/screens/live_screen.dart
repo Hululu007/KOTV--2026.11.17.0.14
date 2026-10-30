@@ -2452,12 +2452,18 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   bool get _showDirectOutput => kotvShowDirectOutput(_playback, _decodeMode);
 
+  /// 切换硬解直出：Win7 上换 ANGLE 后端，须换 Player 并按当前进度重开。
   Future<void> _toggleDirectOutput() async {
-    final on = !_playback.directOutput;
-    setState(() => _mpvOpts = kotvApplyDirectOutput(_playback, _mpvOpts, on));
+    final prev = _mpvOpts;
+    final pos = _playUrl.isNotEmpty ? _playback.position : Duration.zero;
+    setState(() => _mpvOpts = _mpvOpts.copyWith(direct: !_mpvOpts.direct));
     try {
-      await _persistLiveSetting('mpvDirect', on ? 'true' : 'false');
+      await _persistLiveSetting('mpvDirect', _mpvOpts.direct ? 'true' : 'false');
     } catch (_) {}
+    if (_backend == KotvEmbedBackend.mpv && kotvMediaKitNeedsNewPlayer(prev, _mpvOpts)) {
+      await _releaseMpv();
+      await _reopenCurrent(pos);
+    }
   }
 
   Future<void> _pickDecode() async {
@@ -2473,7 +2479,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _decodeMode = v;
       _prefDecodeMode = v;
     });
-    if (_backend == KotvEmbedBackend.mpv && kotvMediaKitNeedsNewPlayer(prev, v)) {
+    if (_backend == KotvEmbedBackend.mpv &&
+        kotvMediaKitNeedsNewPlayer(
+          _mpvOpts.copyWith(decodeMode: prev),
+          _mpvOpts.copyWith(decodeMode: v),
+        )) {
       // 下面按当前进度重开时由 [_playback] 用新的解码方式建 Player。
       await _releaseMpv();
     } else {
@@ -2482,19 +2492,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     try {
       await _persistLiveSetting('playerDecode', v);
     } catch (_) {}
-    if (_playUrl.isNotEmpty) {
-      // 直播/回看均 live 起播；进度经 startAt 在首次 play 前恢复。
-      final serial = ++_playSerial;
-      await _openLiveUrl(
-        _playUrl,
-        serial: serial,
-        directUrl: _playDirect,
-        headers: _playHeaders,
-        drm: _playDrm,
-        live: true,
-        startAt: pos > Duration.zero ? pos : Duration.zero,
-      );
-    }
+    await _reopenCurrent(pos);
+  }
+
+  /// 按当前进度重开正在播的直播或回看（都按 live 起播；进度经 startAt 在首次 play 前恢复）。
+  Future<void> _reopenCurrent(Duration pos) async {
+    if (_playUrl.isEmpty) return;
+    final serial = ++_playSerial;
+    await _openLiveUrl(
+      _playUrl,
+      serial: serial,
+      directUrl: _playDirect,
+      headers: _playHeaders,
+      drm: _playDrm,
+      live: true,
+      startAt: pos > Duration.zero ? pos : Duration.zero,
+    );
   }
 
   Future<void> _pickRender() async {
