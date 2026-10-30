@@ -20,8 +20,6 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -196,11 +194,8 @@ class KotvEngineService : Service() {
     if (!starting.compareAndSet(false, true)) return
     try {
       stopEngine()
-      // 自己的旧引擎已结束，端口上仍有程序监听就是别的程序占着（回应与否都一样），拉起也绑不上。
-      if (portStillListening()) {
-        Log.w(TAG, ":9978 held by another app; engine not started")
-        return
-      }
+      killStrayEngines()
+      portTaken = false
       val so = resolveEngineSo() ?: run {
         Log.e(TAG, "libkotv_engine.so not found")
         return
@@ -249,6 +244,12 @@ class KotvEngineService : Service() {
         if (engineProcess === proc) {
           engineProcess = null
         }
+        // 端口被别的程序占着：重拉也绑不上，等前端重试时再拉。
+        if (code == KotvEngineDefaults.EXIT_PORT_IN_USE) {
+          portTaken = true
+          Log.w(TAG, ":9978 taken by another app; not restarting")
+          return@thread
+        }
         // 服务还在则自动拉起（后台被杀后的自愈）
         if (running.get()) {
           Thread.sleep(800)
@@ -288,6 +289,37 @@ class KotvEngineService : Service() {
         p.destroyForcibly()
       }
     } catch (_: Throwable) {
+    }
+    // 等它真正退出、放开端口；否则新引擎会以「端口被占」退出。
+    repeat(15) {
+      if (!processAlive(p)) return
+      Thread.sleep(100)
+    }
+  }
+
+  /**
+   * 结束本应用残留的引擎进程（服务重启后丢了句柄的旧进程，可能卡住还占着端口），并等它们退出。
+   * /proc 只看得到同 UID 的进程，killProcess 也只对同 UID 生效。
+   */
+  private fun killStrayEngines() {
+    val self = android.os.Process.myPid()
+    fun strays(): List<Int> = File("/proc").listFiles().orEmpty().mapNotNull { dir ->
+      val pid = dir.name.toIntOrNull() ?: return@mapNotNull null
+      if (pid == self) return@mapNotNull null
+      val cmd = try {
+        File(dir, "cmdline").readText()
+      } catch (_: Throwable) {
+        return@mapNotNull null
+      }
+      pid.takeIf { cmd.contains("libkotv_engine.so") && !cmd.contains("-relax-nic") }
+    }
+    val left = strays()
+    if (left.isEmpty()) return
+    Log.w(TAG, "killing stray engine pids=$left")
+    left.forEach { android.os.Process.killProcess(it) }
+    repeat(15) {
+      if (strays().isEmpty()) return
+      Thread.sleep(100)
     }
   }
 
@@ -355,22 +387,6 @@ class KotvEngineService : Service() {
     }
   }
 
-  /** :9978 上是否仍有程序在监听；刚结束的旧引擎给一秒释放端口。 */
-  private fun portStillListening(): Boolean {
-    repeat(4) {
-      if (!portListening()) return false
-      Thread.sleep(250)
-    }
-    return portListening()
-  }
-
-  private fun portListening(): Boolean = try {
-    Socket().use { it.connect(InetSocketAddress("127.0.0.1", KotvEngineDefaults.PORT), 500) }
-    true
-  } catch (_: Throwable) {
-    false
-  }
-
   /** :9978 上是本引擎在答（KOTV 健康检查 ok）。 */
   private fun engineHealthy(): Boolean {
     return try {
@@ -400,8 +416,15 @@ class KotvEngineService : Service() {
 
     private val running = AtomicBoolean(false)
 
+    /** 引擎因 :9978 被别的程序占着退出过；前端经 engineState 读取，下次拉起前清掉。 */
+    @Volatile
+    var portTaken = false
+      private set
+
     fun start(context: Context) {
       running.set(true)
+      // 前端重试时立刻清掉上一次的结果，免得在新引擎起来前读到旧的「被占」。
+      portTaken = false
       val i = Intent(context, KotvEngineService::class.java).setAction(ACTION_START)
       ContextCompat.startForegroundService(context, i)
     }

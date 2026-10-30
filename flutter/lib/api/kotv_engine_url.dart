@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 /// 本机引擎默认端口（与 Go `localproxy.DefaultPort` 一致）。
 const kotvDefaultEnginePort = 9978;
 
+/// 引擎因 [kotvDefaultEnginePort] 被别的程序占着而退出时的退出码；引擎（Go）与安卓引擎服务用同一个数。
+const kotvEnginePortInUseExit = 98;
+
 /// 客户端版本（与 `update.CurrentVersion`、pubspec 同步）。引擎尚未返回 version 时也用它显示。
 const kotvClientVersion = '0.2.3';
 

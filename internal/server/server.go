@@ -115,9 +115,9 @@ func (s *Server) Start() error {
 	remote, _ := fs.Sub(remoteFS, "resources")
 	mux := s.buildMux(remote)
 
-	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", localproxy.DefaultPort))
+	listeners, err := listenEngine(localproxy.DefaultPort)
 	if err != nil {
-		return fmt.Errorf("无法启动 HTTP 服务: %w", err)
+		return err
 	}
 	s.mu.Lock()
 	s.port = localproxy.DefaultPort
@@ -128,12 +128,14 @@ func (s *Server) Start() error {
 	spider.SetLocalProxyPort(localproxy.DefaultPort)
 
 	s.http = &http.Server{Handler: cors(s.gate(mux))}
-	go func() {
-		log.Printf("HTTP 遥控服务已启动: http://127.0.0.1:%d", s.port)
-		if err := s.http.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Printf("HTTP 服务异常: %v", err)
-		}
-	}()
+	log.Printf("HTTP 遥控服务已启动: http://127.0.0.1:%d", s.port)
+	for _, ln := range listeners {
+		go func() {
+			if err := s.http.Serve(ln); err != nil && err != http.ErrServerClosed {
+				log.Printf("HTTP 服务异常（%s）: %v", ln.Addr(), err)
+			}
+		}()
+	}
 	return nil
 }
 

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"log"
 	"os"
 	"os/signal"
@@ -10,8 +11,10 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/app"
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/nicrelax"
 	"github.com/bobo/KOTV/internal/remote"
+	"github.com/bobo/KOTV/internal/server"
 	"github.com/bobo/KOTV/internal/util"
 
 	// 安卓 sidecar 无系统 zoneinfo；嵌入后 KOTV_TZ / Live.timeZone 的 IANA 名才能生效。
@@ -29,6 +32,10 @@ func main() {
 	remote.WireFlutterBridge()
 	a, err := app.New()
 	if err != nil {
+		if errors.Is(err, server.ErrPortInUse) {
+			log.Printf("引擎没有启动: %v", err)
+			os.Exit(localproxy.ExitPortInUse)
+		}
 		log.Fatal(err)
 	}
 	dev := util.DeviceLocation()

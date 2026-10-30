@@ -12,6 +12,10 @@ import (
 
 const DefaultPort = 9978
 
+// ExitPortInUse 引擎因 DefaultPort 被别的程序占着而退出时的退出码。
+// 前端（Flutter 与安卓引擎服务）按这个值判定「端口被占」，不再自动重拉；两边写的是同一个数。
+const ExitPortInUse = 98
+
 // DefaultBridgePort 安卓 SpiderService / JAR·PY 侧车端口（与引擎 DefaultPort 分离）。
 const DefaultBridgePort = 9979
 

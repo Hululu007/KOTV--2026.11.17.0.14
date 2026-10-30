@@ -125,6 +125,9 @@ class MainActivity : FlutterActivity() {
               result.error("engine_start", t.message ?: t.toString(), null)
             }
           }
+          "engineState" -> {
+            result.success(mapOf("portTaken" to KotvEngineService.portTaken))
+          }
           "stopEngine" -> {
             try {
               KotvEngineService.stop(this)
