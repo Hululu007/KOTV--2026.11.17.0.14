@@ -659,7 +659,10 @@ class NativeMpvPlayback extends KotvPlayback {
   Future<void> setDecodeMode(String mode) async {
     _opts = _opts.copyWith(decodeMode: mode);
     try {
-      await _ch.invokeMethod('setDecode', {'decode': _opts.hwdecValue()});
+      await _ch.invokeMethod('setDecode', {
+        'decode': _opts.hwdecValue(),
+        'props': _opts.propertyMap(live: _live),
+      });
     } catch (_) {}
   }
 

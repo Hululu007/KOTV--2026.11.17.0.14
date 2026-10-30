@@ -307,10 +307,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "open" -> {
         val url = call.argument<String>("url") ?: ""
-        @Suppress("UNCHECKED_CAST")
-        val headers = (call.argument<Map<*, *>>("headers") ?: emptyMap<Any, Any>())
-          .entries
-          .associate { "${it.key}" to "${it.value}" }
+        val headers = stringMapArg(call, "headers")
         livePlayback = call.argument<Boolean>("live") == true
         ingestPlayerArgs(call)
         ingestEqualizerArgs(call)
@@ -319,10 +316,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
         pendingStartAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L } ?: 0L
         val forceHls = call.argument<Boolean>("forceHls") == true
-        @Suppress("UNCHECKED_CAST")
-        val props = (call.argument<Map<*, *>>("props") ?: emptyMap<Any, Any>())
-          .entries
-          .associate { "${it.key}" to "${it.value}" }
+        val props = stringMapArg(call, "props")
         main.post {
           try {
             surfaceHost?.let { host ->
@@ -469,10 +463,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "setDecode" -> {
         decodeMode = call.argument<String>("decode") ?: decodeMode
+        val props = stringMapArg(call, "props")
         main.post {
           try {
             if (created.get() && createdDirect != wantDirectOutput()) {
-              ensurePlayerAndReload()
+              ensurePlayerAndReload(props)
             } else if (created.get()) {
               MPVLib.setPropertyString("hwdec", playerHwdec(decodeMode))
             }
@@ -522,10 +517,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "setOpts" -> {
         ingestPlayerArgs(call)
         ingestEqualizerArgs(call)
-        @Suppress("UNCHECKED_CAST")
-        val props = (call.argument<Map<*, *>>("props") ?: emptyMap<Any, Any>())
-          .entries
-          .associate { "${it.key}" to "${it.value}" }
+        val props = stringMapArg(call, "props")
         main.post {
           try {
             ensurePlayerAndReload(props)
@@ -1353,6 +1345,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /** create / open / setOpts 共用的播放选项。 */
+  /** 通道参数里的字典（headers / props）转成字符串表；没传为空表。 */
+  private fun stringMapArg(call: MethodCall, key: String): Map<String, String> =
+    (call.argument<Map<*, *>>(key) ?: emptyMap<Any, Any>()).entries.associate { "${it.key}" to "${it.value}" }
+
   private fun ingestPlayerArgs(call: MethodCall) {
     decodeMode = call.argument<String>("decode") ?: decodeMode
     gpuNext = call.argument<Boolean>("gpuNext") == true

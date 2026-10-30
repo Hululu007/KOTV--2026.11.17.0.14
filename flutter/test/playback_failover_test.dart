@@ -4,7 +4,7 @@ import 'package:kotv/player/playback_failover.dart';
 
 void main() {
   test('hard falls back to auto then next player restores settings decode', () {
-    final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'hard');
+    final f = KotvPlaybackFailover(playerVal: 'innie#fvp', decodeMode: 'hard');
     f.markAttempt();
     final step = f.nextStep();
     expect(step, isNotNull);
@@ -12,6 +12,16 @@ void main() {
     expect(step.decodeMode, 'auto');
     expect(f.decodeMode, 'auto');
 
+    final next = f.nextStep();
+    expect(next, isNotNull);
+    expect(next!.kind, KotvFailoverKind.nextPlayer);
+    expect(next.playerVal, 'innie#mpv');
+    expect(next.decodeMode, 'hard');
+  });
+
+  test('mpv hard goes straight to the next player', () {
+    final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'hard');
+    f.markAttempt();
     final next = f.nextStep();
     expect(next, isNotNull);
     expect(next!.kind, KotvFailoverKind.nextPlayer);

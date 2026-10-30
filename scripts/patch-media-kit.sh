@@ -158,6 +158,7 @@ _kotv_for_target() {
   return 1
 }
 
+# media_kit（Dart，各平台）
 _kotv_patch_py <<'PY'
 import re
 
@@ -262,7 +263,7 @@ if "'cache-on-disk'" in check:
 print(f"ok media_kit ({version}) patches applied ({target})")
 PY
 
-# fvp：Dart 部分各平台共用。
+# fvp（Dart，各平台）
 _kotv_patch_py <<'PY'
 import re
 
@@ -800,6 +801,7 @@ if "releasePlayer(nativeHandle)" not in player_check or "Platform.isAndroid" not
 print(f"ok fvp ({fvp_version}) patches applied ({player_dart})")
 PY
 
+# fvp Windows 插件
 if _kotv_for_target windows; then
 _kotv_patch_py <<'PY'
 fvp_root = pkg_or_skip("fvp")
@@ -992,6 +994,7 @@ if win_check.count("D3D11CreateDevice(") != 1:
 PY
 fi
 
+# fvp 安卓插件
 if _kotv_for_target android; then
 _kotv_patch_py <<'PY'
 fvp_root = pkg_or_skip("fvp")
@@ -1244,6 +1247,7 @@ if "nativeReleasePlayer" not in java_check or 'equals("ReleasePlayer")' not in j
 PY
 fi
 
+# window_manager（Windows）
 if _kotv_for_target windows; then
 _kotv_patch_py <<'PY'
 wm_root = pkg_or_fail("window_manager")
@@ -1484,6 +1488,7 @@ if plugin_leave_old in plugin_check:
 PY
 fi
 
+# video_player_avfoundation（iOS / macOS）
 if _kotv_for_target ios macos; then
 _kotv_patch_py <<'PY'
 root = pkg_or_skip("video_player_avfoundation")
@@ -1535,7 +1540,7 @@ print(f"patched avfoundation mime hint ({swift})")
 PY
 fi
 
-# Win7 线只出 Windows 包。
+# media_kit_video（Win7 线，只出 Windows 包）
 [[ "${KOTV_WIN7:-}" == "1" ]] || exit 0
 
 _kotv_patch_py <<'PY'
