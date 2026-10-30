@@ -90,7 +90,7 @@ flutter config --no-enable-swift-package-manager || true
 # shellcheck source=kotv-fvp-deps.sh
 source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
-"$ROOT/scripts/flutter-pub-get.sh"
+KOTV_FLUTTER_TARGET=macos "$ROOT/scripts/flutter-pub-get.sh"
 if [[ "$KOTV_MACOS_NO_FVP" == "1" ]]; then
   "$ROOT/scripts/kotv-macos-exclude-fvp.sh"
   rm -rf "$ROOT/flutter/macos/Pods" "$ROOT/flutter/macos/Podfile.lock"

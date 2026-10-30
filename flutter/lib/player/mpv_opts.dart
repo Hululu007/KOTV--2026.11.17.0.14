@@ -32,13 +32,13 @@ const kotvImageExts = '';
 /// ## 平台能力
 /// | 选项 | Android 原生 | 桌面 media_kit |
 /// |------|-------------|----------------|
-/// | hwdec | 硬=直出；自动=直出硬解优先再软解 | 直出优先；Windows 直出不成退到硬解后拷贝 |
+/// | hwdec | 硬=直出；自动=直出硬解优先再软解 | Windows 交给 mpv 的 auto；Win7 开「硬解直出」时 dxva2 直出 |
 /// | gpu-next | vo=gpu-next（Surface） | ❌（Texture/libmpv） |
 /// | Vulkan | gpu-api=vulkan（设备支持时） | ❌（libmpv 渲染 API 由 media_kit 定为 OpenGL） |
 /// | 音频直通 | audio-spdif | ❌（不设 audio-spdif，音效照常写 af） |
 /// | AV3A | libmvcodec | 自带 FFmpeg+avs3a |
 /// 桌面/iOS media_kit：下面两样在创建 VideoController 时定死（同一 Player 再建控制器拿到的仍是旧的），
-/// 变了须换一个 Player：软解用 CPU 渲染、其它用 GPU 渲染；Win7 硬解直出用 ANGLE 的 D3D9 后端，关掉用 D3D11。
+/// 变了须换一个 Player：软解用 CPU 渲染、其它用 GPU 渲染；Win7 开硬解直出用 ANGLE 的 D3D9 后端，关掉用 D3D11。
 bool kotvMediaKitNeedsNewPlayer(KotvMpvOpts from, KotvMpvOpts to) =>
     !kotvIsAndroid() && (from.soft != to.soft || (kotvIsWindows7() && from.direct != to.direct));
 
@@ -51,7 +51,7 @@ class KotvMpvOpts {
     this.tlsVerify = true,
     this.audioPassThrough = true,
     this.diskCache = false,
-    this.direct = true,
+    this.direct = false,
     this.dolbyVisionPolicy = 0,
     this.preferredTextLangs = '',
     this.videoEq = KotvVideoEq.off,
@@ -79,7 +79,7 @@ class KotvMpvOpts {
   final bool tlsVerify;
   final bool audioPassThrough;
   final bool diskCache;
-  /// Win7 硬解直出：开 = ANGLE 用 D3D9 后端 + dxva2 零拷贝；关 = ANGLE 用 D3D11 后端 + 硬解后拷贝（dxva2-copy）。
+  /// Win7 硬解直出（默认关）：开 = ANGLE 用 D3D9 后端 + dxva2 零拷贝；关 = ANGLE 用 D3D11 后端，解码交给 mpv 的 auto。
   final bool direct;
   /// 杜比视界策略：0=AUTO 1=假定支持 2=假定不支持（与 exoDolbyVision 枚举一致）。
   final int dolbyVisionPolicy;
@@ -130,7 +130,7 @@ class KotvMpvOpts {
       tlsVerify: tlsVerify,
       audioPassThrough: audioPassThrough,
       diskCache: diskCache,
-      direct: kotvSettingsFlag(settings['mpvDirect'] ?? 'true', def: true),
+      direct: kotvSettingsFlag(settings['mpvDirect']),
       dolbyVisionPolicy: dolby,
       preferredTextLangs: preferredTextLangs,
       videoEq: KotvVideoEq.fromSettings(settings),
@@ -225,8 +225,9 @@ class KotvMpvOpts {
 
   /// 供 setProperty / VideoController 使用的 hwdec 值。
   ///
-  /// 「自动」= 优先硬解，失败再软解；UI 仍显示自动。不用 `auto` / `auto-safe`，按平台写死链。
-  /// Windows 直出优先、退到硬解后拷贝（见下）；Android / macOS / Linux 为直出，iOS 为 videotoolbox-copy。
+  /// 「自动」= 优先硬解，失败再软解；UI 仍显示自动。
+  /// Windows 用 mpv 的 auto（Win7 开直出时除外，见下）；其它平台按平台写死链：
+  /// Android / macOS / Linux 为直出，iOS 为 videotoolbox-copy。
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {
@@ -234,22 +235,17 @@ class KotvMpvOpts {
       return hard ? 'mediacodec' : 'mediacodec,no';
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      // media_kit 在 Windows 用 ANGLE(EGL) 给 libmpv 提供 OpenGL。直出靠 libmpv 编进的
-      // egl-angle 互通（d3d11-egl / dxva2-egl）；互通建不起来（驱动/ANGLE 不支持）时
-      // mpv 跳到下一项硬解后拷贝，仍不行才软解。
-      // Win7：仅 dxva2。d3d11va 依赖 ID3D11VideoDevice（MSDN 最低 Win8，装了 KB2670838 也没有），摸到会卡 UI，
-      // 所以也不用 auto-copy（它会先试 d3d11va-copy）。
-      // 直出时 ANGLE 用 D3D9 后端，dxva2 靠驱动把解码面转成 RGB，Win7 的 mpv 补丁在下列情况自动改走
-      // dxva2-copy，否则会绿屏：10 位（P010）片源；Intel Haswell/Broadwell（驱动用混合解码）上的 H265。
-      // 关掉直出时 ANGLE 用 D3D11 后端，只硬解后拷贝。后端由 media_kit_video 补丁在建播放器时按这里的 hwdec 选：
-      // 列表里有 dxva2 就 D3D9 优先，否则 D3D11 优先（见 scripts/patch-media-kit.sh）。
-      if (kotvIsWindows7()) {
-        final chain = direct ? 'dxva2,dxva2-copy' : 'dxva2-copy';
-        return hard ? chain : '$chain,no';
+      // Win7 开「硬解直出」：dxva2 解码面经 dxva2-egl 交给 ANGLE，须用 ANGLE 的 D3D9 后端。
+      // Win7 的 mpv 补丁在下列情况自动改走 dxva2-copy，否则会绿屏：10 位（P010）片源；
+      // Intel Haswell/Broadwell（驱动用混合解码）上的 H265。
+      // ANGLE 后端由 media_kit_video 补丁在建播放器时按这里的 hwdec 选：列表里有 dxva2 就 D3D9 优先，
+      // 否则保持 D3D11 优先（见 scripts/patch-media-kit.sh）。
+      if (kotvIsWindows7() && direct) {
+        return hard ? 'dxva2,dxva2-copy' : 'dxva2,dxva2-copy,no';
       }
-      return hard
-          ? 'd3d11va,d3d11va-copy,dxva2-copy'
-          : 'd3d11va,d3d11va-copy,dxva2-copy,no';
+      // 其余情况交给 mpv 的 auto：依次试 d3d11va、d3d11va-copy、dxva2-copy，都不行再软解。
+      // Win7 没有 D3D11 视频接口（ID3D11VideoDevice 最低 Win8），前两项建不起来，落到 dxva2-copy。
+      return 'auto';
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       // 画面经 OpenGL ES 画进 FBO。直出 videotoolbox 的帧进不了这块缓冲，只能拷贝后再画。

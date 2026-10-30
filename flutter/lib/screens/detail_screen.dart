@@ -3236,7 +3236,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     if (k == 'mpvDirect') {
       final prev = _mpvOpts;
-      setState(() => _mpvOpts = _mpvOpts.copyWith(direct: kotvSettingsFlag(v, def: true)));
+      setState(() => _mpvOpts = _mpvOpts.copyWith(direct: kotvSettingsFlag(v)));
       if (_backend == KotvEmbedBackend.mpv && kotvMediaKitNeedsNewPlayer(prev, _mpvOpts)) {
         unawaited(_reopenWithNewMpvPlayer());
       }

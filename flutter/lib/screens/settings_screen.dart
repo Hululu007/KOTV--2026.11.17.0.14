@@ -761,7 +761,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _showPlayerSubSheet(
       title: 'MPV 设置',
       buildChildren: (setSheet) {
-        final mpvDirect = kotvSettingsFlag(g('mpvDirect', 'true'), def: true);
+        final mpvDirect = kotvSettingsFlag(g('mpvDirect'));
         final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
         final mpvVulkan = g('mpvVulkan', 'false') == 'true';
         final mpvTlsVerify =
@@ -773,7 +773,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           if (showDirect)
             _sheetToggle(
               label: '硬解直出',
-              subtitle: '画面绿屏、花屏时关掉：改用 D3D11 渲染，硬解后拷贝',
+              subtitle: '开：D3D9 渲染，DXVA2 硬解直出；关：D3D11 渲染，解码由 MPV 自动选择',
               value: mpvDirect,
               onChanged: (v) async {
                 await _set('mpvDirect', v ? 'true' : 'false', msg: '重启播放生效');
@@ -2336,7 +2336,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         usesMpv && kotvIsWindows7() && !KotvMpvOpts(decodeMode: g('playerDecode', 'auto')).soft;
     // 「MPV 设置」副标题写这个平台里面真有的项。
     final mpvSheetHint = showMpvDirect
-        ? '硬解直出 ${kotvSettingsFlag(g('mpvDirect', 'true'), def: true) ? '开' : '关'} / 配置…'
+        ? '硬解直出 ${kotvSettingsFlag(g('mpvDirect')) ? '开' : '关'} / 配置…'
         : (kotvIsAndroid() ? 'Vulkan / 配置…' : '磁盘缓存 / 配置…');
     final canPickPlayer = kotvCanSwitchPlayer(live: false);
     final canPickLivePlayer = kotvCanSwitchPlayer(live: true);

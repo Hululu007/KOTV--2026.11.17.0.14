@@ -546,7 +546,7 @@ kotv_fetch_lua_tarball() {
   return 1
 }
 
-# 桌面 libmpv 须能在 Win7 加载：目标子系统 6.01，避免 import SHCORE.dll（Win8+）。
+# Win7 构建的 libmpv 须能在 Win7 加载：目标子系统 6.01，避免 import SHCORE.dll（Win8+）。
 kotv_windows_mpv_cflags() {
   printf '%s' "-D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -DNTDDI_VERSION=0x06010000"
 }
@@ -584,6 +584,13 @@ apply_mpv_win7_patches() {
     echo "ERROR: failed to apply mpv Win7 patches" >&2
     exit 1
   fi
+}
+
+# 非 Win7 构建：源码目录可能被 Win7 构建打过补丁，按补丁里的文件从 git 还原。
+revert_mpv_win7_patches() {
+  local patch="$ROOT/scripts/patches/mpv-win7-desktop.patch"
+  # shellcheck disable=SC2046
+  git checkout -q HEAD -- $(sed -n 's/^+++ \([^[:space:]]*\).*/\1/p' "$patch")
 }
 
 kotv_windows_path() {
@@ -1591,11 +1598,13 @@ EOF
     git -C mpv checkout -q "$MPV_COMMIT"
   fi
   cd mpv
-  if kotv_is_windows_build; then
+  if kotv_is_windows_build && kotv_is_mpv_win7_build; then
     apply_mpv_win7_patches
     export CFLAGS="${CFLAGS:-} $(kotv_windows_mpv_cflags)"
     export CXXFLAGS="${CXXFLAGS:-} $(kotv_windows_mpv_cflags)"
     export LDFLAGS="${LDFLAGS:-} -Wl,--subsystem,windows:6.01"
+  elif kotv_is_windows_build; then
+    revert_mpv_win7_patches
   fi
   rm -rf build
   # 禁止 meson 回退到系统 libavdevice（与 mdk 同进程时易堆损坏）。
@@ -1608,6 +1617,10 @@ EOF
     local mpv_vk=enabled
     local angle_inc
     angle_inc="$(ensure_windows_angle_headers)"
+    local winver=""
+    if kotv_is_mpv_win7_build; then
+      winver="'-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000',"
+    fi
     echo "==> mpv Windows: vulkan+d3d11+opengl(+plain-gl)+egl-angle+lua/osc (win7=$(kotv_is_mpv_win7_build && echo 1 || echo 0))"
     local -a mpv_extra=(
       -Dd3d11=enabled
@@ -1638,8 +1651,8 @@ EOF
     -Dcplugins=enabled \
       "${mpv_extra[@]}" \
       -Dlibavdevice=disabled \
-      -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG','-I$angle_inc']" \
-      -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']"
+      -Dc_args="[${winver}'-DNDEBUG','-I$angle_inc']" \
+      -Dcpp_args="[${winver}'-DNDEBUG']"
   else
     meson setup build \
       --native-file "$BUILD_DIR/meson-native-kotv.ini" \

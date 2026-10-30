@@ -69,7 +69,7 @@ cd "$ROOT/flutter"
 source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
 flutter config --enable-windows-desktop
-"$ROOT/scripts/flutter-pub-get.sh"
+KOTV_FLUTTER_TARGET=windows "$ROOT/scripts/flutter-pub-get.sh"
 kotv_ensure_mdk_windows_sdk
 flutter build windows --release
 

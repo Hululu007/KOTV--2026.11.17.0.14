@@ -193,7 +193,7 @@ main() {
   export KOTV_MDK_POD_PATH
 
   flutter config --no-enable-swift-package-manager || true
-  "$ROOT/scripts/flutter-pub-get.sh"
+  KOTV_FLUTTER_TARGET=ios "$ROOT/scripts/flutter-pub-get.sh"
 
   cd "$ROOT/flutter"
   kotv_flutter_asset_engines_hide

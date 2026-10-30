@@ -499,7 +499,7 @@ double _sliderBuffered(KotvPlayback player, double total) {
   return buf < pos ? pos : buf;
 }
 
-/// 「硬解直出」图标：开=闪电；关=划掉的闪电，此时硬解后拷贝再显示。点一下切换并落盘 `mpvDirect`。
+/// 「硬解直出」图标：开=闪电；关=划掉的闪电，此时解码由 mpv 自动选择。点一下切换并落盘 `mpvDirect`。
 _IconAct _directOutputIcon({
   required KotvPlayback player,
   required double size,
@@ -510,7 +510,7 @@ _IconAct _directOutputIcon({
   final on = player.directOutput;
   return _IconAct(
     icon: on ? Icons.flash_on : Icons.flash_off,
-    tip: on ? '硬解直出：开' : '硬解直出：关（硬解后拷贝）',
+    tip: on ? '硬解直出：开' : '硬解直出：关',
     size: size,
     focusNode: focusNode,
     scrollIntoView: scrollIntoView,

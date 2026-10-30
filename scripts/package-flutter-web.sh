@@ -54,7 +54,7 @@ echo "==> prepare runtime"
 
 echo "==> Flutter Web (base-href /)"
 # 与桌面/安卓同一套 pub get，否则 Web 会停在 pubspec.lock 里的旧 fvp。
-"$ROOT/scripts/flutter-pub-get.sh"
+KOTV_FLUTTER_TARGET=web "$ROOT/scripts/flutter-pub-get.sh"
 # shellcheck source=kotv-flutter-asset-engines.sh
 source "$ROOT/scripts/kotv-flutter-asset-engines.sh"
 kotv_flutter_asset_engines_hide

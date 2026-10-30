@@ -59,7 +59,7 @@ cd "$ROOT/flutter"
 # shellcheck source=kotv-fvp-deps.sh
 source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
-"$ROOT/scripts/flutter-pub-get.sh"
+KOTV_FLUTTER_TARGET=android "$ROOT/scripts/flutter-pub-get.sh"
 chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 echo "==> fetch Exo AV3A stack (webhtv nextlib + Media3 fongmi)"

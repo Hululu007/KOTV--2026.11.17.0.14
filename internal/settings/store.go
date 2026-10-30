@@ -87,7 +87,7 @@ const (
 	ExoDiskPreloadMs         Type = "exoDiskPreloadMs"
 	MpvTlsVerify             Type = "mpvTlsVerify"
 	MpvDiskCache             Type = "mpvDiskCache"
-	MpvDirect                Type = "mpvDirect" // Win7 硬解直出；关掉走硬解后拷贝
+	MpvDirect                Type = "mpvDirect" // Win7 硬解直出（默认关）；关掉时解码交给 mpv 的 auto
 	VideoEq                  Type = "videoEq"
 	AudioEq                  Type = "audioEq"
 	VideoBrightness          Type = "videoBrightness"
@@ -296,7 +296,7 @@ func defaultFile() file {
 			{ID: "exoDiskPreloadMs", Label: "Exo磁盘预读毫秒", Value: "120000"},
 			{ID: "mpvTlsVerify", Label: "MPV TLS校验", Value: "true"},
 			{ID: "mpvDiskCache", Label: "MPV磁盘缓存", Value: "false"},
-			{ID: "mpvDirect", Label: "MPV硬解直出", Value: "true"},
+			{ID: "mpvDirect", Label: "MPV硬解直出", Value: "false"},
 			{ID: "videoEq", Label: "画面调色", Value: "off"},
 			{ID: "audioEq", Label: "音频均衡", Value: "off"},
 			{ID: "videoBrightness", Label: "画面亮度", Value: "0"},
@@ -451,7 +451,7 @@ func Load() error {
 	ensureSettingLocked(ExoDiskPreloadMs, "Exo磁盘预读毫秒", "120000")
 	ensureSettingLocked(MpvTlsVerify, "MPV TLS校验", "true")
 	ensureSettingLocked(MpvDiskCache, "MPV磁盘缓存", "false")
-	ensureSettingLocked(MpvDirect, "MPV硬解直出", "true")
+	ensureSettingLocked(MpvDirect, "MPV硬解直出", "false")
 	ensureSettingLocked(VideoEq, "画面调色", "off")
 	ensureSettingLocked(AudioEq, "音频均衡", "off")
 	ensureSettingLocked(VideoBrightness, "画面亮度", "0")
