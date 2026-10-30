@@ -20,6 +20,8 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -187,21 +189,18 @@ class KotvEngineService : Service() {
 
   private fun ensureEngine() {
     relaxNicOffload()
-    when (probeEngine()) {
-      EnginePort.HEALTHY -> {
-        Log.i(TAG, "engine already healthy on :9978")
-        return
-      }
-      // 拉起也绑不上端口，退出后又会自动重拉，只会空转。
-      EnginePort.TAKEN -> {
-        Log.w(TAG, ":9978 taken by another app; engine not started")
-        return
-      }
-      EnginePort.DOWN -> {}
+    if (engineHealthy()) {
+      Log.i(TAG, "engine already healthy on :9978")
+      return
     }
     if (!starting.compareAndSet(false, true)) return
     try {
       stopEngine()
+      // 自己的旧引擎已结束，端口上仍有程序监听就是别的程序占着（回应与否都一样），拉起也绑不上。
+      if (portStillListening()) {
+        Log.w(TAG, ":9978 held by another app; engine not started")
+        return
+      }
       val so = resolveEngineSo() ?: run {
         Log.e(TAG, "libkotv_engine.so not found")
         return
@@ -258,7 +257,7 @@ class KotvEngineService : Service() {
       }
       // 等 HTTP 起来
       for (i in 0 until 40) {
-        if (probeEngine() == EnginePort.HEALTHY) {
+        if (engineHealthy()) {
           Log.i(TAG, "engine ready after spawn")
           return
         }
@@ -356,36 +355,39 @@ class KotvEngineService : Service() {
     }
   }
 
-  private enum class EnginePort { HEALTHY, TAKEN, DOWN }
+  /** :9978 上是否仍有程序在监听；刚结束的旧引擎给一秒释放端口。 */
+  private fun portStillListening(): Boolean {
+    repeat(4) {
+      if (!portListening()) return false
+      Thread.sleep(250)
+    }
+    return portListening()
+  }
 
-  /** 探 :9978：本引擎在听 / 有回应但不是本引擎（被别的程序占着）/ 没在听。 */
-  private fun probeEngine(): EnginePort {
-    val conn = try {
-      (URL("${KotvEngineDefaults.BASE_URL}/api/v1/health").openConnection() as HttpURLConnection).apply {
+  private fun portListening(): Boolean = try {
+    Socket().use { it.connect(InetSocketAddress("127.0.0.1", KotvEngineDefaults.PORT), 500) }
+    true
+  } catch (_: Throwable) {
+    false
+  }
+
+  /** :9978 上是本引擎在答（KOTV 健康检查 ok）。 */
+  private fun engineHealthy(): Boolean {
+    return try {
+      val conn = (URL("${KotvEngineDefaults.BASE_URL}/api/v1/health").openConnection() as HttpURLConnection).apply {
         connectTimeout = 800
         readTimeout = 800
         requestMethod = "GET"
       }
-    } catch (_: Throwable) {
-      return EnginePort.DOWN
-    }
-    return try {
-      val code = conn.responseCode
-      val body = if (code in 200..299) conn.inputStream.bufferedReader().use { it.readText() } else ""
-      val json = try {
-        JSONObject(body)
-      } catch (_: Throwable) {
-        null
-      }
-      if (json != null && json.optString("engine") == "kotv" && json.optBoolean("ok", false)) {
-        EnginePort.HEALTHY
-      } else {
-        EnginePort.TAKEN
+      try {
+        if (conn.responseCode !in 200..299) return false
+        val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        json.optString("engine") == "kotv" && json.optBoolean("ok", false)
+      } finally {
+        conn.disconnect()
       }
     } catch (_: Throwable) {
-      EnginePort.DOWN
-    } finally {
-      conn.disconnect()
+      false
     }
   }
 

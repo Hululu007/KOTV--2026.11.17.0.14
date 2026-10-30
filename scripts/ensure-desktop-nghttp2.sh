@@ -32,7 +32,7 @@ need tar
 src="$BUILD_DIR/nghttp2-$NGHTTP2_VER"
 tarball="$BUILD_DIR/nghttp2-$NGHTTP2_VER.tar.gz"
 if [[ ! -f "$src/CMakeLists.txt" ]]; then
-  curl -fsSL -o "$tarball" \
+  curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 20 -o "$tarball" \
     "https://github.com/nghttp2/nghttp2/releases/download/v${NGHTTP2_VER}/nghttp2-${NGHTTP2_VER}.tar.gz"
   rm -rf "$src"
   tar -xzf "$tarball" -C "$BUILD_DIR"

@@ -51,6 +51,21 @@ class EngineLauncher {
 
   static const _portTakenMessage = '本机 $kotvDefaultEnginePort 端口被其他程序占用';
 
+  /// 端口能连上却不回健康检查时，给自己的引擎留的启动时间；超过就当被别的程序占着。
+  static const _silentPortGrace = Duration(seconds: 6);
+
+  /// 本机端口上有没有程序在监听（只看 TCP 能否连上）。
+  Future<bool> _portListening(String base) async {
+    final uri = Uri.parse(base);
+    try {
+      final s = await Socket.connect(uri.host, uri.port, timeout: const Duration(milliseconds: 500));
+      s.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   bool _acceptLocalHealth() {
     if (Platform.isAndroid) return true;
     return _owned && _proc != null;
@@ -83,6 +98,7 @@ class EngineLauncher {
     // 引擎先开端口再加载点播源，端口一通就算连上；点播源加载中/失败由首页等待和提示。
     lastError = '本机引擎没有启动';
     final deadline = DateTime.now().add(timeout);
+    DateTime? silentSince;
     while (DateTime.now().isBefore(deadline)) {
       final h = await _health(baseUrl);
       // 端口有回应就立刻定论：不是本引擎（被别的程序占着、版本不同）直接失败，不再等。
@@ -97,6 +113,16 @@ class EngineLauncher {
       // 只在引擎还在启动时等端口：安卓服务模式，或自己拉起的进程仍存活。
       final starting = (Platform.isAndroid && !_owned) ||
           (_owned && _proc != null && await _procAlive(_proc!));
+      // 端口能连上却不回健康检查：别的程序占着（或卡住不答），本引擎绑不上。
+      if (await _portListening(baseUrl)) {
+        silentSince ??= DateTime.now();
+        if (!starting || DateTime.now().difference(silentSince) >= _silentPortGrace) {
+          lastError = _portTakenMessage;
+          return false;
+        }
+      } else {
+        silentSince = null;
+      }
       if (!starting) return false;
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
@@ -417,6 +443,7 @@ class EngineLauncher {
       var env = _runtimeEnv();
       if (Platform.isAndroid) {
         await _startAndroidEngineService();
+        DateTime? silentSince;
         for (var i = 0; i < 40; i++) {
           final h = await _health(kotvDefaultLocalEngineBaseUrl);
           if (kotvEngineHealthProblem(h).isEmpty) {
@@ -426,8 +453,16 @@ class EngineLauncher {
           }
           // 端口被别的程序占着：本引擎绑不上，不再等也不另起进程，由 ensureReady 报错。
           if (kotvEngineTakenByOther(h)) return;
+          if (await _portListening(kotvDefaultLocalEngineBaseUrl)) {
+            silentSince ??= DateTime.now();
+            if (DateTime.now().difference(silentSince) >= _silentPortGrace) return;
+          } else {
+            silentSince = null;
+          }
           await Future<void>.delayed(const Duration(milliseconds: 250));
         }
+        // 端口上已有程序在监听却不是可用的本引擎：另起进程也绑不上，退出后还会被反复重拉。
+        if (await _portListening(kotvDefaultLocalEngineBaseUrl)) return;
         debugPrint('engine android: service failed to bring :9978 up; fallback Process.start');
         env = await _androidEnv(env);
         final candidates = await _androidEngineCandidates();
@@ -466,14 +501,14 @@ class EngineLauncher {
         debugPrint('engine: no bundled kotv-engine, UI only');
         return;
       }
-      // 端口被别的程序占着：拉起的引擎绑不上就退出，退出后又自动重拉，会一直空转。
-      if (kotvEngineTakenByOther(await _health(kotvDefaultLocalEngineBaseUrl))) {
+      await _killStrayEngines(exceptPid: _proc?.pid);
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      // 自己的旧引擎已结束，端口上还有程序监听就是别的程序占着（回应与否都一样）：
+      // 拉起的引擎绑不上就退出，退出后又自动重拉，会一直空转。
+      if (await _portListening(kotvDefaultLocalEngineBaseUrl)) {
         debugPrint('engine: :$kotvDefaultEnginePort taken by another program, skip start');
         return;
       }
-
-      await _killStrayEngines(exceptPid: _proc?.pid);
-      await Future<void>.delayed(const Duration(milliseconds: 250));
       env = await _withLanIp(env);
       debugPrint('engine start: $bin runtime=${env['KOTV_RUNTIME']} lan=${env['KOTV_LAN_IP']}');
       await _spawn(bin, env);

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 把 OpenSSL（≥3.5，带 QUIC）源码编进 PREFIX，供 ngtcp2/curl HTTP/3。
+# 把 OpenSSL（3.5 起的 3.x，带 QUIC）源码编进 PREFIX，供 ngtcp2/curl HTTP/3。
 # Windows：./Configure mingw64 + Win7 宏（不用 MSYS2 预编译包，那些不支持 Win7）。
 # macOS：仅当「真实硬件 arch == 目标 arch」且 brew 库内真有 QUIC 符号时用 brew；
 #        Rosetta(arch -x86_64) 下 uname 会谎报，禁止误用 arm64 bottle。
@@ -31,7 +31,8 @@ for p in v.split("."):
         parts.append(0)
 while len(parts) < 3:
     parts.append(0)
-sys.exit(0 if tuple(parts[:3]) >= (3, 5, 0) else 1)
+# 4.x 把 ASN1_STRING 等结构改成不透明，curl 8.14.1 的 vtls/openssl.c 直接取成员，编不过。
+sys.exit(0 if (3, 5, 0) <= tuple(parts[:3]) < (4, 0, 0) else 1)
 PY
 }
 
@@ -108,7 +109,7 @@ kotv_vendor_cpan_lib() {
   fi
   rm -rf "$tmp"
   mkdir -p "$tmp"
-  curl -fsSL -o "$tmp/$dist.tar.gz" "$url" || return 1
+  curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "$tmp/$dist.tar.gz" "$url" || return 1
   tar -xzf "$tmp/$dist.tar.gz" -C "$tmp"
   local found
   found="$(find "$tmp" -maxdepth 1 -mindepth 1 -type d \( -name "${dist}-*" -o -name "${dist}-v*" \) | head -1 || true)"
@@ -428,7 +429,7 @@ fi
 src="$BUILD_DIR/openssl-$OPENSSL_VER"
 tarball="$BUILD_DIR/openssl-$OPENSSL_VER.tar.gz"
 if [[ ! -f "$src/Configure" ]]; then
-  curl -fsSL -o "$tarball" \
+  curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "$tarball" \
     "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VER}/openssl-${OPENSSL_VER}.tar.gz"
   rm -rf "$src"
   tar -xzf "$tarball" -C "$BUILD_DIR"
@@ -439,6 +440,8 @@ if kotv_is_windows_build; then
 fi
 
 pref="$(kotv_native_path "$PREFIX")"
+# 走到源码编译说明前缀里已有的不可用（版本、QUIC 或 arch 不对），先清掉免得新旧头文件混用。
+kotv_clear_prefix_openssl
 echo "==> build OpenSSL $OPENSSL_VER → $pref (Configure, perl=$PERL)"
 cd "$src"
 [[ -f Makefile ]] && $MAKE distclean 2>/dev/null || true
