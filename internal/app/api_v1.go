@@ -663,16 +663,19 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 
 	// 片名：专用源标题 > 详情缓存名；勿默认 vodID（很多站 id 是详情页 URL，会盖掉 UI 片名）。
 	title := strings.TrimSpace(sourceTitle)
-	if title == "" {
-		if cached, ok := sites.CachedDetail(vodID); ok {
+	episodeName := ""
+	if cached, ok := sites.CachedDetail(vodID); ok {
+		if title == "" {
 			title = strings.TrimSpace(cached.VodName)
 		}
+		episodeName = episodeNameFromCache(cached, flag, episodeIndex, epURL)
 	}
 	mediaTitle := title
 	if mediaTitle == "" {
 		mediaTitle = vodID
 	}
 	a.SetMediaPlaying(mediaTitle, playURL)
+	spider.SetCurrentPlayInfo(title, episodeName, flag)
 
 	pubQualURLs := make([]string, len(qualURLs))
 	for i, u := range qualURLs {

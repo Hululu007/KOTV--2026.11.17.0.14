@@ -12,7 +12,8 @@ Go Engine（单进程，:9978）
    ├─ CMS 解析     → 内置（type 0/1/4）
    ├─ JS 爬虫      → QuickJS worker 池（CGO 内嵌）
    ├─ Python 爬虫  → Python 进程池（捆绑 runtime/python）
-   └─ JAR 爬虫     → Java bridge（JVM 常驻，HTTP 多路）
+   ├─ JAR 爬虫     → Java bridge（JVM 常驻，HTTP 多路）
+   └─ Node 爬虫    → 捆绑 Node 起猫爪源包（`index.js` / `index.js.md5`）
        运行时：JRE(Liberica21) · Python(CPython3.14) · Chromium · FFmpeg
 ```
 
@@ -75,12 +76,14 @@ Go Engine（单进程，:9978）
 | 类型 | 判定 | 实现 |
 |------|------|------|
 | CMS（内置） | 非 `.py`/`.js`/`csp_` | 引擎内置解析（type 0/1/4） |
-| JS | `api` 含 `.js` | 内嵌 **QuickJS**（CGO），worker 池，同站可并行 |
+| JS | `api` 含 `.js`（非猫爪源包） | 内嵌 **QuickJS**（CGO），worker 池，同站可并行 |
 | Python | `api` 含 `.py` | 捆绑 `runtime/python` 进程池，同站可并行 |
+| Node | `api` 以 `/spider/` 开头（来自猫爪 `/config`） | 捆绑 `runtime/node`（安卓 `libkotv_node.so` + 按需 `libnode.so`），一源包一进程 |
 | JAR | `api` 前缀 `csp_` | **Java bridge**（JVM），桌面 HTTP 多路、可并发、按 client 软取消 |
 
 - `getClientId()` 返回当前 ScopeID，`postMsg` 据此路由回正确前端。
-- 换源时 `ResetScriptSpiders()` 销毁 JS/Python 爬虫，避免旧进程状态污染新站；设置页「清理缓存」清 JAR 磁盘 + JS/Py 内存与落盘目录。
+- 换源时 `ResetScriptSpiders()` 销毁 JS/Python/Node 爬虫，避免旧进程状态污染新站；设置页「清理缓存」清 JAR 磁盘 + JS/Py/Node 内存与落盘目录。
+- 配置地址以 `index.js` / `index.js.md5` 结尾时视为猫爪源包：下载校验后起 Node，`GET /config` 取 `video.sites`（忽略 read/comic/music/pan）；播放地址里的 `127.0.0.1:<node端口>` 与 `js2p://_WEB_` 改写为引擎 `/node/<pkg>/…` 反代。`messageToDart` 打本机 `/msg`（toast / danmuPush / getPlayInfo / queryProfile / saveProfile / openInternalWebview）。
 
 ### Java bridge（JAR 爬虫）
 
@@ -106,6 +109,7 @@ Go Engine（单进程，:9978）
 |------|------|------|
 | JRE 21 | JAR 爬虫 | BellSoft Liberica 21（全平台一致） |
 | Python 3.14 | Python 爬虫 | CPython standalone；Windows x64 用 PythonVista embed 以兼容旧系统 |
+| Node | 猫爪源包 | 桌面 `runtime/node`（LTS；Win7 为 node18-win7）；安卓 `libkotv_node.so` + 按需下载 `libnode.so` |
 | Chromium | 网页嗅探 / 解析 | macOS·Linux x64：CFT Stable headless-shell；Win x64：Win7 REWORK 最新；Win ARM64：最新 snapshot；Linux ARM64 回落系统 Chrome |
 | FFmpeg | 媒体处理 | osxexperts / Gyan / BtbN |
 | QuickJS | JS 爬虫 | CGO 编译进主程序，无单独目录 |
@@ -146,7 +150,8 @@ CI 在 **KOTV Build**（`github-action.yml`）统一构建：
 
 | 脚本 | 作用 |
 |------|------|
-| `prepare-runtime.sh` | 下载装配 `runtime/`（JRE/Python/Chromium/FFmpeg） |
+| `prepare-runtime.sh` | 下载装配 `runtime/`（JRE/Python/Node/Chromium/FFmpeg） |
+| `build-android-node-launcher.sh` | 安卓 Node 启动器 `libkotv_node.so` |
 | `package.sh` | 本地组装发行目录（当前/指定平台） |
 | `package-flutter-{macos,linux,windows,android,web}.sh` | 各平台 Flutter 打包（windows 含 Win7 变体由 `KOTV_WIN7=1` 触发） |
 | `build-engine-*.sh` `bundle-flutter-runtime.sh` `make-win-installer.ps1` | 引擎编译 / 运行时捆绑 / Windows 安装包 |

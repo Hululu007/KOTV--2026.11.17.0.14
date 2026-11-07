@@ -57,6 +57,31 @@ func (a *App) resolveEpisodeURL(vodID, flag, episodeURL string, episodeIndex int
 	return epURL, nil
 }
 
+// episodeNameFromCache 从详情缓存取集名（供猫爪 getPlayInfo）。
+func episodeNameFromCache(v model.Vod, flag string, episodeIndex int, epURL string) string {
+	v.SetVodFlags()
+	flag = strings.TrimSpace(flag)
+	epURL = strings.TrimSpace(epURL)
+	for _, f := range v.VodFlags {
+		if flag != "" && f.Flag != flag && f.Show != flag {
+			continue
+		}
+		if episodeIndex >= 0 && episodeIndex < len(f.Episodes) {
+			if n := strings.TrimSpace(f.Episodes[episodeIndex].Name); n != "" {
+				return n
+			}
+		}
+		if epURL != "" {
+			for _, ep := range f.Episodes {
+				if strings.TrimSpace(ep.URL) == epURL {
+					return strings.TrimSpace(ep.Name)
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func prepareDesktopDRM(result *model.Result) error {
 	if runtime.GOOS == "android" || result == nil {
 		return nil

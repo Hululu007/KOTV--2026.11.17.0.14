@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -187,6 +188,42 @@ func Python() string {
 		filepath.Join("python", "python3"),
 		filepath.Join("python", "python"),
 	)...)
+}
+
+// Node 返回捆绑 Node（不回落系统 PATH）。
+// 桌面：runtime/node/node(.exe)；安卓：nativeLibraryDir/libkotv_node.so。
+func Node() string {
+	if runtime.GOOS == "android" {
+		cands := []string{}
+		if dir := strings.TrimSpace(os.Getenv("KOTV_NATIVE_LIB_DIR")); dir != "" {
+			cands = append(cands, filepath.Join(dir, "libkotv_node.so"))
+		}
+		if exe, err := os.Executable(); err == nil {
+			cands = append(cands, filepath.Join(filepath.Dir(exe), "libkotv_node.so"))
+		}
+		cands = append(cands, underRoots("libkotv_node.so")...)
+		return firstExisting(cands...)
+	}
+	return firstExisting(underRoots(
+		filepath.Join("node", "node"),
+		filepath.Join("node", "node.exe"),
+	)...)
+}
+
+// NodeVersion 返回 `node -v`；不可用时为空。
+func NodeVersion() string {
+	bin := Node()
+	if bin == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "-v")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // Chromium 返回 Chrome / chrome-headless-shell 路径（捆绑优先）。
@@ -385,7 +422,7 @@ func Status() map[string]string {
 		if v := probeAndroidSpider(); v != "" {
 			st = v
 		}
-		return map[string]string{
+		out := map[string]string{
 			"platform": OS(),
 			"arch":     Arch(),
 			"java":     st,
@@ -393,12 +430,29 @@ func Status() map[string]string {
 			"quickjs":  "embedded(CGO)",
 			"bridge":   st,
 		}
+		if n := Node(); n != "" {
+			if v := NodeVersion(); v != "" {
+				out["node"] = v
+			} else {
+				out["node"] = n
+			}
+		}
+		return out
+	}
+	nodeSt := "(missing)"
+	if Node() != "" {
+		if v := NodeVersion(); v != "" {
+			nodeSt = v
+		} else {
+			nodeSt = orMissing(Node())
+		}
 	}
 	return map[string]string{
 		"platform": OS(),
 		"arch":     Arch(),
 		"java":     orMissing(Java()),
 		"python":   orMissing(Python()),
+		"node":     nodeSt,
 		"quickjs":  "embedded(CGO)",
 		"bridge":   orMissing(BridgeJAR()),
 		"chromium": orMissing(Chromium()),

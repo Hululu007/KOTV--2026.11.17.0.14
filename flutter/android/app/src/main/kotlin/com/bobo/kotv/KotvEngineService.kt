@@ -209,6 +209,9 @@ class KotvEngineService : Service() {
       // 持久数据进 filesDir，避免清缓存/系统清 cache 丢掉多仓 DB。
       env["KOTV_DATA_DIR"] = File(filesDir, "KOTV").absolutePath
       env["HOME"] = filesDir.absolutePath
+      // 猫爪 Node：启动器与引擎同目录；ABI 供按需下载 libnode.so。
+      env["KOTV_NATIVE_LIB_DIR"] = File(so).parentFile?.absolutePath ?: applicationInfo.nativeLibraryDir
+      env["KOTV_ANDROID_ABI"] = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: ""
       KotvDeviceEnv.lanIpv4(this)?.let { env["KOTV_LAN_IP"] = it }
       // 注入设备 IANA 时区，Go 用 tzdata LoadLocation。
       val tz = KotvDeviceEnv.timeZoneId()

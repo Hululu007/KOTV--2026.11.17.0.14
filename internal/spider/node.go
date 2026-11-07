@@ -1,0 +1,185 @@
+package spider
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// nodeSpider 通过 HTTP 调用猫爪 Node 源包上的 /spider/<key>/<type>/… 接口。
+type nodeSpider struct {
+	key, api, ext, jar string
+	pkgID              string
+	prefix             string // /spider/key/type
+	inited             bool
+}
+
+func newNodeSpider(key, api, ext, jar string) Spider {
+	api = strings.TrimSpace(api)
+	pkgID := DefaultNodeHost().PkgIDForAPI(api)
+	return &nodeSpider{
+		key:    key,
+		api:    api,
+		ext:    ext,
+		jar:    jar,
+		pkgID:  pkgID,
+		prefix: strings.TrimSuffix(api, "/"),
+	}
+}
+
+func (s *nodeSpider) pkg() (*nodePkg, error) {
+	h := DefaultNodeHost()
+	id := s.pkgID
+	if id == "" {
+		id = h.PkgIDForAPI(s.api)
+		s.pkgID = id
+	}
+	if id == "" {
+		return nil, fmt.Errorf("未找到 Node 源包: %s", s.api)
+	}
+	p := h.GetPkg(id)
+	if p == nil {
+		return nil, fmt.Errorf("Node 源包未加载: %s", id)
+	}
+	if p.Port() <= 0 {
+		if _, err := h.Ensure(p.pkgURL); err != nil {
+			return nil, err
+		}
+		p = h.GetPkg(id)
+		if p == nil || p.Port() <= 0 {
+			return nil, fmt.Errorf("Node 源包未就绪: %s", id)
+		}
+	}
+	return p, nil
+}
+
+func (s *nodeSpider) post(action string, body map[string]any) (string, error) {
+	p, err := s.pkg()
+	if err != nil {
+		return "", err
+	}
+	if body == nil {
+		body = map[string]any{}
+	}
+	path := s.prefix + "/" + action
+	return p.PostJSON(path, body)
+}
+
+func (s *nodeSpider) Init(extend string) error {
+	if extend != "" {
+		s.ext = extend
+	}
+	body := map[string]any{}
+	if strings.TrimSpace(s.ext) != "" {
+		// 源包 init 常见字段 extend；对象型 ext 已是紧凑 JSON 字符串。
+		var extObj any
+		if err := json.Unmarshal([]byte(s.ext), &extObj); err == nil {
+			body["extend"] = extObj
+		} else {
+			body["extend"] = s.ext
+		}
+	}
+	_, err := s.post("init", body)
+	if err != nil {
+		return err
+	}
+	s.inited = true
+	return nil
+}
+
+func (s *nodeSpider) ensureInit() error {
+	if s.inited {
+		return nil
+	}
+	return s.Init(s.ext)
+}
+
+func (s *nodeSpider) HomeContent(filter bool) (string, error) {
+	if err := s.ensureInit(); err != nil {
+		return "", err
+	}
+	return s.post("home", map[string]any{})
+}
+
+func (s *nodeSpider) HomeVideoContent() (string, error) {
+	return "{}", nil
+}
+
+func (s *nodeSpider) CategoryContent(tid, pg string, filter bool, extend map[string]string) (string, error) {
+	if err := s.ensureInit(); err != nil {
+		return "", err
+	}
+	filters := map[string]string{}
+	for k, v := range extend {
+		filters[k] = v
+	}
+	return s.post("category", map[string]any{
+		"id":      tid,
+		"page":    pg,
+		"filter":  filter,
+		"filters": filters,
+	})
+}
+
+func (s *nodeSpider) DetailContent(ids []string) (string, error) {
+	if err := s.ensureInit(); err != nil {
+		return "", err
+	}
+	var id any
+	switch len(ids) {
+	case 0:
+		id = ""
+	case 1:
+		id = ids[0]
+	default:
+		id = ids
+	}
+	return s.post("detail", map[string]any{"id": id})
+}
+
+func (s *nodeSpider) SearchContent(key string, quick bool, pg string) (string, error) {
+	if err := s.ensureInit(); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(pg) == "" {
+		pg = "1"
+	}
+	return s.post("search", map[string]any{
+		"wd":   key,
+		"page": pg,
+	})
+}
+
+func (s *nodeSpider) PlayerContent(flag, id string, vipFlags []string) (string, error) {
+	if err := s.ensureInit(); err != nil {
+		return "", err
+	}
+	raw, err := s.post("play", map[string]any{
+		"flag": flag,
+		"id":   id,
+	})
+	if err != nil {
+		return "", err
+	}
+	p, err := s.pkg()
+	if err != nil {
+		return raw, nil
+	}
+	return p.RewritePlayJSON(raw), nil
+}
+
+func (s *nodeSpider) LiveContent(url string) (string, error) { return "", nil }
+
+func (s *nodeSpider) Proxy(params map[string]string) (int, string, []byte, map[string]string, error) {
+	return 0, "", nil, nil, nil
+}
+
+func (s *nodeSpider) Action(action string) (string, error) {
+	return "", nil
+}
+
+func (s *nodeSpider) ManualVideoCheck() (bool, error) { return false, nil }
+func (s *nodeSpider) IsVideoFormat(string) (bool, error) {
+	return false, nil
+}
+func (s *nodeSpider) Destroy() {}

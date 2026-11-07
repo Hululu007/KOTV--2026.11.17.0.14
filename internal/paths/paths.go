@@ -56,8 +56,9 @@ func JarCache() string { return ensure(filepath.Join(CacheRoot(), "jar")) }
 func PyCache() string  { return ensure(filepath.Join(CacheRoot(), "py")) }
 func PicCache() string { return ensure(filepath.Join(CacheRoot(), "pic")) }
 func LogDir() string   { return ensure(filepath.Join(Data(), "log")) }
-func JsCache() string  { return ensure(filepath.Join(CacheRoot(), "js")) }
-func EpgCache() string { return ensure(filepath.Join(CacheRoot(), "epg")) }
+func JsCache() string   { return ensure(filepath.Join(CacheRoot(), "js")) }
+func NodeCache() string { return ensure(filepath.Join(CacheRoot(), "node")) }
+func EpgCache() string  { return ensure(filepath.Join(CacheRoot(), "epg")) }
 func HttpCache() string {
 	return ensure(filepath.Join(CacheRoot(), "http"))
 }

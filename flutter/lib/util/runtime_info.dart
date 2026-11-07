@@ -8,6 +8,7 @@ const kotvRuntimeDisplayKeysDesktop = <String>[
   'arch',
   'java',
   'python',
+  'node',
   'quickjs',
   'bridge',
   'chromium',
@@ -21,6 +22,7 @@ const kotvRuntimeDisplayKeysAndroid = <String>[
   'arch',
   'java',
   'python',
+  'node',
   'quickjs',
   'bridge',
 ];
@@ -31,6 +33,7 @@ const kotvRuntimeDisplayKeysWeb = <String>[
   'arch',
   'java',
   'python',
+  'node',
   'quickjs',
   'bridge',
 ];
@@ -52,6 +55,8 @@ List<String> formatKotvRuntimeLines(Map<String, String> runtime) {
       if (hideMissingPlayerLibs && v == '(missing)') continue;
       // 外部 mpv 未安装时不必占一行（页内 MPV 不走 runtime）。
       if (k == 'mpv' && v == '(missing)') continue;
+      // 无 Node 时不占一行（仅猫爪源需要）。
+      if (k == 'node' && v == '(missing)') continue;
       out.add('$k: $v');
     }
   }

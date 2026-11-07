@@ -1,6 +1,6 @@
 # KOTV（KO影视）
 
-跨端影视聚合客户端：**Flutter UI + Go 引擎**。引擎加载 CatVod 兼容的站点配置，内置 CMS 解析并支持 JS / Python / JAR 四类爬虫；发行包捆绑 JRE / Python / Chromium / FFmpeg 运行时，QuickJS 通过 CGO 编译进主程序。
+跨端影视聚合客户端：**Flutter UI + Go 引擎**。引擎加载 CatVod / 猫影视兼容的站点配置，内置 CMS 解析并支持 JS / Python / JAR / Node（猫爪）四类爬虫；发行包捆绑 JRE / Python / Node / Chromium / FFmpeg 运行时，QuickJS 通过 CGO 编译进主程序。
 
 > 仓库模块：`github.com/bobo/KOTV`。引擎无 UI，HTTP 端口 `:9978`（API 在 `/api/v1`，嗅探代理在 `/proxy/*`）。
 
@@ -13,6 +13,7 @@
 | JS 爬虫（QuickJS，CGO 内嵌） | ✅ |
 | Python 爬虫（捆绑运行时） | ✅ |
 | JAR 爬虫（Java bridge） | ✅ |
+| Node 爬虫（猫爪 index.js / index.js.md5） | ✅ |
 | 二次解析 type=0/1/2/3/4 | ✅ |
 | M3U8 过滤 / 直播 / EPG | ✅ |
 | DLNA 投屏（DMC 控制 / DMR 接收） | ✅ |
@@ -54,8 +55,9 @@ Go Engine（单进程，:9978）
    ├─ CMS 解析     → 内置（type 0/1/4）
    ├─ JS 爬虫      → QuickJS worker 池（CGO 内嵌）
    ├─ Python 爬虫  → Python 进程池（捆绑 runtime/python）
-   └─ JAR 爬虫     → Java bridge（JVM 常驻，HTTP 多路）
-       运行时：JRE(Liberica21) · Python(CPython3.14) · Chromium · FFmpeg
+   ├─ JAR 爬虫     → Java bridge（JVM 常驻，HTTP 多路）
+   └─ Node 爬虫    → 捆绑 Node 起猫爪源包（runtime/node；安卓 libkotv_node.so）
+       运行时：JRE(Liberica21) · Python(CPython3.14) · Node(LTS/Win7 node18) · Chromium · FFmpeg
 ```
 
 详细设计（进程模型、ScopeID 多前端隔离、爬虫与 bridge、播放引擎）见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
@@ -66,7 +68,7 @@ Go Engine（单进程，:9978）
 - JDK 21（bridge 用 Gradle ShadowJar，与捆绑 Liberica 一致）
 - Flutter 3.44.x（桌面/Android/Web）
 - curl / tar / unzip（下载运行时）
-- 未准备 `runtime/` 时 JAR/Python 爬虫不可用（**不回落系统 Java/Python**）
+- 未准备 `runtime/` 时 JAR/Python/Node 爬虫不可用（**不回落系统 Java/Python/Node**）
 
 ## 快速开始（开发）
 

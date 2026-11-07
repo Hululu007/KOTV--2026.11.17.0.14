@@ -96,8 +96,18 @@ fi
 [[ ! -d "$RT/vlc" ]] || die "runtime/vlc must not ship"
 [[ ! -d "$RT/libmpv" ]] || die "runtime/libmpv must not ship (libmpv sits next to the app binary)"
 
+# 猫爪 Node 源包运行时
+case "$PLAT" in
+  windows-*)
+    need_file "$RT/node/node.exe"
+    ;;
+  *)
+    need_file "$RT/node/node"
+    ;;
+esac
+
 if [[ "$fail" -ne 0 ]]; then
   echo "verify-runtime FAILED for $PLAT at $RT" >&2
   exit 1
 fi
-echo "verify-runtime OK: $PLAT (jre=$jre_files files, jre/lib=$jre_lib_files files)"
+echo "verify-runtime OK: $PLAT (jre=$jre_files files, jre/lib=$jre_lib_files files, node=ok)"

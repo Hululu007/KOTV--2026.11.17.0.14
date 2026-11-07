@@ -362,6 +362,14 @@ jobs:
           name: updater-macos-arm64
           path: dist/updater-mac
 
+      - name: Cache desktop runtime downloads
+        uses: actions/cache@v4
+        with:
+          path: .runtime-cache
+          key: runtime-cache-macos-${{ hashFiles('scripts/prepare-runtime.sh') }}
+          restore-keys: |
+            runtime-cache-macos-
+
       - name: Install desktop MPV source deps
         run: |
           brew install meson ninja pkg-config libass nasm molten-vk curl nghttp2 openssl@3
@@ -568,6 +576,16 @@ jobs:
           key: android-mpv-src-${{ hashFiles('scripts/build-android-mpv-from-source.sh') }}
           restore-keys: |
             android-mpv-src-
+
+      - name: Cache Android Node launcher + nodejs-mobile
+        uses: actions/cache@v4
+        with:
+          path: |
+            .runtime-cache/android-node
+            flutter/android/app/src/main/jniLibs/*/libkotv_node.so
+          key: android-node-v18.20.4-${{ hashFiles('scripts/build-android-node-launcher.sh', 'scripts/android-node/kotv_node_main.cpp') }}
+          restore-keys: |
+            android-node-v18.20.4-
 
       - name: Cache FongMi Media3 maven + checkout
         uses: actions/cache@v4

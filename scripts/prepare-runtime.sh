@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 下载并准备随包运行时：JRE + Python + Chromium + ffmpeg
+# 下载并准备随包运行时：JRE + Python + Chromium + ffmpeg + Node
 # 用法:
 # ./scripts/prepare-runtime.sh # 当前主机平台
 # ./scripts/prepare-runtime.sh macos-arm64 # 指定平台（会覆盖 runtime/）
@@ -15,6 +15,10 @@ PYTHON_MM="${PYTHON_VER%.*}"   # 3.14
 PYTHON_ABI="cp${PYTHON_MM//./}" # cp314
 JRE_VER="21"                 # 全平台统一 BellSoft Liberica feature version
 LIBERICA_FEATURE="$JRE_VER"
+# 猫爪 Node 源：Win7 用 node18-win7；其余平台钉死当前 LTS。
+NODE_VER="v26.13.0"
+NODE_WIN7_VER="v18.20.2"
+NODE_WIN7_REPO="Alex313031/node18-win7"
 
 detect_platform() {
   local os arch
@@ -818,6 +822,90 @@ prepare_ffmpeg() {
 # --- libmpv ---
 # 桌面页内 MPV 与 fvp/mdk 同目录（Windows: mpv-2.dll 在 exe 旁），不进 runtime。
 
+# --- Node（猫爪源包）---
+# 只保留 node/node.exe 与 LICENSE，放 runtime/node/。
+prepare_node() {
+  local plat="$1" dest="$OUT_ROOT/node"
+  if [[ -x "$dest/node" || -f "$dest/node.exe" ]]; then
+    echo "[node] already present: $dest"
+    return
+  fi
+  local url name bin_name extract_kind
+  case "$plat" in
+    macos-arm64)
+      name="node-${NODE_VER}-darwin-arm64.tar.gz"
+      url="https://nodejs.org/dist/${NODE_VER}/$name"
+      extract_kind=tgz
+      bin_name=node
+      ;;
+    macos-x64)
+      name="node-${NODE_VER}-darwin-x64.tar.gz"
+      url="https://nodejs.org/dist/${NODE_VER}/$name"
+      extract_kind=tgz
+      bin_name=node
+      ;;
+    linux-x64)
+      name="node-${NODE_VER}-linux-x64.tar.gz"
+      url="https://nodejs.org/dist/${NODE_VER}/$name"
+      extract_kind=tgz
+      bin_name=node
+      ;;
+    linux-arm64)
+      name="node-${NODE_VER}-linux-arm64.tar.gz"
+      url="https://nodejs.org/dist/${NODE_VER}/$name"
+      extract_kind=tgz
+      bin_name=node
+      ;;
+    windows-x64)
+      if [[ "${KOTV_WIN7:-}" == "1" ]]; then
+        name="node-${NODE_WIN7_VER}-win-x64.zip"
+        url="https://github.com/${NODE_WIN7_REPO}/releases/download/${NODE_WIN7_VER}/$name"
+      else
+        name="node-${NODE_VER}-win-x64.zip"
+        url="https://nodejs.org/dist/${NODE_VER}/$name"
+      fi
+      extract_kind=zip
+      bin_name=node.exe
+      ;;
+    windows-arm64)
+      name="node-${NODE_VER}-win-arm64.zip"
+      url="https://nodejs.org/dist/${NODE_VER}/$name"
+      extract_kind=zip
+      bin_name=node.exe
+      ;;
+    *)
+      echo "skip node for $plat"
+      return
+      ;;
+  esac
+  local archive="$CACHE/$name"
+  download "$url" "$archive"
+  local tmp="$CACHE/node-extract-$plat"
+  rm -rf "$tmp" "$dest"
+  mkdir -p "$tmp" "$dest"
+  if [[ "$extract_kind" == "zip" ]]; then
+    unzip -q "$archive" -d "$tmp"
+  else
+    tar -xzf "$archive" -C "$tmp"
+  fi
+  local bin
+  bin="$(find "$tmp" -type f -name "$bin_name" | head -1)"
+  if [[ -z "$bin" ]]; then
+    echo "ERROR: $bin_name not found in $archive" >&2
+    exit 1
+  fi
+  cp "$bin" "$dest/$bin_name"
+  chmod +x "$dest/$bin_name" 2>/dev/null || true
+  # LICENSE 同级或上一级
+  local lic
+  lic="$(find "$tmp" -type f \( -iname 'LICENSE' -o -iname 'LICENSE.txt' \) | head -1 || true)"
+  if [[ -n "$lic" ]]; then
+    cp "$lic" "$dest/LICENSE"
+  fi
+  rm -rf "$tmp"
+  echo "[node] ready: $dest/$bin_name"
+}
+
 prepare_one() {
   local plat="$1"
   echo "======== prepare runtime: $plat ========"
@@ -832,6 +920,7 @@ prepare_one() {
   fi
   prepare_chromium "$plat"
   prepare_ffmpeg "$plat"
+  prepare_node "$plat"
   # bridge jar（体积变大也无所谓；缺依赖会导致爬虫全挂）
   if [[ ! -f "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.sh" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/settings.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/bobo/kotv/bridge/SpiderBridge.java" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/github/catvod/utils/UiBridge.java" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/github/catvod/crawler/Spider.java" -nt "$ROOT/bridge/spider-bridge.jar" ]]; then
     echo "[bridge] building fat jar..."
@@ -850,9 +939,10 @@ EOF
   echo "======== verifying $OUT_ROOT ========"
   "$ROOT/scripts/verify-runtime.sh" "$OUT_ROOT" "$plat"
   echo "======== done: $OUT_ROOT ========"
-  echo "包含: jre / python / chromium / ffmpeg / bridge"
+  echo "包含: jre / python / chromium / ffmpeg / node / bridge"
   echo "页内 MPV：Android assets/mpv-libs；桌面与 fvp/mdk 同目录（不进 runtime）"
   echo "JS(QuickJS) 已编译进主程序 (CGO)。Windows 请用 MSVCRT MinGW 打包（见 package.sh / check-win7-deps.ps1）。"
+  echo "Node：猫爪 index.js 源包；Win7 为 ${NODE_WIN7_VER}，其余为 ${NODE_VER}。"
 }
 
 TARGET="${1:-}"

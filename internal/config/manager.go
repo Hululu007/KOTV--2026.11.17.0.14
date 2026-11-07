@@ -17,6 +17,7 @@ import (
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/parse"
 	"github.com/bobo/KOTV/internal/paths"
+	appruntime "github.com/bobo/KOTV/internal/runtime"
 	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/util"
@@ -602,21 +603,41 @@ func (m *Manager) parseConfig(cfg *database.Config, isJSON bool, loadJar bool) e
 		return fmt.Errorf("点播源地址无效")
 	}
 
-	data, err := m.fetchData(source, isJSON, cfg.JSON)
-	if err != nil {
-		return err
+	var data string
+	var err error
+	if !isJSON && IsNodePackageURL(cfg.URL) {
+		if appruntime.Node() == "" {
+			return fmt.Errorf("本机没有 Node 运行时")
+		}
+		data, err = spider.DefaultNodeHost().LoadPackage(cfg.URL)
+		if err != nil {
+			return fmt.Errorf("加载 Node 源包失败 (%s): %w", MaskURLCredentials(cfg.URL), err)
+		}
+	} else {
+		data, err = m.fetchData(source, isJSON, cfg.JSON)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(data) == "" {
+			return fmt.Errorf("配置数据为空")
+		}
+		// `xxxxxxxx**`+base64 / `2423…` AES-CBC 包装的正文先解开。
+		data, err = DecodeConfigBody(data)
+		if err != nil {
+			return err
+		}
+		data = FixRelativePaths(cfg.URL, data)
 	}
 	if strings.TrimSpace(data) == "" {
 		return fmt.Errorf("配置数据为空")
 	}
-	// `xxxxxxxx**`+base64 / `2423…` AES-CBC 包装的正文先解开。
-	data, err = DecodeConfigBody(data)
-	if err != nil {
-		return err
-	}
-	data = FixRelativePaths(cfg.URL, data)
 
 	cleaned := util.CleanJSONComments(data)
+	var ignoredNonVideo int
+	cleaned, ignoredNonVideo = NormalizeCatVodJSON(cleaned)
+	if ignoredNonVideo > 0 {
+		log.Printf("已忽略 %d 个非影视站（read/comic/music/pan）", ignoredNonVideo)
+	}
 	// 服务端错误说明 {"msg":"…"}：报错而不是当空配置加载。
 	if msg := ConfigErrorMessage(cleaned); msg != "" {
 		return fmt.Errorf("%s", msg)

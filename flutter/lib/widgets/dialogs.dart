@@ -523,7 +523,8 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
                         fontSize: m.compact ? 20 : 22,
                         fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
-                Text('支持单线路、多仓索引、本地路径，或 {"sites":[…]} JSON',
+                Text(
+                    '支持单线路、多仓索引、猫爪 index.js(.md5)、本地路径，或 {"sites":[…]} / {"video":{"sites":[…]}} JSON',
                     style: TextStyle(
                         color: p.muted, fontSize: m.compact ? 12 : 13)),
                 const SizedBox(height: 12),
@@ -534,7 +535,7 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
                   style: TextStyle(color: p.fg),
                   cursorColor: p.primary,
                   decoration: InputDecoration(
-                    hintText: '配置地址、多仓索引，或粘贴 JSON…',
+                    hintText: '配置地址、index.js.md5、多仓索引，或粘贴 JSON…',
                     hintStyle: TextStyle(color: p.muted),
                     filled: true,
                     fillColor: p.input,

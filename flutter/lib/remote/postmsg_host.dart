@@ -34,6 +34,12 @@ class PostMsgHost {
   /// 当前活跃宿主（页面离开时可 cancelAll 关掉声明式窗并回传 dismiss）。
   static PostMsgHost? instance;
 
+  /// 猫爪 danmuPush：详情页注册后按 url 走现有弹幕加载。
+  static void Function(String url)? onDanmuPush;
+
+  /// 猫爪 openInternalWebview：桌面系统浏览器 / 安卓内置页。
+  static void Function(String url)? onOpenWeb;
+
   final KotvApi api;
   final GlobalKey<NavigatorState> navigatorKey;
 
@@ -289,6 +295,36 @@ class PostMsgHost {
           _close('${cmd['id']}');
         }
       } catch (_) {}
+      return;
+    }
+
+    if (msg.startsWith('DANMU:')) {
+      final payload = msg.substring(6);
+      try {
+        final decoded = jsonDecode(payload);
+        final url = decoded is Map
+            ? '${decoded['url'] ?? ''}'.trim()
+            : payload.trim();
+        if (url.isNotEmpty) onDanmuPush?.call(url);
+      } catch (_) {
+        final url = payload.trim();
+        if (url.isNotEmpty) onDanmuPush?.call(url);
+      }
+      return;
+    }
+
+    if (msg.startsWith('OPENWEB:')) {
+      final url = msg.substring(8).trim();
+      if (url.isEmpty) return;
+      final custom = onOpenWeb;
+      if (custom != null) {
+        custom(url);
+        return;
+      }
+      final uri = Uri.tryParse(url);
+      if (uri != null) {
+        unawaited(launchUrl(uri, mode: LaunchMode.externalApplication));
+      }
       return;
     }
 

@@ -246,8 +246,12 @@ const MediaKeyPrefix = "/k/"
 // IsMediaPath 播放器、图片加载直接请求的媒体地址；凭媒体钥匙可以只读访问。
 func IsMediaPath(path string) bool {
 	path = strings.TrimSuffix(path, "/")
+	if path == "/node/msg" || path == "/msg" {
+		return false
+	}
 	return path == "/proxy" || strings.HasPrefix(path, "/proxy/") ||
-		strings.HasPrefix(path, "/file/") || strings.HasPrefix(path, "/image/") || path == "/tvbus"
+		strings.HasPrefix(path, "/file/") || strings.HasPrefix(path, "/image/") || path == "/tvbus" ||
+		strings.HasPrefix(path, "/node/")
 }
 
 // SplitMediaKey 拆开 /k/<钥匙>/<路径>；不是这种形式时 ok 为 false。

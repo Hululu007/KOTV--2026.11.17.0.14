@@ -82,6 +82,10 @@ func (s *Server) routes() []route {
 		{"/file/", needUser, s.handleFile},
 		{"/image/", needUser, s.handleImage},
 		{"/tvbus", needUser, s.handleTvbus},
+		// 猫爪 Node：/node/msg 仅本机；/node/<pkg>/… 媒体反代
+		{"/node/msg", needLocal, s.handleNodeMsg},
+		{"/msg", needLocal, s.handleNodeMsg}, // CatPawOpen messageToDart 固定打 /msg
+		{"/node/", needUser, s.handleNodeProxy},
 
 		// 设备之间、遥控页、爬虫运行时
 		{"/action", needAdmin, s.handleAction},

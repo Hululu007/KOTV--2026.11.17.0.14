@@ -117,7 +117,13 @@ String kotvStripMediaKey(String path) {
 bool kotvIsEngineMediaPath(String path) {
   var p = path;
   if (p.length > 1 && p.endsWith('/')) p = p.substring(0, p.length - 1);
-  return p == '/proxy' || p.startsWith('/proxy/') || p.startsWith('/file/') || p.startsWith('/image/') || p == '/tvbus';
+  if (p == '/node/msg' || p == '/msg') return false;
+  return p == '/proxy' ||
+      p.startsWith('/proxy/') ||
+      p.startsWith('/file/') ||
+      p.startsWith('/image/') ||
+      p == '/tvbus' ||
+      p.startsWith('/node/');
 }
 
 /// 本进程 HTTP 服务提供的路径（与引擎 `playproxy.IsEngineRoute` 一致）。其它回环路径是 jar 自己的监听。

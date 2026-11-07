@@ -56,9 +56,14 @@ func isJS(api string) bool  { return strings.Contains(api, ".js") }
 func isPy(api string) bool  { return strings.Contains(api, ".py") }
 func isCSP(api string) bool { return strings.HasPrefix(api, "csp_") }
 
-// RunnableAPI 表示该 api 会进 jar / js / py。其余类型不会被当成空首页成功。
+// isNode 猫爪 Node 站：api 形如 /spider/<key>/<type>。
+func isNode(api string) bool {
+	return strings.HasPrefix(strings.TrimSpace(api), "/spider/")
+}
+
+// RunnableAPI 表示该 api 会进 jar / js / py / node。其余类型不会被当成空首页成功。
 func RunnableAPI(api string) bool {
-	return isPy(api) || isJS(api) || isCSP(api)
+	return isPy(api) || isJS(api) || isCSP(api) || isNode(api)
 }
 
 // Get 根据站源类型获取爬虫实例。
@@ -70,6 +75,8 @@ func Get(key, api, ext, jar string) Spider {
 		return newJsSpider(key, api, ext, jar)
 	case isCSP(api):
 		return newJarSpider(key, api, ext, jar)
+	case isNode(api):
+		return newNodeSpider(key, api, ext, jar)
 	default:
 		return noopSpider{}
 	}
@@ -92,19 +99,22 @@ func SetRecent(key, api, ext, jar string) {
 func Clear() {
 	clearJar()
 	clearJsPy()
+	DefaultNodeHost().StopAll()
 	clearScriptCaches()
 }
 
-// ResetScriptSpiders 换源时销毁 JS/Python 爬虫，避免旧进程状态污染新站。
+// ResetScriptSpiders 换源时销毁 JS/Python/Node 爬虫，避免旧进程状态污染新站。
 func ResetScriptSpiders() {
 	clearJsPy()
 	clearJSMemoryCaches()
+	DefaultNodeHost().StopAll()
 }
 
-// clearScriptCaches 清空 JS 内存缓存，并清理本地 js/py 目录（含历史落盘残留）。
+// clearScriptCaches 清空 JS 内存缓存，并清理本地 js/py/node 目录（含历史落盘残留）。
 func clearScriptCaches() {
 	clearJSMemoryCaches()
-	for _, dir := range []string{paths.JsCache(), paths.PyCache()} {
+	DefaultNodeHost().ClearAll()
+	for _, dir := range []string{paths.JsCache(), paths.PyCache(), paths.NodeCache()} {
 		_ = os.RemoveAll(dir)
 		_ = os.MkdirAll(dir, 0o755)
 	}

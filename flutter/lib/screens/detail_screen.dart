@@ -688,6 +688,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   void _attachRemoteHandlers() {
+    // 猫爪 danmuPush → 当前详情页弹幕轨（本机/远端都走 PostMsg）。
+    PostMsgHost.onDanmuPush = _onNodeDanmuPush;
     final bridge = ref.read(remoteBridgeProvider);
     if (bridge == null) return;
     _boundRemote = bridge;
@@ -702,6 +704,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   void _detachRemoteHandlers() {
     final bridge = _boundRemote;
     _boundRemote = null;
+    if (identical(PostMsgHost.onDanmuPush, _onNodeDanmuPush)) {
+      PostMsgHost.onDanmuPush = null;
+    }
     if (bridge == null) return;
     if (identical(bridge.onControl, _onRemoteControl)) bridge.onControl = null;
     if (identical(bridge.onSubtitleFile, _onRemoteSubtitle)) bridge.onSubtitleFile = null;
@@ -709,6 +714,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (identical(bridge.onLiveDanmaku, _onRemoteLiveDanmaku)) bridge.onLiveDanmaku = null;
     if (identical(bridge.onDetailRefresh, _onRemoteDetailRefresh)) bridge.onDetailRefresh = null;
     if (identical(bridge.onPlayerRefresh, _onRemotePlayerRefresh)) bridge.onPlayerRefresh = null;
+  }
+
+  void _onNodeDanmuPush(String url) {
+    if (!mounted || url.trim().isEmpty) return;
+    unawaited(() async {
+      final items = await _fetchDanmaku(url.trim(), notify: false);
+      if (!mounted || items == null) return;
+      _danmakuItems.value = items;
+    }());
   }
 
   void _onRemoteDetailRefresh() {
