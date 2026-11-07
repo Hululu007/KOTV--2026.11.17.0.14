@@ -1,7 +1,6 @@
-diff -ruN meson.build meson.build
---- meson.build	2026-08-10 08:02:09
-+++ meson.build	2026-08-31 17:40:00
-@@ -331,7 +331,7 @@
+--- meson.build
++++ meson.build
+@@ -337,7 +337,7 @@
  features += {'posix': posix}
  features += {'dos-paths': win32, 'win32': win32}
  
@@ -10,7 +9,7 @@ diff -ruN meson.build meson.build
                 '-DCOBJMACROS', '-DINITGUID', '-DNOMINMAX',
                 '-D_USE_MATH_DEFINES', '-DWIN32_LEAN_AND_MEAN',
                 '-D_CRT_DECLARE_NONSTDC_NAMES', '-D_CRT_NONSTDC_NO_WARNINGS',
-@@ -525,8 +525,6 @@
+@@ -534,8 +534,6 @@
                            cc.find_library('imm32'),
                            cc.find_library('ntdll'),
                            cc.find_library('ole32'),
@@ -19,7 +18,7 @@ diff -ruN meson.build meson.build
                            cc.find_library('user32'),
                            cc.find_library('uuid'),
                            cc.find_library('uxtheme'),
-@@ -1371,7 +1369,7 @@
+@@ -1434,7 +1432,7 @@
      sources += files('video/filter/vf_gpu.c')
  endif
  
@@ -28,9 +27,8 @@ diff -ruN meson.build meson.build
      sources += files('video/out/gpu/d3d11_helpers.c')
      features += {'dxgi-debug-d3d11': cc.has_header_symbol('d3d11sdklayers.h', 'DXGI_DEBUG_D3D11')}
  endif
-diff -ruN misc/path_utils.c misc/path_utils.c
---- misc/path_utils.c	2026-08-10 08:02:09
-+++ misc/path_utils.c	2026-08-31 13:12:46
+--- misc/path_utils.c
++++ misc/path_utils.c
 @@ -36,8 +36,10 @@
  
  #if HAVE_DOS_PATHS
@@ -42,23 +40,27 @@ diff -ruN misc/path_utils.c misc/path_utils.c
  
  bstr mp_basename_bstr(bstr path)
  {
-@@ -225,8 +227,12 @@
-     *write = '\0';
-     size_t max_size = wcslen(pathw) + 1;
-     wchar_t *pathc = talloc_array(tmp, wchar_t, max_size);
+@@ -205,6 +207,7 @@
+         result = talloc_strdup(talloc_ctx, path);
+         goto exit;
+     }
 +#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
-     HRESULT hr = PathCchCanonicalizeEx(pathc, max_size, pathw, PATHCCH_ALLOW_LONG_PATHS);
-     result = SUCCEEDED(hr) ? mp_to_utf8(talloc_ctx, pathc) : talloc_strdup(talloc_ctx, path);
-+#else
-+    result = mp_to_utf8(talloc_ctx, pathw);
-+#endif
+     // PathAllocCanonicalize() treats the "." of a \\.\ path as a directory and
+     // removes it, so skip it for device paths.
+     wchar_t *pathx = NULL;
+@@ -214,6 +217,9 @@
+     result = mp_to_utf8(talloc_ctx, pathc);
+     LocalFree(pathx);
  #else
-     result = talloc_strdup(tmp, "");
-     const char *next;
-diff -ruN osdep/io.c osdep/io.c
---- osdep/io.c	2026-08-10 08:02:09
-+++ osdep/io.c	2026-08-31 13:12:46
-@@ -236,6 +236,7 @@
++    result = mp_to_utf8(talloc_ctx, pathc);
++#endif
++#else
+     if (!mp_path_is_absolute(bstr0(path))) {
+         char *cwd = mp_getcwd(tmp);
+         if (!cwd) {
+--- osdep/io.c
++++ osdep/io.c
+@@ -281,6 +281,7 @@
      return wintime / hns_per_second - win_to_unix_epoch;
  }
  
@@ -66,7 +68,7 @@ diff -ruN osdep/io.c osdep/io.c
  static bool get_file_ids_win8(HANDLE h, dev_t *dev, ino_t *ino)
  {
      FILE_ID_INFO ii;
-@@ -250,6 +251,7 @@
+@@ -295,6 +296,7 @@
      memcpy(ino, &ii.FileId, sizeof(*ino));
      return true;
  }
@@ -74,7 +76,7 @@ diff -ruN osdep/io.c osdep/io.c
  
  #if HAVE_UWP
  static bool get_file_ids(HANDLE h, dev_t *dev, ino_t *ino)
-@@ -313,12 +315,13 @@
+@@ -358,12 +360,13 @@
          st.st_size = si.EndOfFile.QuadPart;
      }
  
@@ -94,9 +96,8 @@ diff -ruN osdep/io.c osdep/io.c
      }
  
      *buf = st;
-diff -ruN osdep/w32_register.c osdep/w32_register.c
---- osdep/w32_register.c	2026-08-10 08:02:09
-+++ osdep/w32_register.c	2026-08-31 13:12:46
+--- osdep/w32_register.c
++++ osdep/w32_register.c
 @@ -19,7 +19,9 @@
  
  #include <windows.h>
@@ -131,7 +132,7 @@ diff -ruN osdep/w32_register.c osdep/w32_register.c
      } else {
          mp_msg(log, MSGL_ERR, "Failed to get Programs folder path.\n");
      }
-@@ -417,7 +434,18 @@
+@@ -422,7 +439,18 @@
      if (size)
          reg_add_dwr(log, root, KEY_MPV_UNINSTALL, L"EstimatedSize", size / 1024);
  
@@ -150,10 +151,9 @@ diff -ruN osdep/w32_register.c osdep/w32_register.c
          reg_add_str(log, root, KEY_MPV_UNINSTALL, L"InstallLocation", mpv_path);
  
      mp_msg(log, MSGL_INFO, "mpv has been successfully registered.\n");
-diff -ruN video/out/w32_common.c video/out/w32_common.c
---- video/out/w32_common.c	2026-08-10 08:02:09
-+++ video/out/w32_common.c	2026-08-31 13:12:46
-@@ -193,7 +193,12 @@
+--- video/out/w32_common.c
++++ video/out/w32_common.c
+@@ -194,7 +194,12 @@
  
  static inline int get_system_metrics(struct vo_w32_state *w32, int metric)
  {
@@ -166,7 +166,7 @@ diff -ruN video/out/w32_common.c video/out/w32_common.c
  }
  
  static void adjust_window_rect(struct vo_w32_state *w32, HWND hwnd, RECT *rc)
-@@ -201,8 +206,14 @@
+@@ -202,8 +207,14 @@
      if (!w32->opts->border && !IsMaximized(w32->window))
          return;
  
@@ -181,7 +181,7 @@ diff -ruN video/out/w32_common.c video/out/w32_common.c
  }
  
  static bool check_windows10_build(DWORD build)
-@@ -648,10 +659,13 @@
+@@ -649,10 +660,13 @@
      HDC hdc = NULL;
      int dpi = 0;
  
@@ -196,9 +196,8 @@ diff -ruN video/out/w32_common.c video/out/w32_common.c
          dpi = GetDeviceCaps(hdc, LOGPIXELSX);
          ReleaseDC(NULL, hdc);
          MP_VERBOSE(w32, "DPI detected from the old API: %d\n", dpi);
-diff -ruN video/out/gpu/d3d11_helpers.h video/out/gpu/d3d11_helpers.h
---- video/out/gpu/d3d11_helpers.h	2026-08-10 08:02:09
-+++ video/out/gpu/d3d11_helpers.h	2026-08-31 17:05:00
+--- video/out/gpu/d3d11_helpers.h
++++ video/out/gpu/d3d11_helpers.h
 @@ -28,7 +28,7 @@
  #include "video/mp_image.h"
  
@@ -208,7 +207,6 @@ diff -ruN video/out/gpu/d3d11_helpers.h video/out/gpu/d3d11_helpers.h
  #endif
  
  struct d3d11_device_opts {
-diff -ruN video/decode/vd_lavc.c video/decode/vd_lavc.c
 --- video/decode/vd_lavc.c
 +++ video/decode/vd_lavc.c
 @@ -21,6 +21,8 @@
@@ -220,7 +218,7 @@ diff -ruN video/decode/vd_lavc.c video/decode/vd_lavc.c
  #include <libavcodec/avcodec.h>
  #include <libavformat/version.h>
  #include <libavutil/common.h>
-@@ -53,6 +55,10 @@
+@@ -54,6 +56,10 @@
  #include "video/csputils.h"
  #include "video/sws_utils.h"
  #include "video/out/vo.h"
@@ -231,7 +229,7 @@ diff -ruN video/decode/vd_lavc.c video/decode/vd_lavc.c
  
  #include "options/m_option.h"
  
-@@ -1077,6 +1083,21 @@
+@@ -1172,6 +1178,21 @@
      if (ctx->hwdec_opts->hwdec_image_format)
          new_fctx->sw_format = imgfmt2pixfmt(ctx->hwdec_opts->hwdec_image_format);
  
@@ -253,7 +251,6 @@ diff -ruN video/decode/vd_lavc.c video/decode/vd_lavc.c
      // 1 surface is already included by libavcodec. The field is 0 if the
      // hwaccel supports dynamic surface allocation.
      if (new_fctx->initial_pool_size)
-diff -ruN video/d3d.c video/d3d.c
 --- video/d3d.c
 +++ video/d3d.c
 @@ -264,6 +264,56 @@
@@ -313,7 +310,6 @@ diff -ruN video/d3d.c video/d3d.c
  }
  
  static struct AVBufferRef *d3d9_create_standalone(struct mpv_global *global,
-diff -ruN video/d3d.h video/d3d.h
 --- video/d3d.h
 +++ video/d3d.h
 @@ -38,5 +38,7 @@
