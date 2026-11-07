@@ -123,10 +123,11 @@ def relax_file(pubspec: pathlib.Path) -> bool:
 targets = []
 if cache.is_dir():
     targets.extend(cache.glob("*/fvp-0.39.*/pubspec.yaml"))
+    targets.extend(cache.glob("*/fvp-0.40.*/pubspec.yaml"))
     targets.extend(cache.glob("*/video_player_platform_interface-6.3.*/pubspec.yaml"))
 
 if not targets:
-    print("ERROR: no fvp-0.39.* / video_player_platform_interface-6.3.* in pub-cache", file=sys.stderr)
+    print("ERROR: no fvp-0.39.*/0.40.* / video_player_platform_interface-6.3.* in pub-cache", file=sys.stderr)
     sys.exit(1)
 
 patched = 0

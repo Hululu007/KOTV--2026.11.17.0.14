@@ -79,6 +79,8 @@ print(f"ok lock ffmpeg → {sys.argv[3][:12]}")
 PY
 
 # GHA 上 downloads.videolan.org 经常超时；ISO 三件套改走公共镜像（sha256 不变）。
+# lua.org 在 GHA 上也常超时；改钉 Debian lua5.2 orig（仍是 5.2.4；mpv 禁止 5.3+）。
+# extract 用 --strip-components=1，官方 lua-5.2.4/ 与 Debian lua5.2-5.2.4/ 等价。
 python3 - "$WORK/webhtv/third_party/mpv-native-lock.json" <<'PY'
 import json
 from pathlib import Path
@@ -111,58 +113,103 @@ for key in ("libbluray", "libdvdread", "libdvdnav"):
         continue
     src["url"] = primary + rel
     changed.append(f"{key}→{src['url']}")
+
+lua = sources.get("lua")
+if isinstance(lua, dict):
+    # scripts/vendor/lua5.2_5.2.4.orig.tar.gz
+    lua["url"] = "https://deb.debian.org/debian/pool/main/l/lua5.2/lua5.2_5.2.4.orig.tar.gz"
+    lua["sha256"] = "86fb7e23cbbddfcd92684e5f8017ff41c9112251d1656dbece415a97fad171c0"
+    lua["version"] = "5.2.4"
+    changed.append("lua→debian-orig-5.2.4")
+
 path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 print("ok lock videolan mirrors: " + (", ".join(changed) if changed else "none"))
 PY
 
 build_sh="$WORK/webhtv/scripts/build_mpv_native.sh"
 chmod +x "$build_sh"
+# 给 webhtv 下载逻辑用：vendor 在 KOTV 仓库根，不在 webhtv 树内。
+export KOTV_LUA_VENDOR="$ROOT/scripts/vendor/lua5.2_5.2.4.orig.tar.gz"
 
-# ftp.gnu.org 经常连不上。libiconv 先试镜像，文件名和后面的 sha 不变。
+# ftp.gnu.org / lua.org 经常连不上。libiconv、lua 走镜像或 vendor。
 python3 - "$build_sh" <<'PY'
 from pathlib import Path
+import re
 import sys
+
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
-old_plain = '    curl --location --fail --retry 3 --output "$archive" "$url"\n'
-old_timeout = (
-    '    curl --location --fail --connect-timeout 20 --max-time 300 '
-    '--retry 3 --retry-delay 2 --retry-all-errors --output "$archive" "$url"\n'
-)
 new = (
     '    _kotv_file="${url##*/}"\n'
     '    _kotv_ok=0\n'
-    '    if [[ "$_kotv_file" == libiconv-*.tar.gz ]]; then\n'
-    '      _kotv_urls=(\n'
-    '        "https://mirrors.kernel.org/gnu/libiconv/${_kotv_file}"\n'
-    '        "https://mirror.csclub.uwaterloo.ca/gnu/libiconv/${_kotv_file}"\n'
-    '        "https://mirrors.ocf.berkeley.edu/gnu/libiconv/${_kotv_file}"\n'
-    '        "https://ftp.gnu.org/pub/gnu/libiconv/${_kotv_file}"\n'
-    '      )\n'
-    '    else\n'
-    '      _kotv_urls=("$url")\n'
+    '    # KOTV：lua 优先 vendor，再 Debian 镜像；libiconv 走 GNU 镜像。\n'
+    '    if [[ -n "${KOTV_LUA_VENDOR:-}" && -f "${KOTV_LUA_VENDOR}" ]] && '
+    '[[ "$_kotv_file" == lua5.2_*.orig.tar.gz || "$_kotv_file" == lua-5.2.*.tar.gz ]]; then\n'
+    '      mkdir -p "$(dirname "$archive")"\n'
+    '      cp -f "$KOTV_LUA_VENDOR" "$archive"\n'
+    '      _kotv_ok=1\n'
+    '      log "using vendored lua: $KOTV_LUA_VENDOR"\n'
     '    fi\n'
-    '    for _kotv_try in "${_kotv_urls[@]}"; do\n'
-    '      rm -f "$archive"\n'
-    '      if curl --location --fail --connect-timeout 20 --max-time 300 '
-    '--retry 2 --retry-delay 2 --retry-all-errors --output "$archive" "$_kotv_try"; then\n'
-    '        _kotv_ok=1\n'
-    '        break\n'
+    '    if [[ "$_kotv_ok" != 1 ]]; then\n'
+    '      if [[ "$_kotv_file" == libiconv-*.tar.gz ]]; then\n'
+    '        _kotv_urls=(\n'
+    '          "https://mirrors.kernel.org/gnu/libiconv/${_kotv_file}"\n'
+    '          "https://mirror.csclub.uwaterloo.ca/gnu/libiconv/${_kotv_file}"\n'
+    '          "https://mirrors.ocf.berkeley.edu/gnu/libiconv/${_kotv_file}"\n'
+    '          "https://ftp.gnu.org/pub/gnu/libiconv/${_kotv_file}"\n'
+    '        )\n'
+    '      elif [[ "$_kotv_file" == lua5.2_*.orig.tar.gz || "$_kotv_file" == lua-5.2.*.tar.gz ]]; then\n'
+    '        _kotv_urls=(\n'
+    '          "https://deb.debian.org/debian/pool/main/l/lua5.2/lua5.2_5.2.4.orig.tar.gz"\n'
+    '          "https://mirrors.edge.kernel.org/debian/pool/main/l/lua5.2/lua5.2_5.2.4.orig.tar.gz"\n'
+    '          "https://mirrors.tuna.tsinghua.edu.cn/debian/pool/main/l/lua5.2/lua5.2_5.2.4.orig.tar.gz"\n'
+    '          "https://mirrors.ustc.edu.cn/debian/pool/main/l/lua5.2/lua5.2_5.2.4.orig.tar.gz"\n'
+    '          "$url"\n'
+    '        )\n'
+    '      else\n'
+    '        _kotv_urls=("$url")\n'
     '      fi\n'
-    '      log "download failed, next source: $name"\n'
-    '    done\n'
+    '      for _kotv_try in "${_kotv_urls[@]}"; do\n'
+    '        rm -f "$archive"\n'
+    '        if curl --location --fail --connect-timeout 20 --max-time 300 '
+    '--retry 2 --retry-delay 2 --retry-all-errors --output "$archive" "$_kotv_try"; then\n'
+    '          _kotv_ok=1\n'
+    '          break\n'
+    '        fi\n'
+    '        log "download failed, next source: $name"\n'
+    '      done\n'
+    '    fi\n'
     '    [ "$_kotv_ok" = 1 ]\n'
 )
-if "_kotv_urls" in text:
-    print("ok extract_archive already tries gnu mirrors")
-elif old_plain in text:
-    path.write_text(text.replace(old_plain, new, 1), encoding="utf-8")
-    print("ok patched extract_archive gnu mirrors")
-elif old_timeout in text:
-    path.write_text(text.replace(old_timeout, new, 1), encoding="utf-8")
-    print("ok patched extract_archive gnu mirrors")
+if "KOTV_LUA_VENDOR" in text and "lua5.2_5.2.4.orig.tar.gz" in text:
+    print("ok extract_archive already prefers lua vendor + debian mirrors")
+elif "_kotv_urls" in text:
+    # 旧补丁只有 libiconv：整段替换成含 lua vendor 的版本。
+    pat = re.compile(
+        r'    _kotv_file="\$\{url##\*/\}"\n'
+        r'    _kotv_ok=0\n'
+        r'.*?'
+        r'    \[ "\$_kotv_ok" = 1 \]\n',
+        re.S,
+    )
+    new_text, n = pat.subn(new, text, count=1)
+    if n != 1:
+        raise SystemExit("ERROR: cannot upgrade extract_archive kotv mirror block")
+    path.write_text(new_text, encoding="utf-8")
+    print("ok upgraded extract_archive with lua vendor + debian mirrors")
 else:
-    raise SystemExit("ERROR: extract_archive curl line changed")
+    old_plain = '    curl --location --fail --retry 3 --output "$archive" "$url"\n'
+    old_timeout = (
+        '    curl --location --fail --connect-timeout 20 --max-time 300 '
+        '--retry 3 --retry-delay 2 --retry-all-errors --output "$archive" "$url"\n'
+    )
+    if old_plain in text:
+        path.write_text(text.replace(old_plain, new, 1), encoding="utf-8")
+    elif old_timeout in text:
+        path.write_text(text.replace(old_timeout, new, 1), encoding="utf-8")
+    else:
+        raise SystemExit("ERROR: extract_archive curl line changed")
+    print("ok patched extract_archive gnu/lua mirrors")
 PY
 
 # webhtv 对 mpv 浅克隆 + tag deepen 在 CI 上不稳：要么 shallow 文件冲突，要么 describe 对不上。
