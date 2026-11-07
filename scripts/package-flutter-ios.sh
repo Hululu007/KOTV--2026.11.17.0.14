@@ -187,13 +187,16 @@ main() {
     brew install cocoapods
   fi
   pod --version
+
+  flutter config --no-enable-swift-package-manager || true
+  # 须先 pub get：本地 mdk.podspec 的 s.version 要从 fvp darwin podspec 的
+  # `mdk ~> X.Y` 下限写入；先拉最新 SDK 再 pub get 会把 version 写成 0.40.x，
+  # 与 fvp 仍声明的 ~> 0.39.0 冲突（CocoaPods）。
+  KOTV_FLUTTER_TARGET=ios "$ROOT/scripts/flutter-pub-get.sh"
   # shellcheck source=kotv-fvp-deps.sh
   source "$ROOT/scripts/kotv-fvp-deps.sh"
   kotv_ensure_mdk_apple_pod
   export KOTV_MDK_POD_PATH
-
-  flutter config --no-enable-swift-package-manager || true
-  KOTV_FLUTTER_TARGET=ios "$ROOT/scripts/flutter-pub-get.sh"
 
   cd "$ROOT/flutter"
   kotv_flutter_asset_engines_hide

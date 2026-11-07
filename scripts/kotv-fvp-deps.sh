@@ -304,6 +304,7 @@ kotv_ensure_mdk_apple_pod() {
 
 # fvp podspec 会写 `mdk ~> X.Y.Z`。本地 pod 的 s.version 用该下限以过 CocoaPods；
 # 实际解压的仍是 GitHub 解析到的最新 SDK。
+# 必须在 flutter pub get 之后调用（否则读不到 fvp，会误用最新 SDK 版本号）。
 _kotv_mdk_pod_version() {
   local fvp_root spec ver
   fvp_root="$(kotv_fvp_package_root 2>/dev/null)" || true
@@ -317,7 +318,8 @@ _kotv_mdk_pod_version() {
       fi
     done
   fi
-  kotv_mdk_sdk_ver
+  echo "error: cannot read fvp mdk ~> version (run flutter pub get first)" >&2
+  return 1
 }
 
 kotv_write_mdk_podspec() {
