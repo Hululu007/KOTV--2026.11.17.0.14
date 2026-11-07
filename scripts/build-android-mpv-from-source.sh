@@ -547,6 +547,27 @@ if old_ver not in text:
 if "libdovi markers missing" not in text:
     text = text.replace(old_ver, new_ver, 1)
 
+# FongMi FFmpeg tip 已自带 output_mutex 序列化；再硬 apply 会挡掉后续 diagnostics/avs3 补丁。
+old_out = (
+    '  [ -f "$FFMPEG_MEDIACODEC_OUTPUT_PATCH" ] || die "missing FFmpeg MediaCodec output serialization patch: $FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
+    '  git -C "$deps/ffmpeg" apply --check "$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
+    '  git -C "$deps/ffmpeg" apply "$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
+)
+new_out = (
+    '  [ -f "$FFMPEG_MEDIACODEC_OUTPUT_PATCH" ] || die "missing FFmpeg MediaCodec output serialization patch: $FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
+    '  if grep -Fq "output_mutex" "$deps/ffmpeg/libavcodec/mediacodecdec_common.h"; then\n'
+    '    log "skip FFmpeg MediaCodec output serialization (already in tree)"\n'
+    '  else\n'
+    '    git -C "$deps/ffmpeg" apply --check "$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
+    '    git -C "$deps/ffmpeg" apply "$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
+    '  fi\n'
+)
+if old_out not in text:
+    if "skip FFmpeg MediaCodec output serialization" not in text:
+        raise SystemExit("ERROR: webhtv FFmpeg output serialization apply block changed")
+else:
+    text = text.replace(old_out, new_out, 1)
+
 path.write_text(text, encoding="utf-8")
 print("ok patched webhtv build_mpv_native.sh for libdovi")
 PY
