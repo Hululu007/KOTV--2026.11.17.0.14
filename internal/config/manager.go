@@ -606,8 +606,8 @@ func (m *Manager) parseConfig(cfg *database.Config, isJSON bool, loadJar bool) e
 	var data string
 	var err error
 	if !isJSON && IsNodePackageURL(cfg.URL) {
-		if appruntime.Node() == "" {
-			return fmt.Errorf("本机没有 Node 运行时")
+		if _, err = appruntime.RequireNode(); err != nil {
+			return err
 		}
 		data, err = spider.DefaultNodeHost().LoadPackage(cfg.URL)
 		if err != nil {

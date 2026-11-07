@@ -49,8 +49,9 @@ echo "==> KOTV_MACOS_NO_FVP=$KOTV_MACOS_NO_FVP"
 echo "==> fetch desktop libmpv (AV3A source)"
 "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 
-if [[ ! -d "$ROOT/runtime/jre" ]]; then
-  echo "==> runtime incomplete, preparing..."
+# 仅有旧 jre 时也会跳过 prepare，导致猫爪 Node 缺失；jre 与 node 都要齐。
+if [[ ! -d "$ROOT/runtime/jre" || ! -x "$ROOT/runtime/node/node" ]]; then
+  echo "==> runtime incomplete (need jre + node), preparing..."
   "$ROOT/scripts/prepare-runtime.sh" "$PLAT"
 fi
 
@@ -150,6 +151,7 @@ fi
 
 echo "==> verify package"
 test -x "$OUT_APP/Contents/Resources/runtime/jre/bin/java"
+test -x "$OUT_APP/Contents/Resources/runtime/node/node"
 test -e "$OUT_APP/Contents/Resources/runtime/bridge/spider-bridge.jar" \
   || test -e "$OUT_APP/Contents/Resources/runtime/bridge"
 test -x "$OUT_APP/Contents/Resources/engine/kotv-engine"

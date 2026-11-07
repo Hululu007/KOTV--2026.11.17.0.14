@@ -32,8 +32,8 @@ echo "platform=$PLAT"
 echo "dist=$DIST"
 echo "version=$VERSION"
 
-if [[ ! -d "$RUNTIME_SRC" || ! -d "$RUNTIME_SRC/bridge" ]]; then
-  echo "runtime missing, running prepare-runtime.sh $PLAT ..."
+if [[ ! -d "$RUNTIME_SRC" || ! -d "$RUNTIME_SRC/bridge" || ( ! -x "$RUNTIME_SRC/node/node" && ! -f "$RUNTIME_SRC/node/node.exe" ) ]]; then
+  echo "runtime missing (need bridge + node), running prepare-runtime.sh $PLAT ..."
   "$ROOT/scripts/prepare-runtime.sh" "$PLAT"
 fi
 

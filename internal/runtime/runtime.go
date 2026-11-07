@@ -191,7 +191,7 @@ func Python() string {
 }
 
 // Node 返回捆绑 Node（不回落系统 PATH）。
-// 桌面：runtime/node/node(.exe)；安卓：nativeLibraryDir/libkotv_node.so。
+// 桌面：runtime/node/node(.exe)；安卓：nativeLibraryDir/libkotv_node.so（同目录需有 libnode.so）。
 func Node() string {
 	if runtime.GOOS == "android" {
 		cands := []string{}
@@ -208,6 +208,15 @@ func Node() string {
 		filepath.Join("node", "node"),
 		filepath.Join("node", "node.exe"),
 	)...)
+}
+
+// RequireNode 返回捆绑 Node 路径；没有则返回统一错误文案。
+func RequireNode() (string, error) {
+	bin := Node()
+	if bin == "" {
+		return "", fmt.Errorf("本机没有 Node 运行时")
+	}
+	return bin, nil
 }
 
 // NodeVersion 返回 `node -v`；不可用时为空。

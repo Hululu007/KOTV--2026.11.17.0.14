@@ -21,15 +21,20 @@ if [[ ! -d "$SRC_RT" ]]; then
   exit 1
 fi
 
-# 最少要有 jre（JAR 爬虫）、bridge；页内 MPV 与 fvp/mdk 同目录，不进 runtime
+# 最少要有 jre（JAR）、node（猫爪源包）、bridge；页内 MPV 与 fvp/mdk 同目录，不进 runtime
 need_ok=1
-for need in jre bridge; do
+for need in jre node bridge; do
   if [[ ! -d "$SRC_RT/$need" && ! -e "$SRC_RT/$need" ]]; then
     echo "error: incomplete runtime, missing $SRC_RT/$need" >&2
     echo "  run: ./scripts/prepare-runtime.sh" >&2
     need_ok=0
   fi
 done
+if [[ ! -x "$SRC_RT/node/node" && ! -f "$SRC_RT/node/node.exe" ]]; then
+  echo "error: incomplete runtime, missing $SRC_RT/node/node(.exe)" >&2
+  echo "  run: ./scripts/prepare-runtime.sh" >&2
+  need_ok=0
+fi
 [[ "$need_ok" == 1 ]] || exit 1
 
 # 归一：若传入 .app，落到 Contents/Resources/runtime；否则 <dir>/runtime
@@ -60,15 +65,21 @@ fi
 rm -rf "$DEST_RT/mpv" "$DEST_RT/vlc" "$DEST_RT/libvlc" "$DEST_RT/lib" "$DEST_RT/libmpv"
 
 # 校验关键子目录
-for need in jre bridge; do
+for need in jre node bridge; do
   if [[ ! -e "$DEST_RT/$need" ]]; then
     echo "error: bundle missing $DEST_RT/$need" >&2
     exit 1
   fi
 done
-# Java 可执行
+# Java / Node 可执行
 if [[ "$(uname -s)" == Darwin || "$(uname -s)" == Linux ]]; then
   test -x "$DEST_RT/jre/bin/java" || { echo "error: jre/bin/java missing" >&2; exit 1; }
+  test -x "$DEST_RT/node/node" || { echo "error: node/node missing" >&2; exit 1; }
+elif [[ -f "$DEST_RT/node/node.exe" ]]; then
+  :
+else
+  echo "error: node binary missing under $DEST_RT/node" >&2
+  exit 1
 fi
 
 # 引擎二进制：优先 assets 里已编好的

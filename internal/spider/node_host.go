@@ -88,8 +88,8 @@ func (h *NodeHost) LoadPackage(pkgURL string) (string, error) {
 	if pkgURL == "" {
 		return "", fmt.Errorf("空的 Node 源包地址")
 	}
-	if appruntime.Node() == "" {
-		return "", fmt.Errorf("本机没有 Node 运行时")
+	if _, err := appruntime.RequireNode(); err != nil {
+		return "", err
 	}
 	pkg, err := h.Ensure(pkgURL)
 	if err != nil {
@@ -292,9 +292,9 @@ func (p *nodePkg) start(h *NodeHost) error {
 
 func (p *nodePkg) startLocked(h *NodeHost) error {
 	p.stopLocked()
-	nodeBin := appruntime.Node()
-	if nodeBin == "" {
-		return fmt.Errorf("本机没有 Node 运行时")
+	nodeBin, err := appruntime.RequireNode()
+	if err != nil {
+		return err
 	}
 	freePort, err := pickFreeLocalPort()
 	if err != nil {

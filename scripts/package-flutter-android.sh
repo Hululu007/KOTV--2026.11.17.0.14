@@ -71,8 +71,16 @@ chmod +x "$ROOT/scripts/build-fongmi-media3.sh"
 chmod +x "$ROOT/scripts/prepare-android-mpv-native.sh"
 "$ROOT/scripts/prepare-android-mpv-native.sh"
 chmod +x "$ROOT/scripts/build-android-node-launcher.sh"
-echo "==> build Android Node launcher (libkotv_node.so)"
+echo "==> build Android Node launcher (libkotv_node.so + libnode.so)"
 "$ROOT/scripts/build-android-node-launcher.sh"
+for _abi in arm64-v8a armeabi-v7a; do
+  for _so in libkotv_node.so libnode.so; do
+    if [[ ! -f "$ROOT/flutter/android/app/src/main/jniLibs/$_abi/$_so" ]]; then
+      echo "ERROR: missing jniLibs/$_abi/$_so after node launcher build" >&2
+      exit 1
+    fi
+  done
+done
 
 OUT_DIR="$ROOT/flutter/build/app/outputs/flutter-apk"
 mkdir -p "$ROOT/dist"
@@ -105,6 +113,12 @@ build_one_abi() {
     *" ${abi_filter} "*) ;;
     *) echo "ERROR: apk missing lib/$abi_filter" >&2; exit 1 ;;
   esac
+  for _so in libkotv_node.so libnode.so; do
+    if ! printf '%s\n' "$listing" | grep -qx "lib/${abi_filter}/${_so}"; then
+      echo "ERROR: apk missing lib/${abi_filter}/${_so}" >&2
+      exit 1
+    fi
+  done
   if ! printf '%s\n' "$listing" | python3 -c '
 import re, sys
 want = sys.argv[1]

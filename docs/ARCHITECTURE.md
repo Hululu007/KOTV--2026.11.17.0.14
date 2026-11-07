@@ -114,7 +114,7 @@ Go Engine（单进程，:9978）
 | FFmpeg | 媒体处理 | osxexperts / Gyan / BtbN |
 | QuickJS | JS 爬虫 | CGO 编译进主程序，无单独目录 |
 
-`prepare-runtime.sh` 下载并装配 `runtime/`；查找顺序：可执行文件旁 `runtime/` → `KOTV_RUNTIME` 环境变量 → 开发态仓库 `runtime/`。
+`prepare-runtime.sh` 下载并装配 `runtime/`（含 node）；桌面打包在缺 jre 或 node 时都会再跑一遍，发行包校验 `runtime/node`。查找顺序：可执行文件旁 `runtime/` → `KOTV_RUNTIME` 环境变量 → 开发态仓库 `runtime/`。
 
 ## 播放
 
