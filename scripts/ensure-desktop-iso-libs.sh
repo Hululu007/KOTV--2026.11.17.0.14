@@ -17,7 +17,7 @@ DVDREAD_VER=7.0.1
 DVDREAD_SHA=2e3e04a305c15c3963aa03ae1b9a83c1d239880003fcf3dde986d3943355d407
 DVDNAV_VER=7.0.0
 DVDNAV_SHA=a2a18f5ad36d133c74bf9106b6445806fa253b09141a46392550394b647b221e
-# Align with current Homebrew / FongMi CI packaging (still lacks FongMi/mpv tip APIs).
+# 与当前 Homebrew 打包常用版本一致（上游 tip 另需本地兼容补丁）。
 BLURAY_VER=1.5.0
 BLURAY_SHA=f676408e91a5d321abf8b8d4dfdae36205c297dab5c54c3ec519639025f474a2
 

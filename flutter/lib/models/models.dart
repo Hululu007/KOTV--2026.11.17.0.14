@@ -149,7 +149,8 @@ class EpisodeItem {
   EpisodeItem({required this.name, required this.url, this.headers});
   final String name;
 
-  /// 非空：引擎判定可直开；空串：须 /api/v1/play（按集下标取 raw）。
+  /// 非空：引擎认为非爬虫/磁力等须解析形态；空串：须 /api/v1/play。
+  /// 本机路径是否直喂由详情 `_episodeCanDirectPlay` 再判（远端须 play 换 /file/）。
   final String url;
   final Map<String, String>? headers;
 

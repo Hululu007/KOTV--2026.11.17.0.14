@@ -2041,11 +2041,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     int? playSerial,
   }) async {
     final serial = playSerial ?? _playAtSerial;
-    final pushUrl = (_nodeDanmuPushUrl ?? '').trim();
-    // 本集已有 danmuPush：保留轨，只刷新源列表，勿清空、勿二次拉取同一 URL。
-    final keepPush = pushUrl.isNotEmpty;
-    if (pushUrl.isNotEmpty) _ensureDanmakuPushSource(pushUrl);
-    if (!keepPush) {
+    var pushUrl = (_nodeDanmuPushUrl ?? '').trim();
+    if (pushUrl.isNotEmpty) {
+      _ensureDanmakuPushSource(pushUrl);
+    } else {
       _danmakuItems.value = const [];
     }
     try {
@@ -2056,6 +2055,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             sources: [for (final s in _spiderDanmakuSources) s.toJson()],
           );
       if (!mounted || serial != _playAtSerial) return;
+      // await 期间可能刚到 danmuPush：再读一次，避免二次拉取覆盖推送轨。
+      pushUrl = (_nodeDanmuPushUrl ?? '').trim();
+      final keepPush = pushUrl.isNotEmpty;
+      if (keepPush) _ensureDanmakuPushSource(pushUrl);
       var sources = kotvDanmakuSourcesFrom(res['sources']);
       if (pushUrl.isNotEmpty && !sources.any((s) => s.url == pushUrl)) {
         sources = [DanmakuSource(name: '推送', url: pushUrl), ...sources];
@@ -2075,7 +2078,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         await _loadDanmakuSource(_danmakuSourceIdx, playSerial: serial);
       }
     } catch (_) {
-      if (mounted && serial == _playAtSerial && !keepPush) {
+      if (!mounted || serial != _playAtSerial) return;
+      if ((_nodeDanmuPushUrl ?? '').trim().isEmpty) {
         setState(() => _danmakuSources = const []);
       }
     }
@@ -2150,8 +2154,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await _playAt(epIdx, fullscreen: fullscreen);
   }
 
-  /// 剧集 url 非空时可跳过 play。引擎本机文件路径仅本机客户端可直喂；
-  /// 远端须走 play，由引擎换成 /file/。
+  /// 本客户端能否跳过 play、直接喂 [url]。
+  /// content: 可直喂；http(s) 等带 scheme 可直喂；file: 与无 scheme 本机路径仅本机引擎可直喂，
+  /// 远端须走 play 换成 /file/。
   bool _episodeCanDirectPlay(String url) {
     final u = url.trim();
     if (u.isEmpty) return false;

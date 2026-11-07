@@ -2,9 +2,12 @@ package spider
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
+
+	"github.com/bobo/KOTV/internal/playproxy"
 )
 
 // NodePlayInfo 当前点播起播信息，供 getPlayInfo 回调。
@@ -187,15 +190,43 @@ func resolveNodePkg(prefix string) *nodePkg {
 	return pkg
 }
 
-// rewriteNodePkgURL 弹幕 / OPENWEB：按 prefix 选包后走 RewriteNodeURL。
+// resolveNodePkgByLocalPort 按 URL 里 127.0.0.1|localhost:端口 匹配已起的包。
+func resolveNodePkgByLocalPort(raw string) *nodePkg {
+	sub := reLocalNodeURL.FindStringSubmatch(raw)
+	if len(sub) != 2 {
+		return nil
+	}
+	portStr := sub[1]
+	h := DefaultNodeHost()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, p := range h.pkgs {
+		if p.Port() > 0 && fmt.Sprintf("%d", p.Port()) == portStr {
+			return p
+		}
+	}
+	return nil
+}
+
+// rewriteNodePkgURL 弹幕 / OPENWEB：prefix → 本机端口 → 任一就绪包；再 RewriteNodeURL。
 func rewriteNodePkgURL(u, prefix string) string {
 	u = strings.TrimSpace(u)
 	if u == "" {
 		return u
 	}
-	pkg := resolveNodePkg(prefix)
+	var pkg *nodePkg
+	if strings.TrimSpace(prefix) != "" {
+		pkg = resolveNodePkg(prefix)
+	}
 	if pkg == nil {
-		return u
+		pkg = resolveNodePkgByLocalPort(u)
+	}
+	if pkg == nil {
+		pkg = resolveNodePkg("")
+	}
+	if pkg == nil {
+		// 无源包时仍尽量换成远端可达的引擎地址。
+		return playproxy.PublicizeURL(u)
 	}
 	return pkg.RewriteNodeURL(u)
 }
