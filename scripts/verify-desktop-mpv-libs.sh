@@ -109,12 +109,22 @@ check_iso() {
   local name="$2"
   [[ -f "$f" ]] || return
   local ok_dvd=0 ok_bd=0
-  # stream_dvdnav.c 编入后必有 ifo_dvdnav / dvdnav_open（静态链 libdvdnav 时亦有）
-  if has_str "$f" "dvdnav_open" || has_str "$f" "ifo_dvdnav"; then
+  # 禁用 ISO 时 meson 参数仍会进二进制；ifo_dvdnav 也可能残留。以真实打开符号为准。
+  if has_str "$f" "-Ddvdnav=disabled"; then
+    echo "ERROR: $name built with -Ddvdnav=disabled" >&2
+    fail=1
+    return
+  fi
+  if has_str "$f" "-Dlibbluray=disabled"; then
+    echo "ERROR: $name built with -Dlibbluray=disabled" >&2
+    fail=1
+    return
+  fi
+  if has_str "$f" "dvdnav_open"; then
     ok_dvd=1
   fi
-  # stream_bluray.c
-  if has_str "$f" "bd_open" || has_str "$f" "bdmv/bluray"; then
+  # stream_bluray.c / libbluray
+  if has_str "$f" "bd_get_titles" || has_str "$f" "bdmv/bluray"; then
     ok_bd=1
   fi
   if [[ "$ok_dvd" == 1 && "$ok_bd" == 1 ]]; then
