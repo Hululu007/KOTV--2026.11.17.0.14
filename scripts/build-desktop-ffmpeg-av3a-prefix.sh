@@ -273,6 +273,17 @@ ARCD_CMAKE_ARGS=(
 if ! kotv_is_windows_build; then
   ARCD_CMAKE_ARGS+=(-DCMAKE_C_FLAGS="-fPIC" -DCMAKE_CXX_FLAGS="-fPIC")
 fi
+# 优先用本机缓存的 Boost，避免 cmake FetchContent 从 archives.boost.io 慢下/挂死。
+BOOST_CACHE="${KOTV_BOOST_TGZ:-$ROOT/.runtime-cache/boost_1_87_0.tar.bz2}"
+BOOST_SRC="$BUILD_DIR/boost_1_87_0"
+if [[ -d "$BOOST_SRC/boost" ]]; then
+  echo "  using extracted Boost headers: $BOOST_SRC"
+  ARCD_CMAKE_ARGS+=(-DFETCHCONTENT_SOURCE_DIR_ARCDAV3A_BOOST="$BOOST_SRC")
+elif [[ -f "$BOOST_CACHE" ]]; then
+  echo "  extract Boost from $BOOST_CACHE"
+  tar -xjf "$BOOST_CACHE" -C "$BUILD_DIR"
+  ARCD_CMAKE_ARGS+=(-DFETCHCONTENT_SOURCE_DIR_ARCDAV3A_BOOST="$BOOST_SRC")
+fi
 cmake -G "$CMAKE_GENERATOR" -S ffmpeg/dependency/avs3a -B arcdav3a-build \
   "${ARCD_CMAKE_ARGS[@]}"
 cmake --build arcdav3a-build -j"$JOBS"
