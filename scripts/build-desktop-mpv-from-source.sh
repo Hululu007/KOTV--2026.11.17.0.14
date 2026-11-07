@@ -869,19 +869,50 @@ ensure_libplacebo() {
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d libplacebo/.git ]]; then
-    git clone --depth 1 --recurse-submodules --branch "$LIBPLACEBO_TAG" \
-      https://github.com/haasn/libplacebo.git libplacebo
+    local clone_ok=0
+    local attempt
+    for attempt in 1 2 3 4 5; do
+      echo "  libplacebo clone attempt $attempt"
+      rm -rf libplacebo
+      if git clone --depth 1 --recurse-submodules --branch "$LIBPLACEBO_TAG" \
+        https://github.com/haasn/libplacebo.git libplacebo; then
+        clone_ok=1
+        break
+      fi
+      sleep $((attempt * 3))
+    done
+    if [[ $clone_ok -ne 1 ]]; then
+      echo "ERROR: libplacebo clone/submodules failed after retries" >&2
+      exit 1
+    fi
   else
     # 旧缓存常停在 v7.360.x；改钉后必须显式 checkout，否则仍编出旧 soversion。
     git -C libplacebo fetch --depth 1 origin tag "$LIBPLACEBO_TAG" 2>/dev/null \
       || git -C libplacebo fetch --depth 1 origin "$LIBPLACEBO_TAG"
     git -C libplacebo checkout -q FETCH_HEAD 2>/dev/null \
       || git -C libplacebo checkout -q "$LIBPLACEBO_TAG"
-    git -C libplacebo submodule update --init --recursive 2>/dev/null || true
+    local sm_ok=0
+    local attempt
+    for attempt in 1 2 3 4 5; do
+      if git -C libplacebo submodule update --init --recursive; then
+        sm_ok=1
+        break
+      fi
+      echo "  libplacebo submodule retry $attempt"
+      sleep $((attempt * 3))
+    done
+    if [[ $sm_ok -ne 1 ]]; then
+      echo "ERROR: libplacebo submodule update failed after retries" >&2
+      exit 1
+    fi
   fi
   cd libplacebo
   # 确认源码版本，避免 profile 缓存掩盖错 tag。
   echo "  libplacebo HEAD=$(git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)"
+  if [[ ! -f 3rdparty/Vulkan-Headers/CMakeLists.txt ]]; then
+    echo "ERROR: libplacebo Vulkan-Headers submodule missing" >&2
+    exit 1
+  fi
   rm -rf build
   # 旧 7.360 装到前缀的 .pc/.dylib 会让校验误读；换大版本先清掉。
   rm -f "$PREFIX/lib/libplacebo"* "$PREFIX/lib/pkgconfig/libplacebo.pc" 2>/dev/null || true
