@@ -320,3 +320,45 @@
 +                          int av_sw_format);
  
  #endif
+--- audio/out/ao_wasapi.h
++++ audio/out/ao_wasapi.h
+@@ -100,7 +100,11 @@
+     struct ao_convert_fmt convert_format;
+ 
+     change_notify change;
++#if _WIN32_WINNT >= 0x0602
+     CO_MTA_USAGE_COOKIE hotplug_mta; // the hotplug instance keeps the MTA alive
++#else
++    void *hotplug_mta; // CoIncrementMTAUsage is Win8+; unused on Win7
++#endif
+ } wasapi_state;
+ 
+ char *mp_PKEY_to_str_buf(char *buf, size_t buf_size, const PROPERTYKEY *pkey);
+--- audio/out/ao_wasapi.c
++++ audio/out/ao_wasapi.c
+@@ -504,8 +504,10 @@
+     MP_DBG(ao, "Hotplug uninit\n");
+     struct wasapi_state *state = ao->priv;
+     wasapi_change_uninit(ao);
++#if _WIN32_WINNT >= 0x0602
+     if (state->hotplug_mta)
+         CoDecrementMTAUsage(state->hotplug_mta);
++#endif
+ }
+ 
+ static int hotplug_init(struct ao *ao)
+@@ -513,8 +515,13 @@
+     MP_DBG(ao, "Hotplug init\n");
+     struct wasapi_state *state = ao->priv;
+     state->log = ao->log;
++#if _WIN32_WINNT >= 0x0602
+     HRESULT hr = CoIncrementMTAUsage(&state->hotplug_mta);
+     EXIT_ON_ERROR(hr);
++#else
++    state->hotplug_mta = NULL;
++    HRESULT hr = S_OK;
++#endif
+     hr = wasapi_change_init(ao, true);
+     EXIT_ON_ERROR(hr);
+ 
+     return 0;
