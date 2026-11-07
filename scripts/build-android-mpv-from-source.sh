@@ -548,6 +548,7 @@ if "libdovi markers missing" not in text:
     text = text.replace(old_ver, new_ver, 1)
 
 # FongMi FFmpeg tip 已自带 output_mutex 序列化；再硬 apply 会挡掉后续 diagnostics/avs3 补丁。
+# 但 tip 没有 webhtv verify 依赖的日志字符串，跳过补丁后必须注入，否则 libmvcodec.so 校验失败。
 old_out = (
     '  [ -f "$FFMPEG_MEDIACODEC_OUTPUT_PATCH" ] || die "missing FFmpeg MediaCodec output serialization patch: $FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
     '  git -C "$deps/ffmpeg" apply --check "$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
@@ -557,16 +558,57 @@ new_out = (
     '  [ -f "$FFMPEG_MEDIACODEC_OUTPUT_PATCH" ] || die "missing FFmpeg MediaCodec output serialization patch: $FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
     '  if grep -Fq "output_mutex" "$deps/ffmpeg/libavcodec/mediacodecdec_common.h"; then\n'
     '    log "skip FFmpeg MediaCodec output serialization (already in tree)"\n'
+    '    mc="$deps/ffmpeg/libavcodec/mediacodecdec_common.c"\n'
+    '    if ! grep -Fq "WebHTV MediaCodec output release/flush serialization enabled" "$mc"; then\n'
+    '      python3 - "$mc" <<\'PY\'\n'
+    'from pathlib import Path\n'
+    'import sys\n'
+    'path = Path(sys.argv[1])\n'
+    'text = path.read_text(encoding="utf-8")\n'
+    'marker = \'WebHTV MediaCodec output release/flush serialization enabled\'\n'
+    'if marker in text:\n'
+    '    raise SystemExit(0)\n'
+    'needle = "s->output_mutex_initialized = true;"\n'
+    'idx = text.find(needle)\n'
+    'if idx < 0:\n'
+    '    raise SystemExit("cannot find output_mutex_initialized assignment for verify marker")\n'
+    'insert = needle + "\\n    av_log(avctx, AV_LOG_VERBOSE, \\"" + marker + "\\\\n\\");"\n'
+    'path.write_text(text[:idx] + insert + text[idx + len(needle):], encoding="utf-8")\n'
+    'print("ok injected MediaCodec serialization verify marker")\n'
+    'PY\n'
+    '      grep -Fq "WebHTV MediaCodec output release/flush serialization enabled" "$mc" \\\n'
+    '        || die "MediaCodec serialization verify marker missing after inject"\n'
+    '      log "injected WebHTV MediaCodec serialization verify marker"\n'
+    '    fi\n'
     '  else\n'
     '    git -C "$deps/ffmpeg" apply --check "$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
     '    git -C "$deps/ffmpeg" apply "$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
     '  fi\n'
 )
-if old_out not in text:
-    if "skip FFmpeg MediaCodec output serialization" not in text:
-        raise SystemExit("ERROR: webhtv FFmpeg output serialization apply block changed")
-else:
+if old_out in text:
     text = text.replace(old_out, new_out, 1)
+elif "injected WebHTV MediaCodec serialization verify marker" in text:
+    pass  # already upgraded
+elif 'log "skip FFmpeg MediaCodec output serialization (already in tree)"' in text:
+    # 旧版只 skip、不注入 marker：替换整个 if/else 块
+    import re
+    pat = re.compile(
+        r'  if grep -Fq "output_mutex" "\$deps/ffmpeg/libavcodec/mediacodecdec_common\.h"; then\n'
+        r'    log "skip FFmpeg MediaCodec output serialization \(already in tree\)"\n'
+        r'  else\n'
+        r'    git -C "\$deps/ffmpeg" apply --check "\$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
+        r'    git -C "\$deps/ffmpeg" apply "\$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
+        r'  fi\n',
+        re.M,
+    )
+    # new_out 去掉开头的 [ -f ... ] 行，只替换 if 块
+    repl = new_out.split("\n", 1)[1]
+    text2, n = pat.subn(repl, text, count=1)
+    if n != 1:
+        raise SystemExit("ERROR: webhtv FFmpeg output serialization skip block changed")
+    text = text2
+else:
+    raise SystemExit("ERROR: webhtv FFmpeg output serialization apply block changed")
 
 path.write_text(text, encoding="utf-8")
 print("ok patched webhtv build_mpv_native.sh for libdovi")
