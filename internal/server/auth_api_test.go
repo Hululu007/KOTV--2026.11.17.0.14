@@ -54,12 +54,12 @@ func TestClientLabel(t *testing.T) {
 		t.Fatalf("empty headers -> %q", got)
 	}
 	r.Header.Set("X-Kotv-Client-Platform", "android")
-	r.Header.Set("X-Kotv-Client-Version", "0.2.3")
-	if got := clientLabel(r); got != "android 0.2.3" {
+	r.Header.Set("X-Kotv-Client-Version", "0.3.0")
+	if got := clientLabel(r); got != "android 0.3.0" {
 		t.Fatalf("missing arch -> %q", got)
 	}
 	r.Header.Set("X-Kotv-Client-Arch", "arm64")
-	if got := clientLabel(r); got != "android arm64 0.2.3" {
+	if got := clientLabel(r); got != "android arm64 0.3.0" {
 		t.Fatalf("full -> %q", got)
 	}
 }

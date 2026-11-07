@@ -7,7 +7,7 @@ const kotvDefaultEnginePort = 9978;
 const kotvEnginePortInUseExit = 98;
 
 /// 客户端版本（与 `update.CurrentVersion`、pubspec 同步）。引擎尚未返回 version 时也用它显示。
-const kotvClientVersion = '0.2.3';
+const kotvClientVersion = '0.3.0';
 
 /// 前后端接口协议号（与 Go `server.ProtocolVersion` 一致）。远端后端不同则不能连接。
 const kotvProtocolVersion = 1;
