@@ -1427,8 +1427,8 @@ build_mpv_linux() {
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
     -Dlibcurl=enabled \
-    -Dlibbluray=disabled \
-    -Ddvdnav=disabled \
+    -Dlibbluray=enabled \
+    -Ddvdnav=enabled \
     -Diconv=enabled \
     -Duchardet=enabled \
     -Dlibarchive=enabled \
@@ -1499,8 +1499,8 @@ build_mpv_macos() {
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
     -Dlibcurl=enabled \
-    -Dlibbluray=disabled \
-    -Ddvdnav=disabled \
+    -Dlibbluray=enabled \
+    -Ddvdnav=enabled \
     -Diconv=enabled \
     -Duchardet=enabled \
     -Dlibarchive=enabled \
@@ -1684,8 +1684,8 @@ EOF
       -Dmanpage-build=disabled \
       -Dvulkan="$mpv_vk" \
       -Dlibcurl=enabled \
-    -Dlibbluray=disabled \
-    -Ddvdnav=disabled \
+    -Dlibbluray=enabled \
+    -Ddvdnav=enabled \
     -Diconv=enabled \
     -Duchardet=enabled \
     -Dlibarchive=enabled \
@@ -1704,8 +1704,8 @@ EOF
       -Dmanpage-build=disabled \
       -Dvulkan=enabled \
       -Dlibcurl=enabled \
-    -Dlibbluray=disabled \
-    -Ddvdnav=disabled \
+    -Dlibbluray=enabled \
+    -Ddvdnav=enabled \
     -Diconv=enabled \
     -Duchardet=enabled \
     -Dlibarchive=enabled \

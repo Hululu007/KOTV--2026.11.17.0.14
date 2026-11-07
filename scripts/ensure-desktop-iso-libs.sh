@@ -9,15 +9,17 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-iso-libs-v4"
+STAMP="$PREFIX/.kotv-iso-libs-v5-fongmi-compat"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
+COMPAT_DIR="$ROOT/scripts/patches/kotv-iso-fongmi-compat"
 
 DVDREAD_VER=7.0.1
 DVDREAD_SHA=2e3e04a305c15c3963aa03ae1b9a83c1d239880003fcf3dde986d3943355d407
 DVDNAV_VER=7.0.0
 DVDNAV_SHA=a2a18f5ad36d133c74bf9106b6445806fa253b09141a46392550394b647b221e
-BLURAY_VER=1.4.1
-BLURAY_SHA=76b5dc40097f28dca4ebb009c98ed51321b2927453f75cc72cf74acd09b9f449
+# Align with current Homebrew / FongMi CI packaging (still lacks FongMi/mpv tip APIs).
+BLURAY_VER=1.5.0
+BLURAY_SHA=f676408e91a5d321abf8b8d4dfdae36205c297dab5c54c3ec519639025f474a2
 
 need curl
 need tar
@@ -131,8 +133,31 @@ EOF
 
 ensure_pkg_config
 
-if [[ -f "$STAMP" && -f "$PREFIX/lib/pkgconfig/libbluray.pc" && -f "$PREFIX/lib/pkgconfig/dvdnav.pc" && -f "$PREFIX/lib/pkgconfig/dvdread.pc" ]]; then
-  echo "ok cached ISO libs (libbluray $BLURAY_VER, dvdnav $DVDNAV_VER)"
+iso_fongmi_apis_ok() {
+  # FongMi/mpv meson requires these symbols; stock VideoLAN tarballs lack them
+  # until we inject kotv-iso-fongmi-compat into the static archives + headers.
+  local hdr_dvd="$PREFIX/include/dvdnav/dvdnav.h"
+  local hdr_bd="$PREFIX/include/libbluray/bluray.h"
+  [[ -f "$hdr_dvd" && -f "$hdr_bd" ]] || return 1
+  grep -q 'DVDNAV_HAVE_TIME_SEARCH_FLOOR' "$hdr_dvd" || return 1
+  grep -q 'dvdnav_time_search_floor' "$hdr_dvd" || return 1
+  grep -q 'dvdnav_menu_available' "$hdr_dvd" || return 1
+  grep -q 'bd_get_titles_with_menu_info' "$hdr_bd" || return 1
+  grep -q 'bd_seek_time_checked' "$hdr_bd" || return 1
+  local a
+  for a in "$PREFIX/lib/libdvdnav.a" "$PREFIX/lib/libbluray.a"; do
+    [[ -f "$a" ]] || return 1
+  done
+  if command -v nm >/dev/null 2>&1; then
+    nm -g "$PREFIX/lib/libdvdnav.a" 2>/dev/null | grep -q 'dvdnav_time_search_floor' || return 1
+    nm -g "$PREFIX/lib/libbluray.a" 2>/dev/null | grep -q 'bd_get_titles_with_menu_info' || return 1
+  fi
+  return 0
+}
+
+if [[ -f "$STAMP" && -f "$PREFIX/lib/pkgconfig/libbluray.pc" && -f "$PREFIX/lib/pkgconfig/dvdnav.pc" && -f "$PREFIX/lib/pkgconfig/dvdread.pc" ]] \
+  && iso_fongmi_apis_ok; then
+  echo "ok cached ISO libs (libbluray $BLURAY_VER, dvdnav $DVDNAV_VER + FongMi/mpv API compat)"
   exit 0
 fi
 
@@ -247,8 +272,86 @@ pc() {
     pkg-config "$@"
   fi
 }
+
+# FongMi/mpv tip calls APIs that VideoLAN has not released yet. Keep DVD/Blu-ray
+# enabled by grafting thin wrappers onto our static prefix libraries + headers.
+install_fongmi_iso_compat() {
+  local cc="${CC:-cc}"
+  local cflags=()
+  local arch
+  [[ -f "$COMPAT_DIR/dvdnav_fongmi_compat.c" && -f "$COMPAT_DIR/bluray_fongmi_compat.c" ]] \
+    || { echo "ERROR: missing $COMPAT_DIR sources" >&2; exit 1; }
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    arch="${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
+    cflags+=(-arch "$arch")
+  fi
+  mkdir -p "$BUILD_DIR/iso-fongmi-compat"
+  "$cc" "${cflags[@]}" -O2 -fPIC -I"$PREFIX/include" -c \
+    "$COMPAT_DIR/dvdnav_fongmi_compat.c" -o "$BUILD_DIR/iso-fongmi-compat/dvdnav_fongmi_compat.o"
+  "$cc" "${cflags[@]}" -O2 -fPIC -I"$PREFIX/include" -c \
+    "$COMPAT_DIR/bluray_fongmi_compat.c" -o "$BUILD_DIR/iso-fongmi-compat/bluray_fongmi_compat.o"
+  need ar
+  ar rcs "$PREFIX/lib/libdvdnav.a" "$BUILD_DIR/iso-fongmi-compat/dvdnav_fongmi_compat.o"
+  ar rcs "$PREFIX/lib/libbluray.a" "$BUILD_DIR/iso-fongmi-compat/bluray_fongmi_compat.o"
+
+  python3 - "$PREFIX/include/dvdnav/dvdnav.h" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+t = p.read_text(encoding="utf-8")
+marker = "KOTV_FONGMI_DVDNAV_COMPAT"
+if marker in t:
+    print("ok dvdnav.h already has FongMi/mpv compat decls")
+    raise SystemExit(0)
+block = f"""
+/* {marker}: FongMi/mpv requires these before VideoLAN ships them. */
+#ifndef DVDNAV_HAVE_TIME_SEARCH_FLOOR
+#define DVDNAV_HAVE_TIME_SEARCH_FLOOR 1
+#endif
+DVDNAV_API dvdnav_status_t dvdnav_menu_available(dvdnav_t *self, DVDMenuID_t menu);
+DVDNAV_API dvdnav_status_t dvdnav_time_search_floor(dvdnav_t *self, uint64_t time);
+"""
+# Insert before the common trailing include guard / end of public API.
+needle = "#ifdef __cplusplus\n}\n#endif"
+if needle in t:
+    t = t.replace(needle, block + "\n" + needle, 1)
+else:
+    t = t.rstrip() + "\n" + block
+p.write_text(t, encoding="utf-8")
+print("ok patched dvdnav.h for FongMi/mpv APIs")
+PY
+
+  python3 - "$PREFIX/include/libbluray/bluray.h" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+t = p.read_text(encoding="utf-8")
+marker = "KOTV_FONGMI_BLURAY_COMPAT"
+if marker in t:
+    print("ok bluray.h already has FongMi/mpv compat decls")
+    raise SystemExit(0)
+block = f"""
+/* {marker}: FongMi/mpv requires these before VideoLAN ships them. */
+BD_PUBLIC int bd_seek_time_checked(BLURAY *bd, uint64_t tick);
+BD_PUBLIC uint32_t bd_get_titles_with_menu_info(BLURAY *bd, uint8_t flags,
+                                                 uint32_t min_title_length,
+                                                 int *has_interactive_graphics);
+"""
+needle = "#ifdef __cplusplus\n}\n#endif"
+if needle in t:
+    t = t.replace(needle, block + "\n" + needle, 1)
+else:
+    t = t.rstrip() + "\n" + block
+p.write_text(t, encoding="utf-8")
+print("ok patched bluray.h for FongMi/mpv APIs")
+PY
+}
+
+install_fongmi_iso_compat
+iso_fongmi_apis_ok || { echo "ERROR: FongMi/mpv ISO API compat missing after install" >&2; exit 1; }
+
 pc --exists dvdread
 pc --exists dvdnav
 pc --exists libbluray
-echo "iso-libs ${DVDREAD_VER}/${DVDNAV_VER}/${BLURAY_VER}" >"$STAMP"
-echo "ok ISO libs: dvdread $(pc --modversion dvdread) dvdnav $(pc --modversion dvdnav) libbluray $(pc --modversion libbluray)"
+echo "iso-libs ${DVDREAD_VER}/${DVDNAV_VER}/${BLURAY_VER} + fongmi-compat" >"$STAMP"
+echo "ok ISO libs: dvdread $(pc --modversion dvdread) dvdnav $(pc --modversion dvdnav) libbluray $(pc --modversion libbluray) (FongMi/mpv API compat)"
