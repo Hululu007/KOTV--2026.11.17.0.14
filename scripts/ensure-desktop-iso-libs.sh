@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-iso-libs-v5-fongmi-compat"
+STAMP="$PREFIX/.kotv-iso-libs-v6-fongmi-compat"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 COMPAT_DIR="$ROOT/scripts/patches/kotv-iso-fongmi-compat"
 
@@ -137,11 +137,15 @@ iso_fongmi_apis_ok() {
   # FongMi/mpv meson requires these symbols; stock VideoLAN tarballs lack them
   # until we inject kotv-iso-fongmi-compat into the static archives + headers.
   local hdr_dvd="$PREFIX/include/dvdnav/dvdnav.h"
+  local hdr_layout="$PREFIX/include/dvdnav/title_layout.h"
   local hdr_bd="$PREFIX/include/libbluray/bluray.h"
-  [[ -f "$hdr_dvd" && -f "$hdr_bd" ]] || return 1
+  [[ -f "$hdr_dvd" && -f "$hdr_layout" && -f "$hdr_bd" ]] || return 1
   grep -q 'DVDNAV_HAVE_TIME_SEARCH_FLOOR' "$hdr_dvd" || return 1
   grep -q 'dvdnav_time_search_floor' "$hdr_dvd" || return 1
   grep -q 'dvdnav_menu_available' "$hdr_dvd" || return 1
+  grep -q 'dvdnav_get_next_block_with_wait' "$hdr_layout" || return 1
+  grep -q 'dvdnav_get_active_logical_stream' "$hdr_layout" || return 1
+  grep -q 'dvdnav_get_number_of_stream_attributes' "$hdr_layout" || return 1
   grep -q 'bd_get_titles_with_menu_info' "$hdr_bd" || return 1
   grep -q 'bd_seek_time_checked' "$hdr_bd" || return 1
   local a
@@ -150,6 +154,8 @@ iso_fongmi_apis_ok() {
   done
   if command -v nm >/dev/null 2>&1; then
     nm -g "$PREFIX/lib/libdvdnav.a" 2>/dev/null | grep -q 'dvdnav_time_search_floor' || return 1
+    nm -g "$PREFIX/lib/libdvdnav.a" 2>/dev/null | grep -q 'dvdnav_get_next_block_with_wait' || return 1
+    nm -g "$PREFIX/lib/libdvdnav.a" 2>/dev/null | grep -q 'dvdnav_get_active_logical_stream' || return 1
     nm -g "$PREFIX/lib/libbluray.a" 2>/dev/null | grep -q 'bd_get_titles_with_menu_info' || return 1
   fi
   return 0
@@ -279,13 +285,15 @@ install_fongmi_iso_compat() {
   local cc="${CC:-cc}"
   local cflags=()
   local arch
-  [[ -f "$COMPAT_DIR/dvdnav_fongmi_compat.c" && -f "$COMPAT_DIR/bluray_fongmi_compat.c" ]] \
+  [[ -f "$COMPAT_DIR/dvdnav_fongmi_compat.c" && -f "$COMPAT_DIR/bluray_fongmi_compat.c" \
+    && -f "$COMPAT_DIR/title_layout.h" ]] \
     || { echo "ERROR: missing $COMPAT_DIR sources" >&2; exit 1; }
   if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
     arch="${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
     cflags+=(-arch "$arch")
   fi
-  mkdir -p "$BUILD_DIR/iso-fongmi-compat"
+  mkdir -p "$BUILD_DIR/iso-fongmi-compat" "$PREFIX/include/dvdnav"
+  cp -f "$COMPAT_DIR/title_layout.h" "$PREFIX/include/dvdnav/title_layout.h"
   "$cc" "${cflags[@]}" -O2 -fPIC -I"$PREFIX/include" -c \
     "$COMPAT_DIR/dvdnav_fongmi_compat.c" -o "$BUILD_DIR/iso-fongmi-compat/dvdnav_fongmi_compat.o"
   "$cc" "${cflags[@]}" -O2 -fPIC -I"$PREFIX/include" -c \
