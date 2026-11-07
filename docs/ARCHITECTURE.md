@@ -78,7 +78,7 @@ Go Engine（单进程，:9978）
 | CMS（内置） | 非 `.py`/`.js`/`csp_` | 引擎内置解析（type 0/1/4） |
 | JS | `api` 含 `.js`（非猫爪源包） | 内嵌 **QuickJS**（CGO），worker 池，同站可并行 |
 | Python | `api` 含 `.py` | 捆绑 `runtime/python` 进程池，同站可并行 |
-| Node | `api` 以 `/spider/` 开头（来自猫爪 `/config`） | 捆绑 `runtime/node`（安卓 `libkotv_node.so` + 按需 `libnode.so`），一源包一进程 |
+| Node | `api` 以 `/spider/` 开头（来自猫爪 `/config`） | 捆绑 `runtime/node`（安卓 `libkotv_node.so` + `libnode.so` 同进 jniLibs），一源包一进程 |
 | JAR | `api` 前缀 `csp_` | **Java bridge**（JVM），桌面 HTTP 多路、可并发、按 client 软取消 |
 
 - `getClientId()` 返回当前 ScopeID，`postMsg` 据此路由回正确前端。
@@ -109,7 +109,7 @@ Go Engine（单进程，:9978）
 |------|------|------|
 | JRE 21 | JAR 爬虫 | BellSoft Liberica 21（全平台一致） |
 | Python 3.14 | Python 爬虫 | CPython standalone；Windows x64 用 PythonVista embed 以兼容旧系统 |
-| Node | 猫爪源包 | 桌面 `runtime/node`（LTS；Win7 为 node18-win7）；安卓 `libkotv_node.so` + 按需下载 `libnode.so` |
+| Node | 猫爪源包 | 桌面 `runtime/node`（LTS；Win7 为 node18-win7）；安卓 jniLibs 捆绑 `libkotv_node.so` + `libnode.so` |
 | Chromium | 网页嗅探 / 解析 | macOS·Linux x64：CFT Stable headless-shell；Win x64：Win7 REWORK 最新；Win ARM64：最新 snapshot；Linux ARM64 回落系统 Chrome |
 | FFmpeg | 媒体处理 | osxexperts / Gyan / BtbN |
 | QuickJS | JS 爬虫 | CGO 编译进主程序，无单独目录 |

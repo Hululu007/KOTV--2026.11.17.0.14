@@ -611,7 +611,7 @@ func (m *Manager) parseConfig(cfg *database.Config, isJSON bool, loadJar bool) e
 		}
 		data, err = spider.DefaultNodeHost().LoadPackage(cfg.URL)
 		if err != nil {
-			return fmt.Errorf("加载 Node 源包失败 (%s): %w", MaskURLCredentials(cfg.URL), err)
+			return fmt.Errorf("加载 Node 源包失败 (%s): %w", util.MaskURLCredentials(cfg.URL), err)
 		}
 	} else {
 		data, err = m.fetchData(source, isJSON, cfg.JSON)

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# 用 nodejs-mobile 头文件 + NDK 编 libkotv_node.so（可执行 PIE），写入 flutter jniLibs。
-# libnode.so 体积大，不打进 APK；运行时按 ABI 下载（见 internal/spider/android_node_lib.go）。
+# 用 nodejs-mobile 头文件 + NDK 编 libkotv_node.so，并拷贝同 ABI 的 libnode.so 进 flutter jniLibs。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -85,7 +84,7 @@ for abi in "${ABIS[@]}"; do
   mkdir -p "$out_dir"
   out="$out_dir/libkotv_node.so"
   echo "[android-node] build $abi → $out"
-  # 可执行 PIE；运行时依赖同目录或 LD_LIBRARY_PATH 下的 libnode.so
+  # 可执行 PIE；与同目录 libnode.so 一并打进 APK，动态链接器按 nativeLibraryDir 解析。
   "$CXX" -std=c++17 -O2 -fPIC -pie \
     -I"$INC" \
     "$SRC_CPP" \
@@ -94,15 +93,7 @@ for abi in "${ABIS[@]}"; do
     -Wl,--no-undefined \
     -o "$out"
   chmod +x "$out"
+  cp -f "$SRC/bin/$abi/libnode.so" "$out_dir/libnode.so"
 done
 
-# 供运行时按 ABI 下载的 libnode 副本缓存在 .runtime-cache（不进 APK）
-mkdir -p "$CACHE/libnode"
-for abi in "${ABIS[@]}"; do
-  if [[ -f "$SRC/bin/$abi/libnode.so" ]]; then
-    cp -f "$SRC/bin/$abi/libnode.so" "$CACHE/libnode/$abi-libnode.so"
-  fi
-done
-
-echo "[android-node] done. launcher in $OUT_JNI; libnode cache in $CACHE/libnode"
-echo "  APK 不含 libnode.so；引擎首次加载猫爪源时下载到应用目录。"
+echo "[android-node] done. libkotv_node.so + libnode.so → $OUT_JNI"

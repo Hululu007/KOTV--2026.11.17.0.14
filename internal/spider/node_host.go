@@ -18,7 +18,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -167,7 +166,7 @@ func nodePkgID(pkgURL string) string {
 }
 
 func (p *nodePkg) download(pkgURL string) error {
-	base := nodePackageBaseURL(pkgURL)
+	base := util.NodePackageBaseURL(pkgURL)
 	files := []struct {
 		name string
 		dest string
@@ -307,27 +306,12 @@ func (p *nodePkg) startLocked(h *NodeHost) error {
 	}
 	cmd := exec.Command(nodeBin, args...)
 	cmd.Dir = p.dir
-	env := append(os.Environ(),
+	cmd.Env = append(os.Environ(),
 		"HOST=127.0.0.1",
 		fmt.Sprintf("DEV_HTTP_PORT=%d", freePort),
 		"NODE_PATH="+p.dataDir,
 		fmt.Sprintf("KOTV_MSG_PORT=%d", h.MsgPort()),
 	)
-	if runtime.GOOS == "android" {
-		libDir, libErr := ensureAndroidLibNode()
-		if libErr != nil {
-			return fmt.Errorf("准备安卓 libnode.so: %w", libErr)
-		}
-		if libDir != "" {
-			prev := os.Getenv("LD_LIBRARY_PATH")
-			if prev != "" {
-				env = append(env, "LD_LIBRARY_PATH="+libDir+string(os.PathListSeparator)+prev)
-			} else {
-				env = append(env, "LD_LIBRARY_PATH="+libDir)
-			}
-		}
-	}
-	cmd.Env = env
 	setChildProcAttrs(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -376,77 +360,13 @@ func (p *nodePkg) startLocked(h *NodeHost) error {
 	case port := <-portCh:
 		p.port = port
 		p.backoff = nodeRestartBackoff
-		log.Printf("node pkg %s listening on 127.0.0.1:%d (%s)", p.id, port, maskURLCredentials(p.pkgURL))
+		log.Printf("node pkg %s listening on 127.0.0.1:%d (%s)", p.id, port, util.MaskURLCredentials(p.pkgURL))
 		go p.watch(h)
 		return nil
 	case <-ctx.Done():
 		p.stopLocked()
 		return fmt.Errorf("等待 NODE_PORT 超时")
 	}
-}
-
-// nodePackageBaseURL / maskURLCredentials：与 config 包同逻辑，避免 spider↔config 循环依赖。
-func nodePackageBaseURL(u string) string {
-	u = strings.TrimSpace(u)
-	if u == "" {
-		return u
-	}
-	parsed, err := url.Parse(u)
-	if err != nil {
-		return u
-	}
-	p := parsed.Path
-	lower := strings.ToLower(p)
-	switch {
-	case strings.HasSuffix(lower, "/index.js.md5"):
-		p = p[:len(p)-len("/index.js.md5")] + "/"
-	case strings.HasSuffix(lower, "index.js.md5"):
-		p = p[:len(p)-len("index.js.md5")]
-	case strings.HasSuffix(lower, "/index.js"):
-		p = p[:len(p)-len("/index.js")] + "/"
-	case strings.HasSuffix(lower, "index.js"):
-		p = p[:len(p)-len("index.js")]
-	default:
-		dir := pathDirURL(p)
-		p = dir
-	}
-	parsed.Path = p
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
-	return parsed.String()
-}
-
-func pathDirURL(p string) string {
-	if p == "" || p == "/" {
-		return "/"
-	}
-	i := strings.LastIndex(p, "/")
-	if i <= 0 {
-		return "/"
-	}
-	return p[:i+1]
-}
-
-func maskURLCredentials(u string) string {
-	u = strings.TrimSpace(u)
-	if u == "" {
-		return u
-	}
-	schemeIdx := strings.Index(u, "://")
-	if schemeIdx < 0 {
-		return u
-	}
-	rest := u[schemeIdx+3:]
-	at := strings.Index(rest, "@")
-	if at <= 0 {
-		return u
-	}
-	cred := rest[:at]
-	colon := strings.Index(cred, ":")
-	if colon < 0 {
-		return u
-	}
-	return u[:schemeIdx+3] + cred[:colon+1] + "***" + rest[at:]
 }
 
 func (p *nodePkg) watch(h *NodeHost) {
@@ -539,25 +459,6 @@ func (h *NodeHost) ClearAll() {
 	dir := paths.NodeCache()
 	_ = os.RemoveAll(dir)
 	_ = os.MkdirAll(dir, 0o755)
-}
-
-// RegisterAPI 登记站点 api → 源包，供 isNode / Get 分派。
-func (h *NodeHost) RegisterAPI(api string) {
-	api = strings.TrimSpace(api)
-	if api == "" {
-		return
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	// 最近一次 LoadPackage 的包；若无则忽略。
-	var last *nodePkg
-	for _, p := range h.pkgs {
-		last = p
-	}
-	if last == nil {
-		return
-	}
-	h.apiIndex[api] = last.id
 }
 
 // RegisterPackageAPIs 把 /config 里 video.sites 的 api 全部挂到该包。

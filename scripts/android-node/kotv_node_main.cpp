@@ -1,5 +1,5 @@
-// 安卓 Node 启动器：可执行 PIE，链到 libnode.so，调用 node::Start。
-// 打成 libkotv_node.so 放进 jniLibs；首次用到猫爪源时再按 ABI 下载 libnode.so。
+// 安卓 Node 启动器：可执行 PIE，链到同目录 libnode.so，调用 node::Start。
+// 打成 libkotv_node.so，与 libnode.so 一并放入 jniLibs。
 #include "node.h"
 
 int main(int argc, char* argv[]) {

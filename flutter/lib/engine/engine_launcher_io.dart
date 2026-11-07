@@ -316,7 +316,6 @@ class EngineLauncher {
         final lanIp = '${raw['lanIp'] ?? ''}'.trim();
         final tz = '${raw['timeZoneId'] ?? ''}'.trim();
         final nativeDir = '${raw['nativeLibraryDir'] ?? ''}'.trim();
-        final abi = '${raw['abi'] ?? ''}'.trim();
         if (cache.isNotEmpty) {
           env['KOTV_CACHE_DIR'] = cache;
         }
@@ -329,9 +328,6 @@ class EngineLauncher {
         }
         if (nativeDir.isNotEmpty) {
           env['KOTV_NATIVE_LIB_DIR'] = nativeDir;
-        }
-        if (abi.isNotEmpty) {
-          env['KOTV_ANDROID_ABI'] = abi;
         }
         if (lanIp.isNotEmpty) {
           env['KOTV_LAN_IP'] = lanIp;

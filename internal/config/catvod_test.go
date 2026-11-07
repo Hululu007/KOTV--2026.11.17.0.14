@@ -92,28 +92,3 @@ func TestIsNodePackageURL(t *testing.T) {
 		}
 	}
 }
-
-func TestMaskURLCredentials(t *testing.T) {
-	got := MaskURLCredentials("http://user:secret@example.com/index.js.md5")
-	if strings.Contains(got, "secret") {
-		t.Fatalf("password leaked: %s", got)
-	}
-	if !strings.Contains(got, "user:") || !strings.Contains(got, "***") {
-		t.Fatalf("got %s", got)
-	}
-	plain := "http://example.com/index.js"
-	if MaskURLCredentials(plain) != plain {
-		t.Fatalf("plain changed")
-	}
-}
-
-func TestNodePackageBaseURL(t *testing.T) {
-	got := NodePackageBaseURL("http://u:p@h/dir/index.js.md5")
-	if got != "http://u:p@h/dir/" {
-		t.Fatalf("got %q", got)
-	}
-	got = NodePackageBaseURL("http://h/index.js")
-	if got != "http://h/" {
-		t.Fatalf("got %q", got)
-	}
-}
