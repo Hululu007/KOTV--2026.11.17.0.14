@@ -392,11 +392,13 @@ if ! pc_ready libaribcaption; then
   (
     cd "$BUILD_DIR/libaribcaption"
     rm -rf build
+    # CMake 4.x 拒绝嵌入式 FreeType 的 cmake_minimum_required < 3.5。
     arib_cmake=(cmake -S . -B build -G "$cmake_gen"
       -DCMAKE_BUILD_TYPE=Release
       -DCMAKE_INSTALL_PREFIX="$PREFIX"
       -DCMAKE_INSTALL_LIBDIR=lib
       -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5
       -DBUILD_SHARED_LIBS=OFF
       -DARIBCC_SHARED_LIBRARY=OFF
       -DARIBCC_BUILD_TESTS=OFF

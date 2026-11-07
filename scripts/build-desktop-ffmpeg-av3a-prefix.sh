@@ -73,6 +73,7 @@ clone_ffmpeg() {
   fi
 }
 
+# v21: bdf17191 avs3a 链 libear（speaker_renderer）；.pc/extra-libs 带 -lear。
 # v20: FFmpeg bdf17191（含直播状态暴露）；桌面/安卓同源钉。
 # v19: 曾钉 04482c8（e02d612 直播基线）。
 # v18: arib PIC；Windows libavcodec/arib 补 d2d1。
@@ -81,7 +82,7 @@ clone_ffmpeg() {
 # v15: libxml2 完整启用 zlib+lzma（PREFIX 自带依赖）。
 # v14: +dav1d +libxml2 +libaribcaption + 平台硬解（d3d11va/videotoolbox/vaapi）。
 # HTTP/2+3 仍走 mpv libcurl。伪装扩展名分片靠播放器 extension_picky=0。
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v20-${FFMPEG_COMMIT:0:12}"
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v21-${FFMPEG_COMMIT:0:12}"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -98,10 +99,25 @@ av3a_in_prefix() {
   grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$lib" 2>/dev/null
 }
 
+# bdf17191+ avs3a 静态链 libear；cmake 安装的 .pc 也带 -lear，这里保持一致。
+arcdav3a_cxx_lib() {
+  if kotv_is_windows_build; then
+    printf '%s\n' "-lstdc++"
+  elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    printf '%s\n' "-lc++"
+  elif [[ "$(uname -s 2>/dev/null)" == "Linux" ]]; then
+    # Android NDK 走 -lc++_shared；桌面 Linux 用 libstdc++。
+    printf '%s\n' "-lstdc++"
+  else
+    printf '%s\n' "-lstdc++"
+  fi
+}
+
 write_arcdav3a_pc() {
   local pc="$PREFIX/lib/pkgconfig/arcdav3a.pc"
-  local pref
+  local pref cxx
   pref="$(kotv_native_path "$PREFIX")"
+  cxx="$(arcdav3a_cxx_lib)"
   mkdir -p "$PREFIX/lib/pkgconfig"
   cat >"$pc" <<EOF
 prefix=$pref
@@ -110,9 +126,9 @@ libdir=$pref/lib
 includedir=$pref/include
 
 Name: arcdav3a
-Description: AVS3-P3 / AV3A decoder (libarcdav3a)
+Description: AVS3-P3 / AV3A decoder (libarcdav3a + libear)
 Version: 1.0.0
-Libs: -L$pref/lib -larcdav3a -lm
+Libs: -L$pref/lib -larcdav3a -lear $cxx -lm
 Cflags: -I$pref/include
 EOF
 }
@@ -129,9 +145,12 @@ from pathlib import Path
 p = Path(sys.argv[1])
 win = sys.argv[2] == "1"
 lines = p.read_text(encoding="utf-8", errors="replace").splitlines(True)
-need = ["-larcdav3a", "-ldav1d", "-laribcaption", "-lxml2", "-lz", "-llzma"]
+need = ["-larcdav3a", "-lear", "-ldav1d", "-laribcaption", "-lxml2", "-lz", "-llzma"]
 if win:
     need += ["-lstdc++", "-ld2d1", "-ldwrite", "-lole32", "-luuid"]
+else:
+    import platform
+    need += ["-lc++" if platform.system() == "Darwin" else "-lstdc++"]
 out = []
 for line in lines:
     if line.startswith("Libs:"):
@@ -146,7 +165,7 @@ for line in lines:
     out.append(line)
 p.write_text("".join(out), encoding="utf-8")
 PY
-  echo "ok patched $pc (+ arcdav3a/dav1d/aribcaption/xml2/zlib/lzma${win:+/d2d1} on Libs)"
+  echo "ok patched $pc (+ arcdav3a/ear/dav1d/aribcaption/xml2/zlib/lzma${win:+/d2d1} on Libs)"
 }
 
 promote_arcdav3a_in_avcodec_pc() {
@@ -261,8 +280,12 @@ cmake --install arcdav3a-build
 
 [[ -f "$PREFIX/lib/libarcdav3a.a" ]] \
   || { echo "ERROR: missing $PREFIX/lib/libarcdav3a.a" >&2; exit 1; }
+[[ -f "$PREFIX/lib/libear.a" ]] \
+  || { echo "ERROR: missing $PREFIX/lib/libear.a (avs3a speaker_renderer needs libear)" >&2; exit 1; }
 [[ -f "$PREFIX/include/decoder.h" ]] \
   || { echo "ERROR: missing $PREFIX/include/decoder.h" >&2; exit 1; }
+[[ -f "$PREFIX/include/speaker_renderer.h" ]] \
+  || { echo "ERROR: missing $PREFIX/include/speaker_renderer.h" >&2; exit 1; }
 
 setup_pkg_config
 
@@ -271,37 +294,43 @@ cd ffmpeg
 $MAKE distclean 2>/dev/null || true
 
 PREF_NATIVE="$(kotv_native_path "$PREFIX")"
+ARCDA_CXX="$(arcdav3a_cxx_lib)"
 
 # Windows MinGW：pkg-config 的编译链接探测经常误报；直接 enable + 注入路径。
 if kotv_is_windows_build; then
   echo "==> Windows: bypass arcdav3a/dav1d/xml2/arib pkg-config probes"
-  # 先自测一次，失败则打出真实 gcc 错误
+  # 先自测一次，失败则打出真实 gcc 错误（含 speaker_renderer → libear）。
   cat >"$BUILD_DIR/avs3_link_probe.c" <<'PROBE'
 #include <decoder.h>
+#include <speaker_renderer.h>
 #include <stdint.h>
 long check_avs3_create_decoder(void) { return (long)(intptr_t)avs3_create_decoder; }
-int main(void) { return check_avs3_create_decoder() ? 0 : 1; }
+long check_avs3_speaker_renderer_create(void) { return (long)(intptr_t)avs3_speaker_renderer_create; }
+int main(void) {
+  return (check_avs3_create_decoder() | check_avs3_speaker_renderer_create()) ? 0 : 1;
+}
 PROBE
   if ! gcc -O0 -I"${PREF_NATIVE}/include" -L"${PREF_NATIVE}/lib" \
       -o "$BUILD_DIR/avs3_link_probe.exe" "$BUILD_DIR/avs3_link_probe.c" \
-      -larcdav3a -lm 2>"$BUILD_DIR/avs3_link_probe.log"; then
-    echo "ERROR: MinGW cannot link libarcdav3a:" >&2
+      -larcdav3a -lear ${ARCDA_CXX} -lm 2>"$BUILD_DIR/avs3_link_probe.log"; then
+    echo "ERROR: MinGW cannot link libarcdav3a+libear:" >&2
     cat "$BUILD_DIR/avs3_link_probe.log" >&2
     exit 1
   fi
-  echo "ok MinGW link probe for avs3_create_decoder"
+  echo "ok MinGW link probe for avs3_create_decoder + speaker_renderer"
   # require_pkg_config → 强制 enable（跳过 check_func_headers）
   # FFmpeg configure 里 add_cflags/add_extralibs 吃空格分隔参数，路径不要加引号。
-  cfg_line="enabled libarcdav3a       \&\& enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lm"
+  # bdf17191+：头文件/符号含 speaker_renderer；用宽松匹配覆盖带引号的新写法。
+  cfg_line="enabled libarcdav3a       \&\& enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lear ${ARCDA_CXX} -lm"
   if command -v perl >/dev/null 2>&1; then
-    perl -i.bak -pe "s#enabled libarcdav3a\\s+&& require_pkg_config libarcdav3a arcdav3a decoder\\.h avs3_create_decoder#${cfg_line}#" configure
+    perl -i.bak -pe "s#enabled libarcdav3a\\s+&& require_pkg_config libarcdav3a .*#${cfg_line}#" configure
     # dav1d / libxml2 / libaribcaption：Windows pkg-config 探测不稳（Requires.private / 头路径）。
     # libxml：FongMi 探测头 libxml2/libxml/... + 源码 libxml/...，两个 -I 都要。
     perl -i -pe "s#enabled libdav1d\\s+&& require_pkg_config libdav1d .*#enabled libdav1d \&\& enable libdav1d \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -ldav1d#" configure
     perl -i -pe "s#enabled libxml2\\s+&& require_pkg_config libxml2 .*#enabled libxml2 \&\& enable libxml2 \&\& add_cflags -I${PREF_NATIVE}/include -I${PREF_NATIVE}/include/libxml2 -DLIBXML_STATIC \&\& add_extralibs -L${PREF_NATIVE}/lib -lxml2 -lz -llzma#" configure
     perl -i -pe "s#enabled libaribcaption\\s+&& require_pkg_config libaribcaption .*#enabled libaribcaption \&\& enable libaribcaption \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -laribcaption -lstdc++ -ld2d1 -ldwrite -lole32 -luuid#" configure
   else
-    sed -i.bak "s#require_pkg_config libarcdav3a arcdav3a decoder.h avs3_create_decoder#enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lm#" configure
+    sed -i.bak "s#require_pkg_config libarcdav3a .*#enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lear ${ARCDA_CXX} -lm#" configure
   fi
   grep -nE 'libarcdav3a|libdav1d|libxml2|libaribcaption' configure | head -20
 fi
@@ -332,20 +361,20 @@ if kotv_is_windows_build; then
   # 原生 Schannel，避免 MinGW 编 OpenSSL（MSYS perl 缺 Locale::Maketext）。
   FFMPEG_EXTRA+=(--enable-schannel)
   FFMPEG_EXTRA+=(--enable-d3d11va)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lcrypt32 -lsecur32 -lws2_32 -lstdc++ -ld2d1 -ldwrite -lole32 -luuid")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lear -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lcrypt32 -lsecur32 -lws2_32 -lstdc++ -ld2d1 -ldwrite -lole32 -luuid")
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # Apple ld（Xcode 15+/26）对 nasm 产物报 unknown platform；经典链接器已移除。
   FFMPEG_EXTRA+=(--disable-x86asm)
   FFMPEG_EXTRA+=(--enable-securetransport)
   FFMPEG_EXTRA+=(--enable-videotoolbox)
-  # arib 是 C++；探测阶段也会链 extra-libs。
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lc++")
+  # arib/ear 是 C++；探测阶段也会链 extra-libs。
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lear -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lc++")
   export CC="${CC:-clang}"
   export CXX="${CXX:-clang++}"
 else
   FFMPEG_EXTRA+=(--enable-openssl)
   FFMPEG_EXTRA+=(--enable-vaapi)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lstdc++")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lear -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lstdc++")
 fi
 
 # 旧前缀可能残留 libavdevice.pc（无 .a）；meson 会回退到 Homebrew 共享库。
@@ -361,11 +390,11 @@ PROBE
   probe_cc="${CC:-clang}"
   if ! "$probe_cc" -O0 -I"$PREF_NATIVE/include" -I"$PREF_NATIVE/include/libxml2" -DLIBXML_STATIC \
       -L"$PREF_NATIVE/lib" -o "$probe_bin" "$probe_src" \
-      -larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lc++ \
+      -larcdav3a -lear -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lc++ \
       2>"$BUILD_DIR/ffmpeg_cc_probe.log"; then
     echo "ERROR: pre-configure link probe failed ($probe_cc):" >&2
     cat "$BUILD_DIR/ffmpeg_cc_probe.log" >&2
-    ls -la "$PREFIX/lib"/libz* "$PREFIX/lib"/liblzma* "$PREFIX/lib"/libxml* "$PREFIX/lib"/libarib* 2>/dev/null || true
+    ls -la "$PREFIX/lib"/libz* "$PREFIX/lib"/liblzma* "$PREFIX/lib"/libxml* "$PREFIX/lib"/libarib* "$PREFIX/lib"/libear* "$PREFIX/lib"/libarcdav3a* 2>/dev/null || true
     exit 1
   fi
   if ! "$probe_bin" >/dev/null 2>"$BUILD_DIR/ffmpeg_cc_probe_run.log"; then

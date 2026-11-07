@@ -328,6 +328,30 @@ DISPOSE_NEW = """  /// Release resources
     if (Platform.isAndroid) {
       await FvpPlatform.instance.releasePlayer(nativeHandle);
     }"""
+# fvp 0.40+: dispose() → unawaited(disposeAsync()); 真正卸面在 disposeAsync。
+DISPOSE_ASYNC_OLD = """  /// Release resources and wait for native teardown to finish.
+  Future<void> disposeAsync() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    await updateTexture(width: -1);
+    state = PlaybackState.stopped;"""
+DISPOSE_ASYNC_NEW = """  /// Release resources and wait for native teardown to finish.
+  Future<void> disposeAsync() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    // KOTV patch (scripts/patch-media-kit.sh): stop before delete so the demux
+    // packet cache goes away with the player.
+    state = PlaybackState.stopped;
+    // Texture: ReleaseRT via updateTexture. Android PlatformView never sets
+    // textureId — ReleasePlayer drops native players[surfaceId] while alive.
+    await updateTexture(width: -1);
+    if (Platform.isAndroid) {
+      await FvpPlatform.instance.releasePlayer(nativeHandle);
+    }"""
 SIZE_WAIT_OLD = """      textureId.value = null;
     }
     final size = await _videoSize.future;"""
@@ -336,6 +360,15 @@ SIZE_WAIT_NEW = """      textureId.value = null;
     // KOTV patch (scripts/patch-media-kit.sh): releasing the texture must not wait
     // for a video size. dispose passes width -1; a replaced _videoSize completer
     // would otherwise never finish and mdkPlayerAPI_delete would not run.
+    if ((width != null && width <= 0) || (height != null && height <= 0)) {
+      return -1;
+    }
+    final size = await _videoSize.future;"""
+# fvp 0.40+ 已上游化同等逻辑（注释不同）；当作已打补丁。
+SIZE_WAIT_UPSTREAM = """      textureId.value = null;
+    }
+    // Releasing a texture must not wait for media/video size. That future may
+    // never complete when an in-flight load is cancelled by disposal.
     if ((width != null && width <= 0) || (height != null && height <= 0)) {
       return -1;
     }
@@ -379,14 +412,35 @@ player_text = one_of(
     "dispose stops before delete + ReleasePlayer",
     player_text,
     (
+        (DISPOSE_ASYNC_OLD, DISPOSE_ASYNC_NEW),
         (DISPOSE_OLD, DISPOSE_NEW),
         (DISPOSE_LEGACY, DISPOSE_NEW),
         (DISPOSE_RELEASE_ALWAYS, DISPOSE_NEW),
     ),
 )
-player_text = once(tag, "updateTexture release does not wait for size", player_text, SIZE_WAIT_OLD, SIZE_WAIT_NEW)
-mdk_text = one_of(tag, "platform dispose awaits player delete", mdk_text, AWAIT_PAIRS)
-mdk_text = once(tag, "MdkVideoPlayer.dispose returns Future", mdk_text, SUB_DISPOSE_OLD, SUB_DISPOSE_NEW)
+player_text = one_of(
+    tag,
+    "updateTexture release does not wait for size",
+    player_text,
+    (
+        (SIZE_WAIT_OLD, SIZE_WAIT_NEW),
+        (SIZE_WAIT_OLD, SIZE_WAIT_UPSTREAM),
+    ),
+)
+if (
+    "await player?.disposeAsync()" in mdk_text
+    or "await _players.remove(playerId)?.disposeAsync()" in mdk_text
+    or "await _players.remove(playerId)?.dispose()" in mdk_text
+):
+    print(f"ok {tag} already patched: platform dispose awaits player delete")
+else:
+    mdk_text = one_of(tag, "platform dispose awaits player delete", mdk_text, AWAIT_PAIRS)
+if "await super.disposeAsync()" in mdk_text or (
+    "Future<void> dispose() async" in mdk_text and "await super.dispose()" in mdk_text
+):
+    print(f"ok {tag} already patched: MdkVideoPlayer.dispose returns Future")
+else:
+    mdk_text = once(tag, "MdkVideoPlayer.dispose returns Future", mdk_text, SUB_DISPOSE_OLD, SUB_DISPOSE_NEW)
 # reader.buffering 的 position 是毫秒。getPosition 也按毫秒组装区间。
 # 片段带上 reader.buffering，避免和 getPosition 里已是毫秒的区间撞车。
 BUF_RANGE_OLD = """      if (ev.category == "reader.buffering") {
@@ -416,16 +470,22 @@ mdk_text = once(tag, "reader.buffering range start is milliseconds", mdk_text, B
 # prepare / 出纹理失败时都写 _players[-hashCode]。同一 key 被覆盖时上一只 player
 # 再也 dispose 不到，连播重试/换集会把 mdk 包缓存堆在进程里。
 # 助手内部用 failedId 赋值，避免全局替换把助手自己也改成递归调用。
-ORPHAN_HELPER = """
+# fvp 0.40+：void dispose() 只是 unawaited(disposeAsync())，必须 await disposeAsync。
+_orphan_dispose = (
+    "await prev.disposeAsync();"
+    if "disposeAsync()" in mdk_text
+    else "await prev.dispose();"
+)
+ORPHAN_HELPER = f"""
   /// KOTV patch: keep at most one failed player under [-hashCode]; dispose the previous.
-  Future<void> _storeFailedPlayer(MdkVideoPlayer player) async {
+  Future<void> _storeFailedPlayer(MdkVideoPlayer player) async {{
     final failedId = -hashCode;
     final prev = _players.remove(failedId);
     _players[failedId] = player;
-    if (prev != null && !identical(prev, player)) {
-      await prev.dispose();
-    }
-  }
+    if (prev != null && !identical(prev, player)) {{
+      {_orphan_dispose}
+    }}
+  }}
 """
 # 清掉旧版误补丁（递归助手、重复注释、误挂的 @override）。
 mdk_text, n_broken = re.subn(
@@ -794,7 +854,12 @@ else:
 
 # player.dart may have been written earlier in this run; re-read for final checks.
 player_check = player_dart.read_text(encoding="utf-8")
-if "releasePlayer(nativeHandle)" not in player_check or "Platform.isAndroid" not in player_check.split("Future<void> dispose", 1)[-1][:800]:
+_dispose_chunk = (
+    player_check.split("Future<void> disposeAsync", 1)[-1][:900]
+    if "Future<void> disposeAsync" in player_check
+    else player_check.split("Future<void> dispose", 1)[-1][:900]
+)
+if "releasePlayer(nativeHandle)" not in player_check or "Platform.isAndroid" not in _dispose_chunk:
     print("ERROR: Player.dispose missing Android-gated releasePlayer before mdk delete", file=sys.stderr)
     sys.exit(1)
 
