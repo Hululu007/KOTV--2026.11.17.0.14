@@ -834,8 +834,9 @@ harvest_windows_mpv_dlls() {
   chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
   "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$dest"
 }
-LIBPLACEBO_MIN="${KOTV_LIBPLACEBO_MIN:-7.360.1}"
-LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.360.1}"
+# mpv ada80027+ 要求 libplacebo >=7.387.0（meson.build）。
+LIBPLACEBO_MIN="${KOTV_LIBPLACEBO_MIN:-7.387.0}"
+LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.387.0}"
 
 ensure_libplacebo() {
   local want_profile cached_profile

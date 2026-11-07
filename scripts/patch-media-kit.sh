@@ -622,36 +622,8 @@ else:
 
 # create：X-KOTV-Prepare-Ms → prepare(startPosition)；勿发往 CDN。
 # Mac MPV Media(start:) / mdk prepare(ms) 同思路；避免 prepare(0)+seekTo 触发安卓 AMediaCodec FLUSHING。
-PREPARE_START_OLD = """    if (dataSource.httpHeaders.isNotEmpty) {
-      String headers = '';
-      dataSource.httpHeaders.forEach((key, value) {
-        headers += '$key: $value\\r\\n';
-      });
-      player.setProperty('avio.headers', headers);
-    }
-    player.media = uri;
-    int ret = await player.prepare(); // required!
-"""
-PREPARE_START_MID = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip before avio.headers (CDN).
-    // Same idea as Mac MPV Media(start:) / mdk prepare(startPosition).
-    var prepareMs = 0;
-    if (dataSource.httpHeaders.isNotEmpty) {
-      String headers = '';
-      dataSource.httpHeaders.forEach((key, value) {
-        if (key == 'X-KOTV-Prepare-Ms') {
-          prepareMs = int.tryParse(value) ?? 0;
-          return;
-        }
-        headers += '$key: $value\\r\\n';
-      });
-      if (headers.isNotEmpty) {
-        player.setProperty('avio.headers', headers);
-      }
-    }
-    player.media = uri;
-    int ret = await player.prepare(position: prepareMs); // required!
-"""
-PREPARE_START_NEW = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip before avio.headers (CDN).
+# fvp 0.40+：prepare 包在 _untilCancelled 里，并带 cancellation 早退；旧版仍是 await player.prepare()。
+PREPARE_HDR_UA_REFERER = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip before avio.headers (CDN).
     // UA / Referer 走 avio.user_agent / avio.referer，其余进 avio.headers。
     var prepareMs = 0;
     var ua = '';
@@ -679,25 +651,78 @@ PREPARE_START_NEW = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip bef
     if (referer.isNotEmpty) player.setProperty('avio.referer', referer);
     if (headers.isNotEmpty) player.setProperty('avio.headers', headers);
     player.media = uri;
-    int ret = await player.prepare(position: prepareMs); // required!
 """
-if "avio.user_agent" in mdk_text and "avio.referer" in mdk_text:
-    print(f"ok fvp ({fvp_version}) already patched: avio.user_agent / avio.referer")
-elif PREPARE_START_MID in mdk_text:
-    mdk_text = once(
-        tag,
-        "avio.user_agent / avio.referer",
-        mdk_text,
-        PREPARE_START_MID,
-        PREPARE_START_NEW,
-    )
+PREPARE_HDR_MID = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip before avio.headers (CDN).
+    // Same idea as Mac MPV Media(start:) / mdk prepare(startPosition).
+    var prepareMs = 0;
+    if (dataSource.httpHeaders.isNotEmpty) {
+      String headers = '';
+      dataSource.httpHeaders.forEach((key, value) {
+        if (key == 'X-KOTV-Prepare-Ms') {
+          prepareMs = int.tryParse(value) ?? 0;
+          return;
+        }
+        headers += '$key: $value\\r\\n';
+      });
+      if (headers.isNotEmpty) {
+        player.setProperty('avio.headers', headers);
+      }
+    }
+    player.media = uri;
+"""
+PREPARE_HDR_OLD = """    if (dataSource.httpHeaders.isNotEmpty) {
+      String headers = '';
+      dataSource.httpHeaders.forEach((key, value) {
+        headers += '$key: $value\\r\\n';
+      });
+      player.setProperty('avio.headers', headers);
+    }
+    player.media = uri;
+"""
+PREPARE_CALL_LEGACY_OLD = "    int ret = await player.prepare(); // required!\n"
+PREPARE_CALL_LEGACY_MID = "    int ret = await player.prepare(position: prepareMs); // required!\n"
+PREPARE_CALL_LEGACY_NEW = "    int ret = await player.prepare(position: prepareMs); // required!\n"
+PREPARE_CALL_V40_OLD = """    if (cancellation?.isCancelled ?? false) {
+      return _finishCancelledCreate(player);
+    }
+    final preparation = await _untilCancelled(player.prepare(), cancellation);
+"""
+PREPARE_CALL_V40_MID = """    if (cancellation?.isCancelled ?? false) {
+      return _finishCancelledCreate(player);
+    }
+    final preparation = await _untilCancelled(player.prepare(position: prepareMs), cancellation);
+"""
+PREPARE_CALL_V40_NEW = """    if (cancellation?.isCancelled ?? false) {
+      return _finishCancelledCreate(player);
+    }
+    final preparation = await _untilCancelled(player.prepare(position: prepareMs), cancellation);
+"""
+if "avio.user_agent" in mdk_text and "avio.referer" in mdk_text and "prepare(position: prepareMs)" in mdk_text:
+    print(f"ok fvp ({fvp_version}) already patched: prepare(startPosition) + avio.user_agent / avio.referer")
 else:
-    mdk_text = once(
+    # 先统一 headers 段，再改 prepare 调用（0.40 _untilCancelled / 旧 await）。
+    mdk_text = one_of(
+        tag,
+        "prepare headers + X-KOTV-Prepare-Ms / avio UA+Referer",
+        mdk_text,
+        (
+            (PREPARE_HDR_UA_REFERER, PREPARE_HDR_UA_REFERER),
+            (PREPARE_HDR_MID, PREPARE_HDR_UA_REFERER),
+            (PREPARE_HDR_OLD, PREPARE_HDR_UA_REFERER),
+        ),
+    )
+    mdk_text = one_of(
         tag,
         "prepare(startPosition) via X-KOTV-Prepare-Ms",
         mdk_text,
-        PREPARE_START_OLD,
-        PREPARE_START_NEW,
+        (
+            (PREPARE_CALL_V40_NEW, PREPARE_CALL_V40_NEW),
+            (PREPARE_CALL_V40_MID, PREPARE_CALL_V40_NEW),
+            (PREPARE_CALL_V40_OLD, PREPARE_CALL_V40_NEW),
+            (PREPARE_CALL_LEGACY_NEW, PREPARE_CALL_LEGACY_NEW),
+            (PREPARE_CALL_LEGACY_MID, PREPARE_CALL_LEGACY_NEW),
+            (PREPARE_CALL_LEGACY_OLD, PREPARE_CALL_LEGACY_NEW),
+        ),
     )
 
 # lowLatency 分支：setBufferRange(min:0) 省略 max → Dart 默认 max=-1 会把 max/drop
@@ -733,17 +758,26 @@ if player_text != player_orig:
 if mdk_text != mdk_orig:
     mdk_dart.write_text(mdk_text, encoding="utf-8")
 
-if "state = PlaybackState.stopped;" not in player_dart.read_text(encoding="utf-8").split("Future<void> dispose", 1)[-1][:500]:
+_player_dispose_chunk = (
+    player_dart.read_text(encoding="utf-8").split("Future<void> disposeAsync", 1)[-1][:500]
+    if "Future<void> disposeAsync" in player_dart.read_text(encoding="utf-8")
+    else player_dart.read_text(encoding="utf-8").split("Future<void> dispose", 1)[-1][:500]
+)
+if "state = PlaybackState.stopped;" not in _player_dispose_chunk:
     print("ERROR: fvp dispose patch verification failed", file=sys.stderr)
     sys.exit(1)
 if "width <= 0" not in player_dart.read_text(encoding="utf-8"):
     print("ERROR: fvp updateTexture patch verification failed", file=sys.stderr)
     sys.exit(1)
 mdk_check = mdk_dart.read_text(encoding="utf-8")
-if "await _players.remove(playerId)?.dispose();" not in mdk_check:
+if not (
+    "await player?.disposeAsync();" in mdk_check
+    or "await _players.remove(playerId)?.disposeAsync();" in mdk_check
+    or "await _players.remove(playerId)?.dispose();" in mdk_check
+):
     print("ERROR: fvp platform dispose patch verification failed", file=sys.stderr)
     sys.exit(1)
-if "await super.dispose();" not in mdk_check:
+if "await super.disposeAsync();" not in mdk_check and "await super.dispose();" not in mdk_check:
     print("ERROR: fvp MdkVideoPlayer.dispose patch verification failed", file=sys.stderr)
     sys.exit(1)
 buf_at = mdk_check.find('reader.buffering')

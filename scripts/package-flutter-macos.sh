@@ -186,9 +186,10 @@ if otool -l "$OUT_APP/Contents/Frameworks/libmpv.dylib" | awk '
   ' >&2
   exit 1
 fi
-test -f "$OUT_APP/Contents/Frameworks/libplacebo.360.dylib" \
-  || test -f "$OUT_APP/Contents/Frameworks/libplacebo.dylib" \
-  || { echo "ERROR: missing bundled libplacebo in Frameworks" >&2; exit 1; }
+if ! find "$OUT_APP/Contents/Frameworks" -maxdepth 1 \( -name 'libplacebo.*.dylib' -o -name 'libplacebo.dylib' \) | grep -q .; then
+  echo "ERROR: missing bundled libplacebo in Frameworks" >&2
+  exit 1
+fi
 if strings "$OUT_APP/Contents/Frameworks/libmpv.dylib" | grep -q 'AVFFrameReceiver'; then
   echo "ERROR: bundled libmpv still contains AVFFrameReceiver" >&2
   exit 1

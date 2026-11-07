@@ -14,11 +14,12 @@ marker_ok() {
   [[ -f "$f" && "$(wc -c <"$f" | tr -d ' ')" -ge "$min" ]]
 }
 
-# 与 build-desktop-mpv / ffmpeg 默认钉一致；改 commit 后缓存失效。
+# 与 build-desktop-mpv / ffmpeg / libplacebo 默认钉一致；改钉后缓存失效。
 kotv_mpv_src_stamp() {
   local mpv="${KOTV_MPV_COMMIT:-ada80027ceffc141720be69ab5caccd886a6fd70}"
   local ff="${KOTV_FFMPEG_COMMIT:-bdf17191d55d78984ea742fe858fbf9b9aaa5775}"
-  printf 'mpv=%s ffmpeg=%s\n' "$mpv" "$ff"
+  local pl="${KOTV_LIBPLACEBO_TAG:-v7.387.0}"
+  printf 'mpv=%s ffmpeg=%s libplacebo=%s\n' "$mpv" "$ff" "$pl"
 }
 
 kotv_mpv_src_stamp_ok() {
