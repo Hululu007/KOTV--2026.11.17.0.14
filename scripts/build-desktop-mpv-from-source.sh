@@ -1116,6 +1116,7 @@ ensure_prefix_lua() {
     return
   fi
   need curl
+  # 同 ensure_windows_lua：mpv 仅 5.1/5.2；5.2.4 为 5.2 最终版。勿升 5.3+。
   local ver="${KOTV_LUA_VERSION:-5.2.4}"
   local src="lua-${ver}"
   local _cwd="$PWD"
@@ -1162,6 +1163,8 @@ ensure_windows_lua() {
     return
   fi
   need curl
+  # 钉 5.2.4：FongMi/mpv meson 只认 LuaJIT / Lua 5.1–5.2（lua.pc <5.3）；
+  # player/lua.c 亦拒绝其它主版本。5.2 系列止于 5.2.4，无更新的 5.2.x。
   local ver="${KOTV_LUA_VERSION:-5.2.4}"
   local src="lua-${ver}"
   echo "==> build lua $ver (MinGW dll → PREFIX, for mpv OSC)"
