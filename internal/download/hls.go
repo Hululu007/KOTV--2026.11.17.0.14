@@ -171,8 +171,7 @@ func httpGetString(ctx context.Context, raw string, headers map[string]string) (
 		return "", err
 	}
 	applyHeaders(req, headers)
-	cli := &http.Client{Timeout: 60 * time.Second}
-	resp, err := cli.Do(req)
+	resp, err := newUpstreamClient(headers, 60*time.Second).Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -193,8 +192,7 @@ func httpGetFile(ctx context.Context, raw string, headers map[string]string, des
 		return 0, err
 	}
 	applyHeaders(req, headers)
-	cli := &http.Client{Timeout: 120 * time.Second}
-	resp, err := cli.Do(req)
+	resp, err := newUpstreamClient(headers, 120*time.Second).Do(req)
 	if err != nil {
 		return 0, err
 	}

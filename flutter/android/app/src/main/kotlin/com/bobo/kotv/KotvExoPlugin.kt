@@ -1865,25 +1865,38 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private fun videoInfo(): Map<String, String> {
     val f = player?.videoFormat
     val info = f?.colorInfo
-    val transfer = when (info?.colorTransfer) {
+    val dv = f != null && isDolbyVision(f)
+    var transfer = when (info?.colorTransfer) {
       C.COLOR_TRANSFER_ST2084 -> "PQ"
       C.COLOR_TRANSFER_HLG -> "HLG"
       null, Format.NO_VALUE -> ""
       else -> "SDR"
     }
-    val primaries = when (info?.colorSpace) {
+    var primaries = when (info?.colorSpace) {
       C.COLOR_SPACE_BT2020 -> "BT.2020"
       C.COLOR_SPACE_BT709 -> "BT.709"
       C.COLOR_SPACE_BT601 -> "BT.601"
       else -> ""
     }
+    // colorInfo 常缺省：用 codecs / DV mime 补标签，避免杜比片被标成纯 SDR。
+    if (dv) {
+      if (transfer.isEmpty() || transfer == "SDR") transfer = "PQ"
+      if (primaries.isEmpty() || primaries == "BT.709") primaries = "BT.2020"
+    } else if (transfer.isEmpty()) {
+      val codecs = f?.codecs?.lowercase().orEmpty()
+      if (codecs.startsWith("hvc1.2") || codecs.startsWith("hev1.2")) {
+        transfer = "PQ"
+        if (primaries.isEmpty()) primaries = "BT.2020"
+      }
+    }
+    if (transfer.isEmpty()) transfer = "SDR"
     return mapOf(
       "decoder" to lastVideoDecoder,
-      // 开关打开也要音视频解码器都支持才真的走隧道。
+      // 仅实际进隧道时为 true（偏好开了还要解码器支持）。
       "tunneling" to (player?.isTunnelingEnabled == true).toString(),
       "transfer" to transfer,
       "primaries" to primaries,
-      "dolbyVision" to if (f != null && isDolbyVision(f)) "杜比视界" else "",
+      "dolbyVision" to if (dv) "杜比视界" else "",
       "display" to (appContext?.let { KotvDisplayHdr.label(it) } ?: ""),
     )
   }

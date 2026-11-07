@@ -304,6 +304,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _miniDesktop = false;
   /// 与直播页一致：原位全屏，同一 PlatformView/Texture 放大，不 push 第二块 Surface。
   bool _immersiveFullscreen = false;
+  /// 退全屏两阶段：标志已清但 Stable 层仍用整屏几何，等量槽后再缩，避免 Hybrid/FVP 卸挂。
+  bool _holdImmersiveVideoGeom = false;
+  /// 进出全屏串行队列，防止快速来回交错跳过量槽。
+  Future<void> _immersiveTransit = Future.value();
   /// Android 全屏换集过渡盖：仅 Hybrid Surface 防镂空透底；桌面不用。
   bool _immersiveEpCover = false;
   /// 退出全屏后短时挡住「再 pop 详情」，避免双通道返回直接回首页。
@@ -929,6 +933,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _lastVideoPaintRect = null;
     _videoLayerRect = null;
     _bodyClipRect = null;
+    _holdImmersiveVideoGeom = false;
     if (mounted) {
       setState(() {});
       await WidgetsBinding.instance.endOfFrame;
@@ -1315,6 +1320,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _lastVideoPaintRect = null;
       _videoLayerRect = null;
       _bodyClipRect = null;
+      _holdImmersiveVideoGeom = false;
     }
     super.dispose();
   }
@@ -2522,10 +2528,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _stopBtProgressPoll();
       _syncPlayStatus();
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: '${d.name} · ${ep.name}', url: playUrl);
-      // 网盘 /proxy 与磁力：起播后后台入下载列表（引擎去重）；不挡起播。
+      // 网盘/磁力：引擎 cloud 标志；起播后后台入下载列表（去重）。
       _enqueueCloudPlayIfNeeded(
-        playUrl: playUrl,
-        magnet: magnet,
+        cloud: data['cloud'] == true || magnet,
         site: _detailSite(),
         vodId: _detailId(),
         title: (d.name).trim().isEmpty ? _routeTitle : d.name.trim(),
@@ -2723,7 +2728,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// [stackSize]：详情 Stack 实测约束。沉浸全屏勿用 MediaQuery 整窗尺寸——
   /// 若底栏/SafeArea 仍占位，整窗高会比可见区大，contain 居中会明显偏下。
   Rect _stableVideoRect(BuildContext context, {Size? stackSize}) {
-    if (_immersiveFullscreen) {
+    final holdFullscreen = _immersiveFullscreen || _holdImmersiveVideoGeom;
+    if (holdFullscreen) {
+      // hold：优先用退出前的整屏矩形，避免立刻缩到详情槽卸掉 Surface。
+      if (_holdImmersiveVideoGeom &&
+          _lastVideoPaintRect != null &&
+          _lastVideoPaintRect!.width >= 1 &&
+          _lastVideoPaintRect!.height >= 1) {
+        return _lastVideoPaintRect!;
+      }
       final s = (stackSize != null && stackSize.width >= 1 && stackSize.height >= 1)
           ? stackSize
           : MediaQuery.sizeOf(context);
@@ -2738,13 +2751,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   Widget _buildStableVideoLayer(BuildContext context, {Size? stackSize}) {
+    final holdFullscreen = _immersiveFullscreen || _holdImmersiveVideoGeom;
     final rect = _stableVideoRect(context, stackSize: stackSize);
     Rect? paint = (rect.width >= 1 && rect.height >= 1) ? rect : null;
-    paint ??= (_videoLayerRect != null &&
-            _videoLayerRect!.width >= 1 &&
-            _videoLayerRect!.height >= 1)
-        ? _videoLayerRect
-        : null;
+    if (!holdFullscreen) {
+      paint ??= (_videoLayerRect != null &&
+              _videoLayerRect!.width >= 1 &&
+              _videoLayerRect!.height >= 1)
+          ? _videoLayerRect
+          : null;
+    }
     paint ??= (_lastVideoPaintRect != null &&
             _lastVideoPaintRect!.width >= 1 &&
             _lastVideoPaintRect!.height >= 1)
@@ -2753,19 +2769,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final stack = (stackSize != null && stackSize.width >= 1 && stackSize.height >= 1)
         ? stackSize
         : MediaQuery.sizeOf(context);
-    // 沉浸：无几何时用 Stack 尺寸顶住，避免 shrink 卸掉 Hybrid PlatformView。
-    // 非全屏禁止整屏回退——会盖住顶栏返回/片名。
-    if (paint == null && _playUrl.isNotEmpty && _immersiveFullscreen) {
+    // 沉浸/hold：无几何时用 Stack 尺寸顶住，避免 shrink 卸掉 Hybrid PlatformView。
+    if (paint == null && _playUrl.isNotEmpty && holdFullscreen) {
       if (stack.width >= 1 && stack.height >= 1) paint = Offset.zero & stack;
     }
-    // 退全屏后槽未量到：禁止 shrink 卸掉 Hybrid / FVP Surface（否则黑屏定住）。
     if (paint == null) return const SizedBox.shrink();
-    _lastVideoPaintRect = paint;
+    if (!_holdImmersiveVideoGeom) {
+      _lastVideoPaintRect = paint;
+    }
 
-    // 裁剪宿主：沉浸=整 Stack；非全屏=顶栏下 Expanded。结构固定，只改几何。
+    // 裁剪宿主：沉浸/hold=整屏几何；非全屏=顶栏下 Expanded。
     Rect? clip;
-    if (_immersiveFullscreen) {
-      if (stack.width >= 1 && stack.height >= 1) clip = Offset.zero & stack;
+    if (holdFullscreen) {
+      clip = paint;
     } else {
       clip = _bodyClipRect;
     }
@@ -3159,27 +3175,38 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
   }
 
-  Future<void> _enterFullscreen([KotvDesktopFullscreenKind desktopFs = KotvDesktopFullscreenKind.window]) async {
-    final d = _detail;
-    if (d == null || !mounted || _playUrl.isEmpty || _immersiveFullscreen) return;
-    if (_miniDesktop) await _exitMini();
-    if (!mounted || _immersiveFullscreen) return;
-    if (!kotvIsDesktop() && !kIsWeb && !KotvLayout.television) {
-      // 抖音式：手机全屏保持竖屏，上下滑切集；点「全屏观看」才锁横屏。
-      try {
-        await kotvLockPortrait();
-      } catch (_) {}
-    }
-    // 先铺开画面，等这一帧画完，再进一次系统全屏。全窗口不调用系统全屏。
-    ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
-    setState(() {
-      _desktopFs = desktopFs;
-      _immersiveFullscreen = true;
-      _fsSwipeDy.value = 0;
+  Future<void> _runImmersiveTransit(Future<void> Function() op) {
+    final prev = _immersiveTransit;
+    late final Future<void> next;
+    next = prev.catchError((_) {}).then((_) => op());
+    _immersiveTransit = next;
+    return next;
+  }
+
+  Future<void> _enterFullscreen([KotvDesktopFullscreenKind desktopFs = KotvDesktopFullscreenKind.window]) {
+    return _runImmersiveTransit(() async {
+      final d = _detail;
+      if (d == null || !mounted || _playUrl.isEmpty || _immersiveFullscreen) return;
+      _holdImmersiveVideoGeom = false;
+      if (_miniDesktop) await _exitMini();
+      if (!mounted || _immersiveFullscreen) return;
+      if (!kotvIsDesktop() && !kIsWeb && !KotvLayout.television) {
+        // 抖音式：手机全屏保持竖屏，上下滑切集；点「全屏观看」才锁横屏。
+        try {
+          await kotvLockPortrait();
+        } catch (_) {}
+      }
+      // 先铺开画面，等这一帧画完，再进一次系统全屏。全窗口不调用系统全屏。
+      ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
+      setState(() {
+        _desktopFs = desktopFs;
+        _immersiveFullscreen = true;
+        _fsSwipeDy.value = 0;
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !_immersiveFullscreen) return;
+      await kotvEnterSystemFullscreen(desktopFs);
     });
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || !_immersiveFullscreen) return;
-    await kotvEnterSystemFullscreen(desktopFs);
   }
 
   /// 全屏返回：弹窗、右侧选集、底栏、退出全屏。同一按键的第二次投递不再往下关一层。
@@ -3191,32 +3218,42 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (kotvPopTopPopup(rootNavigatorKey.currentState)) return;
     if (mounted && kotvPopTopPopup(Navigator.of(context, rootNavigator: false))) return;
     if (detailFullscreenDismissLayer?.call() == true) return;
-    if (!_immersiveFullscreen) return;
+    if (!_immersiveFullscreen && !_holdImmersiveVideoGeom) return;
     await _exitImmersiveFullscreen();
   }
 
-  Future<void> _exitImmersiveFullscreen() async {
-    if (!_immersiveFullscreen) return;
-    // 先挡二次返回：Focus 与 PopScope/壳层常在同一按键上各走一遍。
-    _suppressDetailPopUntil = DateTime.now().add(const Duration(milliseconds: 800));
-    _fsSwipeDy.value = 0;
-    final wasDisplay = _desktopFs == KotvDesktopFullscreenKind.display;
-    ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
-    if (mounted) {
-      setState(() {
-        _immersiveFullscreen = false;
-        _immersiveEpCover = false;
-      });
-    }
-    // kotvExitSystemFullscreen 已恢复 edgeToEdge + 方向；勿再叠一次 setPreferredOrientations。
-    await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
-    if (!mounted || _immersiveFullscreen) return;
-    // 再等一帧量槽，避开退出当帧重建 Hybrid Positioned。
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || _immersiveFullscreen) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+  Future<void> _exitImmersiveFullscreen() {
+    return _runImmersiveTransit(() async {
+      if (!_immersiveFullscreen && !_holdImmersiveVideoGeom) return;
+      // 先挡二次返回：Focus 与 PopScope/壳层常在同一按键上各走一遍。
+      _suppressDetailPopUntil = DateTime.now().add(const Duration(milliseconds: 800));
+      _fsSwipeDy.value = 0;
+      final wasDisplay = _desktopFs == KotvDesktopFullscreenKind.display;
+      // 两阶段：先清沉浸标志并 hold 整屏几何，再 remount/退系统栏/量槽，最后一次缩到槽。
+      ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
+      if (mounted) {
+        setState(() {
+          _immersiveFullscreen = false;
+          _immersiveEpCover = false;
+          _holdImmersiveVideoGeom = true;
+        });
+      } else {
+        _holdImmersiveVideoGeom = true;
+      }
+      await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
+      if (!mounted) {
+        _holdImmersiveVideoGeom = false;
+        return;
+      }
+      if (_immersiveFullscreen) return;
+      await WidgetsBinding.instance.endOfFrame;
       if (!mounted || _immersiveFullscreen) return;
       _syncVideoSlotRect();
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || _immersiveFullscreen) return;
+      if (_holdImmersiveVideoGeom) {
+        setState(() => _holdImmersiveVideoGeom = false);
+      }
     });
   }
 
@@ -4163,18 +4200,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
   }
 
-  /// 网盘类 `/proxy?…`（不含 play/bt）或磁力：起播后入下载列表。
-  static bool _isCloudOrMagnetPlay(String playUrl, {required bool magnet}) {
-    if (magnet) return true;
-    final u = playUrl.trim().toLowerCase();
-    if (u.isEmpty) return false;
-    if (u.contains('/proxy/play') || u.contains('/proxy/bt/')) return false;
-    return u.contains('/proxy?') || u.startsWith('proxy://');
-  }
-
+  /// 引擎 `cloud`/`magnet`：起播后入下载列表（勿猜最终 playUrl 形态）。
   void _enqueueCloudPlayIfNeeded({
-    required String playUrl,
-    required bool magnet,
+    required bool cloud,
     required String site,
     required String vodId,
     required String title,
@@ -4184,7 +4212,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     required String epName,
     required String epUrl,
   }) {
-    if (!_isCloudOrMagnetPlay(playUrl, magnet: magnet)) return;
+    if (!cloud) return;
     if (site.isEmpty || vodId.isEmpty) return;
     final nEps = _eps.length;
     final raw = _reversed ? (nEps - 1 - epIndex) : epIndex;
@@ -4204,7 +4232,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             },
           ],
         );
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('cloud download enqueue: $e');
+      }
     }());
   }
 

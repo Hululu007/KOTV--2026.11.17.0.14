@@ -1200,17 +1200,24 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val display = appContext?.let { KotvDisplayHdr.label(it) } ?: ""
     if (!created.get()) return mapOf("display" to display)
     fun prop(name: String) = MPVLib.getPropertyString(name)?.trim().orEmpty()
-    val transfer = when (prop("video-params/gamma")) {
+    val dvProfile = prop("current-tracks/video/dolby-vision-profile")
+    var transfer = when (prop("video-params/gamma")) {
       "" -> ""
       "pq" -> "PQ"
       "hlg" -> "HLG"
       else -> "SDR"
     }
-    val dvProfile = prop("current-tracks/video/dolby-vision-profile")
+    var primaries = prop("video-params/primaries").uppercase()
+    // gamma 缺省但有杜比 profile：补 PQ/BT.2020，避免误标纯 SDR。
+    if (dvProfile.isNotEmpty()) {
+      if (transfer.isEmpty() || transfer == "SDR") transfer = "PQ"
+      if (primaries.isEmpty() || primaries == "BT.709") primaries = "BT.2020"
+    }
+    if (transfer.isEmpty()) transfer = "SDR"
     return mapOf(
       "hwdec" to prop("hwdec-current"),
       "transfer" to transfer,
-      "primaries" to prop("video-params/primaries").uppercase(),
+      "primaries" to primaries,
       "dolbyVision" to if (dvProfile.isEmpty()) "" else "杜比视界 P$dvProfile",
       "output" to when {
         prop("current-vo") != "mediacodec_embed" -> ""

@@ -32,6 +32,14 @@ func IsDirectPlayKey(key string) bool {
 	return key == PushAgentKey || key == LocalFileKey
 }
 
+// spiderDispatchType Node 以 api 前缀为准（含配置写成 type=4 的推送站），其余用 TypeID。
+func spiderDispatchType(site model.Site) int {
+	if spider.IsNodeAPI(site.API) {
+		return 3
+	}
+	return site.TypeID()
+}
+
 func directPlaySite(key string) *model.Site {
 	if key == LocalFileKey {
 		return &model.Site{Key: LocalFileKey, Name: "本地"}
@@ -158,7 +166,7 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 	var result model.Result
 	var err error
 
-	switch site.TypeID() {
+	switch spiderDispatchType(site) {
 	case 3: // Spider：api 为 csp_/脚本路径，靠 jar+key 加载，勿按 HTTP 空址早拒。
 		if !spider.RunnableAPI(site.API) {
 			return failed(fmt.Errorf("站点「%s」没有可用爬虫", siteLabel(site)))
@@ -279,7 +287,7 @@ func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map
 
 	var result model.Result
 	var err error
-	switch site.TypeID() {
+	switch spiderDispatchType(site) {
 	case 3:
 		if native, ok := localDirCategory(tid); ok {
 			result = native
@@ -363,7 +371,7 @@ func (s *SiteService) DetailContent(reqKey string, vod model.Vod) (model.Vod, er
 
 	var result model.Result
 	var err error
-	switch site.TypeID() {
+	switch spiderDispatchType(*site) {
 	case 3:
 		sp := s.cfg.Spider(*site)
 		var raw string
@@ -475,9 +483,9 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 		}
 		applySourceFetch(&result)
 	} else {
-		switch site.TypeID() {
+		switch spiderDispatchType(site) {
 		case 3:
-			// type=3 spider（JS/PY）传参阶段不强制把剧集 id 补成绝对 URL，
+			// type=3 spider（JS/PY/Node）传参阶段不强制把剧集 id 补成绝对 URL，
 			// 让 spider 自己按其输入形态拼接/解析。
 			sp := s.cfg.Spider(site)
 			vipFlags := s.cfg.API().Flags
@@ -805,7 +813,7 @@ func searchFirstExact(sites []model.Site, matchName, query string, exclude map[s
 }
 
 func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, page string) ([]model.Vod, error) {
-	switch site.TypeID() {
+	switch spiderDispatchType(site) {
 	case 3:
 		sp := s.cfg.SpiderOnly(site)
 		raw, err := sp.SearchContent(keyword, quick, page)
@@ -857,7 +865,7 @@ func (s *SiteService) Action(site model.Site, action string) (string, error) {
 	action = strings.TrimSpace(action)
 	var raw string
 	var err error
-	switch site.TypeID() {
+	switch spiderDispatchType(site) {
 	case 3:
 		raw, err = s.cfg.Spider(site).Action(action)
 		if err != nil {

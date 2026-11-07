@@ -618,6 +618,8 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 	sourceTitle := ""
 	beforeProxy := ""
 	magnet := thunder.Match(playURL)
+	// PreparePlayback 前判定：网盘类 /proxy 起播后应入下载列表（展开 CDN 后 URL 不再含 /proxy?）。
+	cloudPlay := localproxy.IsSpiderProxyURL(localproxy.ConvertScheme(playURL))
 	if magnet {
 		// 起播前 Source.stop，确保可被 cancelPending / 换集打断
 		thunder.Stop()
@@ -703,6 +705,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		"media":     exposedMedia,
 		"direct":    directURL,
 		"magnet":    isMagnetPlay,
+		"cloud":     cloudPlay || isMagnetPlay,
 		"parsed":    didParse,
 		"headers":   headers,
 		"drm":       playDrm,

@@ -317,7 +317,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     _flying.clear();
   }
 
-  /// 清屏后按最近窗口重投；暂停时也刷一帧，避免残影留在画面上。
+  /// 清屏后按最近窗口重投；缓冲/暂停不投弹，真播放后再投。
   void _reseedWindow() {
     _clearFlying();
     final mediaSec = _mediaPos.inMilliseconds / 1000.0;
@@ -327,12 +327,8 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
         _cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
       _cursor++;
     }
-    if (_layoutW >= 1 && widget.enabled) {
-      if (_paused) {
-        _activate(mediaSec, viewW: _layoutW);
-      } else {
-        _scheduleActivate(_layoutW);
-      }
+    if (_layoutW >= 1 && widget.enabled && !_paused) {
+      _scheduleActivate(_layoutW);
     }
     if (mounted) setState(() {});
   }
@@ -357,17 +353,29 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     final rate = p.rate <= 0 ? 1.0 : p.rate;
     if (playing == !_paused && (rate - _rate).abs() < 0.001) return;
     // 暂停↔恢复都钉住外推位：避免 MPV/FVP opening 结束时 p.position 落后清屏。
+    final wasPaused = _paused;
     final pin = (playing != !_paused) ? _mediaPos : p.position;
     _rebase(pin, paused: !playing, rate: rate);
     _syncTicker();
+    // 缓冲/opening → 真播放：再投弹。
+    if (wasPaused && playing && widget.enabled) {
+      _scheduleActivate(_layoutW);
+    }
   }
 
   void _onPosition(Duration d) {
     if (!mounted) return;
     // 与上次上报位置比，勿用墙钟外推，否则流滞后会被当成回跳误清屏。
-    // 非对称：回跳易残影，前跳仅大跳才清（避免缓冲校准误清屏）。
     final jumpBack = d + const Duration(milliseconds: 300) < _basePos;
     final jumpFwd = d > _basePos + const Duration(milliseconds: 1500);
+    // 小幅落后：钉住外推位，避免开播后 t<0 整段不画。
+    if (jumpBack && !jumpFwd) {
+      final lag = _basePos - d;
+      if (lag < const Duration(milliseconds: 1500)) {
+        _rebase(_mediaPos, paused: !widget.player.playing, rate: widget.player.rate);
+        return;
+      }
+    }
     _rebase(d, paused: !widget.player.playing, rate: widget.player.rate);
     if (jumpBack || jumpFwd) {
       _reseedWindow();

@@ -690,6 +690,20 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final emptyHome = home && types.isEmpty && list.isEmpty;
       final keepGrid = home && list.isEmpty && _items.isNotEmpty;
       final pageStyle = KotvGridStyle.parse(data['style']);
+      // 仅搜索站 home 常无分类/推荐：引导搜索，勿报成加载失败。
+      var searchOnlyHint = false;
+      if (emptyHome) {
+        final sites = _sitesFromConfig(ref.read(configProvider));
+        final homeKey = ref.read(configProvider).maybeWhen(
+            data: (c) => '${c['home'] ?? ''}'.trim(), orElse: () => '');
+        for (final s in sites) {
+          if ((homeKey.isNotEmpty ? s.key == homeKey : s.home) &&
+              s.searchable) {
+            searchOnlyHint = true;
+            break;
+          }
+        }
+      }
       setState(() {
         if (clearLoading) _loading = false;
         if (replace && !keepGrid) {
@@ -697,7 +711,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           _gridStyle = pageStyle;
         }
         _statusMsg = emptyHome
-            ? '首页没有返回分类和推荐，请重试'
+            ? (searchOnlyHint
+                ? '该站仅支持搜索，请使用顶部搜索'
+                : '首页没有返回分类和推荐，请重试')
             : (keepGrid ? '首页没有返回推荐，请重试' : null);
         // id/name 未变不整表替换，避免分类条跟着内容刷新重建。
         if (types.isNotEmpty && !_sameTypeNav(_types, types)) {

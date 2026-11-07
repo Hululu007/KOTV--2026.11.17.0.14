@@ -278,6 +278,8 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 		})
 	}
 
+	// 网盘 CDN：一律单线程；并行 Range/切片易被掐流。
+	threads = 1
 	if isHLSURL(playURL, format) {
 		t.Kind = KindHLS
 		dest := t.destPath("mp4")
@@ -289,9 +291,6 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 	ext := extFromURL(playURL, "mp4")
 	dest := t.destPath(ext)
 	t.Path = dest
-	// 网盘 CDN / 本机 /proxy：一律单线程。并行 Range 易被夸克等掐成 unexpected EOF；
-	// 留 /proxy 时必须保留鉴权头，禁止 headers=nil。
-	threads = 1
 	n, total, err := downloadHTTP(ctx, playURL, headers, dest, threads, func(bytes, total int64) {
 		p := 0.0
 		if total > 0 {

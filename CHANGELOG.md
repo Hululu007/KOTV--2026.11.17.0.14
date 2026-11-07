@@ -2,11 +2,12 @@
 
 ## v0.2.3
 
-- 猫影视 / 猫爪 Node 源：配置识别 `video.sites` 与 `index.js(.md5)`；桌面捆绑 Node（Win7 为 node18），安卓 jniLibs 直接集成 `libkotv_node.so` 与 `libnode.so`；播放走 `/node/<pkg>/` 反代，支持 toast / 弹幕推送 / 播放信息 / profile / 打开网页等回调。打包强制校验 Node 已编入。安卓起 Node 子进程注入 `LD_LIBRARY_PATH`；环境信息桌面报 Node 路径，安卓只报 `libkotv_node`（不报绝对路径）。配置加载超时透出引擎错误，不再误报「地址无效」。Win7 起 Node/python/java 带 `CREATE_NO_WINDOW`，避免闪 CMD 黑框。
+- 猫影视 / 猫爪 Node 源：配置识别 `video.sites` 与 `index.js(.md5)`；桌面捆绑 Node（Win7 为 node18），安卓 jniLibs 直接集成 `libkotv_node.so` 与 `libnode.so`；播放走 `/node/<pkg>/` 反代，支持 toast / 弹幕推送 / 播放信息 / profile / 打开网页等回调。打包强制校验 Node 已编入。安卓起 Node 子进程注入 `LD_LIBRARY_PATH`；环境信息桌面报 Node 路径，安卓只报 `libkotv_node`（不报绝对路径）。配置加载超时透出引擎错误，不再误报「地址无效」。Win7 起 Node/python/java 带 `CREATE_NO_WINDOW`，避免闪 CMD 黑框。`resolveSitePaths` 不再把 `/spider/…` 拼成 http；home 下发 filter、POST homeVod；按 api 前缀分派 Node（含 type=4）；仅搜索站空首页提示「仅支持搜索」。
 - 已选中的集再点进入全屏；字幕「自动」勾选状态修正；播放返回 / 切 Tab：短超时 flush 与软停，硬释放后台执行。
-- 网盘 HTTP 下载强制单线程，遇 unexpected EOF 再试；留 `/proxy` 时保留鉴权头。网盘/磁力起播后台入下载列表；完成态仍可直开播放。
-- 弹幕：暂停↔恢复钉住外推时钟，小幅回跳不清屏，避免起播后弹幕消失。
-- 安卓 FVP：退全屏槽未量到时继续用上次几何，禁止 shrink 卸掉 Surface。
+- 网盘下载：302 重挂 Cookie；单线程；起播回包 `cloud` 后入下载列表；完成态仍可直开。
+- 弹幕：缓冲/暂停不投，真播放后投；小幅 position 落后不清屏。
+- 安卓 FVP：进出全屏串行；退全屏先 hold 整屏几何，量槽后再缩 Positioned。
+- 播放信息：片源缺 colorInfo 时用 codecs/DV profile 补色彩标签；Exo「· 隧道」仅跟 `isTunnelingEnabled`。
 - 桌面 MPV/FFmpeg（AV3A）与 fvp 跟进上游；Win7 线 fvp 同步，仍用 Flutter 3.19 + SDK 放宽。
 - CI：fvp 0.40.0 的 disposeAsync / `_untilCancelled(prepare)` 与 X-KOTV-Prepare-Ms 补丁锚点；FFmpeg bdf17191 的 libear（arcdav3a.pc / extra-libs）；Linux libaribcaption 在 CMake 4 下补 CMAKE_POLICY_VERSION_MINIMUM；桌面 libplacebo 跟到 v7.387.0（匹配 mpv ada80027）；iOS 先 pub get 再写本地 mdk podspec，避免与 fvp `mdk ~> 0.39` 冲突；安卓跳过上游 MediaCodec 已内置的 output 序列化补丁；Win7 mpv 补丁跟进 `PathAllocCanonicalize`；macOS arm64 运行时 ffmpeg 改 eugeneware 静态包（旧镜像 404）。
 - 远程前端：按协议号握手，账号密码加密传输，记住登录与后端身份；未登录不能进入任何页面，连不上不改地址。

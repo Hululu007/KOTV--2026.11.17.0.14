@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 func downloadHTTP(ctx context.Context, raw string, headers map[string]string, dest string, threads int, onProg func(bytes, total int64)) (int64, int64, error) {
@@ -134,7 +135,7 @@ func probeSize(ctx context.Context, raw string, headers map[string]string) (int6
 		return 0, false, err
 	}
 	applyHeaders(req, headers)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := newUpstreamClient(headers, 30*time.Second).Do(req)
 	if err != nil {
 		return 0, false, nil // 探测失败则退回单线程 GET
 	}
@@ -160,7 +161,7 @@ func downloadRange(ctx context.Context, raw string, headers map[string]string, d
 	}
 	applyHeaders(req, headers)
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-	resp, err := (&http.Client{Timeout: 0}).Do(req)
+	resp, err := newUpstreamClient(headers, 0).Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -209,7 +210,7 @@ func downloadHTTPSingle(ctx context.Context, raw string, headers map[string]stri
 		return 0, 0, err
 	}
 	applyHeaders(req, headers)
-	resp, err := (&http.Client{Timeout: 0}).Do(req)
+	resp, err := newUpstreamClient(headers, 0).Do(req)
 	if err != nil {
 		return 0, 0, err
 	}

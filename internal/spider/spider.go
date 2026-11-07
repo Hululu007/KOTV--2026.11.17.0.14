@@ -56,9 +56,21 @@ func isJS(api string) bool  { return strings.Contains(api, ".js") }
 func isPy(api string) bool  { return strings.Contains(api, ".py") }
 func isCSP(api string) bool { return strings.HasPrefix(api, "csp_") }
 
-// isNode 猫爪 Node 站：api 形如 /spider/<key>/<type>。
+// isNode Node 站：api 形如 /spider/<key>/<type>。
 func isNode(api string) bool {
 	return strings.HasPrefix(strings.TrimSpace(api), "/spider/")
+}
+
+// IsNodeAPI 供配置/站点层判断是否 Node 爬虫 api（勿被 resolveSitePaths 改写成 http）。
+func IsNodeAPI(api string) bool { return isNode(api) }
+
+// KeepAPIRaw 爬虫 api 标识须原样保留，禁止当相对路径拼到配置根 URL 上。
+func KeepAPIRaw(api string) bool {
+	api = strings.TrimSpace(api)
+	if api == "" {
+		return false
+	}
+	return isNode(api) || isCSP(api) || isJS(api) || isPy(api)
 }
 
 // RunnableAPI 表示该 api 会进 jar / js / py / node。其余类型不会被当成空首页成功。

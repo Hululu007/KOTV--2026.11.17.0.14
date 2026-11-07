@@ -98,11 +98,22 @@ func (s *nodeSpider) HomeContent(filter bool) (string, error) {
 	if err := s.ensureInit(); err != nil {
 		return "", err
 	}
-	return s.post("home", map[string]any{})
+	return s.post("home", map[string]any{"filter": filter})
 }
 
 func (s *nodeSpider) HomeVideoContent() (string, error) {
-	return "{}", nil
+	if err := s.ensureInit(); err != nil {
+		return "", err
+	}
+	raw, err := s.post("homeVod", map[string]any{})
+	if err != nil {
+		// 包未实现 homeVod 时返回空列表，勿阻断首页。
+		return "{}", nil
+	}
+	if strings.TrimSpace(raw) == "" {
+		return "{}", nil
+	}
+	return raw, nil
 }
 
 func (s *nodeSpider) CategoryContent(tid, pg string, filter bool, extend map[string]string) (string, error) {
@@ -145,8 +156,9 @@ func (s *nodeSpider) SearchContent(key string, quick bool, pg string) (string, e
 		pg = "1"
 	}
 	return s.post("search", map[string]any{
-		"wd":   key,
-		"page": pg,
+		"wd":    key,
+		"page":  pg,
+		"quick": quick,
 	})
 }
 
@@ -154,10 +166,14 @@ func (s *nodeSpider) PlayerContent(flag, id string, vipFlags []string) (string, 
 	if err := s.ensureInit(); err != nil {
 		return "", err
 	}
-	raw, err := s.post("play", map[string]any{
+	body := map[string]any{
 		"flag": flag,
 		"id":   id,
-	})
+	}
+	if len(vipFlags) > 0 {
+		body["flags"] = vipFlags
+	}
+	raw, err := s.post("play", body)
 	if err != nil {
 		return "", err
 	}

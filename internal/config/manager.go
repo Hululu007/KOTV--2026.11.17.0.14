@@ -933,8 +933,12 @@ func resolveSiteField(base, value string) string {
 	if converted := convertLocalScheme(value); converted != value {
 		return converted
 	}
-	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") ||
-		strings.HasPrefix(value, "csp_") {
+	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
+		return value
+	}
+	// 爬虫 api 标识必须原样保留：/spider/… 若当相对路径拼到 index.js.md5 上，
+	// 会变成 http://host/spider/…，RunnableAPI/isNode 全部失效。
+	if spider.KeepAPIRaw(value) {
 		return value
 	}
 	// 纯 JSON/脚本正文不当 URL 解析
