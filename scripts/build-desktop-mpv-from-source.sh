@@ -526,24 +526,41 @@ EOF
   echo "ok macOS vulkan ($arch) via prefix"
 }
 
-# Lua 官方站偶发 DNS 失败；多镜像回退。
+# Lua 官方站在 CI（尤其 Windows runner）上常超时；旧 github.com/lua/lua v5.2.4 标签也不存在。
+# 优先 LuaDist（GitHub，目录 lua-${ver}/），再 Debian orig（目录 lua5.2-${ver}/，解压后需归一）。
+# 禁止用关 DVD/蓝光换绿。
 kotv_fetch_lua_tarball() {
   local ver="$1" dest="$2"
   local src="lua-${ver}"
   local u
   for u in \
     "https://www.lua.org/ftp/${src}.tar.gz" \
-    "https://github.com/lua/lua/archive/refs/tags/v${ver}.tar.gz" \
-    "https://mirror.ghproxy.com/https://www.lua.org/ftp/${src}.tar.gz" \
-    "https://gitmirror.com/https://www.lua.org/ftp/${src}.tar.gz"; do
+    "https://github.com/LuaDist/lua/archive/${ver}.tar.gz" \
+    "https://deb.debian.org/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz" \
+    "https://mirrors.edge.kernel.org/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz" \
+    "https://ftp.debian.org/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz"; do
     echo "  try lua: $u"
-    if curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 2 -o "$dest" "$u"; then
+    if curl -fsSL --connect-timeout 30 --max-time 120 --retry 3 --retry-delay 2 -o "$dest" "$u" \
+      && [[ -s "$dest" ]] && gzip -t "$dest" 2>/dev/null; then
       return 0
     fi
     rm -f "$dest"
   done
   echo "ERROR: failed to download lua ${ver} from all mirrors" >&2
   return 1
+}
+
+# 官方 / LuaDist → lua-${ver}；Debian orig → lua5.2-${ver}；GitHub lua/lua → lua-v${ver}
+kotv_normalize_lua_srcdir() {
+  local ver="$1"
+  local src="lua-${ver}"
+  [[ -d "$src" ]] && return 0
+  if [[ -d "lua-v${ver}" ]]; then
+    mv "lua-v${ver}" "$src"
+  elif [[ -d "lua5.2-${ver}" ]]; then
+    mv "lua5.2-${ver}" "$src"
+  fi
+  [[ -d "$src" ]] || { echo "ERROR: lua source dir missing after extract (want $src)" >&2; ls -la >&2; return 1; }
 }
 
 # Win7 构建的 libmpv 须能在 Win7 加载：目标子系统 6.01，避免 import SHCORE.dll（Win8+）。
@@ -1056,10 +1073,7 @@ ensure_prefix_lua() {
   if [[ ! -d "$src" ]]; then
     kotv_fetch_lua_tarball "$ver" "${src}.tar.gz"
     tar xzf "${src}.tar.gz"
-    # GitHub archive 目录名可能是 lua-v5.2.4
-    if [[ ! -d "$src" && -d "lua-v${ver}" ]]; then
-      mv "lua-v${ver}" "$src"
-    fi
+    kotv_normalize_lua_srcdir "$ver"
   fi
   cd "$src"
   make "$plat" -j"${KOTV_JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
@@ -1103,9 +1117,7 @@ ensure_windows_lua() {
   if [[ ! -d "$src" ]]; then
     kotv_fetch_lua_tarball "$ver" "${src}.tar.gz"
     tar xzf "${src}.tar.gz"
-    if [[ ! -d "$src" && -d "lua-v${ver}" ]]; then
-      mv "lua-v${ver}" "$src"
-    fi
+    kotv_normalize_lua_srcdir "$ver"
   fi
   cd "$src/src"
   # 5.2 mingw：产出 lua52.dll；顺带留下 liblua.a（luac 目标）。
