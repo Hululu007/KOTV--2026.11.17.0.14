@@ -687,7 +687,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
                   return CustomPaint(
                     size: Size(w, h),
                     isComplex: true,
-                    willChange: !_paused,
+                    willChange: _canEmitDanmaku,
                     painter: _DanmakuPainter(
                       flying: _flying,
                       mediaSec: mediaSec,

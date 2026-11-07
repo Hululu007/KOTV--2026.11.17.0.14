@@ -91,9 +91,8 @@ func HandleNodeMsg(body []byte) any {
 			u, _ = opt["url"].(string)
 			u = strings.TrimSpace(u)
 		}
-		u = rewriteDanmuURL(u, req.Prefix)
+		u = rewriteNodePkgURL(u, req.Prefix)
 		if u != "" {
-			// 前端后续识别；当前 PostMsgHost 未处理时会当 toast，故用明确前缀。
 			payload, _ := json.Marshal(map[string]string{"url": u})
 			jsPostMsg("DANMU:"+string(payload), "")
 		}
@@ -109,14 +108,14 @@ func HandleNodeMsg(body []byte) any {
 		}
 
 	case "queryProfile":
-		pkg := latestNodePkg()
+		pkg := resolveNodePkg("")
 		if pkg == nil {
 			return nil
 		}
 		return pkg.queryProfile()
 
 	case "saveProfile":
-		pkg := latestNodePkg()
+		pkg := resolveNodePkg("")
 		if pkg == nil {
 			return nil
 		}
@@ -140,15 +139,13 @@ func HandleNodeMsg(body []byte) any {
 			u, _ = opt["url"].(string)
 			u = strings.TrimSpace(u)
 		}
-		u = rewriteDanmuURL(u, req.Prefix)
+		u = rewriteNodePkgURL(u, req.Prefix)
 		if u != "" {
-			// UI: 弹窗协议需带 id；另用 OPENWEB: 给前端后续接系统浏览器/内置页。
 			jsPostMsg("OPENWEB:"+u, "")
 		}
 		return map[string]any{"ok": true}
 
 	case "sniff":
-		// 计划外；有调用时记日志并回 null，避免源包卡死。
 		log.Printf("node msg: 未实现 sniff")
 		return nil
 
@@ -160,50 +157,45 @@ func HandleNodeMsg(body []byte) any {
 	}
 }
 
-func rewriteDanmuURL(u, prefix string) string {
-	u = strings.TrimSpace(u)
-	if u == "" {
-		return u
-	}
+// resolveNodePkg 按 api prefix 选包；prefix 空则取任一已起端口的包。
+func resolveNodePkg(prefix string) *nodePkg {
 	h := DefaultNodeHost()
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	var pkg *nodePkg
 	for _, p := range h.pkgs {
 		if p.Port() > 0 {
 			pkg = p
 		}
 	}
-	// 若 prefix 能对应 api，优先该包
-	if prefix != "" {
-		if id := h.apiIndex[strings.TrimSuffix(prefix, "/")]; id != "" {
-			if p := h.pkgs[id]; p != nil {
-				pkg = p
-			}
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return pkg
+	}
+	if id := h.apiIndex[strings.TrimSuffix(prefix, "/")]; id != "" {
+		if p := h.pkgs[id]; p != nil {
+			return p
 		}
-		// prefix 形如 /spider/key/type
-		for api, id := range h.apiIndex {
-			if strings.HasPrefix(prefix, api) || strings.HasPrefix(api, prefix) {
-				if p := h.pkgs[id]; p != nil {
-					pkg = p
-					break
-				}
+	}
+	for api, id := range h.apiIndex {
+		if strings.HasPrefix(prefix, api) || strings.HasPrefix(api, prefix) {
+			if p := h.pkgs[id]; p != nil {
+				return p
 			}
 		}
 	}
-	h.mu.Unlock()
+	return pkg
+}
+
+// rewriteNodePkgURL 弹幕 / OPENWEB：按 prefix 选包后走 RewriteNodeURL。
+func rewriteNodePkgURL(u, prefix string) string {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return u
+	}
+	pkg := resolveNodePkg(prefix)
 	if pkg == nil {
 		return u
 	}
 	return pkg.RewriteNodeURL(u)
-}
-
-func latestNodePkg() *nodePkg {
-	h := DefaultNodeHost()
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	var last *nodePkg
-	for _, p := range h.pkgs {
-		last = p
-	}
-	return last
 }

@@ -644,45 +644,36 @@ func (p *nodePkg) nodeProxyBase() string {
 	return playproxy.PublicizeURL(loop)
 }
 
-// RewritePlayJSON 把播放 JSON 里的本机 node 地址与 js2p://_WEB_ 改成引擎 /node/<pkg>/…。
-func (p *nodePkg) RewritePlayJSON(raw string) string {
+// rewriteToNodeProxy 把本包回环地址与 js2p://_WEB_ 换成 nodeProxyBase（播放 JSON / 弹幕 / OPENWEB 共用）。
+func (p *nodePkg) rewriteToNodeProxy(raw string) string {
 	if raw == "" {
 		return raw
 	}
 	engine := p.nodeProxyBase()
 	port := p.Port()
-	out := raw
 	if port > 0 {
-		local := fmt.Sprintf("http://127.0.0.1:%d", port)
-		localHost := fmt.Sprintf("http://localhost:%d", port)
-		out = strings.ReplaceAll(out, local, engine)
-		out = strings.ReplaceAll(out, localHost, engine)
-		out = reLocalNodeURL.ReplaceAllStringFunc(out, func(m string) string {
+		ps := fmt.Sprintf("%d", port)
+		raw = strings.ReplaceAll(raw, "http://127.0.0.1:"+ps, engine)
+		raw = strings.ReplaceAll(raw, "http://localhost:"+ps, engine)
+		raw = reLocalNodeURL.ReplaceAllStringFunc(raw, func(m string) string {
 			sub := reLocalNodeURL.FindStringSubmatch(m)
-			if len(sub) == 2 && sub[1] == fmt.Sprintf("%d", port) {
+			if len(sub) == 2 && sub[1] == ps {
 				return engine
 			}
 			return m
 		})
 	}
-	out = reJS2P.ReplaceAllString(out, engine)
-	return out
+	return reJS2P.ReplaceAllString(raw, engine)
 }
 
-// RewriteNodeURL 把指向本包 node 端口的 URL 改成远端客户端可达的 /node/<pkg>/…（弹幕、OPENWEB 等）。
+// RewritePlayJSON 把播放 JSON 里的本机 node 地址与 js2p://_WEB_ 改成引擎 /node/<pkg>/…。
+func (p *nodePkg) RewritePlayJSON(raw string) string {
+	return p.rewriteToNodeProxy(raw)
+}
+
+// RewriteNodeURL 把指向本包 node 端口的 URL 改成远端客户端可达的 /node/<pkg>/…。
 func (p *nodePkg) RewriteNodeURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return raw
-	}
-	engine := p.nodeProxyBase()
-	port := p.Port()
-	if port > 0 {
-		raw = strings.ReplaceAll(raw, fmt.Sprintf("http://127.0.0.1:%d", port), engine)
-		raw = strings.ReplaceAll(raw, fmt.Sprintf("http://localhost:%d", port), engine)
-	}
-	raw = reJS2P.ReplaceAllString(raw, engine)
-	return raw
+	return p.rewriteToNodeProxy(strings.TrimSpace(raw))
 }
 
 // profilePath 源包 profile.json。

@@ -482,7 +482,7 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
             });
             try {
               await _prepareLeavePlayback();
-              // 与引擎 _post 默认 120s 对齐；猫爪 Node 起进程可能超过 45s，勿误报「地址无效」。
+              // 与引擎 _post 默认超时同为 120s；猫爪 Node 起进程可能超过 45s，勿误报「地址无效」。
               await api.loadConfig(src).timeout(const Duration(seconds: 120));
               ref.invalidate(configProvider);
               ref.invalidate(settingsProvider);
