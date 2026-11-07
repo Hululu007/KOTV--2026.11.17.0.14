@@ -872,10 +872,20 @@ ensure_libplacebo() {
     git clone --depth 1 --recurse-submodules --branch "$LIBPLACEBO_TAG" \
       https://github.com/haasn/libplacebo.git libplacebo
   else
+    # 旧缓存常停在 v7.360.x；改钉后必须显式 checkout，否则仍编出旧 soversion。
+    git -C libplacebo fetch --depth 1 origin tag "$LIBPLACEBO_TAG" 2>/dev/null \
+      || git -C libplacebo fetch --depth 1 origin "$LIBPLACEBO_TAG"
+    git -C libplacebo checkout -q FETCH_HEAD 2>/dev/null \
+      || git -C libplacebo checkout -q "$LIBPLACEBO_TAG"
     git -C libplacebo submodule update --init --recursive 2>/dev/null || true
   fi
   cd libplacebo
+  # 确认源码版本，避免 profile 缓存掩盖错 tag。
+  echo "  libplacebo HEAD=$(git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)"
   rm -rf build
+  # 旧 7.360 装到前缀的 .pc/.dylib 会让校验误读；换大版本先清掉。
+  rm -f "$PREFIX/lib/libplacebo"* "$PREFIX/lib/pkgconfig/libplacebo.pc" 2>/dev/null || true
+  rm -rf "$PREFIX/include/libplacebo" 2>/dev/null || true
   local placebo_lib=shared
   local vk_flag=enabled
   # glslang：有 shaderc 时不必开（官方更推荐 shaderc；Gentoo 也已丢掉 glslang USE）。
