@@ -133,6 +133,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var dolbyVisionPolicy = 0
   /** 外挂字幕配置（url/name/lang/mime）。 */
   private var currentSubs: List<Map<String, Any?>> = emptyList()
+  /** 排在播放列表里的下一集；播到它时 [onMediaItemTransition] 把它切成当前集。 */
+  private var queuedNext: QueuedNext? = null
   /** 优先 AAC。 */
   private var preferAac = false
   /** 跳过静音段。 */
@@ -382,14 +384,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           result.error("exo_open", "empty url", null)
           return
         }
-        @Suppress("UNCHECKED_CAST")
-        val headers = (call.argument<Map<String, Any?>>("headers") ?: emptyMap())
-          .mapNotNull { (k, v) ->
-            val key = k.trim()
-            val value = v?.toString()?.trim().orEmpty()
-            if (key.isEmpty() || value.isEmpty()) null else key to value
-          }
-          .toMap()
+        val headers = headerArg(call)
         val mime = call.argument<String>("mime")?.trim()?.ifEmpty { null }
         @Suppress("UNCHECKED_CAST")
         val drm = call.argument<Map<String, Any?>>("drm")
@@ -545,37 +540,33 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
-      "warmCacheUrl" -> {
-        val url = call.argument<String>("url")?.trim().orEmpty()
-        @Suppress("UNCHECKED_CAST")
-        val headers =
-          (call.argument<Map<String, Any?>>("headers") ?: emptyMap())
-            .mapNotNull { (k, v) ->
-              val key = k.trim()
-              val value = v?.toString()?.trim().orEmpty()
-              if (key.isEmpty() || value.isEmpty()) null else key to value
-            }
-            .toMap()
-        val maxBytes =
-          call.argument<Number>("maxBytes")?.toLong()
-            ?: (diskPreloadMs.coerceAtLeast(5_000L) * 250L) // ~2Mbps 估算
-        val ctx = appContext
-        if (ctx == null || url.isEmpty() || !diskCacheEnabled) {
-          result.success(false)
-        } else {
-          KotvExoCacheWarmer.warm(
-            ctx,
-            httpClient,
-            url,
-            headers,
-            maxBytes.coerceIn(256L * 1024L, diskPreloadSizeMb.toLong() * 1024L * 1024L / 2),
+      "queueNext" -> {
+        val next =
+          QueuedNext(
+            id = call.argument<String>("id")?.trim().orEmpty(),
+            url = call.argument<String>("url")?.trim().orEmpty(),
+            headers = normalizeHeaders(headerArg(call)),
+            mime = call.argument<String>("mime")?.trim()?.ifEmpty { null },
+            subs = call.argument<List<Map<String, Any?>>>("subs") ?: emptyList(),
           )
+        main.post { result.success(queueNext(next)) }
+      }
+      "clearNext" -> {
+        main.post {
+          clearQueuedNext()
           result.success(true)
         }
       }
-      "cancelWarmCache" -> {
-        KotvExoCacheWarmer.cancel()
-        result.success(true)
+      "skipToNext" -> {
+        main.post {
+          val p = player
+          if (p != null && queuedNext != null && p.hasNextMediaItem()) {
+            p.seekToNextMediaItem()
+            result.success(true)
+          } else {
+            result.success(false)
+          }
+        }
       }
       "getEqualizerCenters" -> {
         main.post {
@@ -677,7 +668,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           // 离页或换引擎走 dispose → releasePlayer。
           try {
             diskPreload.stop()
-            KotvExoCacheWarmer.cancel()
+            queuedNext = null
             player?.stop()
             player?.clearMediaItems()
           } catch (_: Throwable) {
@@ -1059,6 +1050,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   ) {
     formatRetried = false
     secondaryAutoApplied = false
+    queuedNext = null
     livePlayback = live
     currentUrl = url
     currentHeaders = normalizeHeaders(headers)
@@ -1143,6 +1135,54 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       Log.w(TAG, "applyTrackSelectionPrefs", t)
     }
   }
+
+  /**
+   * 把下一集排在当前集后面：Exo 播到当前集末尾前就开始缓冲它，播完直接接上。
+   * 只排点播、无 DRM、请求头与当前集相同的（数据源的请求头是整个播放器共用的）。
+   */
+  private fun queueNext(next: QueuedNext): Boolean {
+    val p = player ?: return false
+    if (next.id.isEmpty() || next.url.isEmpty() || p.mediaItemCount == 0) return false
+    if (livePlayback || buildDrmConfig(currentDrm) != null || next.headers != currentHeaders) {
+      clearQueuedNext()
+      return false
+    }
+    clearQueuedNext()
+    p.addMediaItem(buildMediaItem(next.url, next.mime, null, next.headers, next.subs, next.id))
+    queuedNext = next
+    return true
+  }
+
+  private fun clearQueuedNext() {
+    queuedNext = null
+    val p = player ?: return
+    val after = p.currentMediaItemIndex + 1
+    if (after < p.mediaItemCount) p.removeMediaItems(after, p.mediaItemCount)
+  }
+
+  /** 已播到排好的下一集：它成为当前集，删掉播完的上一项，通知 Dart 换集。 */
+  private fun enterQueuedNext(next: QueuedNext, item: MediaItem) {
+    val p = player ?: return
+    queuedNext = null
+    currentUrl = next.url
+    currentMime = next.mime
+    currentSubs = next.subs
+    formatRetried = false
+    secondaryAutoApplied = false
+    transferredBytes.set(0)
+    if (p.currentMediaItemIndex > 0) p.removeMediaItems(0, p.currentMediaItemIndex)
+    maybeStartDiskPreload(p, item)
+    emit(mapOf("event" to "transition", "id" to next.id))
+  }
+
+  private fun headerArg(call: MethodCall): Map<String, String> =
+    (call.argument<Map<String, Any?>>("headers") ?: emptyMap())
+      .mapNotNull { (k, v) ->
+        val key = k.trim()
+        val value = v?.toString()?.trim().orEmpty()
+        if (key.isEmpty() || value.isEmpty()) null else key to value
+      }
+      .toMap()
 
   private fun maybeStartDiskPreload(p: ExoPlayer, mediaItem: MediaItem) {
     val ctx = appContext ?: return
@@ -1340,6 +1380,15 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           applySecondaryAuto(tracks)
         }
 
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+          val next = queuedNext ?: return
+          if (mediaItem?.mediaId != next.id) return
+          if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
+            reason != Player.MEDIA_ITEM_TRANSITION_REASON_SEEK
+          ) return
+          enterQueuedNext(next, mediaItem)
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
           val cur = player ?: return
           if (playbackState == Player.STATE_ENDED) {
@@ -1390,6 +1439,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
                 val cur = player ?: return
                 val pos = cur.currentPosition.coerceAtLeast(0L)
                 val item = buildMediaItem(currentUrl, currentMime, currentDrm, currentHeaders)
+                queuedNext = null
                 cur.setMediaItem(item, pos)
                 cur.prepare()
                 cur.play()
@@ -1513,8 +1563,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     mime: String?,
     drm: Map<String, Any?>?,
     headers: Map<String, String> = emptyMap(),
+    subs: List<Map<String, Any?>> = currentSubs,
+    mediaId: String? = null,
   ): MediaItem {
     val b = MediaItem.Builder().setUri(playUri(url))
+    if (!mediaId.isNullOrEmpty()) b.setMediaId(mediaId)
     try {
       b.setImageDurationMs(15_000)
     } catch (_: Throwable) {
@@ -1536,9 +1589,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       )
     }
     buildDrmConfig(drm)?.let { b.setDrmConfiguration(it) }
-    val subs = buildSubtitleConfigs(currentSubs)
-    if (subs.isNotEmpty()) {
-      b.setSubtitleConfigurations(subs)
+    val subConfigs = buildSubtitleConfigs(subs)
+    if (subConfigs.isNotEmpty()) {
+      b.setSubtitleConfigurations(subConfigs)
     }
     return b.build()
   }
@@ -1808,7 +1861,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return codecs.startsWith("dvh1") || codecs.startsWith("dvhe") || codecs.startsWith("dav1")
   }
 
-  /** 播放信息：实际视频解码器、片源色彩、显示器 HDR 能力。 */
+  /** 播放信息：实际视频解码器、是否在走隧道、片源色彩、显示器 HDR 能力。 */
   private fun videoInfo(): Map<String, String> {
     val f = player?.videoFormat
     val info = f?.colorInfo
@@ -1826,6 +1879,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     return mapOf(
       "decoder" to lastVideoDecoder,
+      // 开关打开也要音视频解码器都支持才真的走隧道。
+      "tunneling" to (player?.isTunnelingEnabled == true).toString(),
       "transfer" to transfer,
       "primaries" to primaries,
       "dolbyVision" to if (f != null && isDolbyVision(f)) "杜比视界" else "",
@@ -2233,7 +2288,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     main.removeCallbacks(tick)
     surfaceHost?.setBufferingUi(false, "")
     diskPreload.stop()
-    KotvExoCacheWarmer.cancel()
+    queuedNext = null
     releaseAudioEffects()
     try {
       videoEqCtrl.clear(player)
@@ -2547,6 +2602,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     return out
   }
+
+  private data class QueuedNext(
+    val id: String,
+    val url: String,
+    val headers: Map<String, String>,
+    val mime: String?,
+    val subs: List<Map<String, Any?>>,
+  )
 
   companion object {
     private const val TAG = "KotvExo"

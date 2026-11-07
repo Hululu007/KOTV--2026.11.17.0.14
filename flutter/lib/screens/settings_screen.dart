@@ -2721,21 +2721,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             msg: '开机进直播已更新',
                           )),
                         ),
-                        // 预加载写进 Exo 磁盘缓存，只有 Android 用得上。
-                        if (kotvIsAndroid())
-                        KotvSettingsCell(
-                          label: '预加载下一集',
-                          value: g('preloadNextEpisode', 'false') != 'true'
-                              ? '关闭'
-                              : (g('exoDiskCache', 'false') == 'true' ? '开启' : '开启（需开 Exo 磁盘缓存）'),
-                          onTap: () => unawaited(_set(
-                            'preloadNextEpisode',
-                            g('preloadNextEpisode', 'false') == 'true'
-                                ? 'false'
-                                : 'true',
-                            msg: '预加载下一集已更新',
-                          )),
-                        ),
+                        // 下一集排进播放器播放列表：Android Exo/原生 MPV、桌面与 iOS 的 media_kit MPV；
+                        // FVP 与网页不支持无缝（仍会预解析下一集地址，换集走普通 open）。
+                        if (!kIsWeb)
+                          KotvSettingsCell(
+                            label: '预加载下一集',
+                            value: kotvSettingsFlag(g('preloadNextEpisode'))
+                                ? (kotvIsAndroid()
+                                    ? '开启（Exo / MPV 无缝）'
+                                    : '开启（MPV 无缝）')
+                                : '关闭',
+                            onTap: () => unawaited(_set(
+                              'preloadNextEpisode',
+                              kotvSettingsFlag(g('preloadNextEpisode')) ? 'false' : 'true',
+                              msg: '预加载下一集已更新',
+                            )),
+                          ),
                         if (kotvIsAndroid())
                           KotvSettingsCell(
                             label: '音频直通',

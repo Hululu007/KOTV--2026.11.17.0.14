@@ -295,6 +295,10 @@ class KotvMpvOpts {
       try {
         await set('ytdl', 'no');
       } catch (_) {}
+      // 预加载下一集：本集将完时提前打开排在播放列表后面的一项。
+      try {
+        await set('prefetch-playlist', 'yes');
+      } catch (_) {}
       try {
         await set('playlist-exts', kotvPlaylistExts);
       } catch (_) {}

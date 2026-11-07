@@ -307,7 +307,7 @@ func defaultFile() file {
 			{ID: "videoTemperature", Label: "画面色温", Value: "0"},
 			{ID: "videoSharpness", Label: "画面锐度", Value: "0"},
 			{ID: "videoShadow", Label: "画面阴影", Value: "0"},
-			{ID: "preloadNextEpisode", Label: "预解析下一集", Value: "false"},
+			{ID: "preloadNextEpisode", Label: "预加载下一集", Value: "false"},
 			{ID: "subtitleFontScale", Label: "字幕字号", Value: "1.0"},
 			{ID: "subtitlePos", Label: "字幕位置", Value: "0"},
 			{ID: "subtitleColor", Label: "字幕颜色", Value: "#FFFFFF"},
@@ -462,7 +462,7 @@ func Load() error {
 	ensureSettingLocked(VideoTemperature, "画面色温", "0")
 	ensureSettingLocked(VideoSharpness, "画面锐度", "0")
 	ensureSettingLocked(VideoShadow, "画面阴影", "0")
-	ensureSettingLocked(PreloadNextEpisode, "预解析下一集", "false")
+	ensureSettingLocked(PreloadNextEpisode, "预加载下一集", "false")
 	ensureSettingLocked(SubtitleFontScale, "字幕字号", "1.0")
 	ensureSettingLocked(SubtitlePos, "字幕位置", "0")
 	ensureSettingLocked(SubtitleColor, "字幕颜色", "#FFFFFF")

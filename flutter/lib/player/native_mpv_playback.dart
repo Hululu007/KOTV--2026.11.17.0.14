@@ -80,6 +80,9 @@ class NativeMpvPlayback extends KotvPlayback {
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
   final _endedCtrl = StreamController<bool>.broadcast();
+  final _queuedStartCtrl = StreamController<String>.broadcast();
+  /// 已排进 mpv 播放列表的下一集；播到它时由 transition 事件切成当前集。
+  ({String id, String url, Map<String, String> headers})? _queued;
 
   /// 仅随 Texture/错误/就绪变化递增；供详情页 ValueListenableBuilder 重建画面（勿绑 position）。
   final ValueNotifier<int> surfaceRev = ValueNotifier(0);
@@ -188,6 +191,67 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   Stream<bool> get completedStream => _endedCtrl.stream;
+
+  @override
+  Stream<String> get queuedStartStream => _queuedStartCtrl.stream;
+
+  @override
+  Future<bool> queueNext({
+    required String id,
+    required String url,
+    Map<String, String>? headers,
+    String? format,
+    List<Map<String, dynamic>> subs = const [],
+  }) async {
+    final h = kotvNormalizePlayHeaders(headers, url: url);
+    try {
+      final ok = await _ch.invokeMethod<bool>('queueNext', {
+        'id': id,
+        'url': url,
+        'headers': h,
+        'forceHls': kotvIsHls(url, format),
+      });
+      _queued = ok == true ? (id: id, url: url, headers: h) : null;
+    } catch (_) {
+      _queued = null;
+    }
+    return _queued != null;
+  }
+
+  @override
+  Future<void> clearNext() async {
+    _queued = null;
+    try {
+      await _ch.invokeMethod('clearNext');
+    } catch (_) {}
+  }
+
+  @override
+  Future<bool> skipToNext() async {
+    if (_queued == null) return false;
+    try {
+      return await _ch.invokeMethod<bool>('skipToNext') == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _enterQueued(String id) {
+    final q = _queued;
+    if (q == null || q.id != id) return;
+    _queued = null;
+    _url = q.url;
+    _headers = q.headers;
+    _completed = false;
+    _lastError = null;
+    _position = Duration.zero;
+    _duration = Duration.zero;
+    _buffered = Duration.zero;
+    if (!_posCtrl.isClosed) _posCtrl.add(Duration.zero);
+    if (!_queuedStartCtrl.isClosed) _queuedStartCtrl.add(id);
+    notifyListeners();
+    unawaited(_refreshTracks());
+  }
 
   List<KotvTrack> _audioTracks = const [];
   List<KotvTrack> _videoTracks = const [];
@@ -416,6 +480,9 @@ class NativeMpvPlayback extends KotvPlayback {
         if (_w > 0 && _h > 0) _buffering = false;
         notifyListeners();
         break;
+      case 'transition':
+        _enterQueued('${m['id'] ?? ''}');
+        break;
       case 'completed':
         if (_completed) break;
         _completed = true;
@@ -445,6 +512,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _url = url;
     _live = live;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
+    _queued = null;
     _completed = false;
     _ready = false;
     _buffering = true;
@@ -579,6 +647,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _playing = false;
     _buffering = false;
     _completed = false;
+    _queued = null;
     _ready = false;
     _position = Duration.zero;
     _duration = Duration.zero;
@@ -952,6 +1021,7 @@ class NativeMpvPlayback extends KotvPlayback {
     unawaited(_posCtrl.close());
     unawaited(_bufCtrl.close());
     unawaited(_endedCtrl.close());
+    unawaited(_queuedStartCtrl.close());
     super.dispose();
   }
 }

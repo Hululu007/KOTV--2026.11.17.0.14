@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -80,6 +81,11 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.volume.listen((_) => notifyListeners()));
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
+    _subs.add(player.stream.playlist.listen((pl) {
+      final q = _queued;
+      // 排好的下一集总在第 2 项（下标 1）。
+      if (q != null && pl.index == 1) _enterQueued(q);
+    }));
     _subs.add(player.stream.log.listen((log) {
       if (log.level != 'error') return;
       if (!_hlsRetryAllowed || _hlsRetried || _hlsMedia == null) return;
@@ -115,6 +121,11 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void>? _hlsJob;
   Media? _hlsMedia;
   String? _hlsClearKey;
+  /// 本集是否强制按 HLS 解析（demuxer-lavf-format 是整个播放器共用的）。
+  bool _hlsForced = false;
+  /// 已排进播放列表的下一集；播到它时由 playlist 下标切成当前集。
+  ({String id, String url, Media media})? _queued;
+  final _queuedStartCtrl = StreamController<String>.broadcast();
   String _mpvUserAgent = '';
   String _mpvReferer = '';
 
@@ -278,6 +289,73 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Stream<bool> get completedStream => player.stream.completed;
 
+  @override
+  Stream<String> get queuedStartStream => _queuedStartCtrl.stream;
+
+  /// 只排请求头与 HLS 强制解析都和本集相同的：UA、Referer、demuxer-lavf-format 是整个播放器共用的属性，
+  /// 其余请求头按媒体写（media_kit 在 mpv 加载这一项时写 http-header-fields）。
+  @override
+  Future<bool> queueNext({
+    required String id,
+    required String url,
+    Map<String, String>? headers,
+    String? format,
+    List<Map<String, dynamic>> subs = const [],
+  }) async {
+    final h = kotvNormalizePlayHeaders(headers, url: url);
+    if (_url.isEmpty || _live || !mapEquals(h, _headers) || kotvIsHls(url, format) != _hlsForced) {
+      return false;
+    }
+    await clearNext();
+    final fields = kotvSplitMpvHeaders(h).fields;
+    final media = Media(url, httpHeaders: fields.isEmpty ? null : fields);
+    try {
+      await player.add(media);
+    } catch (_) {
+      return false;
+    }
+    _queued = (id: id, url: url, media: media);
+    return true;
+  }
+
+  /// 只留正在播的一项（也删掉无缝接上后留在前面的上一集）。
+  @override
+  Future<void> clearNext() async {
+    _queued = null;
+    final current = player.state.playlist.index;
+    for (var i = player.state.playlist.medias.length - 1; i >= 0; i--) {
+      if (i == current) continue;
+      try {
+        await player.remove(i);
+      } catch (_) {}
+    }
+  }
+
+  @override
+  Future<bool> skipToNext() async {
+    if (_queued == null) return false;
+    try {
+      await player.next();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _enterQueued(({String id, String url, Media media}) q) {
+    _queued = null;
+    _url = q.url;
+    _hlsGen++;
+    _hlsRetried = false;
+    _hlsRetryAllowed = !_hlsForced;
+    _hlsMedia = q.media;
+    _openSerial++;
+    _clearVideoSize();
+    _acceptSize = true;
+    if (!_queuedStartCtrl.isClosed) _queuedStartCtrl.add(q.id);
+    notifyListeners();
+  }
+
   /// media_kit 的 `Tracks` 永远带 `auto` / `no` 两个伪轨（未加载时也在），
   /// 所以不能用 `isNotEmpty` 判有无轨；只数真实轨。
   bool get _hasRealVideoTrack =>
@@ -395,6 +473,8 @@ class MediaKitPlayback extends KotvPlayback {
       start: startAt > Duration.zero ? startAt : null,
     );
     final forceHls = kotvIsHls(url, format);
+    _queued = null;
+    _hlsForced = forceHls;
     _hlsGen++;
     _hlsRetried = false;
     _hlsRetryAllowed = false;
@@ -452,6 +532,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   Future<void> _stopUnload({required String reason}) async {
     _url = '';
+    _queued = null;
     _clearVideoSize();
     _speedBps = 0;
     try {
@@ -828,6 +909,7 @@ class MediaKitPlayback extends KotvPlayback {
     for (final s in _subs) {
       s.cancel();
     }
+    unawaited(_queuedStartCtrl.close());
     super.dispose();
   }
 }

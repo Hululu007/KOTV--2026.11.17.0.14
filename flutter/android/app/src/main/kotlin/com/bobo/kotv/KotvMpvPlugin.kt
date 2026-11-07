@@ -106,6 +106,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var pendingStartAtMs = 0L
   private var loadedUrl: String = ""
   private var loadedHeaders: Map<String, String> = emptyMap()
+  /** 排在 mpv 播放列表第 2 项的下一集；播到它时由 playlist-pos 切成当前集。mpv 事件线程也会读。 */
+  @Volatile private var queuedNext: QueuedNext? = null
   private var volume = 80.0
   private var rate = 1.0
   /** 画面调色（mpv brightness/contrast/… ∈ [-100,100]）。 */
@@ -387,6 +389,32 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
+      "queueNext" -> {
+        val next =
+          QueuedNext(
+            id = call.argument<String>("id")?.trim().orEmpty(),
+            url = call.argument<String>("url")?.trim().orEmpty(),
+            headers = stringMapArg(call, "headers"),
+            forceHls = call.argument<Boolean>("forceHls") == true,
+          )
+        main.post { result.success(queueNext(next)) }
+      }
+      "clearNext" -> {
+        main.post {
+          clearQueuedNext()
+          result.success(null)
+        }
+      }
+      "skipToNext" -> {
+        main.post {
+          if (created.get() && queuedNext != null) {
+            MPVLib.command(arrayOf("playlist-next"))
+            result.success(true)
+          } else {
+            result.success(false)
+          }
+        }
+      }
       "stop" -> {
         main.post {
           try {
@@ -405,6 +433,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             positionSec = 0.0
             durationSec = 0.0
             loadedUrl = ""
+            queuedNext = null
             result.success(null)
           } catch (e: Throwable) {
             result.error("STOP_FAILED", e.message, null)
@@ -991,6 +1020,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setOptionString("force-window", "no")
       MPVLib.setOptionString("idle", "yes")
       MPVLib.setOptionString("keep-open", "yes")
+      // 预加载下一集：本集将完时提前打开排在后面的一项。
+      MPVLib.setOptionString("prefetch-playlist", "yes")
       MPVLib.setOptionString("loop-file", loopFile())
       if (!livePlayback) {
         if (diskCache) {
@@ -1569,6 +1600,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.observeProperty("paused-for-cache", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     MPVLib.observeProperty("seeking", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     MPVLib.observeProperty("eof-reached", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
+    MPVLib.observeProperty("playlist-pos", MPVLib.MpvFormat.MPV_FORMAT_INT64)
     MPVLib.observeProperty("width", MPVLib.MpvFormat.MPV_FORMAT_INT64)
     MPVLib.observeProperty("height", MPVLib.MpvFormat.MPV_FORMAT_INT64)
     MPVLib.observeProperty("video-params/w", MPVLib.MpvFormat.MPV_FORMAT_INT64)
@@ -1655,6 +1687,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun startLoad(url: String, headers: Map<String, String>) {
     try {
+      queuedNext = null
       loadedUrl = url
       loadedHeaders = headers
       applySpdif()
@@ -1665,10 +1698,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       // 只写在这一次 loadfile 上，播完恢复，不留在会话里。
       val opts = ArrayList<String>(6)
       if (startMs > 0L) opts.add("start=${startMs / 1000.0}")
-      if (forceLavfHls) {
-        opts.add("demuxer-lavf-format=hls")
-        opts.add("demuxer-lavf-o-add=http_persistent=0")
-      }
+      if (forceLavfHls) appendHlsOptions(opts)
       appendHeaderOptions(headers, opts)
       if (opts.isEmpty()) {
         MPVLib.command(arrayOf("loadfile", url, "replace"))
@@ -1683,6 +1713,62 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     } catch (e: Throwable) {
       emit(mapOf("event" to "error", "message" to (e.message ?: "load failed")))
     }
+  }
+
+  private fun appendHlsOptions(opts: MutableList<String>) {
+    opts.add("demuxer-lavf-format=hls")
+    opts.add("demuxer-lavf-o-add=http_persistent=0")
+  }
+
+  /**
+   * 把下一集追加到 mpv 播放列表（请求头、HLS 选项只写在这一项上）；prefetch-playlist 让 mpv 在本集
+   * 将完时就打开它，播完直接接上。
+   */
+  private fun queueNext(next: QueuedNext): Boolean {
+    if (!created.get() || livePlayback || next.id.isEmpty() || next.url.isEmpty() || loadedUrl.isEmpty() || repeatOne) {
+      return false
+    }
+    return try {
+      // 只留正在播的一项，新排的总在第 2 项（下标 1）。
+      MPVLib.command(arrayOf("playlist-clear"))
+      val opts = ArrayList<String>(6)
+      if (next.forceHls) appendHlsOptions(opts)
+      appendHeaderOptions(next.headers, opts)
+      if (opts.isEmpty()) {
+        MPVLib.command(arrayOf("loadfile", next.url, "append"))
+      } else {
+        MPVLib.command(arrayOf("loadfile", next.url, "append", "-1", encodeLoadfileOptions(opts)))
+      }
+      queuedNext = next
+      true
+    } catch (t: Throwable) {
+      Log.w(TAG, "queue next failed", t)
+      false
+    }
+  }
+
+  /** 只留正在播的一项。 */
+  private fun clearQueuedNext() {
+    if (queuedNext == null) return
+    queuedNext = null
+    if (created.get()) {
+      try {
+        MPVLib.command(arrayOf("playlist-clear"))
+      } catch (_: Throwable) {
+      }
+    }
+  }
+
+  /** 已播到排好的下一集：它成为当前集，通知 Dart 换集。播完的上一项等下次排队时一并清掉。 */
+  private fun enterQueuedNext(next: QueuedNext) {
+    queuedNext = null
+    loadGen.incrementAndGet()
+    loadedUrl = next.url
+    loadedHeaders = next.headers
+    forceLavfHls = next.forceHls
+    ioHlsRetried = false
+    eof = false
+    emit(mapOf("event" to "transition", "id" to next.id))
   }
 
   /** User-Agent、Referer 单独成项，其余头合成一条列表。没有的项不写。 */
@@ -1789,6 +1875,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   override fun eventProperty(property: String, value: Long) {
     when (property) {
+      // 排好的下一集追加在第 2 项（下标 1）。
+      "playlist-pos" -> {
+        val next = queuedNext
+        if (next != null && value == 1L) main.post { if (queuedNext === next) enterQueuedNext(next) }
+      }
       "width", "video-params/w" -> {
         width = value.toInt()
         emitSize()
@@ -1881,7 +1972,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   override fun endFile(reason: Int, error: Int, errorText: String?) {
     when (reason) {
-      MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_EOF -> markEnded()
+      // 播放列表里还有排好的下一集时，mpv 会接着播它，本集不算播完。
+      MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_EOF -> if (queuedNext == null) markEnded()
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
         val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
         if (!forceLavfHls && !ioHlsRetried && shouldRetryHls(url, error)) {
@@ -1934,6 +2026,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (opacityPct == null) return raw
     return applySubtitleOpacity(raw, opacityPct)
   }
+
+  private data class QueuedNext(
+    val id: String,
+    val url: String,
+    val headers: Map<String, String>,
+    val forceHls: Boolean,
+  )
 
   companion object {
     /** UI/引擎托管：mpv.conf 写入这些键会被跳过。 */

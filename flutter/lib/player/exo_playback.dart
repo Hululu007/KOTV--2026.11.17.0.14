@@ -119,6 +119,9 @@ class ExoPlayback extends KotvPlayback {
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
   final _endedCtrl = StreamController<bool>.broadcast();
+  final _queuedStartCtrl = StreamController<String>.broadcast();
+  /// 已排进播放列表的下一集；播到它时由 transition 事件切成当前集。
+  ({String id, String url, Map<String, String> headers, String? format, List<Map<String, dynamic>> subs})? _queued;
 
   @override
   String get engineLabel => '内置 ExoPlayer';
@@ -140,8 +143,10 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<String?> activeDecoderLabel() async {
-    final name = kotvDecoderName('${(await _videoInfo())?['decoder'] ?? ''}');
-    return name.isEmpty ? null : name;
+    final info = await _videoInfo();
+    final name = kotvDecoderName('${info?['decoder'] ?? ''}');
+    if (name.isEmpty) return null;
+    return '${info?['tunneling']}' == 'true' ? '$name · 隧道' : name;
   }
 
   @override
@@ -202,6 +207,8 @@ class ExoPlayback extends KotvPlayback {
   Stream<Duration> get bufferedStream => _bufCtrl.stream;
   @override
   Stream<bool> get completedStream => _endedCtrl.stream;
+  @override
+  Stream<String> get queuedStartStream => _queuedStartCtrl.stream;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     // 播控/设置的比例优先于传入 fit（Surface 路径靠布局 + 原生 setFit）。
@@ -403,6 +410,9 @@ class ExoPlayback extends KotvPlayback {
         notifyListeners();
         unawaited(_refreshTracks());
         break;
+      case 'transition':
+        _enterQueued('${m['id'] ?? ''}');
+        break;
       case 'completed':
         _completed = true;
         _playing = false;
@@ -432,6 +442,7 @@ class ExoPlayback extends KotvPlayback {
     _format = format;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _drm = drm;
+    _queued = null;
     _completed = false;
     _ready = false;
     _lastError = null;
@@ -632,6 +643,7 @@ class ExoPlayback extends KotvPlayback {
     } catch (_) {}
     _playing = false;
     _completed = false;
+    _queued = null;
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffered = Duration.zero;
@@ -1197,25 +1209,72 @@ class ExoPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  /// 预热下一集媒体到磁盘缓存（需已开磁盘缓存）。
-  Future<void> warmCacheUrl(String url, {Map<String, String>? headers, int? maxBytes}) async {
-    final u = url.trim();
-    if (u.isEmpty || !_diskCache) return;
+  /// 原生只排点播、无 DRM、请求头与当前集相同的（Exo 数据源的请求头整个播放器共用）。
+  @override
+  Future<bool> queueNext({
+    required String id,
+    required String url,
+    Map<String, String>? headers,
+    String? format,
+    List<Map<String, dynamic>> subs = const [],
+  }) async {
+    final h = kotvNormalizePlayHeaders(headers, url: url);
     try {
-      // 预热也会 create：必须先带上当前渲染模式，避免默认 surface 抢先占住原生路径。
-      await setRenderMode(_renderMode);
-      await _ch.invokeMethod('warmCacheUrl', {
-        'url': u,
-        'headers': headers ?? const <String, String>{},
-        if (maxBytes != null) 'maxBytes': maxBytes,
+      final ok = await _ch.invokeMethod<bool>('queueNext', {
+        'id': id,
+        'url': url,
+        'headers': h,
+        'mime': kotvPlayMime(url, format),
+        'subs': subs,
       });
+      _queued = ok == true ? (id: id, url: url, headers: h, format: format, subs: subs) : null;
+    } catch (_) {
+      _queued = null;
+    }
+    return _queued != null;
+  }
+
+  @override
+  Future<void> clearNext() async {
+    _queued = null;
+    try {
+      await _ch.invokeMethod('clearNext');
     } catch (_) {}
   }
 
-  Future<void> cancelWarmCache() async {
+  @override
+  Future<bool> skipToNext() async {
+    if (_queued == null) return false;
     try {
-      await _ch.invokeMethod('cancelWarmCache');
-    } catch (_) {}
+      return await _ch.invokeMethod<bool>('skipToNext') == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _enterQueued(String id) {
+    final q = _queued;
+    if (q == null || q.id != id) return;
+    _queued = null;
+    _url = q.url;
+    _headers = q.headers;
+    _format = q.format;
+    _subs = q.subs;
+    _completed = false;
+    _lastError = null;
+    _position = Duration.zero;
+    _duration = Duration.zero;
+    _buffered = Duration.zero;
+    _audioTracks = const [];
+    _videoTracks = const [];
+    _subtitleTracks = const [];
+    _currentAudioId = null;
+    _currentVideoId = null;
+    _currentSubtitleId = null;
+    if (!_posCtrl.isClosed) _posCtrl.add(Duration.zero);
+    if (!_queuedStartCtrl.isClosed) _queuedStartCtrl.add(id);
+    notifyListeners();
+    unawaited(_refreshTracks());
   }
 
   /// 外挂字幕列表（open 时写入 MediaItem）。
@@ -1272,6 +1331,7 @@ class ExoPlayback extends KotvPlayback {
     _posCtrl.close();
     _bufCtrl.close();
     _endedCtrl.close();
+    _queuedStartCtrl.close();
     super.dispose();
   }
 }

@@ -326,6 +326,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   ZwPlayback? _zw;
   StreamSubscription? _playingSub;
   StreamSubscription? _endedSub;
+  StreamSubscription? _queuedStartSub;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription? _bufferingSub;
   KotvPlayback? _wiredNotifyTarget;
@@ -354,12 +355,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 下一集 play 预解析缓存（flag|index → 引擎 play 返回）。
   final Map<String, Map<String, dynamic>> _nextPlayCache = {};
   int _nextPreloadSerial = 0;
+  /// 本集是否已发起「预加载下一集」（离片尾 [_nextEpisodeQueueLeadMs] 时发起一次）。
+  bool _nextPreloadRequested = false;
+  /// 已排进 Exo 播放列表的下一集；播到它时由 [_onQueuedEpisodeStarted] 记账。
+  ({String key, int idx, String playUrl, Map<String, String> headers, Map<String, dynamic> data})? _queuedNext;
+  /// 无缝进入下一集后、真正开播前出错：退回普通换集（带自动切换播放器）。
+  bool _queuedEpisodeUnconfirmed = false;
+  /// 进度回调里记下的本集时长；无缝换集时给上一集写完播进度。
+  int _tickDurationMs = 0;
   /// 详情接口 magnet：展开/取消磁力任务用（DTO 可能已清空须引擎集的 url）。
   bool _detailMagnet = false;
   /// 详情接口 expand：磁力或 YouTube 播放列表等须异步展开。
   bool _detailExpand = false;
   bool _preloadNextEpisode = false;
-  bool _exoDiskCache = false;
   RemoteBridge? _boundRemote;
   String _routeId = '';
   String _routeSite = '';
@@ -848,12 +856,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final stopSerial = _playAtSerial;
     _sessionStartedAt = null;
     _playingSub?.cancel();
-    _endedSub?.cancel();
+    _unwireEpisodeEnd();
     _posSub?.cancel();
     _bufferingSub?.cancel();
     _unwirePlaybackNotify();
     _playingSub = null;
-    _endedSub = null;
     _posSub = null;
     _bufferingSub = null;
     _magnetPlay = false;
@@ -960,12 +967,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  void _wireEnded(KotvPlayback p) {
-    _endedSub?.cancel();
+  /// 本集结束的两种方式：播完（completed），或无缝进入排好的下一集（queuedStart）。
+  void _wireEpisodeEnd(KotvPlayback p) {
+    _unwireEpisodeEnd();
     _endedSub = p.completedStream.listen((done) {
       if (!done || !mounted) return;
       unawaited(_onPlaybackEnded());
     });
+    _queuedStartSub = p.queuedStartStream.listen(_onQueuedEpisodeStarted);
+  }
+
+  void _unwireEpisodeEnd() {
+    _endedSub?.cancel();
+    _queuedStartSub?.cancel();
+    _endedSub = null;
+    _queuedStartSub = null;
   }
 
   void _wirePosition(KotvPlayback p) {
@@ -989,6 +1005,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _unwirePlaybackNotify();
     _playbackNotify = () {
       if (!mounted || _playUrl.isEmpty) return;
+      if (_queuedEpisodeUnconfirmed && p.lastError != null) {
+        _queuedEpisodeUnconfirmed = false;
+        unawaited(_playAt(_epIdx));
+        return;
+      }
       _syncPlayStatus();
       final w = p.width;
       final h = p.height;
@@ -1038,6 +1059,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final progressed = pos >= 2500 || (dur > 0 && pos >= 1200 && p.playing);
     if (progressed && (p.playing || pos >= 2500)) {
       _playbackLive = true;
+      _queuedEpisodeUnconfirmed = false;
     }
   }
 
@@ -1063,8 +1085,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _endConsumedGen = _playGen;
     _playbackLive = false;
     _advanceBusy = true;
-    if (mounted) setState(() => _status = fromEnd ? '自动播放下一集…' : '播放下一集…');
     try {
+      // 下一集已排进播放器：直接跳过去，换集记账由 [_onQueuedEpisodeStarted] 做。
+      if (_queuedNext?.idx == next && await _playback.skipToNext()) return;
+      if (mounted) setState(() => _status = fromEnd ? '自动播放下一集…' : '播放下一集…');
       // 仅自动连播需要抖音式动画；手势/按钮已在全屏页内播过，勿再 animate。
       if (_immersiveFullscreen && fromEnd) {
         await _fsPageKey.currentState?.animateAutoNext();
@@ -1084,6 +1108,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _markPlaybackLiveIfNeeded();
     if (!_playbackLive || _endConsumedGen == _playGen) return;
     final dur = _playback.duration;
+    _tickDurationMs = dur.inMilliseconds;
+    if (!_nextPreloadRequested && dur.inMilliseconds > 0) {
+      final endingMs = (_skipOpeningEnding && !_repeatOne) ? _endingSec * 1000 : 0;
+      if (dur.inMilliseconds - endingMs - pos.inMilliseconds <= _nextEpisodeQueueLeadMs) {
+        _nextPreloadRequested = true;
+        _preloadNextEpisodeNow();
+      }
+    }
     if (dur.inMilliseconds > 0 && pos.inMilliseconds >= 5000) {
       final now = DateTime.now();
       if (_lastProgressSave == null || now.difference(_lastProgressSave!) >= const Duration(seconds: 5)) {
@@ -1151,6 +1183,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 遥控与全屏设置里的「循环播放视频」都走这里；播放器自己循环，到片尾也不报完成。
   Future<void> _setRepeatOne(bool on) async {
     _repeatOne = on;
+    // 单集循环不往下播：撤掉排好的下一集；关掉后到片尾前再排。
+    _nextPreloadRequested = false;
+    if (on && _queuedNext != null) {
+      _queuedNext = null;
+      await _playback.clearNext();
+    }
     try {
       await _playback.setRepeatOne(on);
     } catch (_) {}
@@ -1204,7 +1242,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       unawaited(MiniPlayerWindow.exit());
     }
     _playingSub?.cancel();
-    _endedSub?.cancel();
+    _unwireEpisodeEnd();
     _posSub?.cancel();
     _bufferingSub?.cancel();
     _unwirePlaybackNotify();
@@ -1252,8 +1290,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
     _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
-    _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'false', def: false);
-    _exoDiskCache = kotvSettingsFlag(settings['exoDiskCache'] ?? 'false', def: false);
+    _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode']);
     kotvPushPlayerSettings(
       settings,
       mpvOpts: _mpvOpts,
@@ -1728,70 +1765,198 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  void _scheduleNextEpisodePreload({
-    required String site,
-    required String id,
-    required String flag,
-    required List<EpisodeItem> eps,
-    required int currentIdx,
-    required int serial,
-  }) {
-    if (!_preloadNextEpisode || !_exoDiskCache) return;
-    final nextIdx = currentIdx + 1;
-    if (nextIdx < 0 || nextIdx >= eps.length) return;
+  /// 离片尾（扣掉片尾跳过）还有这么久时解析下一集并排进 Exo，Exo 在本集播完前缓冲好它。
+  /// 不在开播时就解析：带时效的地址等到播完可能已经过期。
+  static const _nextEpisodeQueueLeadMs = 180000;
+
+  /// 「预加载下一集」：解析下一集并排进当前播放器的播放列表，播完无缝接上。
+  /// Exo、安卓原生 MPV、桌面/iOS media_kit MPV 支持；FVP / 网页排不上。
+  /// 排不上（磁力、DRM、碟片、请求头与本集不同等）时留下解析结果，换集时少等一次解析。
+  void _preloadNextEpisodeNow() {
+    final pb = _playback;
+    final playerVal = _playerVal;
+    final d = _detail;
+    if (!_preloadNextEpisode || _repeatOne || d == null || d.flags.isEmpty) return;
+    final flag = d.flags[_flagIdx.clamp(0, d.flags.length - 1)].flag;
+    final eps = _eps;
+    final nextIdx = _epIdx + 1;
+    if (nextIdx <= 0 || nextIdx >= eps.length) return;
     final nextEp = eps[nextIdx];
-    final cacheKey = _playCacheKey(flag, nextIdx);
-    if (_nextPlayCache.containsKey(cacheKey)) return;
+    final key = _playCacheKey(flag, nextIdx);
+    final serial = _playAtSerial;
     final token = ++_nextPreloadSerial;
+    bool stale() => !mounted || token != _nextPreloadSerial || serial != _playAtSerial || !identical(_playback, pb);
     unawaited(() async {
       try {
-        late final Map<String, dynamic> data;
-        if (nextEp.url.trim().isNotEmpty) {
-          data = {
-            'url': nextEp.url.trim(),
-            if (nextEp.headers != null) 'headers': nextEp.headers,
-            'magnet': false,
-          };
-        } else {
-          data = await ref.read(apiProvider).play(
-                url: '',
-                index: nextIdx,
-                site: site,
-                id: id,
-                flag: flag,
-              );
-        }
-        if (token != _nextPreloadSerial || serial != _playAtSerial) return;
-        if ('${data['url'] ?? ''}'.trim().isEmpty) return;
-        if (data['magnet'] == true || '${data['url']}'.contains('/proxy/bt/')) return;
-        _nextPlayCache[cacheKey] = Map<String, dynamic>.from(data);
+        final data = _nextPlayCache[key] ??
+            (nextEp.url.trim().isNotEmpty
+                ? <String, dynamic>{
+                    'url': nextEp.url.trim(),
+                    if (nextEp.headers != null) 'headers': nextEp.headers,
+                    'magnet': false,
+                  }
+                : await ref.read(apiProvider).play(
+                      url: '',
+                      index: nextIdx,
+                      site: _detailSite(),
+                      id: _detailId(),
+                      flag: flag,
+                    ));
+        if (stale()) return;
+        final base = ref.read(apiProvider).baseUrl;
+        final playUrl = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', base);
+        if (playUrl.isEmpty || data['magnet'] == true || playUrl.contains('/proxy/bt/')) return;
+        _nextPlayCache[key] = Map<String, dynamic>.from(data);
         _trimPlayCache();
-        final exo = _exo;
-        if (exo != null && token == _nextPreloadSerial) {
-          final engineBase = ref.read(apiProvider).baseUrl;
-          final playUrl = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', engineBase);
-          if (playUrl.isNotEmpty) {
-            final direct = kotvRewriteEngineLocalUrl('${data['direct'] ?? ''}', engineBase);
-            final mediaHint = direct.trim().isNotEmpty ? direct : playUrl;
-            final headers = kotvNormalizePlayHeaders(
-              {
-                for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
-                  if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
-              },
-              url: mediaHint,
-            );
-            final warm = kotvResolvePlayOpenTarget(
-              playUrl: playUrl,
-              directUrl: direct,
-              headers: headers,
-              magnet: false,
-              sendHeaders: true,
-            );
-            unawaited(exo.warmCacheUrl(warm.url, headers: warm.headers ?? const {}));
-          }
-        }
+        final drm = data['drm'];
+        if (drm is Map && '${drm['type'] ?? ''}'.trim().isNotEmpty) return;
+        final rawHeaders = _playHeadersOf(data);
+        final format = _playFormatOf(data);
+        final target = _openTargetOf(
+          playerVal: playerVal,
+          playUrl: playUrl,
+          mediaUrl: kotvRewriteEngineLocalUrl('${data['media'] ?? ''}', base),
+          directUrl: kotvRewriteEngineLocalUrl('${data['direct'] ?? ''}', base),
+          rawHeaders: rawHeaders,
+          magnet: false,
+          format: format,
+        );
+        if (KotvDiscPlay.looksLike(target.url) || KotvDiscPlay.looksLike(nextEp.url)) return;
+        final queued = await pb.queueNext(
+          id: key,
+          url: target.url,
+          headers: target.headers,
+          format: format,
+          subs: _playSubsOf(data),
+        );
+        if (!queued || stale()) return;
+        _queuedNext = (key: key, idx: nextIdx, playUrl: playUrl, headers: rawHeaders, data: Map<String, dynamic>.from(data));
       } catch (_) {}
     }());
+  }
+
+  /// 播放器已无缝播到排好的下一集：只做换集的记账（进度、选集、历史、弹幕、遥控上报），不停播、不重开。
+  void _onQueuedEpisodeStarted(String key) {
+    final q = _queuedNext;
+    final d = _detail;
+    if (!mounted || q == null || q.key != key || d == null || q.idx >= _eps.length) return;
+    _queuedNext = null;
+    _nextPlayCache.remove(q.key);
+    final prevName = _currentEpisodeName() ?? '';
+    if (prevName.isNotEmpty && _tickDurationMs > 0) {
+      unawaited(_writeWatchProgress(_tickDurationMs, _tickDurationMs, force: true, episodeName: prevName));
+    }
+    final ep = _eps[q.idx];
+    _playGen++;
+    final serial = ++_playAtSerial;
+    _playbackLive = false;
+    _sessionStartedAt = DateTime.now();
+    _nextPreloadRequested = false;
+    _tickDurationMs = 0;
+    _queuedEpisodeUnconfirmed = true;
+    // 片头跳过：普通换集靠 open(startAt)，这里直接定位。
+    _openingSeekDone = _skipOpeningEnding && _openingSec > 0;
+    if (_openingSeekDone) unawaited(_playback.seek(Duration(seconds: _openingSec)));
+    _playHeaders = q.headers;
+    _danmakuItems.value = const [];
+    _spiderDanmakuSources = kotvDanmakuSourcesFrom(q.data['danmaku']);
+    setState(() {
+      _epIdx = q.idx;
+      _epPage = q.idx ~/ _epSize;
+      _playUrl = q.playUrl;
+    });
+    _applySourceMeta(q.data);
+    _syncFullscreen();
+    _syncPlayStatus();
+    _touchEpisodeHistory(ep.name, d.flags[_flagIdx.clamp(0, d.flags.length - 1)].flag);
+    unawaited(_loadDanmakuForEpisode(name: d.name, episode: ep.name, playSerial: serial));
+    ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: '${d.name} · ${ep.name}', url: q.playUrl);
+  }
+
+  /// 只记当前集，同集保留续播进度（勿 push positionMs:0）。
+  void _touchEpisodeHistory(String episodeName, String flag) {
+    final d = _detail;
+    if (d == null) return;
+    unawaited(LocalHistory.touchEpisode(
+      id: _detailId(),
+      name: d.name,
+      pic: d.pic,
+      site: _detailSite(),
+      remarks: episodeName,
+      flag: flag,
+      typeName: d.typeName,
+      configSource: _configSource,
+    ));
+  }
+
+  /// 专用源可带回封面/简介；片名仅当前为空时补全，勿用 play.title（曾默认=vodID）覆盖已有名。
+  void _applySourceMeta(Map<String, dynamic> data) {
+    final srcTitle = '${data['title'] ?? ''}'.trim();
+    final srcArt = '${data['artwork'] ?? ''}'.trim();
+    final srcDesc = '${data['desc'] ?? ''}'.trim();
+    if (!mounted || _detail == null || (srcTitle.isEmpty && srcArt.isEmpty && srcDesc.isEmpty)) return;
+    final curName = _detail!.name.trim();
+    setState(() {
+      _detail = _detail!.withMeta(
+        name: (curName.isEmpty && srcTitle.isNotEmpty) ? srcTitle : null,
+        pic: srcArt.isNotEmpty ? srcArt : null,
+        content: srcDesc.isNotEmpty ? srcDesc : null,
+      );
+      if (curName.isEmpty && srcTitle.isNotEmpty) {
+        _routeTitle = srcTitle;
+      }
+    });
+  }
+
+  /// 播放回包里的请求头（去掉空键空值）。
+  static Map<String, String> _playHeadersOf(Map<String, dynamic> data) => {
+        for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
+          if (e.key.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) e.key: '${e.value}',
+      };
+
+  static String? _playFormatOf(Map<String, dynamic> data) {
+    final f = '${data['format'] ?? ''}'.trim();
+    return f.isEmpty ? null : f;
+  }
+
+  /// 播放回包里的外挂字幕；Exo 要在 open 前写进 MediaItem。
+  static List<Map<String, dynamic>> _playSubsOf(Map<String, dynamic> data) {
+    final raw = data['subs'];
+    return [
+      if (raw is List)
+        for (final s in raw)
+          if (s is Map)
+            {
+              'url': '${s['url'] ?? ''}',
+              'name': '${s['name'] ?? ''}',
+              'lang': '${s['lang'] ?? ''}',
+              'format': '${s['format'] ?? ''}',
+            },
+    ];
+  }
+
+  /// 交给内置播放器打开的地址与请求头：本地文件直接开；其余按播放器决定带不带请求头。
+  ({String url, Map<String, String>? headers}) _openTargetOf({
+    required String playerVal,
+    required String playUrl,
+    required String mediaUrl,
+    required String directUrl,
+    required Map<String, String> rawHeaders,
+    required bool magnet,
+    String? format,
+  }) {
+    final localMedia = mediaUrl.startsWith('file:') ||
+        mediaUrl.startsWith('content:') ||
+        (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
+    if (!magnet && localMedia) return (url: mediaUrl, headers: null);
+    final mediaHint = directUrl.trim().isNotEmpty ? directUrl : playUrl;
+    return kotvResolvePlayOpenTarget(
+      playUrl: playUrl,
+      directUrl: directUrl,
+      headers: kotvNormalizePlayHeaders(rawHeaders, url: mediaHint),
+      magnet: magnet,
+      sendHeaders: kotvPlaybackSendsHeaders(playerVal: playerVal, mediaUrl: mediaHint, format: format),
+    );
   }
 
   /// 起播或改了弹幕设置：引擎按设置把片源弹幕和自动搜到的合成源列表，再加载默认选中的那条。
@@ -1905,8 +2070,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _lastVideoW = 0;
     _lastVideoH = 0;
     _openingSeekDone = false;
-    _endedSub?.cancel();
-    _endedSub = null;
+    _nextPreloadRequested = false;
+    _queuedNext = null;
+    _queuedEpisodeUnconfirmed = false;
+    _tickDurationMs = 0;
+    _unwireEpisodeEnd();
     _posSub?.cancel();
     _posSub = null;
     _danmakuItems.value = const [];
@@ -1945,16 +2113,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _syncFullscreen();
     if (!canDirect && _detailMagnet) _startBtProgressPoll();
     // 与 play 解析并行：只记当前集，同集保留续播进度（勿 push positionMs:0）。
-    unawaited(LocalHistory.touchEpisode(
-      id: _detailId(),
-      name: d.name,
-      pic: d.pic,
-      site: _detailSite(),
-      remarks: ep.name,
-      flag: flag.flag,
-      typeName: d.typeName,
-      configSource: _configSource,
-    ));
+    _touchEpisodeHistory(ep.name, flag.flag);
     try {
       Map<String, dynamic> data;
       final cacheKey = _playCacheKey(flag.flag, epIdx);
@@ -2027,10 +2186,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         '${data['direct'] ?? ''}',
         ref.read(apiProvider).baseUrl,
       );
-      final rawHeaders = <String, String>{
-        for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
-          if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
-      };
+      final rawHeaders = _playHeadersOf(data);
       _playHeaders = rawHeaders;
       final magnet = data['magnet'] == true || playUrl.contains('/proxy/bt/');
       _magnetPlay = magnet;
@@ -2067,8 +2223,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (volPref != null) {
           _prefVolume = volPref;
         }
-        _preloadNextEpisode = kotvSettingsFlag(playSettings['preloadNextEpisode'] ?? 'false', def: false);
-        _exoDiskCache = kotvSettingsFlag(playSettings['exoDiskCache'] ?? 'false', def: false);
+        _preloadNextEpisode = kotvSettingsFlag(playSettings['preloadNextEpisode']);
         _exo?.applyPlayerOptions(playSettings);
         _fvp?.applyPlayerOptions(playSettings);
       }
@@ -2145,18 +2300,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       );
       Object? lastOpenError;
       var opened = false;
-      final playSubs = data['subs'];
-      final subMaps = <Map<String, dynamic>>[
-        if (playSubs is List)
-          for (final s in playSubs)
-            if (s is Map)
-              {
-                'url': '${s['url'] ?? ''}',
-                'name': '${s['name'] ?? ''}',
-                'lang': '${s['lang'] ?? ''}',
-                'format': '${s['format'] ?? ''}',
-              },
-      ];
+      final subMaps = _playSubsOf(data);
+      final format = _playFormatOf(data);
       for (var attempt = 0; attempt < 8; attempt++) {
         if (serial != _playAtSerial || !mounted) return;
         failover.markAttempt();
@@ -2182,33 +2327,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         }
         await pb.setDecodeMode(failover.decodeMode);
         await pb.setRenderMode(renderMode);
-        final localMedia = mediaUrl.startsWith('file:') ||
-            mediaUrl.startsWith('content:') ||
-            (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
-        late String openUrl;
-        late final Map<String, String>? openHeaders;
-        if (!magnet && localMedia) {
-          openUrl = mediaUrl;
-          openHeaders = null;
-        } else {
-          final mediaHint = directUrl.trim().isNotEmpty ? directUrl : playUrl;
-          final headers = kotvNormalizePlayHeaders(rawHeaders, url: mediaHint);
-          final resolved = kotvResolvePlayOpenTarget(
-            playUrl: playUrl,
-            directUrl: directUrl,
-            headers: headers,
-            magnet: magnet,
-            sendHeaders: kotvPlaybackSendsHeaders(
-              playerVal: failover.playerVal,
-              mediaUrl: mediaHint,
-              format: '${data['format'] ?? ''}'.trim().isEmpty
-                  ? null
-                  : '${data['format']}'.trim(),
-            ),
-          );
-          openUrl = resolved.url;
-          openHeaders = resolved.headers;
-        }
+        final target = _openTargetOf(
+          playerVal: failover.playerVal,
+          playUrl: playUrl,
+          mediaUrl: mediaUrl,
+          directUrl: directUrl,
+          rawHeaders: rawHeaders,
+          magnet: magnet,
+          format: format,
+        );
+        var openUrl = target.url;
+        final openHeaders = target.headers;
         var discProps = <String, String>{};
         if (KotvDiscPlay.looksLike(openUrl) || KotvDiscPlay.looksLike(ep.url)) {
           final disc = KotvDiscPlay.rewrite(
@@ -2277,7 +2406,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             openUrl,
             headers: openHeaders,
             drm: hasDrm ? drm : null,
-            format: '${data['format'] ?? ''}'.trim().isEmpty ? null : '${data['format']}'.trim(),
+            format: format,
             startAt: Duration(milliseconds: startMs),
           );
           if (serial != _playAtSerial || !mounted) {
@@ -2334,36 +2463,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (!mounted) return;
       _spiderDanmakuSources = kotvDanmakuSourcesFrom(data['danmaku']);
       unawaited(_loadDanmakuForEpisode(name: d.name, episode: ep.name, playSerial: serial));
-      // 专用源可带回封面/简介；片名仅当前为空时补全，勿用 play.title（曾默认=vodID）覆盖已有名。
-      final srcTitle = '${data['title'] ?? ''}'.trim();
-      final srcArt = '${data['artwork'] ?? ''}'.trim();
-      final srcDesc = '${data['desc'] ?? ''}'.trim();
-      if (mounted && _detail != null && (srcTitle.isNotEmpty || srcArt.isNotEmpty || srcDesc.isNotEmpty)) {
-        final curName = _detail!.name.trim();
-        setState(() {
-          _detail = _detail!.withMeta(
-            name: (curName.isEmpty && srcTitle.isNotEmpty) ? srcTitle : null,
-            pic: srcArt.isNotEmpty ? srcArt : null,
-            content: srcDesc.isNotEmpty ? srcDesc : null,
-          );
-          if (curName.isEmpty && srcTitle.isNotEmpty) {
-            _routeTitle = srcTitle;
-          }
-        });
-      }
-      _scheduleNextEpisodePreload(
-        site: _detailSite(),
-        id: _detailId(),
-        flag: flag.flag,
-        eps: eps,
-        currentIdx: epIdx,
-        serial: serial,
-      );
+      _applySourceMeta(data);
       // 仍未 READY：等进度回调 _markPlaybackLiveIfNeeded（STATE_READY 才挂 Clock）
       _playbackLive = false;
       _sessionStartedAt = DateTime.now();
       if (gen == _playGen) {
-        _wireEnded(_playback);
+        _wireEpisodeEnd(_playback);
         _wirePosition(_playback);
         _wirePlaybackNotify(_playback);
       }

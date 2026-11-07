@@ -16,7 +16,7 @@ String? kotvMpvHwdecLabel(String raw) {
   return '${v.endsWith('-copy') ? '硬解后拷贝' : '硬解直出'}（${kotvDecoderName(v)}）';
 }
 
-/// 原生播放器 videoInfo → 「PQ · BT.2020 · 杜比视界 P8 · 杜比视界直出（显示器：HDR10/HLG）」。
+/// 原生播放器 videoInfo → 「PQ · BT.2020 · 杜比视界 P7 · 杜比视界直出（显示器：HDR10/HLG）」。
 String? kotvVideoColorLabel(Map<Object?, Object?>? info) {
   if (info == null) return null;
   String s(String k) => '${info[k] ?? ''}'.trim();
@@ -94,6 +94,25 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// [open] 在 [waitReady]=false 时跳过的出画守卫；直播换台后台调用以触发 failover。
   Future<void> awaitReadyAfterOpen() async {}
+
+  /// 把下一集排进播放器自己的播放列表，本集播完无缝接上；播到它时 [queuedStartStream] 发出 [id]。
+  /// Exo、安卓原生 MPV、media_kit MPV 支持；FVP / 网页返回 false，换集仍走 [open]。
+  Future<bool> queueNext({
+    required String id,
+    required String url,
+    Map<String, String>? headers,
+    String? format,
+    List<Map<String, dynamic>> subs = const [],
+  }) async =>
+      false;
+
+  /// 立刻跳到排好的下一集（片尾跳过、下一集按钮）；没排上返回 false。
+  Future<bool> skipToNext() async => false;
+
+  /// 撤掉排好的下一集（如打开单集循环）。
+  Future<void> clearNext() async {}
+
+  Stream<String> get queuedStartStream => const Stream<String>.empty();
   Future<void> playOrPause();
   Future<void> play();
   Future<void> pause();
