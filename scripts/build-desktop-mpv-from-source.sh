@@ -528,28 +528,69 @@ EOF
 
 # Lua 官方站在 CI（尤其 Windows runner）上常超时；github.com/lua/lua 无 v5.2.4 标签。
 # 禁用 LuaDist：只有 luaconf.h.in/.orig，无 luaconf.h，stock `make mingw` 会直接挂。
-# 优先 Debian orig（含完整 src/luaconf.h），再官方站。禁止用关 DVD/蓝光/ISO 换绿。
+# 优先 scripts/vendor 内嵌 Debian orig（含完整 src/luaconf.h），再镜像。禁止用关 DVD/蓝光/ISO 换绿。
 kotv_lua_tarball_has_luaconf() {
   local tar="$1"
-  tar tzf "$tar" 2>/dev/null | grep -qE '(^|/)src/luaconf\.h$'
+  # Windows tar 列表偶带 CR，且路径分隔符可能是 \；勿用裸 $ 锚定。
+  tar tzf "$tar" 2>/dev/null | tr -d '\r' | grep -qE '(^|[/\\])src[/\\]luaconf\.h([[:space:]]|$)'
+}
+
+# PREFIX 里自编的 OpenSSL curl 常无 CA（CURL_CA_BUNDLE=none），HTTPS 会假成功或秒失败。
+kotv_host_curl() {
+  local c
+  if kotv_is_windows_build; then
+    for c in \
+      "/c/Windows/System32/curl.exe" \
+      "/usr/bin/curl" \
+      "/mingw64/bin/curl" \
+      "curl.exe"; do
+      if [[ -x "$c" ]] || command -v "$c" >/dev/null 2>&1; then
+        case "$c" in
+          */.build/desktop-mpv/prefix/*) continue ;;
+        esac
+        printf '%s' "$c"
+        return 0
+      fi
+    done
+  fi
+  command -v curl
 }
 
 kotv_fetch_lua_tarball() {
   local ver="$1" dest="$2"
   local src="lua-${ver}"
-  local u
+  local u curl_bin vendor reason
+  vendor="$ROOT/scripts/vendor/lua5.2_${ver}.orig.tar.gz"
+  if [[ -f "$vendor" ]] && kotv_lua_tarball_has_luaconf "$vendor"; then
+    echo "  use vendored lua: $vendor"
+    cp -f "$vendor" "$dest"
+    return 0
+  fi
+  curl_bin="$(kotv_host_curl)"
+  [[ -n "$curl_bin" ]] || { echo "ERROR: curl not found for lua fetch" >&2; return 1; }
+  echo "  lua fetch via: $curl_bin"
   for u in \
     "https://deb.debian.org/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz" \
     "https://mirrors.edge.kernel.org/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz" \
     "https://ftp.debian.org/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz" \
+    "https://mirrors.tuna.tsinghua.edu.cn/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz" \
+    "https://mirrors.ustc.edu.cn/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz" \
     "https://www.lua.org/ftp/${src}.tar.gz"; do
     echo "  try lua: $u"
-    # 官方站偶发不可达：缩短单次连接等待，避免拖死 Win7 job
-    if curl -fsSL --connect-timeout 15 --max-time 90 --retry 2 --retry-delay 1 -o "$dest" "$u" \
-      && [[ -s "$dest" ]] && gzip -t "$dest" 2>/dev/null \
-      && kotv_lua_tarball_has_luaconf "$dest"; then
+    rm -f "$dest"
+    reason=""
+    if ! "$curl_bin" -fsSL --connect-timeout 15 --max-time 90 --retry 2 --retry-delay 1 -o "$dest" "$u"; then
+      reason="curl failed"
+    elif [[ ! -s "$dest" ]]; then
+      reason="empty download"
+    elif command -v gzip >/dev/null 2>&1 && ! gzip -t "$dest" 2>/dev/null; then
+      reason="not gzip (size=$(wc -c <"$dest" | tr -d ' '))"
+    elif ! kotv_lua_tarball_has_luaconf "$dest"; then
+      reason="missing src/luaconf.h"
+    else
       return 0
     fi
+    echo "    skip: $reason" >&2
     rm -f "$dest"
   done
   echo "ERROR: failed to download lua ${ver} from all mirrors (need archive with src/luaconf.h)" >&2
