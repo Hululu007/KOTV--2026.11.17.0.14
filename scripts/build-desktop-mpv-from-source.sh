@@ -526,31 +526,37 @@ EOF
   echo "ok macOS vulkan ($arch) via prefix"
 }
 
-# Lua 官方站在 CI（尤其 Windows runner）上常超时；旧 github.com/lua/lua v5.2.4 标签也不存在。
-# 优先 LuaDist（GitHub，目录 lua-${ver}/），再 Debian orig（目录 lua5.2-${ver}/，解压后需归一）。
-# 禁止用关 DVD/蓝光换绿。
+# Lua 官方站在 CI（尤其 Windows runner）上常超时；github.com/lua/lua 无 v5.2.4 标签。
+# 禁用 LuaDist：只有 luaconf.h.in/.orig，无 luaconf.h，stock `make mingw` 会直接挂。
+# 优先 Debian orig（含完整 src/luaconf.h），再官方站。禁止用关 DVD/蓝光/ISO 换绿。
+kotv_lua_tarball_has_luaconf() {
+  local tar="$1"
+  tar tzf "$tar" 2>/dev/null | grep -qE '(^|/)src/luaconf\.h$'
+}
+
 kotv_fetch_lua_tarball() {
   local ver="$1" dest="$2"
   local src="lua-${ver}"
   local u
   for u in \
-    "https://www.lua.org/ftp/${src}.tar.gz" \
-    "https://github.com/LuaDist/lua/archive/${ver}.tar.gz" \
     "https://deb.debian.org/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz" \
     "https://mirrors.edge.kernel.org/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz" \
-    "https://ftp.debian.org/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz"; do
+    "https://ftp.debian.org/debian/pool/main/l/lua5.2/lua5.2_${ver}.orig.tar.gz" \
+    "https://www.lua.org/ftp/${src}.tar.gz"; do
     echo "  try lua: $u"
-    if curl -fsSL --connect-timeout 30 --max-time 120 --retry 3 --retry-delay 2 -o "$dest" "$u" \
-      && [[ -s "$dest" ]] && gzip -t "$dest" 2>/dev/null; then
+    # 官方站偶发不可达：缩短单次连接等待，避免拖死 Win7 job
+    if curl -fsSL --connect-timeout 15 --max-time 90 --retry 2 --retry-delay 1 -o "$dest" "$u" \
+      && [[ -s "$dest" ]] && gzip -t "$dest" 2>/dev/null \
+      && kotv_lua_tarball_has_luaconf "$dest"; then
       return 0
     fi
     rm -f "$dest"
   done
-  echo "ERROR: failed to download lua ${ver} from all mirrors" >&2
+  echo "ERROR: failed to download lua ${ver} from all mirrors (need archive with src/luaconf.h)" >&2
   return 1
 }
 
-# 官方 / LuaDist → lua-${ver}；Debian orig → lua5.2-${ver}；GitHub lua/lua → lua-v${ver}
+# 官方 → lua-${ver}；Debian orig → lua5.2-${ver}；偶发 lua-v${ver}
 kotv_normalize_lua_srcdir() {
   local ver="$1"
   local src="lua-${ver}"
@@ -561,6 +567,11 @@ kotv_normalize_lua_srcdir() {
     mv "lua5.2-${ver}" "$src"
   fi
   [[ -d "$src" ]] || { echo "ERROR: lua source dir missing after extract (want $src)" >&2; ls -la >&2; return 1; }
+  [[ -f "$src/src/luaconf.h" ]] || {
+    echo "ERROR: $src/src/luaconf.h missing after extract (incompatible lua tree)" >&2
+    ls -la "$src/src" >&2 || true
+    return 1
+  }
 }
 
 # Win7 构建的 libmpv 须能在 Win7 加载：目标子系统 6.01，避免 import SHCORE.dll（Win8+）。
@@ -1070,7 +1081,8 @@ ensure_prefix_lua() {
   echo "==> build lua $ver ($plat → PREFIX, for mpv OSC)"
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
-  if [[ ! -d "$src" ]]; then
+  if [[ ! -d "$src" || ! -f "$src/src/luaconf.h" ]]; then
+    rm -rf "$src"
     kotv_fetch_lua_tarball "$ver" "${src}.tar.gz"
     tar xzf "${src}.tar.gz"
     kotv_normalize_lua_srcdir "$ver"
@@ -1114,7 +1126,8 @@ ensure_windows_lua() {
   echo "==> build lua $ver (MinGW dll → PREFIX, for mpv OSC)"
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
-  if [[ ! -d "$src" ]]; then
+  if [[ ! -d "$src" || ! -f "$src/src/luaconf.h" ]]; then
+    rm -rf "$src"
     kotv_fetch_lua_tarball "$ver" "${src}.tar.gz"
     tar xzf "${src}.tar.gz"
     kotv_normalize_lua_srcdir "$ver"
