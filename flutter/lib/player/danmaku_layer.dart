@@ -356,8 +356,8 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
     final playing = p.playing;
     final rate = p.rate <= 0 ? 1.0 : p.rate;
     if (playing == !_paused && (rate - _rate).abs() < 0.001) return;
-    // 暂停瞬间钉住外推位置，避免 MPV position 尚未刷新导致回跳。
-    final pin = (!playing && !_paused) ? _mediaPos : p.position;
+    // 暂停↔恢复都钉住外推位：避免 MPV/FVP opening 结束时 p.position 落后清屏。
+    final pin = (playing != !_paused) ? _mediaPos : p.position;
     _rebase(pin, paused: !playing, rate: rate);
     _syncTicker();
   }
@@ -421,12 +421,18 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
         _cursor++;
       }
     } else if (mediaSec + 0.05 < _lastActivateSec) {
-      _clearFlying();
-      _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
-      _cursor = 0;
-      while (_cursor < _sorted.length &&
-          _sorted[_cursor].time < _lastActivateSec) {
-        _cursor++;
+      // 小幅回跳（缓冲校准）不消屏；≥1.5s 才清飞弹重投。
+      final jump = _lastActivateSec - mediaSec;
+      if (jump >= 1.5) {
+        _clearFlying();
+        _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
+        _cursor = 0;
+        while (_cursor < _sorted.length &&
+            _sorted[_cursor].time < _lastActivateSec) {
+          _cursor++;
+        }
+      } else {
+        return;
       }
     }
     final from = _lastActivateSec;

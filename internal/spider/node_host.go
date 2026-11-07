@@ -306,12 +306,12 @@ func (p *nodePkg) startLocked(h *NodeHost) error {
 	}
 	cmd := exec.Command(nodeBin, args...)
 	cmd.Dir = p.dir
-	cmd.Env = append(os.Environ(),
+	cmd.Env = appruntime.WithNativeLibDirEnv(append(os.Environ(),
 		"HOST=127.0.0.1",
 		fmt.Sprintf("DEV_HTTP_PORT=%d", freePort),
 		"NODE_PATH="+p.dataDir,
 		fmt.Sprintf("KOTV_MSG_PORT=%d", h.MsgPort()),
-	)
+	), nodeBin)
 	setChildProcAttrs(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

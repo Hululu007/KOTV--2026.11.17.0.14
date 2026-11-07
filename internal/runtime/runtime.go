@@ -431,18 +431,15 @@ func Status() map[string]string {
 		if v := probeAndroidSpider(); v != "" {
 			st = v
 		}
-		out := map[string]string{
+		return map[string]string{
 			"platform": OS(),
 			"arch":     Arch(),
 			"java":     st,
 			"python":   st,
+			"node":     androidNodeStatus(),
 			"quickjs":  "embedded(CGO)",
 			"bridge":   st,
 		}
-		if n := Node(); n != "" {
-			out["node"] = statusWithVersion(n, NodeVersion())
-		}
-		return out
 	}
 	return map[string]string{
 		"platform": OS(),
@@ -458,7 +455,19 @@ func Status() map[string]string {
 	}
 }
 
-// statusWithVersion 与其它 runtime 项一样先报路径；有版本号时附在后面。
+// androidNodeStatus 与同屏 bridge 项一致：不报 nativeLibraryDir 绝对路径。
+func androidNodeStatus() string {
+	if Node() == "" {
+		return "(missing)"
+	}
+	ver := strings.TrimSpace(NodeVersion())
+	if ver == "" {
+		return "libkotv_node"
+	}
+	return "libkotv_node (" + ver + ")"
+}
+
+// statusWithVersion 桌面与其它 runtime 项一样先报路径；有版本号时附在后面。
 func statusWithVersion(path, ver string) string {
 	path = strings.TrimSpace(path)
 	ver = strings.TrimSpace(ver)
@@ -469,6 +478,56 @@ func statusWithVersion(path, ver string) string {
 		return path
 	}
 	return path + " (" + ver + ")"
+}
+
+// WithNativeLibDirEnv 给子进程补上 native 库搜索路径（安卓 libkotv_node.so 旁需 libnode.so）。
+// 桌面原样返回 env。
+func WithNativeLibDirEnv(env []string, bin string) []string {
+	if runtime.GOOS != "android" {
+		return env
+	}
+	dirs := make([]string, 0, 2)
+	if d := strings.TrimSpace(os.Getenv("KOTV_NATIVE_LIB_DIR")); d != "" {
+		dirs = append(dirs, d)
+	}
+	if bin = strings.TrimSpace(bin); bin != "" {
+		if d := filepath.Dir(bin); d != "" && d != "." {
+			dup := false
+			for _, x := range dirs {
+				if x == d {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				dirs = append(dirs, d)
+			}
+		}
+	}
+	if len(dirs) == 0 {
+		return env
+	}
+	joined := strings.Join(dirs, string(os.PathListSeparator))
+	const key = "LD_LIBRARY_PATH="
+	out := make([]string, 0, len(env)+1)
+	found := false
+	for _, e := range env {
+		if strings.HasPrefix(e, key) {
+			found = true
+			cur := strings.TrimPrefix(e, key)
+			if cur == "" {
+				out = append(out, key+joined)
+			} else {
+				out = append(out, key+joined+string(os.PathListSeparator)+cur)
+			}
+			continue
+		}
+		out = append(out, e)
+	}
+	if !found {
+		out = append(out, key+joined)
+	}
+	return out
 }
 
 func probeAndroidSpider() string {

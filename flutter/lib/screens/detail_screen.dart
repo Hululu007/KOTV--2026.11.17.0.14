@@ -181,12 +181,26 @@ class DetailScreen extends ConsumerStatefulWidget {
       try {
         active._chromeCover.release(active.ref.read(detailChromeCoverProvider.notifier));
       } catch (_) {}
+      // 与 _leavePage 同一套：短超时 flush/软停，硬释放后台，勿 await 最多 4s。
       try {
-        await active._flushWatchProgress(force: true);
+        await active
+            ._flushWatchProgress(force: true)
+            .timeout(const Duration(milliseconds: 400));
       } catch (_) {}
       try {
-        await active._stopHard().timeout(const Duration(seconds: 4));
+        await kotvSoftPausePlayers(
+          <KotvPlayback?>[
+            active._fvp,
+            active._mk,
+            active._exo,
+            active._html,
+            active._art,
+            active._xg,
+            active._zw,
+          ],
+        ).timeout(const Duration(milliseconds: 400));
       } catch (_) {}
+      unawaited(active._stopHard(skipFlush: true));
       if (active._miniDesktop) {
         active._miniDesktop = false;
         try {
@@ -946,19 +960,20 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (_active == this) _active = null;
     _chromeCover.release(ref.read(detailChromeCoverProvider.notifier));
     try {
+      // 进度/软停短超时：不挡返回；硬释放一律 pop 后后台跑。
       try {
-        await _flushWatchProgress(force: true);
+        await _flushWatchProgress(force: true)
+            .timeout(const Duration(milliseconds: 400));
       } catch (_) {}
       if (_immersiveFullscreen) {
         try {
           await _exitImmersiveFullscreen();
         } catch (_) {}
       }
-      // 先软停消音再出栈，硬释放放到 pop 之后，避免点返回等 FVP/MPV 数秒。
       try {
         await kotvSoftPausePlayers(
           <KotvPlayback?>[_fvp, _mk, _exo, _html, _art, _xg, _zw],
-        );
+        ).timeout(const Duration(milliseconds: 400));
       } catch (_) {}
       if (_miniDesktop) {
         try {
@@ -2507,6 +2522,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _stopBtProgressPoll();
       _syncPlayStatus();
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: '${d.name} · ${ep.name}', url: playUrl);
+      // 网盘 /proxy 与磁力：起播后后台入下载列表（引擎去重）；不挡起播。
+      _enqueueCloudPlayIfNeeded(
+        playUrl: playUrl,
+        magnet: magnet,
+        site: _detailSite(),
+        vodId: _detailId(),
+        title: (d.name).trim().isEmpty ? _routeTitle : d.name.trim(),
+        flag: flag.flag,
+        pic: d.pic,
+        epIndex: epIdx,
+        epName: ep.name,
+        epUrl: ep.url,
+      );
       if (fullscreen && mounted) {
         await _enterFullscreen();
       }
@@ -2730,6 +2758,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (paint == null && _playUrl.isNotEmpty && _immersiveFullscreen) {
       if (stack.width >= 1 && stack.height >= 1) paint = Offset.zero & stack;
     }
+    // 退全屏后槽未量到：禁止 shrink 卸掉 Hybrid / FVP Surface（否则黑屏定住）。
     if (paint == null) return const SizedBox.shrink();
     _lastVideoPaintRect = paint;
 
@@ -2741,7 +2770,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       clip = _bodyClipRect;
     }
     if (clip == null || clip.width < 1 || clip.height < 1) {
-      return const SizedBox.shrink();
+      if (_playUrl.isEmpty) return const SizedBox.shrink();
+      clip = paint;
     }
 
     return ValueListenableBuilder<double>(
@@ -4131,6 +4161,51 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         },
       ),
     );
+  }
+
+  /// 网盘类 `/proxy?…`（不含 play/bt）或磁力：起播后入下载列表。
+  static bool _isCloudOrMagnetPlay(String playUrl, {required bool magnet}) {
+    if (magnet) return true;
+    final u = playUrl.trim().toLowerCase();
+    if (u.isEmpty) return false;
+    if (u.contains('/proxy/play') || u.contains('/proxy/bt/')) return false;
+    return u.contains('/proxy?') || u.startsWith('proxy://');
+  }
+
+  void _enqueueCloudPlayIfNeeded({
+    required String playUrl,
+    required bool magnet,
+    required String site,
+    required String vodId,
+    required String title,
+    required String flag,
+    required String pic,
+    required int epIndex,
+    required String epName,
+    required String epUrl,
+  }) {
+    if (!_isCloudOrMagnetPlay(playUrl, magnet: magnet)) return;
+    if (site.isEmpty || vodId.isEmpty) return;
+    final nEps = _eps.length;
+    final raw = _reversed ? (nEps - 1 - epIndex) : epIndex;
+    unawaited(() async {
+      try {
+        await LocalDownload.enqueue(
+          site: site,
+          vodId: vodId,
+          title: title,
+          flag: flag,
+          pic: pic,
+          episodes: [
+            {
+              'index': raw,
+              'name': epName,
+              'url': epUrl,
+            },
+          ],
+        );
+      } catch (_) {}
+    }());
   }
 
   Future<void> _pickDownloadEpisodes() async {

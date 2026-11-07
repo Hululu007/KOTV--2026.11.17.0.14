@@ -7,11 +7,25 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
 
 func downloadHTTP(ctx context.Context, raw string, headers map[string]string, dest string, threads int, onProg func(bytes, total int64)) (int64, int64, error) {
+	n, total, err := downloadHTTPOnce(ctx, raw, headers, dest, threads, onProg)
+	if err == nil {
+		return n, total, nil
+	}
+	// 网盘 CDN 并行 Range / 长连接常中途掐流；清残片后强制单线程再试一次。
+	if !isUnexpectedEOF(err) {
+		return n, total, err
+	}
+	cleanupDownloadParts(dest)
+	return downloadHTTPOnce(ctx, raw, headers, dest, 1, onProg)
+}
+
+func downloadHTTPOnce(ctx context.Context, raw string, headers map[string]string, dest string, threads int, onProg func(bytes, total int64)) (int64, int64, error) {
 	threads = clampThreads(threads)
 	total, acceptRange, err := probeSize(ctx, raw, headers)
 	if err != nil {
@@ -94,6 +108,24 @@ func downloadHTTP(ctx context.Context, raw string, headers map[string]string, de
 		return written.Load(), total, err
 	}
 	return total, total, nil
+}
+
+func isUnexpectedEOF(err error) bool {
+	if err == nil {
+		return false
+	}
+	if err == io.ErrUnexpectedEOF {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "unexpected eof")
+}
+
+func cleanupDownloadParts(dest string) {
+	_ = os.Remove(dest)
+	_ = os.Remove(dest + ".part")
+	for i := 0; i < 16; i++ {
+		_ = os.Remove(fmt.Sprintf("%s.part%d", dest, i))
+	}
 }
 
 func probeSize(ctx context.Context, raw string, headers map[string]string) (int64, bool, error) {

@@ -482,7 +482,8 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
             });
             try {
               await _prepareLeavePlayback();
-              await api.loadConfig(src).timeout(const Duration(seconds: 45));
+              // 与引擎 _post 默认 120s 对齐；猫爪 Node 起进程可能超过 45s，勿误报「地址无效」。
+              await api.loadConfig(src).timeout(const Duration(seconds: 120));
               ref.invalidate(configProvider);
               ref.invalidate(settingsProvider);
               if (ctx.mounted) Navigator.pop(ctx, true);
@@ -490,7 +491,7 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
               if (!ctx.mounted) return;
               setLocal(() {
                 busy = false;
-                status = '加载超时，源地址可能无效';
+                status = '加载超时';
               });
             } catch (e) {
               if (!ctx.mounted) return;
@@ -1000,13 +1001,13 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
   ref.read(uiBusyProvider.notifier).state =
       named ? '正在切换到 $title…' : '正在切换线路…';
   try {
-    await api.loadConfig(selected.url).timeout(const Duration(seconds: 45));
+    await api.loadConfig(selected.url).timeout(const Duration(seconds: 120));
     ref.invalidate(configProvider);
     ref.invalidate(settingsProvider);
     return true;
   } catch (e) {
     if (context.mounted) {
-      final msg = e is TimeoutException ? '加载超时，源地址可能无效' : '$e';
+      final msg = e is TimeoutException ? '加载超时' : '$e';
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('切换失败: $msg')));
     }
