@@ -14,6 +14,19 @@ marker_ok() {
   [[ -f "$f" && "$(wc -c <"$f" | tr -d ' ')" -ge "$min" ]]
 }
 
+# 与 build-desktop-mpv / ffmpeg 默认钉一致；改 commit 后缓存失效。
+kotv_mpv_src_stamp() {
+  local mpv="${KOTV_MPV_COMMIT:-ada80027ceffc141720be69ab5caccd886a6fd70}"
+  local ff="${KOTV_FFMPEG_COMMIT:-bdf17191d55d78984ea742fe858fbf9b9aaa5775}"
+  printf 'mpv=%s ffmpeg=%s\n' "$mpv" "$ff"
+}
+
+kotv_mpv_src_stamp_ok() {
+  local stamp_file="$1"
+  [[ -f "$stamp_file" ]] || return 1
+  [[ "$(cat "$stamp_file")" == "$(kotv_mpv_src_stamp)" ]]
+}
+
 windows_siblings_ok() {
   [[ -f "$ASSET/windows/mpv-2.dll" ]] || return 1
   chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
@@ -24,6 +37,7 @@ fetch_windows() {
   mkdir -p "$ASSET/windows"
   local out="$ASSET/windows/mpv-2.dll"
   local kind_file="$ASSET/windows/.kind"
+  local src_stamp="$ASSET/windows/.kotv-mpv-src"
   local want_kind="av3a-dav1d-vulkan-d3d11-opengl-eglangle-osc-dovi-lcms-xxhash-v25"
   if [[ "${KOTV_WIN7:-}" == "1" || "${KOTV_MPV_WIN7:-}" == "1" ]]; then
     want_kind="av3a-dav1d-vulkan-d3d11-opengl-eglangle-osc-dovi-lcms-xxhash-win7-v25"
@@ -34,34 +48,41 @@ fetch_windows() {
     && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null \
     && grep -aq 'd3d11-egl' "$out" 2>/dev/null \
     && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "$want_kind" ]] \
+    && kotv_mpv_src_stamp_ok "$src_stamp" \
     && windows_siblings_ok; then
     echo "ok windows/mpv-2.dll (cached AV3A + dovi + dav1d + sibling dlls, kind=$want_kind)"
     return
   fi
-  echo "==> windows libmpv: source build with AV3A + libdovi + dav1d (FongMi FFmpeg + MinGW, kind=$want_kind)"
+  echo "==> windows libmpv: source build with AV3A + libdovi + dav1d (kind=$want_kind)"
   "$ROOT/scripts/build-desktop-mpv-from-source.sh" windows
   echo "$want_kind" > "$kind_file"
+  kotv_mpv_src_stamp > "$src_stamp"
 }
 
 fetch_linux() {
   mkdir -p "$ASSET/linux"
   local out="$ASSET/linux/libmpv.so.2"
+  local src_stamp="$ASSET/linux/.kotv-mpv-src"
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
     && grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu' "$out" 2>/dev/null \
-    && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null; then
+    && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null \
+    && kotv_mpv_src_stamp_ok "$src_stamp"; then
     echo "ok linux/libmpv.so.2 (cached AV3A + libdovi + dav1d)"
     return
   fi
   echo "==> linux libmpv: source build with AV3A + libdovi + dav1d"
   "$ROOT/scripts/build-desktop-mpv-from-source.sh" linux
+  kotv_mpv_src_stamp > "$src_stamp"
 }
 
 fetch_macos() {
   mkdir -p "$ASSET/macos"
   local out="$ASSET/macos/libmpv.dylib"
+  local src_stamp="$ASSET/macos/.kotv-mpv-src"
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
     && grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu' "$out" 2>/dev/null \
-    && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null; then
+    && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null \
+    && kotv_mpv_src_stamp_ok "$src_stamp"; then
     echo "ok macOS/libmpv.dylib (cached AV3A + libdovi + dav1d)"
     return
   fi
@@ -71,6 +92,7 @@ fetch_macos() {
   else
     "$ROOT/scripts/build-desktop-mpv-from-source.sh" macos
   fi
+  kotv_mpv_src_stamp > "$src_stamp"
 }
 
 run_fetch() {
