@@ -201,11 +201,15 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
   double _layoutW = 0;
   bool _activateScheduled = false;
 
-  /// 媒体时钟：播中用墙钟外推，暂停钉住；positionStream 定期校准。
+  /// 媒体时钟：播中用墙钟外推，暂停/缓冲钉住；positionStream 定期校准。
   Duration _basePos = Duration.zero;
   int _baseElapsedMs = 0;
   bool _paused = true;
+  bool _buffering = true;
   double _rate = 1.0;
+
+  /// 真开播且未缓冲才投弹（MPV 可 playing=true 仍 buffering）。
+  bool get _canEmitDanmaku => widget.enabled && !_paused && !_buffering;
 
   @override
   void initState() {
@@ -227,7 +231,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
   }
 
   void _onTick() {
-    if (!mounted || !widget.enabled || _paused) return;
+    if (!mounted || !_canEmitDanmaku) return;
     final w = _layoutW;
     if (w < 1) return;
     _activate(_mediaPos.inMilliseconds / 1000.0, viewW: w);
@@ -235,11 +239,11 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
 
   void _scheduleActivate(double viewW) {
     _layoutW = viewW;
-    if (_activateScheduled || !widget.enabled || _paused) return;
+    if (_activateScheduled || !_canEmitDanmaku) return;
     _activateScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _activateScheduled = false;
-      if (!mounted || !widget.enabled || _paused) return;
+      if (!mounted || !_canEmitDanmaku) return;
       final w = _layoutW;
       if (w < 1) return;
       _activate(_mediaPos.inMilliseconds / 1000.0, viewW: w);
@@ -272,8 +276,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
         _cursor = 0;
         if (mounted) setState(() {});
       } else {
-        _rebase(widget.player.position,
-            paused: !widget.player.playing, rate: widget.player.rate);
+        _syncFromPlayer(widget.player);
         _reseedWindow();
       }
     }
@@ -327,7 +330,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
         _cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
       _cursor++;
     }
-    if (_layoutW >= 1 && widget.enabled && !_paused) {
+    if (_layoutW >= 1 && _canEmitDanmaku) {
       _scheduleActivate(_layoutW);
     }
     if (mounted) setState(() {});
@@ -341,62 +344,83 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
   }
 
   void _bindPlayer(KotvPlayback p) {
-    _rebase(p.position, paused: !p.playing, rate: p.rate);
+    _syncFromPlayer(p);
     _posSub = p.positionStream.listen(_onPosition);
     p.addListener(_onPlayerNotify);
+  }
+
+  void _syncFromPlayer(KotvPlayback p, {Duration? pin}) {
+    final playing = p.playing;
+    final buffering = p.buffering || p.stalling;
+    final rate = p.rate <= 0 ? 1.0 : p.rate;
+    _rebase(
+      pin ?? p.position,
+      paused: !playing,
+      buffering: buffering,
+      rate: rate,
+    );
   }
 
   void _onPlayerNotify() {
     if (!mounted) return;
     final p = widget.player;
     final playing = p.playing;
+    final buffering = p.buffering || p.stalling;
     final rate = p.rate <= 0 ? 1.0 : p.rate;
-    if (playing == !_paused && (rate - _rate).abs() < 0.001) return;
-    // 暂停↔恢复都钉住外推位：避免 MPV/FVP opening 结束时 p.position 落后清屏。
-    final wasPaused = _paused;
-    final pin = (playing != !_paused) ? _mediaPos : p.position;
-    _rebase(pin, paused: !playing, rate: rate);
+    if (playing == !_paused &&
+        buffering == _buffering &&
+        (rate - _rate).abs() < 0.001) {
+      return;
+    }
+    final wasCan = _canEmitDanmaku;
+    final pin = (playing != !_paused || buffering != _buffering)
+        ? _mediaPos
+        : p.position;
+    _rebase(pin, paused: !playing, buffering: buffering, rate: rate);
     _syncTicker();
-    // 缓冲/opening → 真播放：再投弹。
-    if (wasPaused && playing && widget.enabled) {
+    if (!wasCan && _canEmitDanmaku) {
       _scheduleActivate(_layoutW);
     }
   }
 
   void _onPosition(Duration d) {
     if (!mounted) return;
-    // 与上次上报位置比，勿用墙钟外推，否则流滞后会被当成回跳误清屏。
     final jumpBack = d + const Duration(milliseconds: 300) < _basePos;
     final jumpFwd = d > _basePos + const Duration(milliseconds: 1500);
-    // 小幅落后：钉住外推位，避免开播后 t<0 整段不画。
     if (jumpBack && !jumpFwd) {
       final lag = _basePos - d;
       if (lag < const Duration(milliseconds: 1500)) {
-        _rebase(_mediaPos, paused: !widget.player.playing, rate: widget.player.rate);
+        _syncFromPlayer(widget.player, pin: _mediaPos);
         return;
       }
     }
-    _rebase(d, paused: !widget.player.playing, rate: widget.player.rate);
+    _syncFromPlayer(widget.player, pin: d);
     if (jumpBack || jumpFwd) {
       _reseedWindow();
     }
   }
 
-  void _rebase(Duration pos, {required bool paused, required double rate}) {
+  void _rebase(
+    Duration pos, {
+    required bool paused,
+    required bool buffering,
+    required double rate,
+  }) {
     _basePos = pos;
     _baseElapsedMs = DateTime.now().millisecondsSinceEpoch;
     _paused = paused;
+    _buffering = buffering;
     _rate = rate <= 0 ? 1.0 : rate;
   }
 
   Duration get _mediaPos {
-    if (_paused) return _basePos;
+    if (_paused || _buffering) return _basePos;
     final elapsed = DateTime.now().millisecondsSinceEpoch - _baseElapsedMs;
     return _basePos + Duration(milliseconds: (elapsed * _rate).round());
   }
 
   void _syncTicker() {
-    final want = widget.enabled && !_paused;
+    final want = _canEmitDanmaku;
     if (want) {
       if (!_tick.isAnimating) _tick.repeat();
       return;

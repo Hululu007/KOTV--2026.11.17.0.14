@@ -100,6 +100,7 @@ func HandleNodeMsg(body []byte) any {
 		return map[string]any{"ok": true}
 
 	case "getPlayInfo":
+		// 引擎进程内一份全局 playInfo；多远端客户端未隔离。
 		info := currentNodePlayInfo()
 		return map[string]any{
 			"title":       info.Title,
@@ -139,6 +140,7 @@ func HandleNodeMsg(body []byte) any {
 			u, _ = opt["url"].(string)
 			u = strings.TrimSpace(u)
 		}
+		u = rewriteDanmuURL(u, req.Prefix)
 		if u != "" {
 			// UI: 弹窗协议需带 id；另用 OPENWEB: 给前端后续接系统浏览器/内置页。
 			jsPostMsg("OPENWEB:"+u, "")

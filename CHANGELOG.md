@@ -5,7 +5,8 @@
 - 猫影视 / 猫爪 Node 源：配置识别 `video.sites` 与 `index.js(.md5)`；桌面捆绑 Node（Win7 为 node18），安卓 jniLibs 直接集成 `libkotv_node.so` 与 `libnode.so`；播放走 `/node/<pkg>/` 反代，支持 toast / 弹幕推送 / 播放信息 / profile / 打开网页等回调。打包强制校验 Node 已编入。安卓起 Node 子进程注入 `LD_LIBRARY_PATH`；环境信息桌面报 Node 路径，安卓只报 `libkotv_node`（不报绝对路径）。配置加载超时透出引擎错误，不再误报「地址无效」。Win7 起 Node/python/java 带 `CREATE_NO_WINDOW`，避免闪 CMD 黑框。`resolveSitePaths` 不再把 `/spider/…` 拼成 http；home 下发 filter、POST homeVod；按 api 前缀分派 Node（含 type=4）；仅搜索站空首页提示「仅支持搜索」。
 - 已选中的集再点进入全屏；字幕「自动」勾选状态修正；播放返回 / 切 Tab：短超时 flush 与软停，硬释放后台执行。
 - 网盘下载：302 重挂 Cookie；单线程；起播回包 `cloud` 后入下载列表；完成态仍可直开。
-- 弹幕：缓冲/暂停不投，真播放后投；小幅 position 落后不清屏。
+- 弹幕：缓冲/暂停不投，真播放后投；小幅 position 落后不清屏；猫爪 danmuPush 与集加载合并，勿清空已推送轨。
+- 猫爪远端：RewritePlayJSON / 弹幕 / OPENWEB 在 PublicBase 非空时直接输出可达 `/node/<pkg>/` 地址。
 - 安卓 FVP：进出全屏串行；退全屏先 hold 整屏几何，量槽后再缩 Positioned。
 - 播放信息：片源缺 colorInfo 时用 codecs/DV profile 补色彩标签；Exo「· 隧道」仅跟 `isTunnelingEnabled`。
 - 桌面 MPV/FFmpeg（AV3A）与 fvp 跟进上游；Win7 线 fvp 同步，仍用 Flutter 3.19 + SDK 放宽。

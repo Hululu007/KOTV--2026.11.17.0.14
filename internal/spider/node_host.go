@@ -24,6 +24,7 @@ import (
 
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
+	"github.com/bobo/KOTV/internal/playproxy"
 	appruntime "github.com/bobo/KOTV/internal/runtime"
 	"github.com/bobo/KOTV/internal/util"
 
@@ -636,12 +637,19 @@ var (
 	reJS2P         = regexp.MustCompile(`(?i)js2p://_WEB_`)
 )
 
+// nodeProxyBase 本包在引擎上的 /node/<pkg> 根。
+// PublicBase 空时为 127.0.0.1；远端则为客户端可达根（含媒体钥匙路径）。
+func (p *nodePkg) nodeProxyBase() string {
+	loop := fmt.Sprintf("http://127.0.0.1:%d/node/%s", localproxy.Port(), p.id)
+	return playproxy.PublicizeURL(loop)
+}
+
 // RewritePlayJSON 把播放 JSON 里的本机 node 地址与 js2p://_WEB_ 改成引擎 /node/<pkg>/…。
 func (p *nodePkg) RewritePlayJSON(raw string) string {
 	if raw == "" {
 		return raw
 	}
-	engine := fmt.Sprintf("http://127.0.0.1:%d/node/%s", localproxy.Port(), p.id)
+	engine := p.nodeProxyBase()
 	port := p.Port()
 	out := raw
 	if port > 0 {
@@ -649,7 +657,6 @@ func (p *nodePkg) RewritePlayJSON(raw string) string {
 		localHost := fmt.Sprintf("http://localhost:%d", port)
 		out = strings.ReplaceAll(out, local, engine)
 		out = strings.ReplaceAll(out, localHost, engine)
-		// 大小写变体
 		out = reLocalNodeURL.ReplaceAllStringFunc(out, func(m string) string {
 			sub := reLocalNodeURL.FindStringSubmatch(m)
 			if len(sub) == 2 && sub[1] == fmt.Sprintf("%d", port) {
@@ -662,13 +669,13 @@ func (p *nodePkg) RewritePlayJSON(raw string) string {
 	return out
 }
 
-// RewriteNodeURL 把指向本包 node 端口的 URL 改成 /node/<pkg>/…（弹幕等）。
+// RewriteNodeURL 把指向本包 node 端口的 URL 改成远端客户端可达的 /node/<pkg>/…（弹幕、OPENWEB 等）。
 func (p *nodePkg) RewriteNodeURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return raw
 	}
-	engine := fmt.Sprintf("http://127.0.0.1:%d/node/%s", localproxy.Port(), p.id)
+	engine := p.nodeProxyBase()
 	port := p.Port()
 	if port > 0 {
 		raw = strings.ReplaceAll(raw, fmt.Sprintf("http://127.0.0.1:%d", port), engine)

@@ -1,10 +1,10 @@
 package spider
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 )
 
@@ -31,7 +31,6 @@ func TestRewritePlayJSON(t *testing.T) {
 	if !strings.Contains(out, engine+"/spider/a/3/proxy/ts/y/.ts") {
 		t.Fatalf("missing rewritten local url: %s", out)
 	}
-	_ = fmt.Sprintf("%s", engine)
 }
 
 func TestRewriteNodeURL(t *testing.T) {
@@ -41,6 +40,24 @@ func TestRewriteNodeURL(t *testing.T) {
 	want := "http://127.0.0.1:9978/node/pkg1/danmu/abc"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestRewriteNodeURLRemotePublicize(t *testing.T) {
+	localproxy.SetPort(9978)
+	defer hostclient.Bind(hostclient.Request{
+		ClientID:   "node-pub",
+		PublicBase: "https://tv.example.com/k/KEY",
+	})()
+	p := &nodePkg{id: "pkg1", port: 9999}
+	got := p.RewriteNodeURL("http://127.0.0.1:9999/danmu/abc")
+	want := "https://tv.example.com/k/KEY/node/pkg1/danmu/abc"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	out := p.RewritePlayJSON(`{"url":"js2p://_WEB_/x.m3u8"}`)
+	if !strings.Contains(out, want[:strings.Index(want, "/danmu")]) {
+		t.Fatalf("play json not publicized: %s", out)
 	}
 }
 

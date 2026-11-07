@@ -262,6 +262,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _stableVolumeOn = false;
   /// 本集 play 返回的片源弹幕；改弹幕设置后带着它重新让引擎选源。
   List<DanmakuSource> _spiderDanmakuSources = const [];
+  /// 猫爪 danmuPush 的弹幕 URL；集加载时并入源列表，禁止无脑清空已推送轨。
+  String? _nodeDanmuPushUrl;
   double _danmakuSize = 18;
   double _danmakuOpacity = 0.85;
   int _danmakuRows = 6;
@@ -735,11 +737,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   void _onNodeDanmuPush(String url) {
-    if (!mounted || url.trim().isEmpty) return;
+    final u = url.trim();
+    if (!mounted || u.isEmpty) return;
+    final serial = _playAtSerial;
+    _nodeDanmuPushUrl = u;
+    if (!_spiderDanmakuSources.any((s) => s.url == u)) {
+      _spiderDanmakuSources = [
+        DanmakuSource(name: '推送', url: u),
+        ..._spiderDanmakuSources,
+      ];
+    }
     unawaited(() async {
-      final items = await _fetchDanmaku(url.trim(), notify: false);
-      if (!mounted || items == null) return;
+      final items = await _fetchDanmaku(u, notify: false);
+      if (!mounted || serial != _playAtSerial || items == null) return;
       _danmakuItems.value = items;
+      if (!_danmakuOn) setState(() => _danmakuOn = true);
     }());
   }
 
@@ -2009,24 +2021,49 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     int? playSerial,
   }) async {
     final serial = playSerial ?? _playAtSerial;
-    _danmakuItems.value = const [];
+    final pushUrl = (_nodeDanmuPushUrl ?? '').trim();
+    final keepPush =
+        pushUrl.isNotEmpty && _danmakuItems.value.isNotEmpty;
+    final spider = <DanmakuSource>[
+      if (pushUrl.isNotEmpty &&
+          !_spiderDanmakuSources.any((s) => s.url == pushUrl))
+        DanmakuSource(name: '推送', url: pushUrl),
+      ..._spiderDanmakuSources,
+    ];
+    if (!keepPush) {
+      _danmakuItems.value = const [];
+    }
     try {
       final res = await ref.read(apiProvider).danmakuAuto(
             site: _detailSite(),
             name: name,
             episode: episode,
-            sources: [for (final s in _spiderDanmakuSources) s.toJson()],
+            sources: [for (final s in spider) s.toJson()],
           );
       if (!mounted || serial != _playAtSerial) return;
-      final sources = kotvDanmakuSourcesFrom(res['sources']);
-      final selected = (res['selected'] as num?)?.toInt() ?? 0;
+      var sources = kotvDanmakuSourcesFrom(res['sources']);
+      if (pushUrl.isNotEmpty && !sources.any((s) => s.url == pushUrl)) {
+        sources = [DanmakuSource(name: '推送', url: pushUrl), ...sources];
+      }
+      var selected = (res['selected'] as num?)?.toInt() ?? 0;
+      if (pushUrl.isNotEmpty) {
+        final pi = sources.indexWhere((s) => s.url == pushUrl);
+        if (pi >= 0) selected = pi;
+      }
       setState(() {
         _danmakuSources = sources;
-        _danmakuSourceIdx = sources.isEmpty ? 0 : selected.clamp(0, sources.length - 1);
+        _danmakuSourceIdx =
+            sources.isEmpty ? 0 : selected.clamp(0, sources.length - 1);
       });
-      if (sources.isNotEmpty) await _loadDanmakuSource(_danmakuSourceIdx, playSerial: serial);
+      // danmuPush 已写入的轨保留，勿再清空重载。
+      if (keepPush) return;
+      if (sources.isNotEmpty) {
+        await _loadDanmakuSource(_danmakuSourceIdx, playSerial: serial);
+      }
     } catch (_) {
-      if (mounted && serial == _playAtSerial) setState(() => _danmakuSources = const []);
+      if (mounted && serial == _playAtSerial && !keepPush) {
+        setState(() => _danmakuSources = const []);
+      }
     }
   }
 
@@ -2132,6 +2169,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _posSub = null;
     _danmakuItems.value = const [];
     _spiderDanmakuSources = const [];
+    _nodeDanmuPushUrl = null;
     final canDirect = ep.url.trim().isNotEmpty;
     // 立刻高亮：先于 flush/停播，避免点选集要等落盘才变色。
     if (mounted) {
