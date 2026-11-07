@@ -851,7 +851,13 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       await _ch.invokeMethod('setSubtitleTrack', {'id': id});
       final key = id.trim().toLowerCase();
-      _currentSubtitleId = (key.isEmpty || key == 'no' || key == 'off' || key == 'auto') ? null : id;
+      if (key.isEmpty || key == 'no' || key == 'off') {
+        _currentSubtitleId = null;
+      } else if (key == 'auto') {
+        _currentSubtitleId = 'auto';
+      } else {
+        _currentSubtitleId = id;
+      }
       notifyListeners();
     } catch (_) {}
   }

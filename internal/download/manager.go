@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/thunder"
 )
@@ -289,6 +290,11 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 	ext := extFromURL(playURL, "mp4")
 	dest := t.destPath(ext)
 	t.Path = dest
+	// 未能展开的脚本 /proxy：单线程、不带播放器 CDN 头，避免打坏本机代理。
+	if localproxy.IsSpiderProxyURL(playURL) {
+		threads = 1
+		headers = nil
+	}
 	n, total, err := downloadHTTP(ctx, playURL, headers, dest, threads, func(bytes, total int64) {
 		p := 0.0
 		if total > 0 {

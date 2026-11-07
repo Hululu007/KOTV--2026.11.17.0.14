@@ -857,10 +857,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
   /// soft pause → release → 清宿主 → dispose 包装类（不改音量）。
   /// 勿在此使用 [ref]：[_leavePage] 可能在 pop/dispose 之后仍调用本方法。
-  Future<void> _stopHard() async {
-    try {
-      await _flushWatchProgress(force: true);
-    } catch (_) {}
+  /// [skipFlush]：离开页已落过进度时跳过二次 flush。
+  Future<void> _stopHard({bool skipFlush = false}) async {
+    if (!skipFlush) {
+      try {
+        await _flushWatchProgress(force: true);
+      } catch (_) {}
+    }
     _playbackLive = false;
     _advanceBusy = false;
     _playGen++;
@@ -946,14 +949,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       try {
         await _flushWatchProgress(force: true);
       } catch (_) {}
-      // 先退沉浸（布局落稳）再硬停：避免全屏 Positioned 与 release 同帧；停后再出栈防后台出声。
       if (_immersiveFullscreen) {
         try {
           await _exitImmersiveFullscreen();
         } catch (_) {}
       }
+      // 先软停消音再出栈，硬释放放到 pop 之后，避免点返回等 FVP/MPV 数秒。
       try {
-        await _stopHard();
+        await kotvSoftPausePlayers(
+          <KotvPlayback?>[_fvp, _mk, _exo, _html, _art, _xg, _zw],
+        );
       } catch (_) {}
       if (_miniDesktop) {
         try {
@@ -961,6 +966,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         } catch (_) {}
       }
       if (!mounted) {
+        unawaited(_stopHard(skipFlush: true));
         afterPop?.call();
         return;
       }
@@ -968,11 +974,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       setState(() {});
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) {
+        unawaited(_stopHard(skipFlush: true));
         afterPop?.call();
         return;
       }
       Navigator.of(context).pop();
       afterPop?.call();
+      unawaited(_stopHard(skipFlush: true));
     } finally {
       if (!done.isCompleted) done.complete();
       if (_leaveDone == done) {
@@ -2060,6 +2068,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await _loadDanmakuSource(idx, notify: true);
   }
 
+  /// 选集：未在播则起播；已选中再点则进全屏（遥控少一步）。
+  Future<void> _onEpisodeTap(int epIdx, {bool fullscreen = false}) async {
+    if (_leaving) return;
+    if (epIdx == _epIdx && _playUrl.isNotEmpty && _playbackLive) {
+      if (!_immersiveFullscreen) await _enterFullscreen();
+      return;
+    }
+    await _playAt(epIdx, fullscreen: fullscreen);
+  }
+
   Future<void> _playAt(int epIdx, {bool fullscreen = false}) async {
     if (_leaving) return;
     final d = _detail;
@@ -3034,9 +3052,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             _endingSec = end;
           });
         },
-        onSelectEp: (i) => _playAt(i),
+        onSelectEp: (i) => unawaited(_onEpisodeTap(i)),
         onNext: () => unawaited(_advanceToNextEpisode(fromEnd: false)),
-        onPrev: () => _playAt(_epIdx - 1),
+        onPrev: () => unawaited(_onEpisodeTap(_epIdx - 1)),
         onDecodeChanged: (mode) {
           final prev = _decodeMode;
           if (mounted) {
@@ -3999,7 +4017,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 selected: _epIdx == _epPage * _epSize + i,
                 height: epH,
                 fontSize: epFs,
-                onTap: () => _playAt(_epPage * _epSize + i),
+                onTap: () => unawaited(_onEpisodeTap(_epPage * _epSize + i)),
               ),
             ),
         ],

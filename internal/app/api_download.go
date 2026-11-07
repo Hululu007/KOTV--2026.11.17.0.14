@@ -9,12 +9,14 @@ import (
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/parse"
+	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/source"
 	"github.com/bobo/KOTV/internal/thunder"
 )
 
 // ResolveDownload 解析可下载地址：与起播共用 playerContent / 二次解析，保留爬虫与站源 Header。
-// 不走 PreparePlayback / /proxy/play；网盘类 /proxy?url=&header= 展开成直链并合并鉴权头。
+// 不走 PreparePlayback / /proxy/play；网盘类 /proxy?url=&header= 展开成直链并合并鉴权头，
+// 供 downloadHTTP 直拉（下载器不是播放器，不能依赖本机 /proxy→jar 流式泵）。
 func (a *App) ResolveDownload(siteKey, vodID, flag, epURL string, epIndex int) (string, map[string]string, string, error) {
 	site := a.resolvePlaySite(siteKey)
 	ep, err := a.resolveEpisodeURL(vodID, flag, epURL, epIndex)
@@ -57,10 +59,14 @@ func (a *App) ResolveDownload(siteKey, vodID, flag, epURL string, epIndex int) (
 		playURL = localproxy.ConvertScheme(strings.TrimSpace(info.URL))
 	}
 
-	// 网盘等爬虫 /proxy 地址不展开成 CDN 直链：下载在引擎本机执行，和本机播放器一样经
-	// /proxy→jar 拉流，由爬虫处理 Cookie / 签名续期。直连 CDN 常因鉴权或时效失败。
 	if strings.TrimSpace(playURL) == "" {
 		return "", nil, "", fmt.Errorf("未解析到可下载地址")
+	}
+	// 下载始终展开网盘类 /proxy（含本机）：把 CDN 与 Cookie 从查询串取出，避免裸 HTTP
+	// 客户端把鉴权头打到 127.0.0.1/proxy 或对代理做多线程 Range 导致失败。
+	if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(playURL, headers); ok {
+		playURL = media
+		headers = hdrs
 	}
 	return playURL, headers, format, nil
 }

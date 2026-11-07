@@ -2,7 +2,10 @@
 
 ## v0.2.3
 
-- 猫影视 / 猫爪 Node 源：配置识别 `video.sites` 与 `index.js(.md5)`；桌面捆绑 Node（Win7 为 node18），安卓 jniLibs 直接集成 `libkotv_node.so` 与 `libnode.so`；播放走 `/node/<pkg>/` 反代，支持 toast / 弹幕推送 / 播放信息 / profile / 打开网页等回调。打包强制校验 Node 已编入，避免仅有旧 jre 时跳过准备导致「本机没有 Node 运行时」。
+- 猫影视 / 猫爪 Node 源：配置识别 `video.sites` 与 `index.js(.md5)`；桌面捆绑 Node（Win7 为 node18），安卓 jniLibs 直接集成 `libkotv_node.so` 与 `libnode.so`；播放走 `/node/<pkg>/` 反代，支持 toast / 弹幕推送 / 播放信息 / profile / 打开网页等回调。打包强制校验 Node 已编入，避免仅有旧 jre 时跳过准备导致「本机没有 Node 运行时」。环境信息里 Node 与其它 runtime 一样显示路径。
+- 已选中的集再点进入全屏；字幕「自动」勾选状态修正；播放返回先软停再出栈，硬释放不挡返回。
+- 网盘下载展开 `/proxy` 直链后落盘；磁力中间数据进下载目录（不再进 cache）；下载完成仍可在下载列表直开播放。
+- 桌面 MPV/FFmpeg（AV3A）与 fvp 跟进上游；Win7 线 fvp 同步，仍用 Flutter 3.19 + SDK 放宽。
 - 远程前端：按协议号握手，账号密码加密传输，记住登录与后端身份；未登录不能进入任何页面，连不上不改地址。
 - 远端每个接口都要鉴权，设备与遥控类接口只给管理员；下载按用户隔离，远端会话恢复用户自己的仓与首页。
 - 引擎先开端口再后台加载点播配置，断网时也能连上本机后端；首页加载只转圈。

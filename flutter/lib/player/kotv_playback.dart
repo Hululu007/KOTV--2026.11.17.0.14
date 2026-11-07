@@ -446,6 +446,8 @@ bool kotvSubtitleIsOff(String? id) {
     case 'none':
     case 'off':
       return true;
+    case 'auto':
+      return false;
     default:
       return false;
   }

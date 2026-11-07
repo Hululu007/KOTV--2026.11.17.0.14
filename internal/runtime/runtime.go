@@ -440,34 +440,35 @@ func Status() map[string]string {
 			"bridge":   st,
 		}
 		if n := Node(); n != "" {
-			if v := NodeVersion(); v != "" {
-				out["node"] = v
-			} else {
-				out["node"] = n
-			}
+			out["node"] = statusWithVersion(n, NodeVersion())
 		}
 		return out
-	}
-	nodeSt := "(missing)"
-	if Node() != "" {
-		if v := NodeVersion(); v != "" {
-			nodeSt = v
-		} else {
-			nodeSt = orMissing(Node())
-		}
 	}
 	return map[string]string{
 		"platform": OS(),
 		"arch":     Arch(),
 		"java":     orMissing(Java()),
 		"python":   orMissing(Python()),
-		"node":     nodeSt,
+		"node":     statusWithVersion(Node(), NodeVersion()),
 		"quickjs":  "embedded(CGO)",
 		"bridge":   orMissing(BridgeJAR()),
 		"chromium": orMissing(Chromium()),
 		"ffmpeg":   orMissing(FFmpeg()),
 		"mpv":      orMissing(MPV()),
 	}
+}
+
+// statusWithVersion 与其它 runtime 项一样先报路径；有版本号时附在后面。
+func statusWithVersion(path, ver string) string {
+	path = strings.TrimSpace(path)
+	ver = strings.TrimSpace(ver)
+	if path == "" {
+		return "(missing)"
+	}
+	if ver == "" {
+		return path
+	}
+	return path + " (" + ver + ")"
 }
 
 func probeAndroidSpider() string {

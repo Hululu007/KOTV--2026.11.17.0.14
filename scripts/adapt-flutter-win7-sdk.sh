@@ -3,7 +3,7 @@
 # 不提交改动到 git；仅影响当前工作区。
 #
 # FVP 0.39 官方要求 Flutter >=3.22 / Dart ^3.4，但 Win7 SP1 运行时可用 0.39。
-# 本脚本保留 fvp 0.39.1，并 pin 其编译所需的 video_player_platform_interface 6.3.0
+# 本脚本保留 fvp 0.40.0，并 pin 其编译所需的 video_player_platform_interface 6.3.0
 #（VideoViewType / createWithOptions）。两者及 pub get 解出的其它高约束包，由
 # flutter-pub-get.sh 在 pub-cache 里扫描放宽 environment（跳过 SDK 校验）。
 # 不要把 Win7 线升到 Flutter 3.22+。
@@ -22,8 +22,8 @@ perl -i -pe 's/shared_preferences:\s*\^2\.3\.3/shared_preferences: 2.3.0/' "$APP
 perl -i -pe 's/web:\s*\^1\.1\.0/web: 0.5.1/' "$APP"
 perl -i -pe 's/wakelock_plus:\s*[^\n]+/wakelock_plus: 1.2.8/' "$APP"
 perl -i -pe 's/video_player:\s*\^[^\n]+/video_player: 2.9.2/' "$APP"
-# 保留 0.39.1（与主线一致）。SDK 约束在 pub-cache 里放宽，见下方 / flutter-pub-get.sh。
-perl -i -pe 's/fvp:\s*[^\n]+/fvp: 0.39.1/' "$APP"
+# 保留 0.40.0（与主线一致）。SDK 约束在 pub-cache 里放宽，见下方 / flutter-pub-get.sh。
+perl -i -pe 's/fvp:\s*[^\n]+/fvp: 0.40.0/' "$APP"
 perl -i -pe 's/media_kit_video:\s*[^\n]+/media_kit_video: 1.2.5/' "$APP"
 # 3.0.0 要 collection ^1.19.0，Flutter 3.19 的 flutter_test 把 collection 钉死在 1.18.0。
 # 3.0.0-beta.2 的 Html / Style 接口相同，collection 只要 ^1.17.0。
@@ -68,7 +68,7 @@ perl -i -pe 's/path:\s*\^[^\n]+/path: 1.9.0/' "$APP"
 cat >> "$APP" <<'OVERRIDES'
 
 # Win7 / Flutter 3.19 临时覆盖（adapt-flutter-win7-sdk.sh；勿提交）
-# fvp 0.39.1 + video_player_platform_interface 6.3.0（VideoViewType）；environment 由
+# fvp 0.40.0 + video_player_platform_interface 6.3.0（VideoViewType）；environment 由
 # flutter-pub-get.sh 在 pub-cache 放宽。勿把 vppi 降到 6.2（无 VideoViewType）。
 dependency_overrides:
   path: 1.9.0
@@ -89,7 +89,7 @@ dependency_overrides:
   video_player_platform_interface: 6.3.0
   video_player_avfoundation: 2.6.2
   video_player_web: 2.3.2
-  fvp: 0.39.1
+  fvp: 0.40.0
   web: 0.5.1
   wakelock_plus: 1.2.8
   # 1.3.x 用 onPopInvokedWithResult，Flutter 3.19 只有 onPopInvoked。
@@ -101,5 +101,5 @@ dependency_overrides:
   file_selector_windows: 0.9.3+3
 OVERRIDES
 
-echo "adapted pubspec for Flutter 3.19 / Dart 3.3 (fvp 0.39.1 kept):"
+echo "adapted pubspec for Flutter 3.19 / Dart 3.3 (fvp 0.40.0 kept):"
 grep -nE 'sdk:|video_player|fvp:|media_kit_video|dependency_overrides' "$APP" | head -50

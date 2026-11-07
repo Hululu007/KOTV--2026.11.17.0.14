@@ -141,7 +141,8 @@ public class Path {
     }
 
     public static File thunder() {
-        return mkdir(new File(cache(), "thunder"));
+        // 迅雷中间文件进公共下载目录，不进 cache（清缓存不误伤；与完成文件同根）。
+        return mkdir(new File(download(), "KO影视-thunder"));
     }
 
     public static File root(String name) {

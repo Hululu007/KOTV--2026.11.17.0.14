@@ -37,7 +37,7 @@ resolve_ffmpeg_sha() {
     printf '%s\n' "$sha"
     return
   fi
-  printf '%s\n' "04482c8d13ac27b2a9fe93f5d388929eef8af5f4"
+  printf '%s\n' "bdf17191d55d78984ea742fe858fbf9b9aaa5775"
 }
 
 FFMPEG_COMMIT="$(resolve_ffmpeg_sha)"

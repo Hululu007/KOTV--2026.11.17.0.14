@@ -10,11 +10,13 @@ import (
 	"context"
 	"encoding/base64"
 	"log"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/bobo/KOTV/internal/model"
+	"github.com/bobo/KOTV/internal/paths"
 )
 
 var (
@@ -25,6 +27,11 @@ var (
 	progressMu sync.Mutex
 	progress   = FetchProgress{Phase: "idle"}
 )
+
+// DataDir 磁力中间数据目录：落在下载根下，不进 cache。
+func DataDir() string {
+	return paths.Ensure(filepath.Join(paths.Downloads(), ".kotv-thunder"))
+}
 
 // FetchProgress 当前磁力任务进度（供 UI 轮询）。
 type FetchProgress struct {

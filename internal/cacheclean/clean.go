@@ -85,14 +85,20 @@ func Run(opt Options) Result {
 
 	if opt.Magnet {
 		n, err := thunder.ClearStorage()
-		add("磁力下载", filepath.Join(paths.Root(), "thunder"), n, err)
+		add("磁力下载", thunder.DataDir(), n, err)
 		n2, err2 := wipeDirRemove(filepath.Join(paths.Root(), "bt"))
 		if n2 > 0 || (err2 == nil && dirExists(filepath.Join(paths.Root(), "bt"))) {
 			add("BT遗留", filepath.Join(paths.Root(), "bt"), n2, err2)
 		}
-		n3, err3 := wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "thunder"))
-		if n3 > 0 {
-			add("磁力(bridge)", filepath.Join(paths.Root(), "cache", "thunder"), n3, err3)
+		// 旧版遗留路径一并清掉。
+		for _, legacy := range []string{
+			filepath.Join(paths.Root(), "thunder"),
+			filepath.Join(paths.Root(), "cache", "thunder"),
+		} {
+			n3, err3 := wipeDirKeepRoot(legacy)
+			if n3 > 0 {
+				add("磁力遗留", legacy, n3, err3)
+			}
 		}
 	}
 

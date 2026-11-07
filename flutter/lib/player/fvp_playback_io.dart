@@ -932,10 +932,17 @@ class FvpPlayback extends KotvPlayback {
       _currentVideoId = actV.isEmpty ? null : '${actV.first}';
       final actS = c.getActiveSubtitleTracks() ?? const <int>[];
       if (actS.isEmpty) {
-        _currentSubtitleId = _subtitleManualOff || _subtitleManualAuto ? null : _currentSubtitleId;
+        if (_subtitleManualOff) {
+          _currentSubtitleId = null;
+        } else if (_subtitleManualAuto) {
+          _currentSubtitleId = 'auto';
+        }
         if (!_subtitleManualOff && !_subtitleManualAuto) {
           _currentSecondarySubtitleId = null;
         }
+      } else if (_subtitleManualAuto) {
+        _currentSubtitleId = 'auto';
+        _currentSecondarySubtitleId = actS.length > 1 ? '${actS[1]}' : null;
       } else {
         _currentSubtitleId = '${actS.first}';
         _currentSecondarySubtitleId = actS.length > 1 ? '${actS[1]}' : null;
@@ -1207,7 +1214,7 @@ class FvpPlayback extends KotvPlayback {
       } else if (kotvSubtitleIsAuto(id)) {
         _subtitleManualOff = false;
         _subtitleManualAuto = true;
-        _currentSubtitleId = null;
+        _currentSubtitleId = 'auto';
         c.setProperty('subtitle', '1');
         c.setSubtitleTracks(const []);
         _applySecondaryAutoIfNeeded();

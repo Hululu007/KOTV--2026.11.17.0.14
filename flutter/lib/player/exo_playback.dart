@@ -898,8 +898,19 @@ class ExoPlayback extends KotvPlayback {
       await _ensureNative();
       await _ch.invokeMethod('selectSubtitleTrack', {'id': id});
       final key = id.trim().toLowerCase();
-      _currentSubtitleId = (key.isEmpty || key == 'no' || key == 'off' || key == 'auto') ? null : id;
+      if (key.isEmpty || key == 'no' || key == 'off') {
+        _currentSubtitleId = null;
+      } else if (key == 'auto') {
+        _currentSubtitleId = 'auto';
+      } else {
+        _currentSubtitleId = id;
+      }
+      final keep = _currentSubtitleId;
       await _refreshTracks();
+      // 刷新轨列表常清掉当前 id；「自动」无 selected 轨时要保留。
+      if (keep == 'auto' && (_currentSubtitleId == null || _currentSubtitleId!.isEmpty)) {
+        _currentSubtitleId = 'auto';
+      }
     } catch (_) {}
   }
 

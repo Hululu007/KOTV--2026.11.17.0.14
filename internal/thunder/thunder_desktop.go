@@ -365,7 +365,7 @@ func openTorrent(ctx context.Context, raw string) (*torrent.Torrent, string, err
 	if err != nil {
 		return nil, "", err
 	}
-	dir := paths.Ensure(filepath.Join(paths.Root(), "thunder", md5str(raw)))
+	dir := paths.Ensure(filepath.Join(DataDir(), md5str(raw)))
 	torrentPath := filepath.Join(dir, "task.torrent")
 
 	if isTorrentURL(raw) && (strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://")) {
@@ -612,7 +612,7 @@ func ensureClient() (*torrent.Client, error) {
 		return client, nil
 	}
 	cfg := torrent.NewDefaultClientConfig()
-	cfg.DataDir = paths.Ensure(filepath.Join(paths.Root(), "thunder"))
+	cfg.DataDir = DataDir()
 	cfg.ListenPort = 0
 	cfg.NoDefaultPortForwarding = true
 	cfg.Seed = true
@@ -641,7 +641,7 @@ func ClearStorage() (int64, error) {
 	if c != nil {
 		c.Close()
 	}
-	dir := filepath.Join(paths.Root(), "thunder")
+	dir := DataDir()
 	var total int64
 	_ = filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
 		if err == nil && info != nil && !info.IsDir() {
@@ -652,7 +652,7 @@ func ClearStorage() (int64, error) {
 	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
 		return total, err
 	}
-	_ = os.MkdirAll(dir, 0o755)
+	_ = os.MkdirAll(DataDir(), 0o755)
 	setProgress("idle", 0, 0, 0, "磁力缓存已清理")
 	log.Printf("thunder: storage cleared (~%d bytes)", total)
 	return total, nil

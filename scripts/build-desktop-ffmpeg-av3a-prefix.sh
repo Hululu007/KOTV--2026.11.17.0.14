@@ -27,7 +27,7 @@ resolve_ffmpeg_sha() {
     return
   fi
   # e02d612 基线：avcodec/mediacodec Dolby Vision profile 5 GPU mapping
-  printf '%s\n' "04482c8d13ac27b2a9fe93f5d388929eef8af5f4"
+  printf '%s\n' "bdf17191d55d78984ea742fe858fbf9b9aaa5775"
 }
 
 FFMPEG_COMMIT="$(resolve_ffmpeg_sha)"
@@ -73,14 +73,15 @@ clone_ffmpeg() {
   fi
 }
 
-# v19: 钉回 FFmpeg 04482c8（e02d612 直播基线）；默认不再跟 tip。
+# v20: FFmpeg bdf17191（含直播状态暴露）；桌面/安卓同源钉。
+# v19: 曾钉 04482c8（e02d612 直播基线）。
 # v18: arib PIC；Windows libavcodec/arib 补 d2d1。
 # v17: zlib PIC；xz 只装 liblzma；FFmpeg/libxml 用 LIBXML_STATIC。
 # v16: codecs 静态 zlib/lzma；mac 探测链 -lc++；清 DYLD 防 Abort。
 # v15: libxml2 完整启用 zlib+lzma（PREFIX 自带依赖）。
 # v14: +dav1d +libxml2 +libaribcaption + 平台硬解（d3d11va/videotoolbox/vaapi）。
 # HTTP/2+3 仍走 mpv libcurl。伪装扩展名分片靠播放器 extension_picky=0。
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v19-${FFMPEG_COMMIT:0:12}"
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v20-${FFMPEG_COMMIT:0:12}"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1

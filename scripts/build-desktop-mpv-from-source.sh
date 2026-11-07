@@ -14,7 +14,7 @@ ASSET="$ROOT/flutter/assets/mpv-libs"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 MPV_REPO="${KOTV_MPV_REPO:-https://github.com/FongMi/mpv.git}"
-MPV_COMMIT="${KOTV_MPV_COMMIT:-cca559b41ceb0bb7731cf6ef2e1f33276cd30c42}"
+MPV_COMMIT="${KOTV_MPV_COMMIT:-ada80027ceffc141720be69ab5caccd886a6fd70}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 AV3A="${KOTV_BUILD_MPV_AV3A:-1}"
 
