@@ -775,9 +775,10 @@ prepare_ffmpeg() {
   local url name
   case "$plat" in
     macos-arm64)
-      # 勿用 osxexperts.net：CI runner 常 DNS 失败。改 GitHub 托管静态包。
-      url="https://github.com/charlienovember/videobot-ffmpeg/releases/download/ffmpeg-n8.1.2/ffmpeg-n8.1.2-macos-arm64.zip"
-      name="ffmpeg-n8.1.2-macos-arm64.zip" ;;
+      # 勿用 osxexperts.net：CI runner 常 DNS 失败。
+      # 原 charlienovember/videobot-ffmpeg 镜像已 404，改 eugeneware/ffmpeg-static。
+      url="https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-darwin-arm64.gz"
+      name="ffmpeg-darwin-arm64.gz" ;;
     macos-x64)
       url="https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v6.1/ffmpeg-6.1-macos-64.zip"
       name="ffmpeg-6.1-macos-64.zip" ;;
@@ -803,9 +804,13 @@ prepare_ffmpeg() {
   rm -rf "$tmp"
   mkdir -p "$tmp"
   case "$archive" in
- *.zip) unzip -q "$archive" -d "$tmp" ;;
- *.tar.xz) tar -xJf "$archive" -C "$tmp" ;;
- *) tar -xzf "$archive" -C "$tmp" ;;
+    *.zip) unzip -q "$archive" -d "$tmp" ;;
+    *.tar.xz) tar -xJf "$archive" -C "$tmp" ;;
+    *.gz)
+      # eugeneware 等单文件 gzip 二进制（非 tar.gz）
+      gunzip -c "$archive" >"$tmp/ffmpeg"
+      ;;
+    *) tar -xzf "$archive" -C "$tmp" ;;
   esac
   local bin
   bin="$(find "$tmp" -type f \( -name ffmpeg -o -name ffmpeg.exe \) | head -1)"
