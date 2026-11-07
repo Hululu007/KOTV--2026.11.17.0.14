@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -219,22 +218,6 @@ func RequireNode() (string, error) {
 	return bin, nil
 }
 
-// NodeVersion 返回 `node -v`；不可用时为空。
-func NodeVersion() string {
-	bin := Node()
-	if bin == "" {
-		return ""
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "-v")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
 // Chromium 返回 Chrome / chrome-headless-shell 路径（捆绑优先）。
 func Chromium() string {
 	cands := underRoots(
@@ -446,7 +429,8 @@ func Status() map[string]string {
 		"arch":     Arch(),
 		"java":     orMissing(Java()),
 		"python":   orMissing(Python()),
-		"node":     statusWithVersion(Node(), NodeVersion()),
+		// 与 java/python 一样只报路径，勿在 Status 里 exec node -v（会闪 Win 控制台）。
+		"node":     orMissing(Node()),
 		"quickjs":  "embedded(CGO)",
 		"bridge":   orMissing(BridgeJAR()),
 		"chromium": orMissing(Chromium()),
@@ -455,29 +439,12 @@ func Status() map[string]string {
 	}
 }
 
-// androidNodeStatus 与同屏 bridge 项一致：不报 nativeLibraryDir 绝对路径。
+// androidNodeStatus 与同屏 bridge 项一致：有则报 libkotv_node，不 exec、不报绝对路径。
 func androidNodeStatus() string {
 	if Node() == "" {
 		return "(missing)"
 	}
-	ver := strings.TrimSpace(NodeVersion())
-	if ver == "" {
-		return "libkotv_node"
-	}
-	return "libkotv_node (" + ver + ")"
-}
-
-// statusWithVersion 桌面与其它 runtime 项一样先报路径；有版本号时附在后面。
-func statusWithVersion(path, ver string) string {
-	path = strings.TrimSpace(path)
-	ver = strings.TrimSpace(ver)
-	if path == "" {
-		return "(missing)"
-	}
-	if ver == "" {
-		return path
-	}
-	return path + " (" + ver + ")"
+	return "libkotv_node"
 }
 
 // WithNativeLibDirEnv 给子进程补上 native 库搜索路径（安卓 libkotv_node.so 旁需 libnode.so）。

@@ -2903,13 +2903,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         onSecondaryTap: _immersiveFullscreen ? null : () => kotvHandleAppBack?.call(),
         onDoubleTap: _immersiveFullscreen
             ? null
-            : () {
-                if (_playUrl.isNotEmpty) {
-                  unawaited(_enterFullscreen());
-                } else if (_eps.isNotEmpty) {
-                  unawaited(_playAt(_epIdx >= 0 ? _epIdx : 0, fullscreen: true));
-                }
-              },
+            : () => unawaited(_cycleImmersiveByDoubleTap()),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -3162,6 +3156,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         endingSec: _endingSec,
         desktopFullscreen: _desktopFs,
         onExitEmbedded: () => unawaited(_exitImmersiveFullscreen()),
+        onDoubleTapEmbedded: () => unawaited(_cycleImmersiveByDoubleTap()),
         onOffsetsChanged: (open, end) {
           if (!mounted) return;
           setState(() {
@@ -3254,6 +3249,27 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return next;
   }
 
+  /// 双击画面：内嵌→全窗口→系统全屏→内嵌（桌面）；非桌面沉浸态双击直接退出。
+  Future<void> _cycleImmersiveByDoubleTap() async {
+    if (!_immersiveFullscreen) {
+      if (_playUrl.isNotEmpty) {
+        await _enterFullscreen(KotvDesktopFullscreenKind.window);
+      } else if (_eps.isNotEmpty) {
+        await _playAt(_epIdx >= 0 ? _epIdx : 0, fullscreen: true);
+      }
+      return;
+    }
+    if (!kotvIsDesktop() && !kIsWeb) {
+      await _exitImmersiveFullscreen();
+      return;
+    }
+    if (_desktopFs == KotvDesktopFullscreenKind.window) {
+      await _upgradeImmersiveToDisplay();
+      return;
+    }
+    await _exitImmersiveFullscreen();
+  }
+
   Future<void> _enterFullscreen([KotvDesktopFullscreenKind desktopFs = KotvDesktopFullscreenKind.window]) {
     return _runImmersiveTransit(() async {
       final d = _detail;
@@ -3277,6 +3293,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted || !_immersiveFullscreen) return;
       await kotvEnterSystemFullscreen(desktopFs);
+    });
+  }
+
+  /// 已在全窗口沉浸时升为系统全屏（双击第二档）。
+  Future<void> _upgradeImmersiveToDisplay() {
+    return _runImmersiveTransit(() async {
+      if (!mounted || !_immersiveFullscreen) return;
+      if (_desktopFs == KotvDesktopFullscreenKind.display) return;
+      setState(() => _desktopFs = KotvDesktopFullscreenKind.display);
+      await kotvEnterSystemFullscreen(KotvDesktopFullscreenKind.display);
     });
   }
 
@@ -3381,13 +3407,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             },
       onSecondaryTap: () => kotvHandleAppBack?.call(),
       onDoubleTap: interactive && !stableSlot
-          ? () {
-              if (_playUrl.isNotEmpty) {
-                unawaited(_enterFullscreen());
-              } else if (_eps.isNotEmpty) {
-                unawaited(_playAt(_epIdx >= 0 ? _epIdx : 0, fullscreen: true));
-              }
-            }
+          ? () => unawaited(_cycleImmersiveByDoubleTap())
           : null,
       child: Stack(
         fit: StackFit.expand,

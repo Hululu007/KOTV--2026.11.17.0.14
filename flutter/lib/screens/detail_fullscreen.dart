@@ -28,6 +28,7 @@ class DetailFullscreenPage extends StatefulWidget {
     required this.title,
     this.embedded = false,
     this.onExitEmbedded,
+    this.onDoubleTapEmbedded,
     this.episodes = const [],
     this.epIdx = -1,
     this.onSelectEp,
@@ -111,6 +112,8 @@ class DetailFullscreenPage extends StatefulWidget {
   /// true：嵌在详情页内切换布局；false：独立路由（遗留）。
   final bool embedded;
   final VoidCallback? onExitEmbedded;
+  /// 嵌入模式双击画面：由父页做桌面三态循环；为空则退沉浸。
+  final VoidCallback? onDoubleTapEmbedded;
   final List<String> episodes;
   final int epIdx;
   final void Function(int idx)? onSelectEp;
@@ -385,13 +388,18 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     }
   }
 
-  /// 点画面：只显隐控件，不播停。控件已显示则再点一次收起。双击退出全屏。
+  /// 点画面：只显隐控件，不播停。控件已显示则再点一次收起。
+  /// 双击：嵌入态交父页（桌面三态）；否则退出全屏。
   void _handleVideoTap() {
     final now = DateTime.now();
     final last = _lastTapAt;
     _lastTapAt = now;
     if (last != null && now.difference(last) < kDoubleTapTimeout) {
       _lastTapAt = null;
+      if (widget.embedded) {
+        (widget.onDoubleTapEmbedded ?? widget.onExitEmbedded)?.call();
+        return;
+      }
       unawaited(_exitFullscreen());
       return;
     }
