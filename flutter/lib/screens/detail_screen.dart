@@ -3283,16 +3283,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           await kotvLockPortrait();
         } catch (_) {}
       }
-      // 先铺开画面，等这一帧画完，再进一次系统全屏。全窗口不调用系统全屏。
+      // 先铺开画面，再进系统全屏（时序收在 kotvEnterSystemFullscreenAfterLayout）。
+      // 全窗口 kind 不会改系统窗口。
       ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
       setState(() {
         _desktopFs = desktopFs;
         _immersiveFullscreen = true;
         _fsSwipeDy.value = 0;
       });
-      await WidgetsBinding.instance.endOfFrame;
       if (!mounted || !_immersiveFullscreen) return;
-      await kotvEnterSystemFullscreen(desktopFs);
+      await kotvEnterSystemFullscreenAfterLayout(desktopFs);
     });
   }
 
@@ -3302,7 +3302,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (!mounted || !_immersiveFullscreen) return;
       if (_desktopFs == KotvDesktopFullscreenKind.display) return;
       setState(() => _desktopFs = KotvDesktopFullscreenKind.display);
-      await kotvEnterSystemFullscreen(KotvDesktopFullscreenKind.display);
+      if (!mounted || !_immersiveFullscreen) return;
+      await kotvEnterSystemFullscreenAfterLayout(KotvDesktopFullscreenKind.display);
     });
   }
 

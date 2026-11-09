@@ -18,6 +18,15 @@ enum KotvDesktopFullscreenKind {
   display,
 }
 
+/// 沉浸布局已 setState 后调用：先等这一帧画完，再进系统全屏。
+/// 详情 / 直播共用，避免各页各自写 endOfFrame + enter 时序漂移。
+Future<void> kotvEnterSystemFullscreenAfterLayout(
+  KotvDesktopFullscreenKind kind,
+) async {
+  await WidgetsBinding.instance.endOfFrame;
+  await kotvEnterSystemFullscreen(kind);
+}
+
 Future<void> kotvEnterSystemFullscreen(KotvDesktopFullscreenKind kind) async {
   try {
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -40,7 +49,7 @@ Future<void> kotvEnterSystemFullscreen(KotvDesktopFullscreenKind kind) async {
   }
   if (!kotvIsDesktop()) return;
   // Windows：先等应用内布局落稳再 setFullScreen，避免和画面放大挤在同一帧。
-  // 有边框不先最大化。子窗口改到客户区是补丁里回到消息循环再做的。
+  // 有边框不先最大化。子窗口改到客户区由 window_manager 补丁延后（再二次）踢醒。
   if (kotvIsWindows()) {
     try {
       if (await windowManager.isFullScreen()) return;

@@ -41,8 +41,9 @@
 # window_manager 0.4.3 有边框进入系统全屏会先 SC_MAXIMIZE。窗口已经最大化后，
 # 紧接着的 SetWindowPos 常常改不到尺寸，子窗口收不到新的 WM_SIZE，画面停在最后一帧。
 # 有边框分支去掉这次最大化，只去标题栏样式并铺到显示器。无边框仍靠最大化改尺寸。
-# 不最大化时 WM_SIZE 不是 SIZE_MAXIMIZED，离开全屏那次 ForceChildRefresh 不会跑。
-# Win7 第一次系统全屏画面定住，退回详情后整个窗口也不动。进入末尾补一次，并记下已进入。
+# 不最大化时 WM_SIZE 不是 SIZE_MAXIMIZED，离开全屏原有的 ForceChildRefresh 不会跑。
+# 进/出都 PostMessage 延后踢 Flutter 子窗（同步踢会重入 WM_SIZE 卡死）；再 SetTimer
+# 二次踢一次，避免 ANGLE/纹理在首次踢完后才落稳时 Win7 偶发定格。
 #
 # video_player 的 formatHint 只在 Android 生效。iOS 打开时若判断为 HLS，Dart 写入
 # X-KOTV-Asset-Mime，这里把它从 HTTP 头里拿掉，改成 AVURLAsset 的 MIME。
@@ -1542,24 +1543,42 @@ plugin_leave_new = """      _EmitEvent("leave-full-screen");"""
 if plugin_leave_old in plugin:
     plugin = plugin.replace(plugin_leave_old, plugin_leave_new, 1)
     print(f"patched window_manager plugin ({wm_version}): leave does not resize inline")
-plugin_msg = "message == WM_APP + 0x51"
-if plugin_msg not in plugin:
-    plugin_anchor = "  std::optional<LRESULT> result = std::nullopt;\n"
-    plugin_insert = """  std::optional<LRESULT> result = std::nullopt;
-
-  if (message == WM_APP + 0x51) {
+# 0x4B51 = 二次延后踢子窗的 timer id（进/出全屏各用同一条路径）。
+PLUGIN_REFRESH_ONCE = """  if (message == WM_APP + 0x51) {
     window_manager->ForceChildRefresh();
     return 0;
   }
 """
-    if plugin_anchor not in plugin:
-        print(
-            f"ERROR: window_manager plugin ({wm_version}) HandleWindowProc anchor missing",
-            file=sys.stderr,
+PLUGIN_REFRESH_TWICE = """  if (message == WM_APP + 0x51) {
+    window_manager->ForceChildRefresh();
+    // ANGLE/纹理可能在这次尺寸变更之后才落稳；再延后踢一次，避免 Win7 偶发定格。
+    ::SetTimer(hWnd, 0x4B51, 120, nullptr);
+    return 0;
+  }
+  if (message == WM_TIMER && wParam == 0x4B51) {
+    ::KillTimer(hWnd, 0x4B51);
+    window_manager->ForceChildRefresh();
+    return 0;
+  }
+"""
+if "0x4B51" not in plugin:
+    if PLUGIN_REFRESH_ONCE in plugin:
+        plugin = plugin.replace(PLUGIN_REFRESH_ONCE, PLUGIN_REFRESH_TWICE, 1)
+        print(f"patched window_manager plugin ({wm_version}): second deferred child refresh")
+    else:
+        plugin_anchor = "  std::optional<LRESULT> result = std::nullopt;\n"
+        if plugin_anchor not in plugin:
+            print(
+                f"ERROR: window_manager plugin ({wm_version}) HandleWindowProc anchor missing",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        plugin = plugin.replace(
+            plugin_anchor,
+            "  std::optional<LRESULT> result = std::nullopt;\n\n" + PLUGIN_REFRESH_TWICE,
+            1,
         )
-        sys.exit(1)
-    plugin = plugin.replace(plugin_anchor, plugin_insert, 1)
-    print(f"patched window_manager plugin ({wm_version}): deferred child refresh")
+        print(f"patched window_manager plugin ({wm_version}): deferred child refresh")
 wm_plugin.write_text(plugin, encoding="utf-8")
 wm_check = wm_cpp.read_text(encoding="utf-8")
 anchor = "} else {  // Restore from fullscreen"
@@ -1578,7 +1597,7 @@ if enter.find("::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);") < ent
     print("ERROR: window_manager bordered fullscreen still maximizes first", file=sys.stderr)
     sys.exit(1)
 plugin_check = wm_plugin.read_text(encoding="utf-8")
-if "message == WM_APP + 0x51" not in plugin_check:
+if "message == WM_APP + 0x51" not in plugin_check or "0x4B51" not in plugin_check:
     print("ERROR: window_manager plugin missing deferred child refresh", file=sys.stderr)
     sys.exit(1)
 if plugin_leave_old in plugin_check:
