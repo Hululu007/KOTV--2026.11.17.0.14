@@ -41,6 +41,11 @@ func TestRewriteNodeURL(t *testing.T) {
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
+	got = p.RewriteNodeURL("http://127.0.0.1:9999/website")
+	want = "http://127.0.0.1:9978/node/pkg1/website"
+	if got != want {
+		t.Fatalf("website got %q want %q", got, want)
+	}
 }
 
 func TestRewriteNodeURLRemotePublicize(t *testing.T) {

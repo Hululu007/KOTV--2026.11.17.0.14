@@ -128,6 +128,20 @@ void main() {
       kotvRewriteEngineLocalUrl('http://127.0.0.1:9978/api/v1/home', 'http://192.168.1.8:9978'),
       'http://192.168.1.8:9978/api/v1/home',
     );
+    expect(
+      kotvRewriteEngineLocalUrl(
+        'http://127.0.0.1:9978/node/pkg1/website',
+        'http://192.168.1.8:9978',
+      ),
+      'http://192.168.1.8:9978/k/KEY/node/pkg1/website',
+    );
+    expect(
+      kotvRewriteEngineLocalUrl(
+        'http://127.0.0.1:9978/website/api/status',
+        'http://192.168.1.8:9978',
+      ),
+      'http://192.168.1.8:9978/website/api/status',
+    );
     expect(kotvStripMediaKey('/k/KEY/proxy'), '/proxy');
     expect(kotvStripMediaKey('/proxy'), '/proxy');
   });

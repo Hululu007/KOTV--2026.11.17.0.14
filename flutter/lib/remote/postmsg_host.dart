@@ -10,7 +10,9 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api/kotv_api.dart';
+import '../api/kotv_engine_url.dart';
 import '../player/kotv_platform.dart';
+import '../player/kotv_traffic.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
 import '../util/kotv_io.dart';
@@ -314,17 +316,16 @@ class PostMsgHost {
     }
 
     if (msg.startsWith('OPENWEB:')) {
-      final url = msg.substring(8).trim();
+      var url = msg.substring(8).trim();
       if (url.isEmpty) return;
+      // /msg 回调无远端 PublicBase，引擎侧常仍是 127.0.0.1；客户端按连接根改写。
+      url = _rewriteEngineLocalUrl(url);
       final custom = onOpenWeb;
       if (custom != null) {
         custom(url);
         return;
       }
-      final uri = Uri.tryParse(url);
-      if (uri != null) {
-        unawaited(launchUrl(uri, mode: LaunchMode.externalApplication));
-      }
+      unawaited(_openExternal(url));
       return;
     }
 
@@ -1028,6 +1029,13 @@ class PostMsgHost {
         SnackBar(content: Text(fail), duration: const Duration(seconds: 3)),
       );
     });
+  }
+
+  String _rewriteEngineLocalUrl(String raw) {
+    final base = api.baseUrl.trim().isNotEmpty
+        ? api.baseUrl
+        : KotvTraffic.engineBaseUrl;
+    return kotvRewriteEngineLocalUrl(raw, base);
   }
 
   Future<bool> _openExternal(String raw) async {

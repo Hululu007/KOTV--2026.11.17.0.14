@@ -57,8 +57,13 @@ func (s *Server) handleNodeProxy(w http.ResponseWriter, r *http.Request) {
 	if sub == "" {
 		forward = "/"
 	}
-	if r.URL.RawQuery != "" {
-		// ReverseProxy 会带上 RawQuery
-	}
 	pkg.Proxy(w, r, forward)
+}
+
+// handleWebsiteProxy 配置中心绝对路径 /website… → 当前就绪 Node 源包。
+func (s *Server) handleWebsiteProxy(w http.ResponseWriter, r *http.Request) {
+	if spider.DefaultNodeHost().ProxyWebsite(w, r) {
+		return
+	}
+	http.Error(w, "Node 源包未就绪", http.StatusBadGateway)
 }

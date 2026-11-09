@@ -361,6 +361,12 @@ func (s *SiteService) DetailContent(reqKey string, vod model.Vod) (model.Vod, er
 			VodPlayFrom: ds.Name,
 			Site:        ds,
 		}
+		if reqKey == LocalFileKey {
+			// 本机路径可能含 # / $，不能走 name$url# 拆集。
+			f := model.CreateFlag(ds.Name)
+			f.Episodes = []model.Episode{model.CreateEpisode(name, id)}
+			detail.VodFlags = []model.Flag{f}
+		}
 		detail.SetVodFlags()
 		result := model.Result{Success: true, List: []model.Vod{detail}}
 		s.mu.Lock()

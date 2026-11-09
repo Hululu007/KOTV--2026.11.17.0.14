@@ -157,7 +157,13 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
   /// 已下载完成：按文件路径直接播放（远端前端由引擎换成 /file/ 地址）。
   Future<void> _playDownloaded(Map<String, dynamic> t) async {
     final path = '${t['path'] ?? ''}'.trim();
-    if (path.isEmpty) return;
+    if (path.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('文件路径缺失，无法播放')),
+      );
+      return;
+    }
     await openDirectPlay(
       context,
       ref,

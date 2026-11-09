@@ -517,6 +517,34 @@ func (h *NodeHost) GetPkg(id string) *nodePkg {
 	return h.pkgs[id]
 }
 
+// ActivePkg 返回任一已起端口的源包；没有则 nil。
+// 配置中心页内 fetch('/website/…') 打引擎根路径时，用它反代到当前 Node。
+func (h *NodeHost) ActivePkg() *nodePkg {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var pkg *nodePkg
+	for _, p := range h.pkgs {
+		if p != nil && p.Port() > 0 {
+			pkg = p
+		}
+	}
+	return pkg
+}
+
+// ProxyWebsite 把 /website… 原样反代到 ActivePkg；无就绪包返回 false。
+func (h *NodeHost) ProxyWebsite(w http.ResponseWriter, r *http.Request) bool {
+	pkg := h.ActivePkg()
+	if pkg == nil {
+		return false
+	}
+	path := r.URL.Path
+	if path == "" {
+		path = "/website"
+	}
+	pkg.Proxy(w, r, path)
+	return true
+}
+
 // ReleaseOther 切站时保留 keepAPI 所属包，停掉其它。
 func (h *NodeHost) ReleaseOther(keepAPI string) {
 	keepID := ""
