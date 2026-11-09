@@ -4,6 +4,8 @@
 
 - 远程 OPENWEB：Go 统一代理（会话戳记、`/node/<pkg>/`、根别名反代 + Cookie）；本机不改写；Flutter 原样打开下发 URL。
 - 下载列表已完成任务可点开播放（本机直读路径，远端 play 换成 `/file/`）。
+- Node 切站：修复 watch 休眠后误杀新进程；未登记 api 时保留已起源包，避免 Win7 长时间转圈。
+- 桌面 MPV 无缝换集：排队下一集时关掉 media_kit 的 `keep-open`，否则 EOF 不前进播放列表。
 
 ## v0.3.0
 

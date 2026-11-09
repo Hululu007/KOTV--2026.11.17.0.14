@@ -401,7 +401,8 @@ func (p *nodePkg) watch(h *NodeHost) {
 	time.Sleep(backoff)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.stopping {
+	// 休眠期间若已 Stop，或 Ensure/其它路径已拉起新进程，禁止再 startLocked（会先杀掉新进程，Win7 上表现为切站长时间转圈）。
+	if p.stopping || p.cmd != nil {
 		return
 	}
 	if err := p.startLocked(h); err != nil {
@@ -613,11 +614,18 @@ func reservedNodeRootSegment(seg string) bool {
 	return false
 }
 
-// ReleaseOther 切站时保留 keepAPI 所属包，停掉其它。
+// ReleaseOther 切站时保留 keepAPI 所属 Node 源包，停掉其它。
+// 非 Node api 时停掉全部；Node api 尚未登记进索引时保留当前已起包，避免误杀后冷启卡住。
 func (h *NodeHost) ReleaseOther(keepAPI string) {
+	keepAPI = strings.TrimSpace(keepAPI)
 	keepID := ""
-	if strings.HasPrefix(strings.TrimSpace(keepAPI), "/spider/") {
+	if IsNodeAPI(keepAPI) {
 		keepID = h.PkgIDForAPI(keepAPI)
+		if keepID == "" {
+			if p := h.ActivePkg(); p != nil {
+				keepID = p.id
+			}
+		}
 	}
 	h.mu.Lock()
 	pkgs := make([]*nodePkg, 0, len(h.pkgs))

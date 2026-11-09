@@ -83,8 +83,11 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
     _subs.add(player.stream.playlist.listen((pl) {
       final q = _queued;
-      // 排好的下一集总在第 2 项（下标 1）。
-      if (q != null && pl.index == 1) _enterQueued(q);
+      if (q == null) return;
+      // media_kit 默认 keep-open=yes 时列表不自动前进；有排队项时我们会改成 no。
+      // 以当前项 URI 识别已接到下一集（勿写死下标 1）。
+      if (pl.index < 0 || pl.index >= pl.medias.length) return;
+      if (pl.medias[pl.index].uri == q.media.uri) _enterQueued(q);
     }));
     _subs.add(player.stream.log.listen((log) {
       if (log.level != 'error') return;
@@ -294,6 +297,9 @@ class MediaKitPlayback extends KotvPlayback {
 
   /// 只排请求头与 HLS 强制解析都和本集相同的：UA、Referer、demuxer-lavf-format 是整个播放器共用的属性，
   /// 其余请求头按媒体写（media_kit 在 mpv 加载这一项时写 http-header-fields）。
+  ///
+  /// media_kit 默认 `keep-open=yes`，EOF 不会前进播放列表，无缝换集接不上。
+  /// 成功排队后改为 `no`，让 mpv 接到已 `append`+prefetch 的下一集。
   @override
   Future<bool> queueNext({
     required String id,
@@ -314,6 +320,7 @@ class MediaKitPlayback extends KotvPlayback {
     } catch (_) {
       return false;
     }
+    await _setKeepOpen(false);
     _queued = (id: id, url: url, media: media);
     return true;
   }
@@ -321,6 +328,7 @@ class MediaKitPlayback extends KotvPlayback {
   /// 只留正在播的一项（也删掉无缝接上后留在前面的上一集）。
   @override
   Future<void> clearNext() async {
+    final had = _queued != null;
     _queued = null;
     final current = player.state.playlist.index;
     for (var i = player.state.playlist.medias.length - 1; i >= 0; i--) {
@@ -329,6 +337,7 @@ class MediaKitPlayback extends KotvPlayback {
         await player.remove(i);
       } catch (_) {}
     }
+    if (had) await _setKeepOpen(true);
   }
 
   @override
@@ -342,8 +351,17 @@ class MediaKitPlayback extends KotvPlayback {
     }
   }
 
+  Future<void> _setKeepOpen(bool keep) async {
+    final platform = player.platform;
+    if (platform == null) return;
+    try {
+      await (platform as dynamic).setProperty('keep-open', keep ? 'yes' : 'no');
+    } catch (_) {}
+  }
+
   void _enterQueued(({String id, String url, Media media}) q) {
     _queued = null;
+    unawaited(_setKeepOpen(true));
     _url = q.url;
     _hlsGen++;
     _hlsRetried = false;
