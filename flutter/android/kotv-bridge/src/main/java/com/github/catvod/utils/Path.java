@@ -129,21 +129,33 @@ public class Path {
             String n = dir.getName();
             if (n == null || !n.startsWith("s_c_")) continue;
             File[] files = dir.listFiles();
-            if (files == null) continue;
-            for (File f : files) {
-                if (f == null || !f.isFile()) continue;
-                File dest = new File(tvBase, f.getName());
-                if (dest.exists()) continue;
-                if (!f.renameTo(dest)) {
-                    try {
-                        write(dest, read(f));
-                        //noinspection ResultOfMethodCallIgnored
-                        f.delete();
-                    } catch (Throwable ignored) {
+            if (files != null) {
+                for (File f : files) {
+                    if (f == null || !f.isFile()) continue;
+                    File dest = new File(tvBase, f.getName());
+                    if (dest.exists()) continue;
+                    if (!f.renameTo(dest)) {
+                        try {
+                            write(dest, read(f));
+                            //noinspection ResultOfMethodCallIgnored
+                            f.delete();
+                        } catch (Throwable ignored) {
+                        }
                     }
                 }
             }
+            deleteTree(dir);
         }
+    }
+
+    private static void deleteTree(File f) {
+        if (f == null || !f.exists()) return;
+        File[] kids = f.listFiles();
+        if (kids != null) {
+            for (File c : kids) deleteTree(c);
+        }
+        //noinspection ResultOfMethodCallIgnored
+        f.delete();
     }
 
     private static String tvScope() {

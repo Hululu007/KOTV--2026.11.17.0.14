@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestSweepRootKeepsUIAndTV(t *testing.T) {
+func TestSweepRootKeepsClientJSONAndUserTV(t *testing.T) {
 	root := t.TempDir()
 	mustMk := func(name string) string {
 		p := filepath.Join(root, name)
@@ -22,10 +22,15 @@ func TestSweepRootKeepsUIAndTV(t *testing.T) {
 	}
 	ui := mustMk("ui")
 	tv := mustMk("TV")
+	sc := mustMk(filepath.Join("TV", "s_c_deadbeef"))
+	su := mustMk(filepath.Join("TV", "s_u_user1"))
 	db := mustMk("db")
 	cache := mustMk("data")
 	mustFile(ui, "client.json", `{"clientId":"abc"}`)
+	mustFile(ui, "junk.log", "gone")
 	mustFile(tv, ".cookie", "keep")
+	mustFile(sc, ".old", "migrate-or-drop")
+	mustFile(su, ".user", "keep-user")
 	mustFile(db, "x.db", "db")
 	mustFile(cache, "tmp.bin", "gone")
 
@@ -35,13 +40,20 @@ func TestSweepRootKeepsUIAndTV(t *testing.T) {
 	for _, p := range []string{
 		filepath.Join(ui, "client.json"),
 		filepath.Join(tv, ".cookie"),
+		filepath.Join(su, ".user"),
 		filepath.Join(db, "x.db"),
 	} {
 		if _, err := os.Stat(p); err != nil {
 			t.Fatalf("should keep %s: %v", p, err)
 		}
 	}
-	if _, err := os.Stat(cache); !os.IsNotExist(err) {
-		t.Fatalf("data/ should be removed, err=%v", err)
+	for _, p := range []string{
+		filepath.Join(ui, "junk.log"),
+		sc,
+		cache,
+	} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("should remove %s, err=%v", p, err)
+		}
 	}
 }

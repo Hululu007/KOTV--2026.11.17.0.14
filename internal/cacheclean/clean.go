@@ -1,5 +1,5 @@
 // Package cacheclean 清理爬虫/磁力/日志等用户缓存（不删设置与数据库）。
-// 「全部」时还会扫数据根，去掉 db 以外的残留。
+// 「全部」时扫数据根：保留 db/、ui/client.json、TV/ 凭证与 s_u_*；清掉 s_c_* 与其它残留。
 package cacheclean
 
 import (
@@ -142,8 +142,8 @@ func Run(opt Options) Result {
 	return res
 }
 
-// sweepRootKeepConfigAndDB 保留数据库、UI 态（client.json）与站点凭证目录 TV/，其余清掉。
-// 若误删 ui/，Flutter 会重生 clientId；旧实现还会把 cookie 绑到 s_c_*，网盘被迫重登。
+// sweepRootKeepConfigAndDB 保留 db/、ui/client.json、TV/ 下稳定凭证与 s_u_* 用户隔离目录。
+// ui/ 里其它文件可清；历史 s_c_*（按 Flutter clientId 分的目录）删掉。
 func sweepRootKeepConfigAndDB(root string) (int64, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -156,10 +156,25 @@ func sweepRootKeepConfigAndDB(root string) (int64, error) {
 	for _, e := range entries {
 		name := e.Name()
 		low := strings.ToLower(name)
-		if low == "db" || low == "ui" || low == "tv" {
+		p := filepath.Join(root, name)
+		switch low {
+		case "db":
+			continue
+		case "ui":
+			n, err := scrubDirKeepFileNames(p, "client.json")
+			freed += n
+			if err != nil {
+				return freed, err
+			}
+			continue
+		case "tv":
+			n, err := removeTVClientScopeDirs(p)
+			freed += n
+			if err != nil {
+				return freed, err
+			}
 			continue
 		}
-		p := filepath.Join(root, name)
 		if e.IsDir() {
 			n, err := wipeDirRemove(p)
 			freed += n
@@ -175,6 +190,72 @@ func sweepRootKeepConfigAndDB(root string) (int64, error) {
 		}
 		if err := os.Remove(p); err == nil {
 			freed += sz
+		}
+	}
+	return freed, nil
+}
+
+// scrubDirKeepFileNames 删除目录内除 keep 以外的条目（大小写不敏感文件名）。
+func scrubDirKeepFileNames(dir string, keep ...string) (int64, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	allow := map[string]struct{}{}
+	for _, k := range keep {
+		allow[strings.ToLower(k)] = struct{}{}
+	}
+	var freed int64
+	for _, e := range entries {
+		if _, ok := allow[strings.ToLower(e.Name())]; ok {
+			continue
+		}
+		p := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			n, err := wipeDirRemove(p)
+			freed += n
+			if err != nil {
+				return freed, err
+			}
+			continue
+		}
+		info, err := e.Info()
+		sz := int64(0)
+		if err == nil {
+			sz = info.Size()
+		}
+		if err := os.Remove(p); err == nil {
+			freed += sz
+		}
+	}
+	return freed, nil
+}
+
+// removeTVClientScopeDirs 去掉历史 TV/s_c_*（本机 cookie 已改落 /TV/）；保留 s_u_* 与根下凭证文件。
+func removeTVClientScopeDirs(tvRoot string) (int64, error) {
+	entries, err := os.ReadDir(tvRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var freed int64
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(strings.ToLower(name), "s_c_") {
+			continue
+		}
+		n, err := wipeDirRemove(filepath.Join(tvRoot, name))
+		freed += n
+		if err != nil {
+			return freed, err
 		}
 	}
 	return freed, nil

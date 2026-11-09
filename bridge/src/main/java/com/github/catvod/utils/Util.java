@@ -263,8 +263,8 @@ public class Util {
     }
 
     /**
-     * 会话隔离键：仅远端已登录用 {@code u:<userId>}；本机未登录只用 {@code c:<clientId>}，不造 userId。
-     * 用于 UI/队列/遥控路由；站点 cookie 落盘请用 {@link #tvScopeId()}。
+     * 会话隔离键：远端已登录 {@code u:<userId>}；本机多前端路由用 {@code c:<clientId>}（不造 userId）。
+     * 只给 UI/队列/遥控路由；站点 cookie 落盘用 {@link #tvScopeId()}（本机不按 clientId 分目录）。
      */
     public static String scopeId() {
         String uid = userId();
