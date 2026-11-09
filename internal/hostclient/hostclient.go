@@ -43,34 +43,19 @@ func Enter(id string) func() {
 	return EnterSession(id, "", false)
 }
 
-// EnterSession 绑定 clientId/userId，并声明是否使用独立运行时引擎。
-// dedicated=false：本机或未开远端鉴权 → 共享 JVM/Py/JS；脚本仍全局缓存。
-// 同 goroutine 嵌套时保留当前 Username（若 userID 未变）。
+// EnterSession 绑定 clientId/userId（测试/同线程嵌套）。子 goroutine 须用 Bind(Snapshot())，
+// 否则 Username/PublicBase 等不会带过去，Path.tv 会误落 /TV/。
 func EnterSession(clientID, userID string, dedicated bool) func() {
 	clientID = strings.TrimSpace(clientID)
 	userID = strings.TrimSpace(userID)
 	if clientID == "" && userID == "" && !dedicated {
 		return func() {}
 	}
-	username := ""
-	if userID != "" && userID == CurrentUserID() {
-		username = CurrentUsername()
-	}
-	gid := goid()
-	prev, _ := byG.Load(gid)
-	byG.Store(gid, binding{
+	return Bind(Request{
 		ClientID:  clientID,
 		UserID:    userID,
-		Username:  username,
-		Dedicated: dedicated && userID != "",
+		Dedicated: dedicated,
 	})
-	return func() {
-		if prev == nil {
-			byG.Delete(gid)
-			return
-		}
-		byG.Store(gid, prev)
-	}
 }
 
 // Request 一次 HTTP 请求绑定到 goroutine 的身份与上下文。

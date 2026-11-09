@@ -23,6 +23,7 @@ func TestSweepRootKeepsClientJSONAndUserTV(t *testing.T) {
 	ui := mustMk("ui")
 	tv := mustMk("TV")
 	sc := mustMk(filepath.Join("TV", "s_c_deadbeef"))
+	suUUID := mustMk(filepath.Join("TV", "s_u_0123456789abcdef0123456789abcdef"))
 	su := mustMk(filepath.Join("TV", "s_u_user1"))
 	db := mustMk("db")
 	cache := mustMk("data")
@@ -30,6 +31,7 @@ func TestSweepRootKeepsClientJSONAndUserTV(t *testing.T) {
 	mustFile(ui, "junk.log", "gone")
 	mustFile(tv, ".cookie", "keep")
 	mustFile(sc, ".old", "drop")
+	mustFile(suUUID, ".old-uuid", "drop")
 	mustFile(su, ".user", "keep-user")
 	mustFile(db, "x.db", "db")
 	mustFile(cache, "tmp.bin", "gone")
@@ -50,6 +52,7 @@ func TestSweepRootKeepsClientJSONAndUserTV(t *testing.T) {
 	for _, p := range []string{
 		filepath.Join(ui, "junk.log"),
 		sc,
+		suUUID,
 		cache,
 	} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {

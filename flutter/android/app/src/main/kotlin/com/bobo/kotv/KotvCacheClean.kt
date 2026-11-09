@@ -34,6 +34,7 @@ object KotvCacheClean {
       wipe(File(cache, "epg"))
       wipe(File(cache, "jpa"))
       wipe(File(cache, "mpv"))
+      wipe(File(cache, "mpv-cache"))
       wipe(File(cache, "proxy"))
       try {
         KotvExoCache.clear(ctx)
@@ -41,9 +42,9 @@ object KotvCacheClean {
         Log.w(TAG, "exo clear failed", t)
       }
     }
-    // 与 Go sweep 一致：仅「全部」删历史 TV/s_c_*；保留 /TV/ 根凭证与 s_u_<用户名>。
+    // 与 Go paths.IsLegacyTVDir 一致：全部时删 s_c_* / 旧 s_u_<uuid>；保留 s_u_<用户名>。
     if (all) {
-      removeLegacyClientTVDirs()
+      removeLegacyTVDirs()
     }
   }
 
@@ -58,15 +59,25 @@ object KotvCacheClean {
     }
   }
 
-  /** 外置 `/TV/s_c_*`；本机凭证在 `/TV/.name`，远端在 `/TV/s_u_<用户名>`。 */
-  private fun removeLegacyClientTVDirs() {
+  /** 外置 `/TV/`：本机 `.name`、远端 `s_u_<用户名>` 保留。 */
+  private fun removeLegacyTVDirs() {
     val tv = File(Environment.getExternalStorageDirectory(), "TV")
     if (!tv.isDirectory) return
     val kids = tv.listFiles() ?: return
     for (f in kids) {
       if (!f.isDirectory) continue
-      if (!f.name.lowercase().startsWith("s_c_")) continue
+      if (!isLegacyTVDir(f.name)) continue
       wipe(f)
     }
+  }
+
+  /** 与 Go paths.IsLegacyTVDir 同规则，勿另写一套。 */
+  private fun isLegacyTVDir(name: String): Boolean {
+    val low = name.lowercase()
+    if (low.startsWith("s_c_")) return true
+    if (!low.startsWith("s_u_")) return false
+    val rest = low.removePrefix("s_u_")
+    if (rest.length != 32) return false
+    return rest.all { it in '0'..'9' || it in 'a'..'f' }
   }
 }

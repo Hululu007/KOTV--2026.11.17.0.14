@@ -105,3 +105,26 @@ func RemoveTVUserDirs(username string) {
 		_ = os.RemoveAll(filepath.Join(root, seg))
 	}
 }
+
+// IsLegacyTVDir 全部清理时应删的历史 TV 子目录：
+// s_c_*（旧 clientId 桶），以及曾按账号 UUID 建的 s_u_<32 位 hex>。
+// 保留 s_u_<用户名> 与根下 .cookie 等文件。
+func IsLegacyTVDir(name string) bool {
+	low := strings.ToLower(strings.TrimSpace(name))
+	if strings.HasPrefix(low, "s_c_") {
+		return true
+	}
+	if !strings.HasPrefix(low, "s_u_") {
+		return false
+	}
+	rest := low[len("s_u_"):]
+	if len(rest) != 32 {
+		return false
+	}
+	for _, c := range rest {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}

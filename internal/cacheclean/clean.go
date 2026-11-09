@@ -142,7 +142,7 @@ func Run(opt Options) Result {
 	return res
 }
 
-// sweepRootKeepConfigAndDB 保留 db/、ui/client.json、TV/ 根凭证与 s_u_*；删除 s_c_* 与其它残留。
+// sweepRootKeepConfigAndDB 保留 db/、ui/client.json、TV/ 根凭证与 s_u_<用户名>；删除遗留 TV 桶与其它残留。
 func sweepRootKeepConfigAndDB(root string) (int64, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -233,7 +233,7 @@ func scrubDirKeepFileNames(dir string, keep ...string) (int64, error) {
 	return freed, nil
 }
 
-// removeLegacyClientTVDirs 删除历史 TV/s_c_*；保留 /TV/ 根凭证与 s_u_<用户名>。
+// removeLegacyClientTVDirs 删除 paths.IsLegacyTVDir（s_c_*、旧 s_u_<uuid>）；保留根凭证与 s_u_<用户名>。
 func removeLegacyClientTVDirs(tvRoot string) (int64, error) {
 	entries, err := os.ReadDir(tvRoot)
 	if err != nil {
@@ -248,7 +248,7 @@ func removeLegacyClientTVDirs(tvRoot string) (int64, error) {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasPrefix(strings.ToLower(name), "s_c_") {
+		if !paths.IsLegacyTVDir(name) {
 			continue
 		}
 		n, err := wipeDirRemove(filepath.Join(tvRoot, name))

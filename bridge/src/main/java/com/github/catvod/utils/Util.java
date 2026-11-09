@@ -346,12 +346,10 @@ public class Util {
         }
         String out = b.toString().trim();
         while (out.startsWith(".")) out = out.substring(1).trim();
-        if (out.length() > 64) {
-            out = out.substring(0, 64);
-            // 避免截断半个代理对
-            if (!out.isEmpty() && Character.isHighSurrogate(out.charAt(out.length() - 1))) {
-                out = out.substring(0, out.length() - 1);
-            }
+        // 按 code point 截到 64，与 Go paths.sanitizeTVUsername 一致。
+        int cps = out.codePointCount(0, out.length());
+        if (cps > 64) {
+            out = out.substring(0, out.offsetByCodePoints(0, 64)).trim();
         }
         return out.trim();
     }

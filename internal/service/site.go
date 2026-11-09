@@ -679,14 +679,12 @@ func (s *SiteService) SearchParallel(keyword string, siteKeys []string, maxConcu
 	}
 	results := make([]siteResult, len(searchable))
 	var wg sync.WaitGroup
-	parentCID := hostclient.Current()
-	parentUID := hostclient.CurrentUserID()
-	parentDed := hostclient.DedicatedRuntime()
+	parent := hostclient.Snapshot()
 	for i, site := range searchable {
 		wg.Add(1)
 		go func(i int, site model.Site) {
 			defer wg.Done()
-			done := hostclient.EnterSession(parentCID, parentUID, parentDed)
+			done := hostclient.Bind(parent)
 			defer done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -744,11 +742,9 @@ func (s *SiteService) SearchFirstExact(keyword string, siteKeys []string, exclud
 		}
 		sites = filtered
 	}
-	parentCID := hostclient.Current()
-	parentUID := hostclient.CurrentUserID()
-	parentDed := hostclient.DedicatedRuntime()
+	parent := hostclient.Snapshot()
 	vod, ok := searchFirstExact(sites, matchName, query, vodKeySet(exclude), func(site model.Site, kw string) ([]model.Vod, error) {
-		done := hostclient.EnterSession(parentCID, parentUID, parentDed)
+		done := hostclient.Bind(parent)
 		defer done()
 		return s.searchSite(site, kw, true, "1")
 	})

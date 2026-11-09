@@ -413,11 +413,9 @@ func callParseJarBridge(payload []byte) error {
 }
 
 func notifyParseJarAsync(jarPath string, recent bool) {
-	cid := hostclient.Current()
-	uid := hostclient.CurrentUserID()
-	ded := hostclient.DedicatedRuntime()
+	parent := hostclient.Snapshot()
 	go func() {
-		done := hostclient.EnterSession(cid, uid, ded)
+		done := hostclient.Bind(parent)
 		defer done()
 		_ = notifyParseJar(jarPath, recent)
 	}()

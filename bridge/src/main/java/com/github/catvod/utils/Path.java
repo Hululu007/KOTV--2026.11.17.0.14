@@ -84,7 +84,10 @@ public class Path {
         return tv(Util.tvScopeId(), name);
     }
 
-    /** 指定 {@link Util#tvScopeId()}（或已捕获的同形键）的凭证文件。 */
+    /**
+     * 指定凭证目录键的文件：只传 {@link Util#tvScopeId()} / 裸用户名（或已捕获的同值），
+     * 不要传 {@link Util#scopeId()}（那是账号 UUID，会落成错误的 {@code s_u_<uuid>}）。
+     */
     public static File tv(String scopeId, String name) {
         if (name == null) name = "";
         if (!name.isEmpty() && !name.startsWith(".")) name = "." + name;

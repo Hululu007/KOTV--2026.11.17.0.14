@@ -38,6 +38,10 @@ func (a *App) PurgeUserData(userID, username string) {
 	spider.KillUserRuntime(userID)
 	parse.CancelUserSniffs(userID)
 	paths.RemoveTVUserDirs(username)
+	// 旧版曾按账号 UUID 建 s_u_<id>；删用户时一并清掉。
+	if userID != username {
+		paths.RemoveTVUserDirs(userID)
+	}
 	// 清理迁移前残留目录
 	_ = os.RemoveAll(filepath.Join(paths.Data(), "users", userID))
 }
