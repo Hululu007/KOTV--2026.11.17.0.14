@@ -49,7 +49,7 @@ Future<void> kotvEnterSystemFullscreen(KotvDesktopFullscreenKind kind) async {
   }
   if (!kotvIsDesktop()) return;
   // Windows：先等应用内布局落稳再 setFullScreen，避免和画面放大挤在同一帧。
-  // 有边框不先最大化。子窗口改到客户区由 window_manager 补丁延后（再二次）踢醒。
+  // 有边框不先最大化。子窗对齐客户区由 window_manager 补丁延后按条件重试。
   if (kotvIsWindows()) {
     try {
       if (await windowManager.isFullScreen()) return;

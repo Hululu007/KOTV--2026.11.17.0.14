@@ -42,8 +42,8 @@
 # 紧接着的 SetWindowPos 常常改不到尺寸，子窗口收不到新的 WM_SIZE，画面停在最后一帧。
 # 有边框分支去掉这次最大化，只去标题栏样式并铺到显示器。无边框仍靠最大化改尺寸。
 # 不最大化时 WM_SIZE 不是 SIZE_MAXIMIZED，离开全屏原有的 ForceChildRefresh 不会跑。
-# 进/出都 PostMessage 延后踢 Flutter 子窗（同步踢会重入 WM_SIZE 卡死）；再 SetTimer
-# 二次踢一次，避免 ANGLE/纹理在首次踢完后才落稳时 Win7 偶发定格。
+# 进/出都 PostMessage 延后同步 Flutter 子窗（同步改会重入 WM_SIZE 卡死）：先对齐客户区，
+# 未对齐再延后重试；已对齐才 ±1 逼重绘。不赌固定毫秒。
 #
 # video_player 的 formatHint 只在 Android 生效。iOS 打开时若判断为 HLS，Dart 写入
 # X-KOTV-Asset-Mime，这里把它从 HTTP 头里拿掉，改成 AVURLAsset 的 MIME。
@@ -1451,7 +1451,7 @@ WM_REFRESH_OLD = """void WindowManager::ForceChildRefresh() {
       rect.bottom - rect.top,
       SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_FRAMECHANGED);
 }"""
-WM_REFRESH_NEW = """void WindowManager::ForceChildRefresh() {
+WM_REFRESH_BLIND = """void WindowManager::ForceChildRefresh() {
   HWND main = GetMainWindow();
   if (!main) return;
   RECT rect;
@@ -1467,6 +1467,39 @@ WM_REFRESH_NEW = """void WindowManager::ForceChildRefresh() {
   ::SetWindowPos(view, nullptr, 0, 0, w, h,
                  SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
 }"""
+WM_REFRESH_SYNC = """bool WindowManager::ForceChildRefresh() {
+  HWND main = GetMainWindow();
+  if (!main) return true;
+  RECT client;
+  if (!::GetClientRect(main, &client)) return true;
+  const int w = client.right - client.left;
+  const int h = client.bottom - client.top;
+  if (w <= 0 || h <= 0) return true;
+  HWND view = ::FindWindowEx(main, nullptr, kFlutterViewWindowClassName, nullptr);
+  if (!view) return true;
+  RECT view_rect;
+  if (!::GetClientRect(view, &view_rect)) return true;
+  const int vw = view_rect.right - view_rect.left;
+  const int vh = view_rect.bottom - view_rect.top;
+  // KOTV: 先对齐客户区。未对齐返回 false 让调用方延后重试；已对齐再 ±1 逼重绘。
+  // 不用 SWP_FRAMECHANGED，避免重入非客户区计算。
+  if (vw != w || vh != h) {
+    ::SetWindowPos(view, nullptr, 0, 0, w, h,
+                   SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+    RECT after;
+    if (!::GetClientRect(view, &after) || after.right - after.left != w ||
+        after.bottom - after.top != h) {
+      return false;
+    }
+  }
+  ::SetWindowPos(view, nullptr, 0, 0, w + 1, h,
+                 SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+  ::SetWindowPos(view, nullptr, 0, 0, w, h,
+                 SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+  return true;
+}"""
+WM_REFRESH_DECL_OLD = "  void WindowManager::ForceChildRefresh();"
+WM_REFRESH_DECL_NEW = "  bool WindowManager::ForceChildRefresh();"
 WM_MAX_OLD = """  if (isFullScreen) {  // Set to fullscreen
     ::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
     if (!is_frameless_) {"""
@@ -1525,15 +1558,27 @@ elif "不能再靠 IsZoomed" not in wm_text:
         file=sys.stderr,
     )
     sys.exit(1)
-if WM_REFRESH_OLD in wm_text:
-    wm_text = wm_text.replace(WM_REFRESH_OLD, WM_REFRESH_NEW, 1)
-    print(f"patched window_manager ({wm_version}): Flutter view client rect")
-elif "FindWindowEx(main, nullptr, kFlutterViewWindowClassName, nullptr)" not in wm_text:
+if WM_REFRESH_DECL_OLD in wm_text:
+    wm_text = wm_text.replace(WM_REFRESH_DECL_OLD, WM_REFRESH_DECL_NEW, 1)
+    print(f"patched window_manager ({wm_version}): ForceChildRefresh returns bool")
+elif WM_REFRESH_DECL_NEW not in wm_text:
     print(
-        f"ERROR: window_manager ({wm_version}) ForceChildRefresh anchor missing",
+        f"ERROR: window_manager ({wm_version}) ForceChildRefresh decl missing",
         file=sys.stderr,
     )
     sys.exit(1)
+if "先对齐客户区" not in wm_text:
+    if WM_REFRESH_OLD in wm_text:
+        wm_text = wm_text.replace(WM_REFRESH_OLD, WM_REFRESH_SYNC, 1)
+    elif WM_REFRESH_BLIND in wm_text:
+        wm_text = wm_text.replace(WM_REFRESH_BLIND, WM_REFRESH_SYNC, 1)
+    else:
+        print(
+            f"ERROR: window_manager ({wm_version}) ForceChildRefresh body anchor missing",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"patched window_manager ({wm_version}): sync Flutter child to client")
 wm_cpp.write_text(wm_text, encoding="utf-8")
 wm_plugin = wm_root / "windows" / "window_manager_plugin.cpp"
 plugin = wm_plugin.read_text(encoding="utf-8")
@@ -1543,13 +1588,12 @@ plugin_leave_new = """      _EmitEvent("leave-full-screen");"""
 if plugin_leave_old in plugin:
     plugin = plugin.replace(plugin_leave_old, plugin_leave_new, 1)
     print(f"patched window_manager plugin ({wm_version}): leave does not resize inline")
-# 0x4B51 = 二次延后踢子窗的 timer id（进/出全屏各用同一条路径）。
 PLUGIN_REFRESH_ONCE = """  if (message == WM_APP + 0x51) {
     window_manager->ForceChildRefresh();
     return 0;
   }
 """
-PLUGIN_REFRESH_TWICE = """  if (message == WM_APP + 0x51) {
+PLUGIN_REFRESH_TIMER = """  if (message == WM_APP + 0x51) {
     window_manager->ForceChildRefresh();
     // ANGLE/纹理可能在这次尺寸变更之后才落稳；再延后踢一次，避免 Win7 偶发定格。
     ::SetTimer(hWnd, 0x4B51, 120, nullptr);
@@ -1561,10 +1605,21 @@ PLUGIN_REFRESH_TWICE = """  if (message == WM_APP + 0x51) {
     return 0;
   }
 """
-if "0x4B51" not in plugin:
-    if PLUGIN_REFRESH_ONCE in plugin:
-        plugin = plugin.replace(PLUGIN_REFRESH_ONCE, PLUGIN_REFRESH_TWICE, 1)
-        print(f"patched window_manager plugin ({wm_version}): second deferred child refresh")
+PLUGIN_REFRESH_SYNC = """  if (message == WM_APP + 0x51) {
+    // 未对齐客户区则延后重试；对齐后 ForceChildRefresh 内再 ±1 重绘。
+    if (!window_manager->ForceChildRefresh() && wParam < 8) {
+      ::PostMessage(hWnd, WM_APP + 0x51, wParam + 1, 0);
+    }
+    return 0;
+  }
+"""
+if "wParam < 8" not in plugin:
+    if PLUGIN_REFRESH_TIMER in plugin:
+        plugin = plugin.replace(PLUGIN_REFRESH_TIMER, PLUGIN_REFRESH_SYNC, 1)
+        print(f"patched window_manager plugin ({wm_version}): condition child sync")
+    elif PLUGIN_REFRESH_ONCE in plugin:
+        plugin = plugin.replace(PLUGIN_REFRESH_ONCE, PLUGIN_REFRESH_SYNC, 1)
+        print(f"patched window_manager plugin ({wm_version}): condition child sync")
     else:
         plugin_anchor = "  std::optional<LRESULT> result = std::nullopt;\n"
         if plugin_anchor not in plugin:
@@ -1575,10 +1630,15 @@ if "0x4B51" not in plugin:
             sys.exit(1)
         plugin = plugin.replace(
             plugin_anchor,
-            "  std::optional<LRESULT> result = std::nullopt;\n\n" + PLUGIN_REFRESH_TWICE,
+            "  std::optional<LRESULT> result = std::nullopt;\n\n" + PLUGIN_REFRESH_SYNC,
             1,
         )
-        print(f"patched window_manager plugin ({wm_version}): deferred child refresh")
+        print(f"patched window_manager plugin ({wm_version}): condition child sync")
+elif "0x4B51" in plugin:
+    # 旧盲踢 timer 残留：条件同步已在时仍可能夹着 SetTimer，整段换成 SYNC。
+    if PLUGIN_REFRESH_TIMER in plugin:
+        plugin = plugin.replace(PLUGIN_REFRESH_TIMER, PLUGIN_REFRESH_SYNC, 1)
+        print(f"patched window_manager plugin ({wm_version}): drop blind SetTimer kick")
 wm_plugin.write_text(plugin, encoding="utf-8")
 wm_check = wm_cpp.read_text(encoding="utf-8")
 anchor = "} else {  // Restore from fullscreen"
@@ -1590,6 +1650,9 @@ if WM_MARKER not in enter or WM_DEFER not in enter or "WM_APP + 0x51" not in ent
 if "ForceChildRefresh();" in enter:
     print("ERROR: window_manager enter-fullscreen still refreshes inline", file=sys.stderr)
     sys.exit(1)
+if "先对齐客户区" not in wm_check or "bool WindowManager::ForceChildRefresh() {" not in wm_check:
+    print("ERROR: window_manager ForceChildRefresh is not condition-driven", file=sys.stderr)
+    sys.exit(1)
 if "::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);" not in enter:
     print("ERROR: window_manager frameless fullscreen lost SC_MAXIMIZE", file=sys.stderr)
     sys.exit(1)
@@ -1597,8 +1660,11 @@ if enter.find("::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);") < ent
     print("ERROR: window_manager bordered fullscreen still maximizes first", file=sys.stderr)
     sys.exit(1)
 plugin_check = wm_plugin.read_text(encoding="utf-8")
-if "message == WM_APP + 0x51" not in plugin_check or "0x4B51" not in plugin_check:
-    print("ERROR: window_manager plugin missing deferred child refresh", file=sys.stderr)
+if "message == WM_APP + 0x51" not in plugin_check or "wParam < 8" not in plugin_check:
+    print("ERROR: window_manager plugin missing condition child sync", file=sys.stderr)
+    sys.exit(1)
+if "0x4B51" in plugin_check:
+    print("ERROR: window_manager plugin still has blind SetTimer kick", file=sys.stderr)
     sys.exit(1)
 if plugin_leave_old in plugin_check:
     print("ERROR: window_manager plugin still resizes inside WM_SIZE", file=sys.stderr)

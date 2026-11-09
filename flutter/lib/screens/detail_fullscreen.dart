@@ -259,10 +259,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         // 先锁竖屏再进沉浸：锁方向常会把系统栏拉回来。电视保持横屏。
         unawaited(() async {
           await kotvLockPortrait();
-          await kotvEnterSystemFullscreen(widget.desktopFullscreen);
+          await kotvEnterSystemFullscreenAfterLayout(widget.desktopFullscreen);
         }());
       } else {
-        unawaited(kotvEnterSystemFullscreen(widget.desktopFullscreen));
+        unawaited(kotvEnterSystemFullscreenAfterLayout(widget.desktopFullscreen));
       }
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -445,7 +445,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _showForceLandscape = false;
     });
     await kotvForceLandscape();
-    await kotvEnterSystemFullscreen(widget.desktopFullscreen);
+    await kotvEnterSystemFullscreenAfterLayout(widget.desktopFullscreen);
     _bumpChrome();
   }
 
@@ -453,7 +453,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (KotvLayout.television) return;
     setState(() => _forcedLandscape = false);
     await kotvLockPortrait();
-    await kotvEnterSystemFullscreen(widget.desktopFullscreen);
+    await kotvEnterSystemFullscreenAfterLayout(widget.desktopFullscreen);
     if (!mounted) return;
     _refreshForceLandscapeBtn();
     _bumpChrome();
