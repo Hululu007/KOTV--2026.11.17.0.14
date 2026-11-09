@@ -49,6 +49,12 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   bool _filtersExpanded = false;
   final Map<String, String> _extend = {};
   String? _statusMsg;
+
+  /// 当前首页为空且应走顶部搜索（与推送空首页区分）。
+  bool _homeSearchOnly = false;
+
+  /// 已为该站 key 自动打开过顶部搜索，避免重复跳转。
+  String? _searchOnlyJumpKey;
   bool _loading = true;
   bool _ready = false;
   List<ConfigBannerSlide> _apiBanners = [];
@@ -263,6 +269,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     setState(() {
       _loading = true;
       _statusMsg = null;
+      _homeSearchOnly = false;
       _page = 1;
       _pageCount = 0;
       _hasMore = true;
@@ -690,30 +697,26 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final emptyHome = home && types.isEmpty && list.isEmpty;
       final keepGrid = home && list.isEmpty && _items.isNotEmpty;
       final pageStyle = KotvGridStyle.parse(data['style']);
-      // 仅搜索站 home 常无分类/推荐：引导搜索，勿报成加载失败。
-      var searchOnlyHint = false;
-      if (emptyHome) {
-        final sites = _sitesFromConfig(ref.read(configProvider));
-        final homeKey = ref.read(configProvider).maybeWhen(
-            data: (c) => '${c['home'] ?? ''}'.trim(), orElse: () => '');
-        for (final s in sites) {
-          if ((homeKey.isNotEmpty ? s.key == homeKey : s.home) &&
-              s.searchable) {
-            searchOnlyHint = true;
-            break;
-          }
-        }
-      }
+      // 空首页 + 可搜 + 非推送：通用「仅搜索」站，引导顶部搜索；推送空首页不报错。
+      final homeSite = _resolveHomeSite(_sitesFromConfig(ref.read(configProvider)));
+      final searchOnlyHint =
+          homeSite?.prefersTopSearchWhenEmpty(emptyHome) ?? false;
+      final pushEmptyHome =
+          emptyHome && (homeSite?.isPushSite ?? false);
       setState(() {
         if (clearLoading) _loading = false;
         if (replace && !keepGrid) {
           _listStyle = pageStyle.isList;
           _gridStyle = pageStyle;
         }
+        _homeSearchOnly = searchOnlyHint;
+        if (!searchOnlyHint) _searchOnlyJumpKey = null;
         _statusMsg = emptyHome
             ? (searchOnlyHint
                 ? '该站仅支持搜索，请使用顶部搜索'
-                : '首页没有返回分类和推荐，请重试')
+                : (pushEmptyHome
+                    ? null
+                    : '首页没有返回分类和推荐，请重试'))
             : (keepGrid ? '首页没有返回推荐，请重试' : null);
         // id/name 未变不整表替换，避免分类条跟着内容刷新重建。
         if (types.isNotEmpty && !_sameTypeNav(_types, types)) {
@@ -760,6 +763,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           _hasMore = _pageCount == 0 || _page < _pageCount;
         }
       });
+      if (searchOnlyHint) {
+        _openTopSearchForSite(homeSite?.key ?? '');
+      }
     } catch (e) {
       if (!mounted) return;
       if (kotvMessageNeedsLogin(e)) {
@@ -801,6 +807,26 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     return false;
   }
 
+  SiteInfo? _resolveHomeSite(List<SiteInfo> sites) {
+    final homeKey = ref.read(configProvider).maybeWhen(
+        data: (c) => '${c['home'] ?? ''}'.trim(), orElse: () => '');
+    for (final s in sites) {
+      if (homeKey.isNotEmpty ? s.key == homeKey : s.home) return s;
+    }
+    return null;
+  }
+
+  /// 仅搜索站：打开顶部搜索（同 key 只跳一次，换站后可再跳）。
+  void _openTopSearchForSite(String siteKey) {
+    final key = siteKey.trim();
+    if (key.isEmpty || _searchOnlyJumpKey == key) return;
+    _searchOnlyJumpKey = key;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      goKotvPage(ref, KotvPage.search);
+    });
+  }
+
   Future<void> _openSitePicker(List<SiteInfo> sites) async {
     if (sites.isEmpty) {
       await _addSource();
@@ -811,12 +837,14 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       ref,
       sites: sites,
       onSelect: (key) async {
-        final name = () {
-          for (final s in sites) {
-            if (s.key == key) return s.name;
+        SiteInfo? selected;
+        for (final s in sites) {
+          if (s.key == key) {
+            selected = s;
+            break;
           }
-          return key;
-        }();
+        }
+        final name = selected?.name.isNotEmpty == true ? selected!.name : key;
         // 换源前先硬停详情/直播，再清栈，避免后台继续出声。
         await DetailScreen.prepareLeave();
         await LiveScreen.prepareLeave();
@@ -833,11 +861,20 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           _types = [];
           _items.clear();
           _statusMsg = null;
+          _homeSearchOnly = false;
+          _searchOnlyJumpKey = null;
         });
         try {
           await ref.read(apiProvider).setHome(key);
           // 配置在首页请求结束之后再刷新。_reload 返回时会 invalidate。
           await _reload(clearContent: true);
+          // 可搜空首页在 _applyPage 里跳顶部搜索；推送空首页保持静默。
+          if (mounted &&
+              selected != null &&
+              selected.prefersTopSearchWhenEmpty(
+                  _types.isEmpty && _items.isEmpty)) {
+            _openTopSearchForSite(selected.key);
+          }
         } catch (e) {
           if (mounted) setState(() => _statusMsg = '切换失败: $e');
         } finally {
@@ -1043,11 +1080,13 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                           color: KotvPalette.of(context).muted, fontSize: 13)),
                 ),
                 AppPill(
-                    label: '重试',
+                    label: _homeSearchOnly ? '去搜索' : '重试',
                     width: 88,
                     height: 32,
                     fontSize: 13,
-                    onTap: _reload),
+                    onTap: _homeSearchOnly
+                        ? () => goKotvPage(ref, KotvPage.search)
+                        : _reload),
               ],
             ),
           ),

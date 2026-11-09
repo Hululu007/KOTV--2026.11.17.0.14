@@ -278,6 +278,7 @@ class SiteInfo {
     this.searchable = true,
     this.changeable = true,
     this.indexs = false,
+    this.type = 0,
     this.styleType = '',
   });
   final String key;
@@ -288,7 +289,17 @@ class SiteInfo {
 
   /// 豆瓣等索引站，点条目去全网搜索而不是本站详情。
   final bool indexs;
+
+  /// 配置 type；4 为推送类（可无 home/search 路由）。
+  final int type;
   final String styleType;
+
+  /// 推送类站：详情/播放入口，不作浏览首页。
+  bool get isPushSite => type == 4;
+
+  /// 空首页且可搜、又非推送：应走顶部搜索（如「搜索|全盘」类站）。
+  bool prefersTopSearchWhenEmpty(bool emptyHome) =>
+      emptyHome && searchable && !isPushSite;
 
   factory SiteInfo.fromJson(Map<String, dynamic> j) => SiteInfo(
         key: '${j['key'] ?? ''}',
@@ -297,6 +308,7 @@ class SiteInfo {
         searchable: j['searchable'] != false,
         changeable: j['changeable'] != false,
         indexs: j['indexs'] == true,
+        type: j['type'] is num ? (j['type'] as num).toInt() : int.tryParse('${j['type'] ?? ''}') ?? 0,
         styleType: VodItem._styleType(j['style']),
       );
 

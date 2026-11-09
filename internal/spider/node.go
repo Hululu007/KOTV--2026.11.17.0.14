@@ -65,6 +65,30 @@ func (s *nodeSpider) post(action string, body map[string]any) (string, error) {
 	return p.PostJSON(path, body)
 }
 
+// nodeRouteMissing 源包未注册该动作时的 HTTP 404（如推送站只有 init/detail/play）。
+func nodeRouteMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	// PostJSON: "POST <path> http 404: …"
+	return strings.Contains(err.Error(), " http 404:")
+}
+
+// postOptional 可选动作：无路由时当作空 JSON，避免把缺省接口报成失败。
+func (s *nodeSpider) postOptional(action string, body map[string]any) (string, error) {
+	raw, err := s.post(action, body)
+	if nodeRouteMissing(err) {
+		return "{}", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(raw) == "" {
+		return "{}", nil
+	}
+	return raw, nil
+}
+
 func (s *nodeSpider) Init(extend string) error {
 	if extend != "" {
 		s.ext = extend
@@ -98,19 +122,16 @@ func (s *nodeSpider) HomeContent(filter bool) (string, error) {
 	if err := s.ensureInit(); err != nil {
 		return "", err
 	}
-	return s.post("home", map[string]any{"filter": filter})
+	return s.postOptional("home", map[string]any{"filter": filter})
 }
 
 func (s *nodeSpider) HomeVideoContent() (string, error) {
 	if err := s.ensureInit(); err != nil {
 		return "", err
 	}
+	// homeVod 多包未实现：任意失败都当空列表，勿阻断首页。
 	raw, err := s.post("homeVod", map[string]any{})
-	if err != nil {
-		// 包未实现 homeVod 时返回空列表，勿阻断首页。
-		return "{}", nil
-	}
-	if strings.TrimSpace(raw) == "" {
+	if err != nil || strings.TrimSpace(raw) == "" {
 		return "{}", nil
 	}
 	return raw, nil
@@ -124,7 +145,7 @@ func (s *nodeSpider) CategoryContent(tid, pg string, filter bool, extend map[str
 	for k, v := range extend {
 		filters[k] = v
 	}
-	return s.post("category", map[string]any{
+	return s.postOptional("category", map[string]any{
 		"id":      tid,
 		"page":    pg,
 		"filter":  filter,
@@ -155,7 +176,7 @@ func (s *nodeSpider) SearchContent(key string, quick bool, pg string) (string, e
 	if strings.TrimSpace(pg) == "" {
 		pg = "1"
 	}
-	return s.post("search", map[string]any{
+	return s.postOptional("search", map[string]any{
 		"wd":    key,
 		"page":  pg,
 		"quick": quick,

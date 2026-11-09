@@ -32,7 +32,8 @@ func IsDirectPlayKey(key string) bool {
 	return key == PushAgentKey || key == LocalFileKey
 }
 
-// spiderDispatchType Node 以 api 前缀为准（含配置写成 type=4 的推送站），其余用 TypeID。
+// spiderDispatchType Node 的 /spider/… api 一律走爬虫分派（含配置 type=4 的推送站）；
+// 推送站本身可能未注册 home/search，由 nodeSpider 对缺失路由返回空结果。
 func spiderDispatchType(site model.Site) int {
 	if spider.IsNodeAPI(site.API) {
 		return 3
