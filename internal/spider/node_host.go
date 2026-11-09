@@ -50,10 +50,22 @@ var (
 
 // NodeHost 管理猫爪 Node 源包：下载、启动、反代与消息回调。
 type NodeHost struct {
-	mu       sync.Mutex
-	pkgs     map[string]*nodePkg // id → pkg
-	apiIndex map[string]string   // /spider/... → pkgID
-	runner   string
+	mu          sync.Mutex
+	pkgs        map[string]*nodePkg // id → pkg
+	apiIndex    map[string]string   // /spider/... → pkgID
+	rootAliases map[string]struct{} // OPENWEB 登记的根路径首段（页内绝对路径反代）
+	runner      string
+}
+
+// callerSnap 最近一次经引擎发起的 Node 调用方会话（供 /msg OPENWEB 恢复 Bind）。
+type callerSnap struct {
+	ClientID   string
+	UserID     string
+	Scope      string
+	PublicBase string
+	AuthToken  string
+	Dedicated  bool
+	Platform   string
 }
 
 type nodePkg struct {
@@ -66,6 +78,7 @@ type nodePkg struct {
 	stopping bool
 	backoff  time.Duration
 	cancel   context.CancelFunc
+	caller   callerSnap
 }
 
 // DefaultNodeHost 进程内单例。
@@ -457,6 +470,7 @@ func (h *NodeHost) ClearAll() {
 	h.mu.Lock()
 	h.pkgs = map[string]*nodePkg{}
 	h.apiIndex = map[string]string{}
+	h.rootAliases = map[string]struct{}{}
 	h.mu.Unlock()
 	dir := paths.NodeCache()
 	_ = os.RemoveAll(dir)
@@ -519,7 +533,7 @@ func (h *NodeHost) GetPkg(id string) *nodePkg {
 }
 
 // ActivePkg 返回任一已起端口的源包；没有则 nil。
-// 配置中心页内 fetch('/website/…') 打引擎根路径时，用它反代到当前 Node。
+// 根别名页内绝对路径 fetch 打引擎根时，用它反代到当前 Node。
 func (h *NodeHost) ActivePkg() *nodePkg {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -532,18 +546,83 @@ func (h *NodeHost) ActivePkg() *nodePkg {
 	return pkg
 }
 
-// ProxyWebsite 把 /website… 原样反代到 ActivePkg；无就绪包返回 false。
-func (h *NodeHost) ProxyWebsite(w http.ResponseWriter, r *http.Request) bool {
+// RememberNodeRootAlias 登记 OPENWEB 路径首段，供引擎对 /首段/… 反代 ActivePkg。
+func (h *NodeHost) RememberNodeRootAlias(seg string) {
+	seg = strings.Trim(strings.TrimSpace(seg), "/")
+	if i := strings.IndexByte(seg, '/'); i >= 0 {
+		seg = seg[:i]
+	}
+	if seg == "" || reservedNodeRootSegment(seg) {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.rootAliases == nil {
+		h.rootAliases = map[string]struct{}{}
+	}
+	h.rootAliases[seg] = struct{}{}
+}
+
+// RootAliases 当前已登记的根路径首段。
+func (h *NodeHost) RootAliases() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]string, 0, len(h.rootAliases))
+	for a := range h.rootAliases {
+		out = append(out, a)
+	}
+	return out
+}
+
+// MatchNodeRootAlias 请求路径是否落在已登记根别名下。
+func (h *NodeHost) MatchNodeRootAlias(path string) bool {
+	seg := firstPathSegment(path)
+	if seg == "" {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.rootAliases[seg]
+	return ok
+}
+
+// ProxyRootAlias 把已登记根别名路径原样反代到 ActivePkg；未命中返回 false。
+func (h *NodeHost) ProxyRootAlias(w http.ResponseWriter, r *http.Request) bool {
+	if !h.MatchNodeRootAlias(r.URL.Path) {
+		return false
+	}
 	pkg := h.ActivePkg()
 	if pkg == nil {
 		return false
 	}
 	path := r.URL.Path
 	if path == "" {
-		path = "/website"
+		path = "/"
 	}
 	pkg.Proxy(w, r, path)
 	return true
+}
+
+func firstPathSegment(path string) string {
+	path = strings.TrimSpace(path)
+	path = strings.TrimPrefix(path, "/")
+	if path == "" {
+		return ""
+	}
+	if i := strings.IndexByte(path, '/'); i >= 0 {
+		return path[:i]
+	}
+	return path
+}
+
+func reservedNodeRootSegment(seg string) bool {
+	switch strings.ToLower(seg) {
+	case "api", "node", "proxy", "file", "image", "library", "ui", "health",
+		"k", "msg", "action", "media", "device", "upload", "tvbus", "spider",
+		"java", "cache", "newFolder", "delFolder", "delFile":
+		return true
+	}
+	return false
 }
 
 // ReleaseOther 切站时保留 keepAPI 所属包，停掉其它。
@@ -663,7 +742,7 @@ func (p *nodePkg) Proxy(w http.ResponseWriter, r *http.Request, path string) {
 
 var (
 	reLocalNodeURL = regexp.MustCompile(`(?i)https?://(?:127\.0\.0\.1|localhost):(\d+)`)
-	// 带可选 path/query/fragment，便于 /website 与 /spider 分流改写。
+	// 带可选 path/query/fragment，统一改写到 /node/<pkg>/…。
 	reLocalNodeURLParts = regexp.MustCompile(`(?i)https?://(?:127\.0\.0\.1|localhost):(\d+)((?:/[^?\s"'\\]*)?(?:\?[^#\s"'\\]*)?(?:#[^\s"'\\]*)?)`)
 	reJS2P              = regexp.MustCompile(`(?i)js2p://_WEB_`)
 )
@@ -675,24 +754,7 @@ func (p *nodePkg) nodeProxyBase() string {
 	return playproxy.PublicizeURL(loop)
 }
 
-// engineWebsiteURL 远端配置中心：引擎根 /website…（Publicize 后客户端可达）。
-func (p *nodePkg) engineWebsiteURL(pathQueryFrag string) string {
-	if pathQueryFrag == "" {
-		pathQueryFrag = "/website"
-	}
-	if !strings.HasPrefix(pathQueryFrag, "/") {
-		pathQueryFrag = "/" + pathQueryFrag
-	}
-	return playproxy.PublicizeURL(fmt.Sprintf("http://127.0.0.1:%d%s", localproxy.Port(), pathQueryFrag))
-}
-
-func isWebsitePath(path string) bool {
-	return path == "/website" || strings.HasPrefix(path, "/website/")
-}
-
-// rewriteToNodeProxy 本包回环地址与 js2p://_WEB_ 的统一改写入口。
-// 配置中心 /website…：本机不改写（直连 Node 端口）；远端 → 引擎 /website…。
-// 其余路径 → /node/<pkg>/…。
+// rewriteToNodeProxy 播放/弹幕：本包回环与 js2p://_WEB_ → /node/<pkg>/…。
 func (p *nodePkg) rewriteToNodeProxy(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -700,7 +762,6 @@ func (p *nodePkg) rewriteToNodeProxy(raw string) string {
 	}
 	nodeBase := p.nodeProxyBase()
 	port := p.Port()
-	remote := strings.TrimSpace(hostclient.PublicBase()) != ""
 	if port > 0 {
 		ps := fmt.Sprintf("%d", port)
 		raw = reLocalNodeURLParts.ReplaceAllStringFunc(raw, func(m string) string {
@@ -711,19 +772,6 @@ func (p *nodePkg) rewriteToNodeProxy(raw string) string {
 			rest := ""
 			if len(sub) > 2 {
 				rest = sub[2]
-			}
-			pathOnly := rest
-			if i := strings.IndexAny(rest, "?#"); i >= 0 {
-				pathOnly = rest[:i]
-			}
-			if pathOnly == "" {
-				pathOnly = "/"
-			}
-			if isWebsitePath(pathOnly) {
-				if !remote {
-					return m // 本机：保持 http://127.0.0.1:<nodePort>/website
-				}
-				return p.engineWebsiteURL(rest)
 			}
 			if rest == "" {
 				return strings.TrimRight(nodeBase, "/")
@@ -739,9 +787,104 @@ func (p *nodePkg) RewritePlayJSON(raw string) string {
 	return p.rewriteToNodeProxy(raw)
 }
 
-// RewriteNodeURL 单条 URL。配置中心本机不改写；远端走引擎 /website；其余 /node/<pkg>/…。
+// RewriteNodeURL 单条 URL（弹幕等）→ /node/<pkg>/…。
 func (p *nodePkg) RewriteNodeURL(raw string) string {
 	return p.rewriteToNodeProxy(strings.TrimSpace(raw))
+}
+
+// rememberCaller 在引擎→Node 调用时戳记当前会话，供随后 /msg OPENWEB 恢复。
+func (p *nodePkg) rememberCaller() {
+	if p == nil {
+		return
+	}
+	snap := callerSnap{
+		ClientID:   hostclient.Current(),
+		UserID:     hostclient.CurrentUserID(),
+		Scope:      hostclient.ScopeID(),
+		PublicBase: hostclient.PublicBase(),
+		AuthToken:  hostclient.AuthToken(),
+		Dedicated:  hostclient.DedicatedRuntime(),
+		Platform:   hostclient.CurrentPlatform(),
+	}
+	if snap.Scope == "" && snap.PublicBase == "" && snap.AuthToken == "" && snap.ClientID == "" {
+		return
+	}
+	p.mu.Lock()
+	p.caller = snap
+	p.mu.Unlock()
+}
+
+func (p *nodePkg) callerSnap() callerSnap {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.caller
+}
+
+// RewriteOpenWebURL 仅 OPENWEB：本机原样；远端 → /node/<pkg>/… + Publicize + 可选 ?token=。
+// 同时登记路径首段为根别名，供页内绝对路径 API 反代。
+func (p *nodePkg) RewriteOpenWebURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || p == nil {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		if hostclient.PublicBase() != "" {
+			return appendOpenWebToken(playproxy.PublicizeURL(raw))
+		}
+		return raw
+	}
+	port := u.Port()
+	if port == "" {
+		if strings.EqualFold(u.Scheme, "https") {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	if fmt.Sprintf("%d", p.Port()) != port {
+		return raw
+	}
+	path := u.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	if seg := firstPathSegment(path); seg != "" {
+		DefaultNodeHost().RememberNodeRootAlias(seg)
+	}
+	if hostclient.PublicBase() == "" {
+		return raw
+	}
+	engine := fmt.Sprintf("http://127.0.0.1:%d/node/%s%s", localproxy.Port(), p.id, path)
+	if u.RawQuery != "" {
+		engine += "?" + u.RawQuery
+	}
+	if u.Fragment != "" {
+		engine += "#" + u.Fragment
+	}
+	return appendOpenWebToken(playproxy.PublicizeURL(engine))
+}
+
+func appendOpenWebToken(raw string) string {
+	tok := strings.TrimSpace(hostclient.AuthToken())
+	if tok == "" {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	q := u.Query()
+	if strings.TrimSpace(q.Get("token")) != "" {
+		return raw
+	}
+	q.Set("token", tok)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // profilePath 源包 profile.json。

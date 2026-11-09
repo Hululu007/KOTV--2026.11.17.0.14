@@ -8,15 +8,15 @@ import (
 	"testing"
 )
 
-func TestActivePkgAndProxyWebsite(t *testing.T) {
+func TestActivePkgAndProxyRootAlias(t *testing.T) {
 	h := &NodeHost{pkgs: map[string]*nodePkg{}}
 	if h.ActivePkg() != nil {
 		t.Fatal("empty host should have no active pkg")
 	}
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9978/website/api/status", nil)
-	if h.ProxyWebsite(rr, req) {
-		t.Fatal("ProxyWebsite should fail without active pkg")
+	if h.ProxyRootAlias(rr, req) {
+		t.Fatal("ProxyRootAlias should miss without alias")
 	}
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,11 +34,15 @@ func TestActivePkgAndProxyWebsite(t *testing.T) {
 	if h.ActivePkg() != p {
 		t.Fatal("ActivePkg should return ready pkg")
 	}
+	h.RememberNodeRootAlias("website")
+	if !h.MatchNodeRootAlias("/website/api/status") {
+		t.Fatal("expected alias match")
+	}
 
 	rr = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9978/website/api/status", nil)
-	if !h.ProxyWebsite(rr, req) {
-		t.Fatal("ProxyWebsite should succeed")
+	if !h.ProxyRootAlias(rr, req) {
+		t.Fatal("ProxyRootAlias should succeed")
 	}
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())

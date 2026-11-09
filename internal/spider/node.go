@@ -61,6 +61,7 @@ func (s *nodeSpider) post(action string, body map[string]any) (string, error) {
 	if body == nil {
 		body = map[string]any{}
 	}
+	p.rememberCaller()
 	path := s.prefix + "/" + action
 	return p.PostJSON(path, body)
 }

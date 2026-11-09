@@ -7,7 +7,7 @@
 - 已选中的集再点进入全屏；字幕「自动」勾选状态修正；播放返回 / 切 Tab：短超时 flush 与软停，硬释放后台执行。
 - 网盘下载：302 重挂 Cookie；单线程；起播回包 `cloud` 后入下载列表；完成态可点开播放（本机直喂，远端走 play 换成 `/file/`）。
 - 弹幕：缓冲/暂停不投，真播放后投；小幅 position 落后不清屏；猫爪 danmuPush 与集加载共用加载入口，await 后再认推送，勿二次拉取覆盖。
-- 猫爪远端：播放 JSON / 弹幕 / OPENWEB 共用 `rewriteToNodeProxy`；消息 URL 按端口选包，无包时仍 Publicize。配置中心本机不改写（直连 Node `/website`）；远端经引擎 `/website` 代理并鉴权（token/Cookie）。下载列表本机路径含 `#`/`$` 时不再误拆集。
+- 猫爪远端：播放 JSON / 弹幕走 `/node/<pkg>/`；OPENWEB 本机不改写，远端由引擎改写为 `/node/<pkg>/…` 并按调用方定向投递；页内绝对路径根别名动态反代 + token/Cookie 鉴权。Flutter 原样打开下发 URL。下载列表本机路径含 `#`/`$` 时不再误拆集。
 - 安卓 FVP：进出全屏串行；退全屏先 hold 整屏几何，量槽后再缩 Positioned。
 - 播放信息：片源缺 colorInfo 时用 codecs/DV profile 补色彩标签；Exo「· 隧道」仅跟 `isTunnelingEnabled`。
 - 桌面 MPV/FFmpeg（AV3A）与 fvp 跟进上游；Win7 线 fvp 同步，仍用 Flutter 3.19 + SDK 放宽。

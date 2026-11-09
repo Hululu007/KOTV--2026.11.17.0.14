@@ -16,6 +16,7 @@ type binding struct {
 	UserID     string
 	Platform   string
 	PublicBase string // 非本机请求：scheme://host[:port]，供代理 URL 改写
+	AuthToken  string // 登录令牌；供 Node OPENWEB 远端 URL 附带 ?token=
 	Dedicated  bool   // 远端租户：独立引擎；本机/未开鉴权：共享引擎
 }
 
@@ -66,6 +67,7 @@ type Request struct {
 	Dedicated  bool   // 远端租户：独立运行时
 	Platform   string // 前端平台（android/windows/…）
 	PublicBase string // 非本机请求的对外根地址（可带媒体钥匙前缀），供改写代理地址；本机为空
+	AuthToken  string // 登录令牌；Node OPENWEB 远端改写时写入 ?token=
 }
 
 // Bind 把 req 绑定到当前 goroutine，返回的函数恢复之前的绑定。
@@ -78,6 +80,7 @@ func Bind(req Request) func() {
 		UserID:     userID,
 		Platform:   strings.ToLower(strings.TrimSpace(req.Platform)),
 		PublicBase: strings.TrimRight(strings.TrimSpace(req.PublicBase), "/"),
+		AuthToken:  strings.TrimSpace(req.AuthToken),
 		Dedicated:  req.Dedicated && userID != "",
 	})
 	return func() {
@@ -137,6 +140,38 @@ func PublicBase() string {
 		return b.PublicBase
 	}
 	return ""
+}
+
+// AuthToken 当前请求登录令牌；本机免登录通常为空。
+func AuthToken() string {
+	v, ok := byG.Load(goid())
+	if !ok {
+		return ""
+	}
+	if b, ok := v.(binding); ok {
+		return b.AuthToken
+	}
+	return ""
+}
+
+// Snapshot 当前 goroutine 绑定的完整请求上下文（无绑定时零值）。
+func Snapshot() Request {
+	v, ok := byG.Load(goid())
+	if !ok {
+		return Request{}
+	}
+	b, ok := v.(binding)
+	if !ok {
+		return Request{}
+	}
+	return Request{
+		ClientID:   b.ClientID,
+		UserID:     b.UserID,
+		Dedicated:  b.Dedicated,
+		Platform:   b.Platform,
+		PublicBase: b.PublicBase,
+		AuthToken:  b.AuthToken,
+	}
 }
 
 // ScopeID 会话/队列/媒体/遥控隔离键。

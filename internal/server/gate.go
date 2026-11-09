@@ -11,6 +11,7 @@ import (
 	"github.com/bobo/KOTV/internal/auth"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/playproxy"
+	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/util"
 )
 
@@ -66,6 +67,10 @@ func (s *Server) gate(next http.Handler) http.Handler {
 		}
 		local := isLoopbackRequest(r) && !isWebClient(r)
 		need := s.routeNeed(r)
+		rootAlias := spider.DefaultNodeHost().MatchNodeRootAlias(r.URL.Path)
+		if rootAlias {
+			need = needUser
+		}
 		token := requestToken(r)
 		var user *auth.User
 		if token != "" {
@@ -106,7 +111,7 @@ func (s *Server) gate(next http.Handler) http.Handler {
 			return
 		}
 
-		bind := hostclient.Request{Platform: requestPlatform(r)}
+		bind := hostclient.Request{Platform: requestPlatform(r), AuthToken: token}
 		if user != nil && !local {
 			bind.UserID, bind.Dedicated = user.ID, true
 		} else {
@@ -124,11 +129,26 @@ func (s *Server) gate(next http.Handler) http.Handler {
 		}
 		defer hostclient.Bind(bind)()
 
+		if level == accessFull && token != "" {
+			setNodeRootAuthCookies(w, token)
+		}
+
 		ctx := context.WithValue(r.Context(), accessKey, level)
 		if user != nil {
 			ctx = context.WithValue(ctx, authUserKey, user)
 		}
-		next.ServeHTTP(w, r.WithContext(ctx))
+		r = r.WithContext(ctx)
+
+		// Node OPENWEB 登记的根路径别名（如源包自挂 /website）：反代 ActivePkg，不走固定路由。
+		if rootAlias {
+			stripQueryToken(r)
+			if spider.DefaultNodeHost().ProxyRootAlias(w, r) {
+				return
+			}
+			http.Error(w, "Node 源包未就绪", http.StatusBadGateway)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -190,29 +210,59 @@ func requestPlatform(r *http.Request) string {
 	return strings.ToLower(strings.TrimSpace(plat))
 }
 
-// websiteAuthCookie 配置中心页内后续 fetch('/website/…') 用的会话 Cookie（Path=/website）。
-const websiteAuthCookie = "kotv_website_auth"
+// nodeRootAuthCookie Node 根别名页内后续绝对路径 fetch 用的会话 Cookie（Path=/<别名>）。
+const nodeRootAuthCookie = "kotv_node_root_auth"
 
 // requestToken 登录令牌：Authorization: Bearer；
-// /ui 与 /website… 也可带查询参数 token（浏览器打不开自定义头）；
-// /website… 还可读 Cookie（首屏带 token 后写入，供页内绝对路径 API）。
+// /ui、/node/…、已登记根别名也可带查询参数 token（浏览器打不开自定义头）；
+// 根别名还可读 Cookie（首屏带 token 后写入，供页内绝对路径 API）。
 func requestToken(r *http.Request) string {
 	if tok := auth.BearerFromHeader(r.Header.Get("Authorization")); tok != "" {
 		return tok
 	}
 	path := r.URL.Path
-	website := path == "/website" || strings.HasPrefix(path, "/website/")
-	if path == "/ui" || website {
+	underNode := strings.HasPrefix(path, "/node/")
+	alias := spider.DefaultNodeHost().MatchNodeRootAlias(path)
+	if path == "/ui" || underNode || alias {
 		if t := strings.TrimSpace(r.URL.Query().Get("token")); t != "" {
 			return t
 		}
 	}
-	if website {
-		if c, err := r.Cookie(websiteAuthCookie); err == nil {
+	if alias {
+		if c, err := r.Cookie(nodeRootAuthCookie); err == nil {
 			return strings.TrimSpace(c.Value)
 		}
 	}
 	return ""
+}
+
+// setNodeRootAuthCookies 为当前已登记的 Node 根别名种鉴权 Cookie。
+func setNodeRootAuthCookies(w http.ResponseWriter, token string) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return
+	}
+	for _, a := range spider.DefaultNodeHost().RootAliases() {
+		http.SetCookie(w, &http.Cookie{
+			Name:     nodeRootAuthCookie,
+			Value:    token,
+			Path:     "/" + a,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
+}
+
+func stripQueryToken(r *http.Request) {
+	if r == nil || r.URL == nil {
+		return
+	}
+	q := r.URL.Query()
+	if !q.Has("token") {
+		return
+	}
+	q.Del("token")
+	r.URL.RawQuery = q.Encode()
 }
 
 // clientLabel 请求方客户端「平台 架构 版本」，记日志用。

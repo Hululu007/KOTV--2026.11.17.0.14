@@ -33,6 +33,7 @@ func (s *Server) handleNodeMsg(w http.ResponseWriter, r *http.Request) {
 
 // handleNodeProxy 反代 /node/<pkg>/… → node 进程。
 func (s *Server) handleNodeProxy(w http.ResponseWriter, r *http.Request) {
+	stripQueryToken(r)
 	path := r.URL.Path
 	rest := strings.TrimPrefix(path, "/node/")
 	if rest == "" || rest == path {
@@ -58,26 +59,4 @@ func (s *Server) handleNodeProxy(w http.ResponseWriter, r *http.Request) {
 		forward = "/"
 	}
 	pkg.Proxy(w, r, forward)
-}
-
-// handleWebsiteProxy 配置中心绝对路径 /website… → 当前就绪 Node 源包。
-// 远端：首屏可用 ?token=；成功鉴权后种 Cookie，页内 fetch('/website/api/…') 继续带鉴权。
-func (s *Server) handleWebsiteProxy(w http.ResponseWriter, r *http.Request) {
-	if tok := requestToken(r); tok != "" {
-		http.SetCookie(w, &http.Cookie{
-			Name:     websiteAuthCookie,
-			Value:    tok,
-			Path:     "/website",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-		})
-	}
-	if q := r.URL.Query(); q.Has("token") {
-		q.Del("token")
-		r.URL.RawQuery = q.Encode()
-	}
-	if spider.DefaultNodeHost().ProxyWebsite(w, r) {
-		return
-	}
-	http.Error(w, "Node 源包未就绪", http.StatusBadGateway)
 }

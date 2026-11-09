@@ -10,10 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api/kotv_api.dart';
-import '../api/kotv_auth_token.dart';
-import '../api/kotv_engine_url.dart';
 import '../player/kotv_platform.dart';
-import '../player/kotv_traffic.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
 import '../util/kotv_io.dart';
@@ -39,9 +36,6 @@ class PostMsgHost {
 
   /// 猫爪 danmuPush：详情页注册后按 url 走现有弹幕加载。
   static void Function(String url)? onDanmuPush;
-
-  /// 猫爪 openInternalWebview：桌面系统浏览器 / 安卓内置页。
-  static void Function(String url)? onOpenWeb;
 
   final KotvApi api;
   final GlobalKey<NavigatorState> navigatorKey;
@@ -1025,41 +1019,11 @@ class PostMsgHost {
     });
   }
 
-  String _rewriteEngineLocalUrl(String raw) {
-    final base = api.baseUrl.trim().isNotEmpty
-        ? api.baseUrl
-        : KotvTraffic.engineBaseUrl;
-    return kotvRewriteEngineLocalUrl(raw, base);
-  }
-
-  /// 配置中心等：本机原样打开 Node 回环；远端改写到引擎 /website 并附登录 token。
+  /// OPENWEB：引擎已改写/鉴权，客户端原样打开下发 URL。
   Future<void> _openEngineWeb(String raw) async {
-    final base = api.baseUrl.trim().isNotEmpty
-        ? api.baseUrl
-        : KotvTraffic.engineBaseUrl;
-    var url = raw.trim();
-    if (!kotvIsLocalEngineBaseUrl(base)) {
-      url = _rewriteEngineLocalUrl(url);
-      url = await _withWebsiteAuthToken(url);
-    }
-    final custom = onOpenWeb;
-    if (custom != null) {
-      custom(url);
-      return;
-    }
+    final url = raw.trim();
+    if (url.isEmpty) return;
     await _openExternal(url);
-  }
-
-  Future<String> _withWebsiteAuthToken(String url) async {
-    final u = Uri.tryParse(url);
-    if (u == null || u.host.isEmpty) return url;
-    final path = u.path;
-    if (path != '/website' && !path.startsWith('/website/')) return url;
-    final token = (await kotvAuthToken()).trim();
-    if (token.isEmpty) return url;
-    final q = Map<String, String>.from(u.queryParameters);
-    q.putIfAbsent('token', () => token);
-    return u.replace(queryParameters: q).toString();
   }
 
   Future<bool> _openExternal(String raw) async {

@@ -82,13 +82,11 @@ func (s *Server) routes() []route {
 		{"/file/", needUser, s.handleFile},
 		{"/image/", needUser, s.handleImage},
 		{"/tvbus", needUser, s.handleTvbus},
-		// 猫爪 Node：/node/msg 仅本机；/node/<pkg>/… 与 /website… 反代到源包
+		// 猫爪 Node：/node/msg 仅本机；/node/<pkg>/… 反代到源包。
+		// 页内绝对路径根别名（如源包自挂 /website）由 gate 动态反代，不在此硬编码。
 		{"/node/msg", needLocal, s.handleNodeMsg},
 		{"/msg", needLocal, s.handleNodeMsg}, // CatPawOpen messageToDart 固定打 /msg
 		{"/node/", needUser, s.handleNodeProxy},
-		// 配置中心 HTML 用绝对路径 fetch('/website/api/…')，须挂在引擎根（catDartServerPort）
-		{"/website", needUser, s.handleWebsiteProxy},
-		{"/website/", needUser, s.handleWebsiteProxy},
 
 		// 设备之间、遥控页、爬虫运行时
 		{"/action", needAdmin, s.handleAction},

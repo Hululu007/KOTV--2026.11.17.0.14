@@ -43,20 +43,15 @@ func TestRewriteNodeURL(t *testing.T) {
 		t.Fatalf("got %q want %q", got, want)
 	}
 	got = p.RewriteNodeURL("http://127.0.0.1:9999/website")
-	want = "http://127.0.0.1:9999/website"
+	want = "http://127.0.0.1:9978/node/pkg1/website"
 	if got != want {
-		t.Fatalf("website local should keep node port, got %q want %q", got, want)
-	}
-	got = p.RewriteNodeURL("http://127.0.0.1:9999/website/api/status")
-	want = "http://127.0.0.1:9999/website/api/status"
-	if got != want {
-		t.Fatalf("website api local got %q want %q", got, want)
+		t.Fatalf("website play/danmu path got %q want %q", got, want)
 	}
 }
 
 func TestRewriteNodeURLRemotePublicize(t *testing.T) {
 	localproxy.SetPort(9978)
-	playproxy.SetEngineRoutes([]string{"/node/", "/website", "/website/"})
+	playproxy.SetEngineRoutes([]string{"/node/"})
 	t.Cleanup(func() { playproxy.SetEngineRoutes(nil) })
 	defer hostclient.Bind(hostclient.Request{
 		ClientID:   "node-pub",
@@ -69,13 +64,56 @@ func TestRewriteNodeURLRemotePublicize(t *testing.T) {
 		t.Fatalf("got %q want %q", got, want)
 	}
 	got = p.RewriteNodeURL("http://127.0.0.1:9999/website")
-	wantWeb := "https://tv.example.com/website"
+	wantWeb := "https://tv.example.com/k/KEY/node/pkg1/website"
 	if got != wantWeb {
 		t.Fatalf("website remote got %q want %q", got, wantWeb)
 	}
 	out := p.RewritePlayJSON(`{"url":"js2p://_WEB_/x.m3u8"}`)
 	if !strings.Contains(out, want[:strings.Index(want, "/danmu")]) {
 		t.Fatalf("play json not publicized: %s", out)
+	}
+}
+
+func TestRewriteOpenWebURLLocalKeep(t *testing.T) {
+	localproxy.SetPort(9978)
+	h := DefaultNodeHost()
+	h.mu.Lock()
+	h.rootAliases = map[string]struct{}{}
+	h.mu.Unlock()
+	p := &nodePkg{id: "pkg1", port: 9999}
+	raw := "http://127.0.0.1:9999/website"
+	got := p.RewriteOpenWebURL(raw)
+	if got != raw {
+		t.Fatalf("local OPENWEB should keep node URL, got %q", got)
+	}
+	if !h.MatchNodeRootAlias("/website") {
+		t.Fatal("OPENWEB should register root alias")
+	}
+}
+
+func TestRewriteOpenWebURLRemoteNodeProxy(t *testing.T) {
+	localproxy.SetPort(9978)
+	playproxy.SetEngineRoutes([]string{"/node/"})
+	t.Cleanup(func() { playproxy.SetEngineRoutes(nil) })
+	h := DefaultNodeHost()
+	h.mu.Lock()
+	h.rootAliases = map[string]struct{}{}
+	h.mu.Unlock()
+	defer hostclient.Bind(hostclient.Request{
+		ClientID:   "ow",
+		UserID:     "u1",
+		Dedicated:  true,
+		PublicBase: "https://tv.example.com/k/KEY",
+		AuthToken:  "tok123",
+	})()
+	p := &nodePkg{id: "pkg1", port: 9999}
+	got := p.RewriteOpenWebURL("http://127.0.0.1:9999/website")
+	want := "https://tv.example.com/k/KEY/node/pkg1/website?token=tok123"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	if !h.MatchNodeRootAlias("/website/api") {
+		t.Fatal("expected website root alias")
 	}
 }
 
@@ -111,5 +149,52 @@ func TestHandleNodeMsgGetPlayInfo(t *testing.T) {
 func TestHandleNodeMsgUnknown(t *testing.T) {
 	if HandleNodeMsg([]byte(`{"action":"nope"}`)) != nil {
 		t.Fatal("want nil")
+	}
+}
+
+func TestHandleNodeMsgOpenWebUsesCaller(t *testing.T) {
+	localproxy.SetPort(9978)
+	playproxy.SetEngineRoutes([]string{"/node/"})
+	t.Cleanup(func() { playproxy.SetEngineRoutes(nil) })
+
+	h := DefaultNodeHost()
+	p := &nodePkg{id: "pkg1", port: 9999, pkgURL: "http://example/index.js"}
+	h.mu.Lock()
+	h.pkgs["pkg1"] = p
+	h.rootAliases = map[string]struct{}{}
+	h.mu.Unlock()
+	t.Cleanup(func() {
+		h.mu.Lock()
+		delete(h.pkgs, "pkg1")
+		h.mu.Unlock()
+	})
+
+	p.mu.Lock()
+	p.caller = callerSnap{
+		ClientID:   "",
+		UserID:     "user-a",
+		Scope:      "u:user-a",
+		PublicBase: "https://tv.example.com/k/KEY",
+		AuthToken:  "tok-a",
+		Dedicated:  true,
+	}
+	p.mu.Unlock()
+
+	var gotMsg, gotScope string
+	SetPostMsgEmitter(func(msg, clientID string) {
+		gotMsg, gotScope = msg, clientID
+	})
+	t.Cleanup(func() { SetPostMsgEmitter(nil) })
+
+	resp := HandleNodeMsg([]byte(`{"action":"openInternalWebview","url":"http://127.0.0.1:9999/website"}`))
+	if m, ok := resp.(map[string]any); !ok || m["ok"] != true {
+		t.Fatalf("resp=%v", resp)
+	}
+	want := "OPENWEB:https://tv.example.com/k/KEY/node/pkg1/website?token=tok-a"
+	if gotMsg != want {
+		t.Fatalf("msg=%q want %q", gotMsg, want)
+	}
+	if gotScope != "u:user-a" {
+		t.Fatalf("scope=%q", gotScope)
 	}
 }
