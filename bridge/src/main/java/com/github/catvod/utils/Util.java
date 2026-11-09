@@ -263,8 +263,8 @@ public class Util {
     }
 
     /**
-     * 会话隔离键：远端已登录 {@code u:<userId>}；本机多前端路由用 {@code c:<clientId>}（不造 userId）。
-     * 只给 UI/队列/遥控路由；站点 cookie 落盘用 {@link #tvScopeId()}（本机不按 clientId 分目录）。
+     * 会话隔离键（UI/队列/遥控路由，不进 cookie 目录名）。
+     * 远端租户 {@code u:<userId>}；本机多前端 {@code c:<clientId>}。
      */
     public static String scopeId() {
         String uid = userId();
@@ -280,13 +280,27 @@ public class Util {
     }
 
     /**
-     * 站点凭证（{@link Path#tv}）落盘隔离键。
-     * 本机无用户 / 仅 {@code c:} → 空，落 {@code /TV/}；远端 {@code u:} → {@code /TV/s_u_*}/。
-     * 不建 {@code s_c_*}。
+     * 站点凭证落盘用的逻辑 scope：本机（含本机登录）→ 空；仅远端 {@code u:} 保留。
+     * {@link Path#tv} 据此决定目录，见 {@link #tvDirName(String)}。
      */
     public static String tvScopeId() {
         String s = scopeId();
-        if (s.isEmpty() || s.startsWith("c:")) return "";
+        if (s.startsWith("u:")) return s;
+        return "";
+    }
+
+    /**
+     * {@code Path.tv} 子目录名片段（收拢在此，桌面/安卓 Path 共用）。
+     * 空 → 落 {@code /TV/}；{@code u_…} → {@code /TV/s_u_…}/；永不产生 {@code c_…}/{@code s_c_*}。
+     */
+    public static String tvDirName(String scopeId) {
+        if (scopeId == null) return "";
+        String t = scopeId.trim();
+        if (t.isEmpty() || t.startsWith("c:") || t.startsWith("c_")) return "";
+        if (!(t.startsWith("u:") || t.startsWith("u_"))) return "";
+        String s = t.replace(':', '_').replaceAll("[^a-zA-Z0-9._-]", "_");
+        if (s.isEmpty() || s.startsWith("c_")) return "";
+        if (s.length() > 64) s = s.substring(0, 64);
         return s;
     }
 

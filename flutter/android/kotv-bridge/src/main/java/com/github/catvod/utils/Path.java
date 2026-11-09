@@ -92,9 +92,11 @@ public class Path {
         return files("wallpaper_cache");
     }
 
-    /** 站点凭证等：TV[/scope]/.name。
-     * 本机（无用户 / 仅 c:）→ {@code /TV/.name}；远端用户 → {@code /TV/s_u_*}/。
-     * 不创建 {@code s_c_*}；旧目录由清理直接删。潇洒等 jar 网盘走自管路径，不经本方法。 */
+    /**
+     * 站点凭证：本机 → {@code /TV/.name}；远端用户 → {@code /TV/s_u_*}/。
+     * 目录名规则以 bridge {@code Util.tvDirName} 为准；改落盘须同步桌面 Path。
+     * 潇洒等 jar 网盘走自管路径，不经本方法。
+     */
     public static File tv(String name) {
         return tv(tvScope(), name);
     }
@@ -107,33 +109,33 @@ public class Path {
 
     private static File tvRoot(String scopeId) {
         File base = mkdir(new File(root(), "TV"));
-        String raw = scopeId == null ? "" : scopeId.trim();
-        if (raw.startsWith("c:")) raw = "";
-        String s = sanitizeScope(raw);
-        if (s.isEmpty()) return base;
-        return mkdir(new File(base, "s_" + s));
+        String seg = tvDirName(scopeId);
+        if (seg.isEmpty()) return base;
+        return mkdir(new File(base, "s_" + seg));
     }
 
+    /** 宿主 CL 可能仍是旧 Util：优先 tvDirName / tvScopeId，缺方法再本地算。 */
     private static String tvScope() {
         try {
             return Util.tvScopeId();
         } catch (Throwable ignored) {
-            try {
-                String s = Util.scopeId();
-                if (s != null && s.startsWith("c:")) return "";
-                return s == null ? "" : s;
-            } catch (Throwable ignored2) {
-                return "";
-            }
+            return "";
         }
     }
 
-    private static String sanitizeScope(String scopeId) {
-        if (scopeId == null) return "";
-        // Windows / 远端 u:<id> 路径禁止 ':'，换成下划线。
-        String s = scopeId.trim().replace(':', '_').replaceAll("[^a-zA-Z0-9._-]", "_");
-        if (s.length() > 64) s = s.substring(0, 64);
-        return s;
+    private static String tvDirName(String scopeId) {
+        try {
+            return Util.tvDirName(scopeId);
+        } catch (Throwable ignored) {
+            if (scopeId == null) return "";
+            String t = scopeId.trim();
+            if (t.isEmpty() || t.startsWith("c:") || t.startsWith("c_")) return "";
+            if (!(t.startsWith("u:") || t.startsWith("u_"))) return "";
+            String s = t.replace(':', '_').replaceAll("[^a-zA-Z0-9._-]", "_");
+            if (s.isEmpty() || s.startsWith("c_")) return "";
+            if (s.length() > 64) s = s.substring(0, 64);
+            return s;
+        }
     }
 
     /**

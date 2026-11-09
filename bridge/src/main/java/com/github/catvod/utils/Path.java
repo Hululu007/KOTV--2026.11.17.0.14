@@ -76,14 +76,16 @@ public class Path {
         return files("wallpaper_cache");
     }
 
-    /** 站点凭证等：TV[/scope]/.name。
-     * 本机（无用户 / 仅 c:）→ {@code /TV/.name}；远端用户 → {@code /TV/s_u_*}/。
-     * 不创建 {@code s_c_*}；旧目录由清理直接删。潇洒等 jar 网盘走自管路径，不经本方法。 */
+    /**
+     * 站点凭证：本机 → {@code /TV/.name}；远端用户 → {@code /TV/s_u_*}/。
+     * 目录名规则只在 {@link Util#tvDirName(String)}；改落盘必须同步安卓宿主 Path。
+     * 潇洒等 jar 网盘走自管路径，不经本方法。
+     */
     public static File tv(String name) {
         return tv(Util.tvScopeId(), name);
     }
 
-    /** 指定 scope 的凭证文件（异步线程可传实例捕获的 {@link Util#tvScopeId()}）。 */
+    /** 指定 scope 的凭证文件（异步线程可传已捕获的 {@link Util#tvScopeId()}）。 */
     public static File tv(String scopeId, String name) {
         if (name == null) name = "";
         if (!name.isEmpty() && !name.startsWith(".")) name = "." + name;
@@ -92,20 +94,9 @@ public class Path {
 
     private static File tvRoot(String scopeId) {
         File base = mkdir(new File(root(), "TV"));
-        // 本机 c: / 空 → /TV/；仅 u: 建 s_u_*。
-        String raw = scopeId == null ? "" : scopeId.trim();
-        if (raw.startsWith("c:")) raw = "";
-        String s = sanitizeScope(raw);
-        if (s.isEmpty()) return base;
-        return mkdir(new File(base, "s_" + s));
-    }
-
-    private static String sanitizeScope(String scopeId) {
-        if (scopeId == null) return "";
-        // Windows 路径禁止 ':'（远端 u:<id> 需换成下划线）
-        String s = scopeId.trim().replace(':', '_').replaceAll("[^a-zA-Z0-9._-]", "_");
-        if (s.length() > 64) s = s.substring(0, 64);
-        return s;
+        String seg = Util.tvDirName(scopeId);
+        if (seg.isEmpty()) return base;
+        return mkdir(new File(base, "s_" + seg));
     }
 
     public static File so() {

@@ -29,7 +29,7 @@ func TestSweepRootKeepsClientJSONAndUserTV(t *testing.T) {
 	mustFile(ui, "client.json", `{"clientId":"abc"}`)
 	mustFile(ui, "junk.log", "gone")
 	mustFile(tv, ".cookie", "keep")
-	mustFile(sc, ".old", "migrate-or-drop")
+	mustFile(sc, ".old", "drop")
 	mustFile(su, ".user", "keep-user")
 	mustFile(db, "x.db", "db")
 	mustFile(cache, "tmp.bin", "gone")

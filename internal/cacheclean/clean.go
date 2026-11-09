@@ -142,8 +142,7 @@ func Run(opt Options) Result {
 	return res
 }
 
-// sweepRootKeepConfigAndDB 保留 db/、ui/client.json、TV/ 下稳定凭证与 s_u_* 用户隔离目录。
-// ui/ 里其它文件可清；历史 s_c_*（按 Flutter clientId 分的目录）删掉。
+// sweepRootKeepConfigAndDB 保留 db/、ui/client.json、TV/ 根凭证与 s_u_*；删除 s_c_* 与其它残留。
 func sweepRootKeepConfigAndDB(root string) (int64, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -168,7 +167,7 @@ func sweepRootKeepConfigAndDB(root string) (int64, error) {
 			}
 			continue
 		case "tv":
-			n, err := removeTVClientScopeDirs(p)
+			n, err := removeLegacyClientTVDirs(p)
 			freed += n
 			if err != nil {
 				return freed, err
@@ -234,8 +233,8 @@ func scrubDirKeepFileNames(dir string, keep ...string) (int64, error) {
 	return freed, nil
 }
 
-// removeTVClientScopeDirs 去掉历史 TV/s_c_*（本机 cookie 已改落 /TV/）；保留 s_u_* 与根下凭证文件。
-func removeTVClientScopeDirs(tvRoot string) (int64, error) {
+// removeLegacyClientTVDirs 删除历史 TV/s_c_*；保留 /TV/ 根凭证与 s_u_*。
+func removeLegacyClientTVDirs(tvRoot string) (int64, error) {
 	entries, err := os.ReadDir(tvRoot)
 	if err != nil {
 		if os.IsNotExist(err) {

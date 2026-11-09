@@ -175,8 +175,8 @@ func Snapshot() Request {
 }
 
 // ScopeID 会话/队列/媒体/遥控隔离键（不是站点 cookie 落盘路径）。
-// 远端租户（dedicated）：u:<userId>；本机（含本机已登录/admin）只按 c:<clientId>，源与账号无关。
-// JAR 侧 Path.tv 对本机 c: 落稳定 /TV/，见 Util.tvScopeId。
+// 远端租户（dedicated）：u:<userId>；本机（含本机已登录/admin）只按 c:<clientId>。
+// cookie 落盘：本机 /TV/，远端 /TV/s_u_*/，见 Util.tvScopeId / tvDirName。
 func ScopeID() string {
 	if DedicatedRuntime() {
 		if u := CurrentUserID(); u != "" {
