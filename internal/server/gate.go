@@ -83,8 +83,7 @@ func (s *Server) gate(next http.Handler) http.Handler {
 		case need == needLocal:
 			writeAPIError(w, http.StatusForbidden, "只允许本机访问")
 			return
-		// 登录令牌优先于媒体钥匙：OPENWEB 常为 /k/<钥匙>/node/…?token=…，
-		// 须按用户会话放行并种根别名 Cookie，否则页内绝对路径 API 会 401。
+		// 登录令牌优先于媒体钥匙，便于 /node/…?token= 按用户会话放行并种根别名 Cookie。
 		case user != nil && remoteAccessAllowed(r):
 		case mediaKey != "":
 			if !auth.ValidMediaKey(mediaKey) {
@@ -131,10 +130,8 @@ func (s *Server) gate(next http.Handler) http.Handler {
 		}
 		defer hostclient.Bind(bind)()
 
-		// 有效登录令牌即种根别名 Cookie（不依赖 access 档），供页内 /首段/api 携带。
-		// 经 ReverseProxy 时用 wrapper 在 WriteHeader 再写入，避免被上游响应头冲掉。
-		if user != nil && token != "" {
-			w = withNodeRootAuthCookies(w, token)
+		if user != nil {
+			w = wrapNodeRootAuthCookies(w, r, token)
 		}
 
 		ctx := context.WithValue(r.Context(), accessKey, level)
@@ -143,7 +140,7 @@ func (s *Server) gate(next http.Handler) http.Handler {
 		}
 		r = r.WithContext(ctx)
 
-		// Node OPENWEB 登记的根路径别名（如源包自挂 /website）：反代 ActivePkg，不走固定路由。
+		// OPENWEB 登记的根别名：反代 ActivePkg（不硬编码业务路径名）。
 		if rootAlias {
 			stripQueryToken(r)
 			if spider.DefaultNodeHost().ProxyRootAlias(w, r) {
@@ -212,99 +209,6 @@ func requestPlatform(r *http.Request) string {
 		plat = r.URL.Query().Get("platform")
 	}
 	return strings.ToLower(strings.TrimSpace(plat))
-}
-
-// nodeRootAuthCookie Node 根别名页内后续绝对路径 fetch 用的会话 Cookie（Path=/<别名>）。
-const nodeRootAuthCookie = "kotv_node_root_auth"
-
-// requestToken 登录令牌：Authorization: Bearer；
-// /ui、/node/…、已登记根别名也可带查询参数 token（浏览器打不开自定义头）；
-// 根别名还可读 Cookie（首屏带 token 后写入，供页内绝对路径 API）。
-func requestToken(r *http.Request) string {
-	if tok := auth.BearerFromHeader(r.Header.Get("Authorization")); tok != "" {
-		return tok
-	}
-	path := r.URL.Path
-	underNode := strings.HasPrefix(path, "/node/")
-	alias := spider.DefaultNodeHost().MatchNodeRootAlias(path)
-	if path == "/ui" || underNode || alias {
-		if t := strings.TrimSpace(r.URL.Query().Get("token")); t != "" {
-			return t
-		}
-	}
-	if alias {
-		if c, err := r.Cookie(nodeRootAuthCookie); err == nil {
-			return strings.TrimSpace(c.Value)
-		}
-	}
-	return ""
-}
-
-// nodeRootAuthCookies 当前已登记根别名对应的鉴权 Cookie。
-func nodeRootAuthCookies(token string) []*http.Cookie {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return nil
-	}
-	aliases := spider.DefaultNodeHost().RootAliases()
-	out := make([]*http.Cookie, 0, len(aliases))
-	for _, a := range aliases {
-		out = append(out, &http.Cookie{
-			Name:     nodeRootAuthCookie,
-			Value:    token,
-			Path:     "/" + a,
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-		})
-	}
-	return out
-}
-
-// withNodeRootAuthCookies 在最终写响应头时附上根别名 Cookie（兼容 ReverseProxy）。
-func withNodeRootAuthCookies(w http.ResponseWriter, token string) http.ResponseWriter {
-	cookies := nodeRootAuthCookies(token)
-	if len(cookies) == 0 {
-		return w
-	}
-	for _, c := range cookies {
-		http.SetCookie(w, c)
-	}
-	return &nodeRootCookieWriter{ResponseWriter: w, cookies: cookies}
-}
-
-type nodeRootCookieWriter struct {
-	http.ResponseWriter
-	cookies []*http.Cookie
-	wrote   bool
-}
-
-func (w *nodeRootCookieWriter) WriteHeader(code int) {
-	if !w.wrote {
-		w.wrote = true
-		for _, c := range w.cookies {
-			http.SetCookie(w.ResponseWriter, c)
-		}
-	}
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *nodeRootCookieWriter) Write(b []byte) (int, error) {
-	if !w.wrote {
-		w.WriteHeader(http.StatusOK)
-	}
-	return w.ResponseWriter.Write(b)
-}
-
-func stripQueryToken(r *http.Request) {
-	if r == nil || r.URL == nil {
-		return
-	}
-	q := r.URL.Query()
-	if !q.Has("token") {
-		return
-	}
-	q.Del("token")
-	r.URL.RawQuery = q.Encode()
 }
 
 // clientLabel 请求方客户端「平台 架构 版本」，记日志用。

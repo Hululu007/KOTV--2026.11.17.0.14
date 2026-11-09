@@ -181,7 +181,6 @@ func TestHandleNodeMsgOpenWebUsesCaller(t *testing.T) {
 
 	p.mu.Lock()
 	p.caller = callerSnap{
-		ClientID:   "",
 		UserID:     "user-a",
 		Scope:      "u:user-a",
 		PublicBase: "https://tv.example.com/k/KEY",

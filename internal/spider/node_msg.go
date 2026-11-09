@@ -6,9 +6,6 @@ import (
 	"log"
 	"strings"
 	"sync"
-
-	"github.com/bobo/KOTV/internal/hostclient"
-	"github.com/bobo/KOTV/internal/playproxy"
 )
 
 // NodePlayInfo 当前点播起播信息，供 getPlayInfo 回调。
@@ -141,34 +138,8 @@ func HandleNodeMsg(body []byte) any {
 		u := strings.TrimSpace(req.URL)
 		if u == "" {
 			u, _ = opt["url"].(string)
-			u = strings.TrimSpace(u)
 		}
-		u = strings.TrimSpace(u)
-		if u == "" {
-			return map[string]any{"ok": true}
-		}
-		pkg := resolveOpenWebPkg(u, req.Prefix)
-		scope := ""
-		if pkg != nil {
-			snap := pkg.callerSnap()
-			if snap.Scope != "" || snap.PublicBase != "" || snap.AuthToken != "" || snap.ClientID != "" || snap.UserID != "" {
-				defer hostclient.Bind(hostclient.Request{
-					ClientID:   snap.ClientID,
-					UserID:     snap.UserID,
-					Dedicated:  snap.Dedicated,
-					Platform:   snap.Platform,
-					PublicBase: snap.PublicBase,
-					AuthToken:  snap.AuthToken,
-				})()
-				scope = snap.Scope
-			}
-			u = pkg.RewriteOpenWebURL(u)
-		} else {
-			u = playproxy.PublicizeURL(u)
-		}
-		if u != "" {
-			jsPostMsg("OPENWEB:"+u, scope)
-		}
+		emitOpenWeb(u, req.Prefix)
 		return map[string]any{"ok": true}
 
 	case "sniff":
@@ -231,31 +202,3 @@ func resolveNodePkgByLocalPort(raw string) *nodePkg {
 	return nil
 }
 
-// resolveOpenWebPkg prefix → 本机端口 → 任一就绪包。
-func resolveOpenWebPkg(u, prefix string) *nodePkg {
-	var pkg *nodePkg
-	if strings.TrimSpace(prefix) != "" {
-		pkg = resolveNodePkg(prefix)
-	}
-	if pkg == nil {
-		pkg = resolveNodePkgByLocalPort(u)
-	}
-	if pkg == nil {
-		pkg = resolveNodePkg("")
-	}
-	return pkg
-}
-
-// rewriteNodePkgURL 弹幕等：prefix → 本机端口 → 任一就绪包；再 RewriteNodeURL。
-func rewriteNodePkgURL(u, prefix string) string {
-	u = strings.TrimSpace(u)
-	if u == "" {
-		return u
-	}
-	pkg := resolveOpenWebPkg(u, prefix)
-	if pkg == nil {
-		// 无源包时仍尽量换成远端可达的引擎地址。
-		return playproxy.PublicizeURL(u)
-	}
-	return pkg.RewriteNodeURL(u)
-}

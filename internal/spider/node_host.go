@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/playproxy"
@@ -55,17 +54,6 @@ type NodeHost struct {
 	apiIndex    map[string]string   // /spider/... → pkgID
 	rootAliases map[string]struct{} // OPENWEB 登记的根路径首段（页内绝对路径反代）
 	runner      string
-}
-
-// callerSnap 最近一次经引擎发起的 Node 调用方会话（供 /msg OPENWEB 恢复 Bind）。
-type callerSnap struct {
-	ClientID   string
-	UserID     string
-	Scope      string
-	PublicBase string
-	AuthToken  string
-	Dedicated  bool
-	Platform   string
 }
 
 type nodePkg struct {
@@ -790,133 +778,6 @@ func (p *nodePkg) RewritePlayJSON(raw string) string {
 // RewriteNodeURL 单条 URL（弹幕等）→ /node/<pkg>/…。
 func (p *nodePkg) RewriteNodeURL(raw string) string {
 	return p.rewriteToNodeProxy(strings.TrimSpace(raw))
-}
-
-// rememberCaller 在引擎→Node 调用时戳记当前会话，供随后 /msg OPENWEB 恢复。
-func (p *nodePkg) rememberCaller() {
-	if p == nil {
-		return
-	}
-	snap := callerSnap{
-		ClientID:   hostclient.Current(),
-		UserID:     hostclient.CurrentUserID(),
-		Scope:      hostclient.ScopeID(),
-		PublicBase: hostclient.PublicBase(),
-		AuthToken:  hostclient.AuthToken(),
-		Dedicated:  hostclient.DedicatedRuntime(),
-		Platform:   hostclient.CurrentPlatform(),
-	}
-	if snap.Scope == "" && snap.PublicBase == "" && snap.AuthToken == "" && snap.ClientID == "" {
-		return
-	}
-	p.mu.Lock()
-	p.caller = snap
-	p.mu.Unlock()
-}
-
-func (p *nodePkg) callerSnap() callerSnap {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.caller
-}
-
-// RewriteOpenWebURL 仅 OPENWEB：本机原样；远端 → /node/<pkg>/… + Publicize + 可选 ?token=。
-// 同时登记路径首段为根别名，供页内绝对路径 API 反代。
-func (p *nodePkg) RewriteOpenWebURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || p == nil {
-		return raw
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return raw
-	}
-	host := strings.ToLower(u.Hostname())
-	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
-		if hostclient.PublicBase() != "" {
-			return appendOpenWebToken(playproxy.PublicizeURL(raw))
-		}
-		return raw
-	}
-	port := u.Port()
-	if port == "" {
-		if strings.EqualFold(u.Scheme, "https") {
-			port = "443"
-		} else {
-			port = "80"
-		}
-	}
-	if fmt.Sprintf("%d", p.Port()) != port {
-		return raw
-	}
-	path := u.EscapedPath()
-	if path == "" {
-		path = "/"
-	}
-	if seg := firstPathSegment(path); seg != "" {
-		DefaultNodeHost().RememberNodeRootAlias(seg)
-	}
-	if hostclient.PublicBase() == "" {
-		return raw
-	}
-	engine := fmt.Sprintf("http://127.0.0.1:%d/node/%s%s", localproxy.Port(), p.id, path)
-	if u.RawQuery != "" {
-		engine += "?" + u.RawQuery
-	}
-	if u.Fragment != "" {
-		engine += "#" + u.Fragment
-	}
-	// 浏览器页不要带 /k/<媒体钥匙>：否则 gate 易按媒体只读处理，页内绝对路径 API 种不上 Cookie。
-	return appendOpenWebToken(publicizeOpenWebPage(engine))
-}
-
-// publicizeOpenWebPage 把引擎回环页地址改成客户端可达根，且去掉 PublicBase 里的媒体钥匙前缀。
-func publicizeOpenWebPage(engineURL string) string {
-	snap := hostclient.Snapshot()
-	if snap.PublicBase == "" {
-		return engineURL
-	}
-	snap.PublicBase = stripPublicMediaKey(snap.PublicBase)
-	defer hostclient.Bind(snap)()
-	return playproxy.PublicizeURL(engineURL)
-}
-
-func stripPublicMediaKey(base string) string {
-	base = strings.TrimSpace(base)
-	u, err := url.Parse(base)
-	if err != nil || u.Host == "" {
-		return strings.TrimRight(base, "/")
-	}
-	p := u.Path
-	if !strings.HasPrefix(p, playproxy.MediaKeyPrefix) {
-		return strings.TrimRight(base, "/")
-	}
-	rest := strings.TrimPrefix(p, playproxy.MediaKeyPrefix)
-	if i := strings.IndexByte(rest, '/'); i >= 0 {
-		u.Path = rest[i:]
-	} else {
-		u.Path = ""
-	}
-	u.RawPath = ""
-	return strings.TrimRight(u.String(), "/")
-}
-
-func appendOpenWebToken(raw string) string {
-	tok := strings.TrimSpace(hostclient.AuthToken())
-	if tok == "" {
-		return raw
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return raw
-	}
-	q := u.Query()
-	if strings.TrimSpace(q.Get("token")) != "" {
-		return raw
-	}
-	q.Set("token", tok)
-	u.RawQuery = q.Encode()
-	return u.String()
 }
 
 // profilePath 源包 profile.json。

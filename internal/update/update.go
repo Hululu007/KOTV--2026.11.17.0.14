@@ -17,7 +17,7 @@ import (
 
 // CurrentVersion 可由 CI 通过
 // -ldflags "-X github.com/bobo/KOTV/internal/update.CurrentVersion=1.2.3" 注入。
-var CurrentVersion = "0.3.0"
+var CurrentVersion = "0.3.1"
 
 // Info 远程版本信息。
 type Info struct {

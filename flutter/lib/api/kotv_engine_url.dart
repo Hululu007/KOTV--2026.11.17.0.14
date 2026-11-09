@@ -151,8 +151,6 @@ bool kotvIsEngineServedPath(String path) {
       p == '/ui' ||
       p == '/library' ||
       p == '/java' ||
-      p == '/website' ||
-      p.startsWith('/website/') ||
       p.startsWith('/api/');
 }
 

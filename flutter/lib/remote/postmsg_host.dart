@@ -312,8 +312,7 @@ class PostMsgHost {
 
     if (msg.startsWith('OPENWEB:')) {
       final raw = msg.substring(8).trim();
-      if (raw.isEmpty) return;
-      unawaited(_openEngineWeb(raw));
+      if (raw.isNotEmpty) unawaited(_openExternal(raw));
       return;
     }
 
@@ -1017,13 +1016,6 @@ class PostMsgHost {
         SnackBar(content: Text(fail), duration: const Duration(seconds: 3)),
       );
     });
-  }
-
-  /// OPENWEB：引擎已改写/鉴权，客户端原样打开下发 URL。
-  Future<void> _openEngineWeb(String raw) async {
-    final url = raw.trim();
-    if (url.isEmpty) return;
-    await _openExternal(url);
   }
 
   Future<bool> _openExternal(String raw) async {
