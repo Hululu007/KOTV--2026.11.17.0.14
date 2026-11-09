@@ -499,7 +499,7 @@ double _sliderBuffered(KotvPlayback player, double total) {
   return buf < pos ? pos : buf;
 }
 
-/// 「硬解直出」图标：开=闪电（dxva2）；关=划掉的闪电（d3d11va-copy）。点一下切换并落盘 `mpvDirect`。
+/// 「硬解直出」图标：开=闪电；关=划掉的闪电（D3D11 渲染，解码由 MPV 自动选择）。点一下切换并落盘 `mpvDirect`。
 _IconAct _directOutputIcon({
   required KotvPlayback player,
   required double size,
