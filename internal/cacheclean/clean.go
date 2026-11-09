@@ -142,7 +142,8 @@ func Run(opt Options) Result {
 	return res
 }
 
-// sweepRootKeepConfigAndDB 保留配置与数据库，其余一律清掉。
+// sweepRootKeepConfigAndDB 保留数据库、UI 态（client.json）与站点凭证目录 TV/，其余清掉。
+// 若误删 ui/，Flutter 会重生 clientId；旧实现还会把 cookie 绑到 s_c_*，网盘被迫重登。
 func sweepRootKeepConfigAndDB(root string) (int64, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -155,7 +156,7 @@ func sweepRootKeepConfigAndDB(root string) (int64, error) {
 	for _, e := range entries {
 		name := e.Name()
 		low := strings.ToLower(name)
-		if low == "db" {
+		if low == "db" || low == "ui" || low == "tv" {
 			continue
 		}
 		p := filepath.Join(root, name)

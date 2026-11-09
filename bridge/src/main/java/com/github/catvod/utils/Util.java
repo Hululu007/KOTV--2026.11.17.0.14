@@ -264,6 +264,7 @@ public class Util {
 
     /**
      * 会话隔离键：仅远端已登录用 {@code u:<userId>}；本机未登录只用 {@code c:<clientId>}，不造 userId。
+     * 用于 UI/队列/遥控路由；站点 cookie 落盘请用 {@link #tvScopeId()}。
      */
     public static String scopeId() {
         String uid = userId();
@@ -276,6 +277,17 @@ public class Util {
         if (cid.isEmpty()) return "";
         if (cid.startsWith("u:") || cid.startsWith("c:")) return cid;
         return "c:" + cid;
+    }
+
+    /**
+     * 站点凭证（{@link Path#tv}）落盘隔离键。
+     * 仅远端 {@code u:} 建子目录；本机 {@code c:} 视为空，落稳定 {@code /TV/}，
+     * 避免 Flutter clientId 重生后出现新的 {@code s_c_*}、网盘被迫重登。
+     */
+    public static String tvScopeId() {
+        String s = scopeId();
+        if (s.isEmpty() || s.startsWith("c:")) return "";
+        return s;
     }
 
     public static void clearScope() {

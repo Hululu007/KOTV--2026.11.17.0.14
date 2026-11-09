@@ -57,7 +57,7 @@ public class Path {
     }
 
     public static File tv() {
-        return tvRoot(Util.scopeId());
+        return tvRoot(Util.tvScopeId());
     }
 
     public static File backup() {
@@ -76,29 +76,66 @@ public class Path {
         return files("wallpaper_cache");
     }
 
-    /** 站点凭证等：TV[/scope]/.name（多前端按 Scope/userId 隔离 cookie/token）。
-     * 空 scope → {@code /TV/.name}。潇洒等 jar 网盘走自管 TVBox/filesDir，不经本方法。 */
+    /** 站点凭证等：TV[/scope]/.name。
+     * 本机空 scope → {@code /TV/.name}（稳定，不跟 clientId）；远端 {@code u:} → {@code /TV/s_u_*}/。
+     * 潇洒等 jar 网盘走自管 TVBox/filesDir，不经本方法。 */
     public static File tv(String name) {
-        return tv(Util.scopeId(), name);
+        return tv(Util.tvScopeId(), name);
     }
 
-    /** 指定 scope 的凭证文件（异步线程可传实例捕获的 scopeId）。 */
+    /** 指定 scope 的凭证文件（异步线程可传实例捕获的 {@link Util#tvScopeId()}）。 */
     public static File tv(String scopeId, String name) {
         if (name == null) name = "";
         if (!name.isEmpty() && !name.startsWith(".")) name = "." + name;
         return new File(tvRoot(scopeId), name);
     }
 
+    private static volatile boolean legacyClientTvMigrated;
+
     private static File tvRoot(String scopeId) {
         File base = mkdir(new File(root(), "TV"));
-        String s = sanitizeScope(scopeId);
-        if (s.isEmpty()) return base;
+        // 本机 c: 与空 scope 一样落 /TV/；勿再建成 s_c_*。
+        String raw = scopeId == null ? "" : scopeId.trim();
+        if (raw.startsWith("c:")) raw = "";
+        String s = sanitizeScope(raw);
+        if (s.isEmpty()) {
+            migrateLegacyClientTvDirs(base);
+            return base;
+        }
         return mkdir(new File(base, "s_" + s));
+    }
+
+    /** 把历史 {@code TV/s_c_*}/ 下的凭证文件迁到稳定 {@code /TV/}（不覆盖已有）。 */
+    private static void migrateLegacyClientTvDirs(File tvBase) {
+        if (legacyClientTvMigrated || tvBase == null) return;
+        legacyClientTvMigrated = true;
+        File[] kids = tvBase.listFiles();
+        if (kids == null) return;
+        for (File dir : kids) {
+            if (dir == null || !dir.isDirectory()) continue;
+            String n = dir.getName();
+            if (n == null || !n.startsWith("s_c_")) continue;
+            File[] files = dir.listFiles();
+            if (files == null) continue;
+            for (File f : files) {
+                if (f == null || !f.isFile()) continue;
+                File dest = new File(tvBase, f.getName());
+                if (dest.exists()) continue;
+                if (!f.renameTo(dest)) {
+                    try {
+                        write(dest, read(f));
+                        //noinspection ResultOfMethodCallIgnored
+                        f.delete();
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+        }
     }
 
     private static String sanitizeScope(String scopeId) {
         if (scopeId == null) return "";
-        // Windows 路径禁止 ':'（本机 c:<id> / 远端 u:<id> 需换成下划线）
+        // Windows 路径禁止 ':'（远端 u:<id> 需换成下划线）
         String s = scopeId.trim().replace(':', '_').replaceAll("[^a-zA-Z0-9._-]", "_");
         if (s.length() > 64) s = s.substring(0, 64);
         return s;
