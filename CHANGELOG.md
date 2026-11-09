@@ -9,6 +9,7 @@
 - Win7 系统全屏：子窗按客户区对齐，未对齐延后重试（去掉固定毫秒盲踢）；详情/直播进全屏时序收拢。
 - Win7 MPV：硬解直出只试 `dxva2`，不行直接软解（去掉 `dxva2-copy`）；关掉直出时显式 `d3d11va,d3d11va-copy`（回读，不经 dxva2-egl）。
 - 本机站点/网盘凭证落 `/TV/`；远端用户 `/TV/s_u_*`；不建 `s_c_*`（全部清理时删）。目录名收拢到 `Util.tvDirName`。全部清理：`ui/` 只留 `client.json`。
+- 安卓清理缓存：宿主清 `cacheDir` 下 jar/js/py/epg/jpa/mpv/proxy、`codeCache/kotv_site_jars` 与 Exo；全部时再删外置 `/TV/s_c_*`（Go 只扫 `filesDir/KOTV`）。
 
 ## v0.3.0
 

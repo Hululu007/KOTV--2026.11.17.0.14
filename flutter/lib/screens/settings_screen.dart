@@ -1993,6 +1993,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     try {
       await kotvClearFlutterEphemeral();
     } catch (_) {}
+    // 安卓：Go 只扫 filesDir/KOTV；cacheDir 爬虫与外置 /TV/s_c_* 由宿主清。
+    try {
+      await kotvClearAndroidCaches(
+        script: params['script'] == true,
+        jar: params['jar'] == true,
+        other: params['other'] == true,
+        all: choice == 'all',
+      );
+    } catch (_) {}
     if (params['other'] == true) {
       try {
         await kotvClearWallpaperDisk();

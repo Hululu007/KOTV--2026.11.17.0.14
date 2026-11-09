@@ -188,6 +188,19 @@ class MainActivity : FlutterActivity() {
             result.error("exo_cache", e.message, null)
           }
         }
+        // cacheDir 爬虫/杂项 + 全部时外置 /TV/s_c_*（Go 只扫 filesDir/KOTV）。
+        "clearCaches" -> {
+          try {
+            val script = call.argument<Boolean>("script") ?: false
+            val jar = call.argument<Boolean>("jar") ?: false
+            val other = call.argument<Boolean>("other") ?: false
+            val all = call.argument<Boolean>("all") ?: false
+            KotvCacheClean.clear(this, script, jar, other, all)
+            result.success(true)
+          } catch (e: Exception) {
+            result.error("cache", e.message, null)
+          }
+        }
         "ensureCastPermissions" -> ensureCastPermissions(result)
         "ensureStoragePermission" -> ensureStoragePermission(result)
         "ensureReadMediaPermission" -> ensureReadMediaPermission(result)
