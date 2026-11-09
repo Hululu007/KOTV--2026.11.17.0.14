@@ -43,14 +43,14 @@ func TestRewriteNodeURL(t *testing.T) {
 		t.Fatalf("got %q want %q", got, want)
 	}
 	got = p.RewriteNodeURL("http://127.0.0.1:9999/website")
-	want = "http://127.0.0.1:9978/website"
+	want = "http://127.0.0.1:9999/website"
 	if got != want {
-		t.Fatalf("website got %q want %q", got, want)
+		t.Fatalf("website local should keep node port, got %q want %q", got, want)
 	}
 	got = p.RewriteNodeURL("http://127.0.0.1:9999/website/api/status")
-	want = "http://127.0.0.1:9978/website/api/status"
+	want = "http://127.0.0.1:9999/website/api/status"
 	if got != want {
-		t.Fatalf("website api got %q want %q", got, want)
+		t.Fatalf("website api local got %q want %q", got, want)
 	}
 }
 

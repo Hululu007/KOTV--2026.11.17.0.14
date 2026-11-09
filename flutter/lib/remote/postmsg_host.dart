@@ -1032,10 +1032,16 @@ class PostMsgHost {
     return kotvRewriteEngineLocalUrl(raw, base);
   }
 
-  /// 配置中心等引擎页：先改写回环，远端再附带登录 token（gate / Cookie）。
+  /// 配置中心等：本机原样打开 Node 回环；远端改写到引擎 /website 并附登录 token。
   Future<void> _openEngineWeb(String raw) async {
-    var url = _rewriteEngineLocalUrl(raw);
-    url = await _withWebsiteAuthToken(url);
+    final base = api.baseUrl.trim().isNotEmpty
+        ? api.baseUrl
+        : KotvTraffic.engineBaseUrl;
+    var url = raw.trim();
+    if (!kotvIsLocalEngineBaseUrl(base)) {
+      url = _rewriteEngineLocalUrl(url);
+      url = await _withWebsiteAuthToken(url);
+    }
     final custom = onOpenWeb;
     if (custom != null) {
       custom(url);
@@ -1049,15 +1055,6 @@ class PostMsgHost {
     if (u == null || u.host.isEmpty) return url;
     final path = u.path;
     if (path != '/website' && !path.startsWith('/website/')) return url;
-    final base = api.baseUrl.trim().isNotEmpty
-        ? api.baseUrl
-        : KotvTraffic.engineBaseUrl;
-    if (kotvIsLocalEngineBaseUrl(base) &&
-        (u.host == '127.0.0.1' ||
-            u.host == 'localhost' ||
-            u.host == '::1')) {
-      return url;
-    }
     final token = (await kotvAuthToken()).trim();
     if (token.isEmpty) return url;
     final q = Map<String, String>.from(u.queryParameters);

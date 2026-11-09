@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/playproxy"
@@ -674,10 +675,10 @@ func (p *nodePkg) nodeProxyBase() string {
 	return playproxy.PublicizeURL(loop)
 }
 
-// engineRootURL 引擎根上的路径（如 /website）；经 PublicizeURL 供远端客户端可达。
-func (p *nodePkg) engineRootURL(pathQueryFrag string) string {
+// engineWebsiteURL 远端配置中心：引擎根 /website…（Publicize 后客户端可达）。
+func (p *nodePkg) engineWebsiteURL(pathQueryFrag string) string {
 	if pathQueryFrag == "" {
-		pathQueryFrag = "/"
+		pathQueryFrag = "/website"
 	}
 	if !strings.HasPrefix(pathQueryFrag, "/") {
 		pathQueryFrag = "/" + pathQueryFrag
@@ -690,7 +691,8 @@ func isWebsitePath(path string) bool {
 }
 
 // rewriteToNodeProxy 本包回环地址与 js2p://_WEB_ 的统一改写入口。
-// /website… → 引擎根 /website…（配置中心绝对路径 API）；其余 → /node/<pkg>/…。
+// 配置中心 /website…：本机不改写（直连 Node 端口）；远端 → 引擎 /website…。
+// 其余路径 → /node/<pkg>/…。
 func (p *nodePkg) rewriteToNodeProxy(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -698,6 +700,7 @@ func (p *nodePkg) rewriteToNodeProxy(raw string) string {
 	}
 	nodeBase := p.nodeProxyBase()
 	port := p.Port()
+	remote := strings.TrimSpace(hostclient.PublicBase()) != ""
 	if port > 0 {
 		ps := fmt.Sprintf("%d", port)
 		raw = reLocalNodeURLParts.ReplaceAllStringFunc(raw, func(m string) string {
@@ -717,7 +720,10 @@ func (p *nodePkg) rewriteToNodeProxy(raw string) string {
 				pathOnly = "/"
 			}
 			if isWebsitePath(pathOnly) {
-				return p.engineRootURL(rest)
+				if !remote {
+					return m // 本机：保持 http://127.0.0.1:<nodePort>/website
+				}
+				return p.engineWebsiteURL(rest)
 			}
 			if rest == "" {
 				return strings.TrimRight(nodeBase, "/")
@@ -733,7 +739,7 @@ func (p *nodePkg) RewritePlayJSON(raw string) string {
 	return p.rewriteToNodeProxy(raw)
 }
 
-// RewriteNodeURL 单条 URL：/website… 走引擎根，其余走 /node/<pkg>/…。
+// RewriteNodeURL 单条 URL。配置中心本机不改写；远端走引擎 /website；其余 /node/<pkg>/…。
 func (p *nodePkg) RewriteNodeURL(raw string) string {
 	return p.rewriteToNodeProxy(strings.TrimSpace(raw))
 }

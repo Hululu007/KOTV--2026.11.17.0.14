@@ -83,7 +83,7 @@ Go Engine（单进程，:9978）
 
 - `getClientId()` 返回当前 ScopeID，`postMsg` 据此路由回正确前端。
 - 换源时 `ResetScriptSpiders()` 销毁 JS/Python/Node 爬虫，避免旧进程状态污染新站；设置页「清理缓存」清 JAR 磁盘 + JS/Py/Node 内存与落盘目录。
-- 配置地址以 `index.js` / `index.js.md5` 结尾时视为猫爪源包：下载校验后起 Node，`GET /config` 取 `video.sites`（忽略 read/comic/music/pan）；播放/弹幕等 `127.0.0.1:<node端口>` 与 `js2p://_WEB_` 改写为引擎 `/node/<pkg>/…`；配置中心改写为引擎根 `/website`（本机 `http://127.0.0.1:9978/website`，远端经 Publicize + 登录 token/Cookie）。页内绝对路径 `/website/api/…` 同样走引擎反代。`messageToDart` 打本机 `/msg`（toast / danmuPush / getPlayInfo / queryProfile / saveProfile / openInternalWebview）。
+- 配置地址以 `index.js` / `index.js.md5` 结尾时视为猫爪源包：下载校验后起 Node，`GET /config` 取 `video.sites`（忽略 read/comic/music/pan）；播放/弹幕等 `127.0.0.1:<node端口>` 与 `js2p://_WEB_` 改写为引擎 `/node/<pkg>/…`。配置中心 `/website`：本机不改写（直连 Node 端口）；远端改写为引擎 `/website` 并鉴权（token/Cookie），页内 `/website/api/…` 走引擎反代。`messageToDart` 打本机 `/msg`（toast / danmuPush / getPlayInfo / queryProfile / saveProfile / openInternalWebview）。
 
 ### Java bridge（JAR 爬虫）
 
