@@ -83,6 +83,9 @@ func (s *Server) gate(next http.Handler) http.Handler {
 		case need == needLocal:
 			writeAPIError(w, http.StatusForbidden, "只允许本机访问")
 			return
+		// 登录令牌优先于媒体钥匙：OPENWEB 常为 /k/<钥匙>/node/…?token=…，
+		// 须按用户会话放行并种根别名 Cookie，否则页内绝对路径 API 会 401。
+		case user != nil && remoteAccessAllowed(r):
 		case mediaKey != "":
 			if !auth.ValidMediaKey(mediaKey) {
 				writeAPIError(w, http.StatusUnauthorized, "媒体地址已过期，请重新打开")
@@ -93,7 +96,6 @@ func (s *Server) gate(next http.Handler) http.Handler {
 				return
 			}
 			level = accessMedia
-		case user != nil && remoteAccessAllowed(r):
 		case need == needPublic:
 			level = accessPublic
 		case !remoteAccessAllowed(r):
@@ -129,8 +131,10 @@ func (s *Server) gate(next http.Handler) http.Handler {
 		}
 		defer hostclient.Bind(bind)()
 
-		if level == accessFull && token != "" {
-			setNodeRootAuthCookies(w, token)
+		// 有效登录令牌即种根别名 Cookie（不依赖 access 档），供页内 /首段/api 携带。
+		// 经 ReverseProxy 时用 wrapper 在 WriteHeader 再写入，避免被上游响应头冲掉。
+		if user != nil && token != "" {
+			w = withNodeRootAuthCookies(w, token)
 		}
 
 		ctx := context.WithValue(r.Context(), accessKey, level)
@@ -236,14 +240,16 @@ func requestToken(r *http.Request) string {
 	return ""
 }
 
-// setNodeRootAuthCookies 为当前已登记的 Node 根别名种鉴权 Cookie。
-func setNodeRootAuthCookies(w http.ResponseWriter, token string) {
+// nodeRootAuthCookies 当前已登记根别名对应的鉴权 Cookie。
+func nodeRootAuthCookies(token string) []*http.Cookie {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return
+		return nil
 	}
-	for _, a := range spider.DefaultNodeHost().RootAliases() {
-		http.SetCookie(w, &http.Cookie{
+	aliases := spider.DefaultNodeHost().RootAliases()
+	out := make([]*http.Cookie, 0, len(aliases))
+	for _, a := range aliases {
+		out = append(out, &http.Cookie{
 			Name:     nodeRootAuthCookie,
 			Value:    token,
 			Path:     "/" + a,
@@ -251,6 +257,42 @@ func setNodeRootAuthCookies(w http.ResponseWriter, token string) {
 			SameSite: http.SameSiteLaxMode,
 		})
 	}
+	return out
+}
+
+// withNodeRootAuthCookies 在最终写响应头时附上根别名 Cookie（兼容 ReverseProxy）。
+func withNodeRootAuthCookies(w http.ResponseWriter, token string) http.ResponseWriter {
+	cookies := nodeRootAuthCookies(token)
+	if len(cookies) == 0 {
+		return w
+	}
+	for _, c := range cookies {
+		http.SetCookie(w, c)
+	}
+	return &nodeRootCookieWriter{ResponseWriter: w, cookies: cookies}
+}
+
+type nodeRootCookieWriter struct {
+	http.ResponseWriter
+	cookies []*http.Cookie
+	wrote   bool
+}
+
+func (w *nodeRootCookieWriter) WriteHeader(code int) {
+	if !w.wrote {
+		w.wrote = true
+		for _, c := range w.cookies {
+			http.SetCookie(w.ResponseWriter, c)
+		}
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *nodeRootCookieWriter) Write(b []byte) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
 }
 
 func stripQueryToken(r *http.Request) {

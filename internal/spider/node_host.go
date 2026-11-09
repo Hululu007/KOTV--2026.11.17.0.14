@@ -866,7 +866,39 @@ func (p *nodePkg) RewriteOpenWebURL(raw string) string {
 	if u.Fragment != "" {
 		engine += "#" + u.Fragment
 	}
-	return appendOpenWebToken(playproxy.PublicizeURL(engine))
+	// 浏览器页不要带 /k/<媒体钥匙>：否则 gate 易按媒体只读处理，页内绝对路径 API 种不上 Cookie。
+	return appendOpenWebToken(publicizeOpenWebPage(engine))
+}
+
+// publicizeOpenWebPage 把引擎回环页地址改成客户端可达根，且去掉 PublicBase 里的媒体钥匙前缀。
+func publicizeOpenWebPage(engineURL string) string {
+	snap := hostclient.Snapshot()
+	if snap.PublicBase == "" {
+		return engineURL
+	}
+	snap.PublicBase = stripPublicMediaKey(snap.PublicBase)
+	defer hostclient.Bind(snap)()
+	return playproxy.PublicizeURL(engineURL)
+}
+
+func stripPublicMediaKey(base string) string {
+	base = strings.TrimSpace(base)
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" {
+		return strings.TrimRight(base, "/")
+	}
+	p := u.Path
+	if !strings.HasPrefix(p, playproxy.MediaKeyPrefix) {
+		return strings.TrimRight(base, "/")
+	}
+	rest := strings.TrimPrefix(p, playproxy.MediaKeyPrefix)
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		u.Path = rest[i:]
+	} else {
+		u.Path = ""
+	}
+	u.RawPath = ""
+	return strings.TrimRight(u.String(), "/")
 }
 
 func appendOpenWebToken(raw string) string {

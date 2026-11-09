@@ -108,12 +108,22 @@ func TestRewriteOpenWebURLRemoteNodeProxy(t *testing.T) {
 	})()
 	p := &nodePkg{id: "pkg1", port: 9999}
 	got := p.RewriteOpenWebURL("http://127.0.0.1:9999/website")
-	want := "https://tv.example.com/k/KEY/node/pkg1/website?token=tok123"
+	// 浏览器页不加 /k/<钥匙>，便于 ?token= 走用户会话并种根别名 Cookie。
+	want := "https://tv.example.com/node/pkg1/website?token=tok123"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 	if !h.MatchNodeRootAlias("/website/api") {
 		t.Fatal("expected website root alias")
+	}
+}
+
+func TestStripPublicMediaKey(t *testing.T) {
+	if got := stripPublicMediaKey("https://tv.example.com/k/KEY"); got != "https://tv.example.com" {
+		t.Fatalf("got %q", got)
+	}
+	if got := stripPublicMediaKey("http://192.168.1.8:9978/k/abc123"); got != "http://192.168.1.8:9978" {
+		t.Fatalf("got %q", got)
 	}
 }
 
@@ -190,7 +200,7 @@ func TestHandleNodeMsgOpenWebUsesCaller(t *testing.T) {
 	if m, ok := resp.(map[string]any); !ok || m["ok"] != true {
 		t.Fatalf("resp=%v", resp)
 	}
-	want := "OPENWEB:https://tv.example.com/k/KEY/node/pkg1/website?token=tok-a"
+	want := "OPENWEB:https://tv.example.com/node/pkg1/website?token=tok-a"
 	if gotMsg != want {
 		t.Fatalf("msg=%q want %q", gotMsg, want)
 	}
