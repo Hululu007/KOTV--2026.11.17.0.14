@@ -65,7 +65,8 @@ func (s *nodeSpider) post(action string, body map[string]any) (string, error) {
 	return p.PostJSON(path, body)
 }
 
-// nodeRouteMissing 源包未注册该动作时的 HTTP 404（如推送站只有 init/detail/play）。
+// nodeRouteMissing 源包未注册该动作时的 HTTP 404。
+// 猫爪 Node 按方法存在才挂路由（t.home&&post/home）；推送等站无 home/search。
 func nodeRouteMissing(err error) bool {
 	if err == nil {
 		return false
@@ -74,7 +75,7 @@ func nodeRouteMissing(err error) bool {
 	return strings.Contains(err.Error(), " http 404:")
 }
 
-// postOptional 可选动作：无路由时当作空 JSON，避免把缺省接口报成失败。
+// postOptional 可选动作：无路由时当作空 JSON（兜底；推送首页在 SiteService 已跳过）。
 func (s *nodeSpider) postOptional(action string, body map[string]any) (string, error) {
 	raw, err := s.post(action, body)
 	if nodeRouteMissing(err) {

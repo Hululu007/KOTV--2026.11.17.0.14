@@ -50,11 +50,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   final Map<String, String> _extend = {};
   String? _statusMsg;
 
-  /// 当前首页为空且应走顶部搜索（与推送空首页区分）。
+  /// 当前首页为空且提示使用顶部搜索（与推送空首页区分）。
   bool _homeSearchOnly = false;
-
-  /// 已为该站 key 自动打开过顶部搜索，避免重复跳转。
-  String? _searchOnlyJumpKey;
   bool _loading = true;
   bool _ready = false;
   List<ConfigBannerSlide> _apiBanners = [];
@@ -697,12 +694,12 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final emptyHome = home && types.isEmpty && list.isEmpty;
       final keepGrid = home && list.isEmpty && _items.isNotEmpty;
       final pageStyle = KotvGridStyle.parse(data['style']);
-      // 空首页 + 可搜 + 非推送：通用「仅搜索」站，引导顶部搜索；推送空首页不报错。
-      final homeSite = _resolveHomeSite(_sitesFromConfig(ref.read(configProvider)));
+      // fp() 类站 home 恒空且可搜：横幅引导顶部搜索；type4 推送空首页静默。
+      final homeSite =
+          _resolveHomeSite(_sitesFromConfig(ref.read(configProvider)));
       final searchOnlyHint =
-          homeSite?.prefersTopSearchWhenEmpty(emptyHome) ?? false;
-      final pushEmptyHome =
-          emptyHome && (homeSite?.isPushSite ?? false);
+          homeSite?.showsSearchOnlyHomeHint(emptyHome) ?? false;
+      final pushEmptyHome = emptyHome && (homeSite?.isPushSite ?? false);
       setState(() {
         if (clearLoading) _loading = false;
         if (replace && !keepGrid) {
@@ -710,7 +707,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           _gridStyle = pageStyle;
         }
         _homeSearchOnly = searchOnlyHint;
-        if (!searchOnlyHint) _searchOnlyJumpKey = null;
         _statusMsg = emptyHome
             ? (searchOnlyHint
                 ? '该站仅支持搜索，请使用顶部搜索'
@@ -763,9 +759,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           _hasMore = _pageCount == 0 || _page < _pageCount;
         }
       });
-      if (searchOnlyHint) {
-        _openTopSearchForSite(homeSite?.key ?? '');
-      }
     } catch (e) {
       if (!mounted) return;
       if (kotvMessageNeedsLogin(e)) {
@@ -816,17 +809,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     return null;
   }
 
-  /// 仅搜索站：打开顶部搜索（同 key 只跳一次，换站后可再跳）。
-  void _openTopSearchForSite(String siteKey) {
-    final key = siteKey.trim();
-    if (key.isEmpty || _searchOnlyJumpKey == key) return;
-    _searchOnlyJumpKey = key;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      goKotvPage(ref, KotvPage.search);
-    });
-  }
-
   Future<void> _openSitePicker(List<SiteInfo> sites) async {
     if (sites.isEmpty) {
       await _addSource();
@@ -837,14 +819,13 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       ref,
       sites: sites,
       onSelect: (key) async {
-        SiteInfo? selected;
+        var name = key;
         for (final s in sites) {
           if (s.key == key) {
-            selected = s;
+            if (s.name.isNotEmpty) name = s.name;
             break;
           }
         }
-        final name = selected?.name.isNotEmpty == true ? selected!.name : key;
         // 换源前先硬停详情/直播，再清栈，避免后台继续出声。
         await DetailScreen.prepareLeave();
         await LiveScreen.prepareLeave();
@@ -862,19 +843,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           _items.clear();
           _statusMsg = null;
           _homeSearchOnly = false;
-          _searchOnlyJumpKey = null;
         });
         try {
           await ref.read(apiProvider).setHome(key);
           // 配置在首页请求结束之后再刷新。_reload 返回时会 invalidate。
           await _reload(clearContent: true);
-          // 可搜空首页在 _applyPage 里跳顶部搜索；推送空首页保持静默。
-          if (mounted &&
-              selected != null &&
-              selected.prefersTopSearchWhenEmpty(
-                  _types.isEmpty && _items.isEmpty)) {
-            _openTopSearchForSite(selected.key);
-          }
         } catch (e) {
           if (mounted) setState(() => _statusMsg = '切换失败: $e');
         } finally {

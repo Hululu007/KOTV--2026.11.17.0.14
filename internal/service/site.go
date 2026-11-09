@@ -32,13 +32,17 @@ func IsDirectPlayKey(key string) bool {
 	return key == PushAgentKey || key == LocalFileKey
 }
 
-// spiderDispatchType Node 的 /spider/… api 一律走爬虫分派（含配置 type=4 的推送站）；
-// 推送站本身可能未注册 home/search，由 nodeSpider 对缺失路由返回空结果。
+// spiderDispatchType Node 的 /spider/… api 一律走爬虫分派（含配置 type=4 的推送站）。
 func spiderDispatchType(site model.Site) int {
 	if spider.IsNodeAPI(site.API) {
 		return 3
 	}
 	return site.TypeID()
+}
+
+// nodePushSpider CatPawOpen push.js：meta.type=4，只挂 init/detail/play，无 home/search。
+func nodePushSpider(site model.Site) bool {
+	return spider.IsNodeAPI(site.API) && site.TypeID() == 4
 }
 
 func directPlaySite(key string) *model.Site {
@@ -172,6 +176,12 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		if !spider.RunnableAPI(site.API) {
 			return failed(fmt.Errorf("站点「%s」没有可用爬虫", siteLabel(site)))
 		}
+		// Node 推送无 home 路由：直接空首页，避免 POST /home → 404。
+		if nodePushSpider(site) {
+			result = model.Result{Success: true}
+			applyTypes(site, &result)
+			break
+		}
 		sp := s.cfg.Spider(site)
 		type homeBundler interface {
 			HomeBundle(filter bool) (home string, homeVod string, err error)
@@ -290,6 +300,10 @@ func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map
 	var err error
 	switch spiderDispatchType(site) {
 	case 3:
+		if nodePushSpider(site) {
+			result = model.Result{Success: true}
+			break
+		}
 		if native, ok := localDirCategory(tid); ok {
 			result = native
 		} else {
@@ -822,6 +836,10 @@ func searchFirstExact(sites []model.Site, matchName, query string, exclude map[s
 func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, page string) ([]model.Vod, error) {
 	switch spiderDispatchType(site) {
 	case 3:
+		// Node 推送无 search 路由。
+		if nodePushSpider(site) {
+			return nil, nil
+		}
 		sp := s.cfg.SpiderOnly(site)
 		raw, err := sp.SearchContent(keyword, quick, page)
 		if err != nil {

@@ -290,15 +290,15 @@ class SiteInfo {
   /// 豆瓣等索引站，点条目去全网搜索而不是本站详情。
   final bool indexs;
 
-  /// 配置 type；4 为推送类（可无 home/search 路由）。
+  /// 配置 type；4 为推送站（CatPawOpen push 仅 init/detail/play，无 home/search）。
   final int type;
   final String styleType;
 
-  /// 推送类站：详情/播放入口，不作浏览首页。
+  /// 推送站：详情/播放入口，无浏览首页。
   bool get isPushSite => type == 4;
 
-  /// 空首页且可搜、又非推送：应走顶部搜索（如「搜索|全盘」类站）。
-  bool prefersTopSearchWhenEmpty(bool emptyHome) =>
+  /// 空首页且可搜、非推送：提示使用顶部搜索（勿自动跳转）。
+  bool showsSearchOnlyHomeHint(bool emptyHome) =>
       emptyHome && searchable && !isPushSite;
 
   factory SiteInfo.fromJson(Map<String, dynamic> j) => SiteInfo(
