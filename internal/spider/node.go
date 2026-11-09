@@ -130,12 +130,39 @@ func (s *nodeSpider) HomeVideoContent() (string, error) {
 	if err := s.ensureInit(); err != nil {
 		return "", err
 	}
-	// homeVod 多包未实现：任意失败都当空列表，勿阻断首页。
-	raw, err := s.post("homeVod", map[string]any{})
-	if err != nil || strings.TrimSpace(raw) == "" {
-		return "{}", nil
+	// 猫爪包按方法挂路由：homeVod 与 homeVideo 常只实现其一（缓存包约 5 vs 16）。
+	return s.postHomeVideoList()
+}
+
+// postHomeVideoList 先 homeVod；无该路由再 homeVideo；其它错误不阻断首页。
+func (s *nodeSpider) postHomeVideoList() (string, error) {
+	vodRaw, vodErr := s.post("homeVod", map[string]any{})
+	var videoRaw string
+	var videoErr error
+	if nodeRouteMissing(vodErr) {
+		videoRaw, videoErr = s.postOptional("homeVideo", map[string]any{})
 	}
-	return raw, nil
+	return pickHomeVideoRaw(vodRaw, vodErr, videoRaw, videoErr)
+}
+
+// pickHomeVideoRaw 合并 homeVod / homeVideo 结果（供单测）。
+func pickHomeVideoRaw(vodRaw string, vodErr error, videoRaw string, videoErr error) (string, error) {
+	if vodErr == nil {
+		if strings.TrimSpace(vodRaw) == "" {
+			return "{}", nil
+		}
+		return vodRaw, nil
+	}
+	if nodeRouteMissing(vodErr) {
+		if videoErr != nil && !nodeRouteMissing(videoErr) {
+			return "", videoErr
+		}
+		if strings.TrimSpace(videoRaw) == "" || nodeRouteMissing(videoErr) {
+			return "{}", nil
+		}
+		return videoRaw, nil
+	}
+	return "{}", nil
 }
 
 func (s *nodeSpider) CategoryContent(tid, pg string, filter bool, extend map[string]string) (string, error) {

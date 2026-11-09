@@ -111,14 +111,14 @@ func HandleNodeMsg(body []byte) any {
 		}
 
 	case "queryProfile":
-		pkg := resolveNodePkg("")
+		pkg := resolveNodePkg(req.Prefix)
 		if pkg == nil {
 			return nil
 		}
 		return pkg.queryProfile()
 
 	case "saveProfile":
-		pkg := resolveNodePkg("")
+		pkg := resolveNodePkg(req.Prefix)
 		if pkg == nil {
 			return nil
 		}
@@ -149,7 +149,7 @@ func HandleNodeMsg(body []byte) any {
 		return map[string]any{"ok": true}
 
 	case "sniff":
-		log.Printf("node msg: 未实现 sniff")
+		// CatPawOpen ffm3u8 等会调；当前宿主无嗅探管线，返回 null。
 		return nil
 
 	default:

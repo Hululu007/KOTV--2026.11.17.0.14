@@ -40,7 +40,8 @@ func spiderDispatchType(site model.Site) int {
 	return site.TypeID()
 }
 
-// nodePushSpider CatPawOpen push.js：meta.type=4，只挂 init/detail/play，无 home/search。
+// nodePushSpider CatPawOpen/缓存包 push：meta.type=4，无 home/search/category
+//（有 init/detail/play，另可有 support/proxy）。
 func nodePushSpider(site model.Site) bool {
 	return spider.IsNodeAPI(site.API) && site.TypeID() == 4
 }

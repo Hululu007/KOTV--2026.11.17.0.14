@@ -290,7 +290,7 @@ class SiteInfo {
   /// 豆瓣等索引站，点条目去全网搜索而不是本站详情。
   final bool indexs;
 
-  /// 配置 type；4 为推送站（CatPawOpen push 仅 init/detail/play，无 home/search）。
+  /// 配置 type；4 为推送站（无 home/search/category，有 detail/play）。
   final int type;
   final String styleType;
 
