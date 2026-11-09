@@ -281,8 +281,8 @@ public class Util {
 
     /**
      * 站点凭证（{@link Path#tv}）落盘隔离键。
-     * 仅远端 {@code u:} 建子目录；本机 {@code c:} 视为空，落稳定 {@code /TV/}，
-     * 避免 Flutter clientId 重生后出现新的 {@code s_c_*}、网盘被迫重登。
+     * 本机无用户 / 仅 {@code c:} → 空，落 {@code /TV/}；远端 {@code u:} → {@code /TV/s_u_*}/。
+     * 不建 {@code s_c_*}。
      */
     public static String tvScopeId() {
         String s = scopeId();

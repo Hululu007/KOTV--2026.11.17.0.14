@@ -93,8 +93,8 @@ public class Path {
     }
 
     /** 站点凭证等：TV[/scope]/.name。
-     * 本机空 scope → {@code /TV/.name}；远端 {@code u:} → {@code /TV/s_u_*}/。
-     * 潇洒等 jar 网盘 cookie 自管 {@code /TVBox/} 与 filesDir/Pizazz，不经本方法。 */
+     * 本机（无用户 / 仅 c:）→ {@code /TV/.name}；远端用户 → {@code /TV/s_u_*}/。
+     * 不创建 {@code s_c_*}；旧目录由清理直接删。潇洒等 jar 网盘走自管路径，不经本方法。 */
     public static File tv(String name) {
         return tv(tvScope(), name);
     }
@@ -105,57 +105,13 @@ public class Path {
         return new File(tvRoot(scopeId), name);
     }
 
-    private static volatile boolean legacyClientTvMigrated;
-
     private static File tvRoot(String scopeId) {
         File base = mkdir(new File(root(), "TV"));
         String raw = scopeId == null ? "" : scopeId.trim();
         if (raw.startsWith("c:")) raw = "";
         String s = sanitizeScope(raw);
-        if (s.isEmpty()) {
-            migrateLegacyClientTvDirs(base);
-            return base;
-        }
+        if (s.isEmpty()) return base;
         return mkdir(new File(base, "s_" + s));
-    }
-
-    private static void migrateLegacyClientTvDirs(File tvBase) {
-        if (legacyClientTvMigrated || tvBase == null) return;
-        legacyClientTvMigrated = true;
-        File[] kids = tvBase.listFiles();
-        if (kids == null) return;
-        for (File dir : kids) {
-            if (dir == null || !dir.isDirectory()) continue;
-            String n = dir.getName();
-            if (n == null || !n.startsWith("s_c_")) continue;
-            File[] files = dir.listFiles();
-            if (files != null) {
-                for (File f : files) {
-                    if (f == null || !f.isFile()) continue;
-                    File dest = new File(tvBase, f.getName());
-                    if (dest.exists()) continue;
-                    if (!f.renameTo(dest)) {
-                        try {
-                            write(dest, read(f));
-                            //noinspection ResultOfMethodCallIgnored
-                            f.delete();
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                }
-            }
-            deleteTree(dir);
-        }
-    }
-
-    private static void deleteTree(File f) {
-        if (f == null || !f.exists()) return;
-        File[] kids = f.listFiles();
-        if (kids != null) {
-            for (File c : kids) deleteTree(c);
-        }
-        //noinspection ResultOfMethodCallIgnored
-        f.delete();
     }
 
     private static String tvScope() {
