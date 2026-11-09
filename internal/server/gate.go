@@ -114,7 +114,7 @@ func (s *Server) gate(next http.Handler) http.Handler {
 
 		bind := hostclient.Request{Platform: requestPlatform(r), AuthToken: token}
 		if user != nil && !local {
-			bind.UserID, bind.Dedicated = user.ID, true
+			bind.UserID, bind.Username, bind.Dedicated = user.ID, user.Username, true
 		} else {
 			bind.ClientID = clientIDFromRequest(r)
 		}

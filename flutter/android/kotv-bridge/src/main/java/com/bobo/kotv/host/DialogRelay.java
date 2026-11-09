@@ -63,13 +63,17 @@ public final class DialogRelay {
         Activity act = UiContext.activity();
         Context base = act != null ? act : ctx;
         if (base.getApplicationContext() == base) return ctx;
-        return wrap(base, Util.remoteClientId(), Util.remoteUserId());
+        return wrap(base, Util.remoteClientId(), Util.remoteUserId(), Util.remoteUsername());
     }
 
-    public static Context wrap(Context base, String clientId, String userId) {
+    public static Context wrap(Context base, String clientId, String userId, String username) {
         if (base == null) return null;
         if (base instanceof RemoteUiContext) return base;
-        return new RemoteUiContext(base, clientId == null ? "" : clientId, userId == null ? "" : userId);
+        return new RemoteUiContext(
+                base,
+                clientId == null ? "" : clientId,
+                userId == null ? "" : userId,
+                username == null ? "" : username);
     }
 
     public static WindowManager wrapWindowManager(WindowManager real) {
@@ -109,13 +113,15 @@ public final class DialogRelay {
             SWALLOWED.add(view);
         }
         String uid = userIdOf(view);
-        RELAY.execute(() -> runRelay(view, cid, uid, toast));
+        String uname = usernameOf(view);
+        RELAY.execute(() -> runRelay(view, cid, uid, uname, toast));
         return true;
     }
 
-    private static void runRelay(View view, String clientId, String userId, boolean toast) {
+    private static void runRelay(View view, String clientId, String userId, String username, boolean toast) {
         Util.setClientId(clientId);
         Util.setUserId(userId);
+        Util.setUsername(username);
         try {
             if (toast) {
                 sleepQuiet(80);
@@ -455,15 +461,27 @@ public final class DialogRelay {
         return Util.remoteUserId();
     }
 
+    private static String usernameOf(View view) {
+        Context c = view.getContext();
+        int hops = 0;
+        while (c instanceof ContextWrapper && hops++ < 8) {
+            if (c instanceof RemoteUiContext) return ((RemoteUiContext) c).username;
+            c = ((ContextWrapper) c).getBaseContext();
+        }
+        return Util.remoteUsername();
+    }
+
     static final class RemoteUiContext extends ContextWrapper {
         final String clientId;
         final String userId;
+        final String username;
         private WindowManager wm;
 
-        RemoteUiContext(Context base, String clientId, String userId) {
+        RemoteUiContext(Context base, String clientId, String userId, String username) {
             super(base);
             this.clientId = clientId;
             this.userId = userId;
+            this.username = username == null ? "" : username;
         }
 
         @Override

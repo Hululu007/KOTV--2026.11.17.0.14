@@ -174,14 +174,21 @@ def _install_python_stub(types):
 
 
 _ui_scope = threading.local()
+_ui_username = threading.local()
 
 
-def _bind_ui_scope(scope):
+def _bind_ui_scope(scope, username=None):
     _ui_scope.v = scope or ""
+    if username is not None:
+        _ui_username.v = username or ""
 
 
 def _current_ui_scope():
     return getattr(_ui_scope, "v", "") or ""
+
+
+def _current_ui_username():
+    return getattr(_ui_username, "v", "") or ""
 
 
 def _install_java_module_stubs():
@@ -498,6 +505,13 @@ def _install_desktop_java(types, proxy_cls):
                 return scope[2:]
             return ""
 
+        def username(self):
+            return _current_ui_username()
+
+        def tvScopeId(self):
+            name = _current_ui_username()
+            return ("u:" + name) if name else ""
+
         def clientId(self):
             return _current_ui_scope()
 
@@ -547,11 +561,12 @@ def _install_desktop_java(types, proxy_cls):
     def _post_msg(msg, scope=None):
         if scope:
             prev = _current_ui_scope()
+            prev_user = _current_ui_username()
             _bind_ui_scope(scope)
             try:
                 jclass("com.github.catvod.utils.Util").notify(msg)
             finally:
-                _bind_ui_scope(prev)
+                _bind_ui_scope(prev, prev_user)
             return
         jclass("com.github.catvod.utils.Util").notify(msg)
 
@@ -996,7 +1011,8 @@ def kotv_dispatch_json(line):
         return json.dumps({"id": None, "ok": False, "error": "empty request"}, ensure_ascii=False)
     req = json.loads(line)
     prev = _current_ui_scope()
-    _bind_ui_scope(str(req.get("clientId") or ""))
+    prev_user = _current_ui_username()
+    _bind_ui_scope(str(req.get("clientId") or ""), str(req.get("username") or ""))
     try:
         result = invoke(req.get("method", ""), req.get("args") or {})
         return json.dumps({"id": req.get("id"), "ok": True, "result": result}, ensure_ascii=False)
@@ -1004,7 +1020,7 @@ def kotv_dispatch_json(line):
         traceback.print_exc(file=sys.stderr)
         return json.dumps({"id": req.get("id"), "ok": False, "error": str(exc)}, ensure_ascii=False)
     finally:
-        _bind_ui_scope(prev)
+        _bind_ui_scope(prev, prev_user)
 
 
 def kotv_repl():

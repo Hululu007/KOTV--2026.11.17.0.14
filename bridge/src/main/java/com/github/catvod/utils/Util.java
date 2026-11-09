@@ -44,8 +44,10 @@ public class Util {
      * 线程池内丢失的场景由 NetProfiles.lastActive 兜底。
      */
     private static final ThreadLocal<String> CLIENT_ID_TL = new InheritableThreadLocal<>();
-    /** 远端鉴权用户；有则界面消息优先按 userId 路由到该用户设备。 */
+    /** 远端鉴权用户 id（稳定 UUID）；界面消息 / Scope 路由用，不进 cookie 目录名。 */
     private static final ThreadLocal<String> USER_ID_TL = new InheritableThreadLocal<>();
+    /** 远端登录名；仅 {@link #tvScopeId()}/{@link Path#tv} 目录用，避免随账号 id 重建而变。 */
+    private static final ThreadLocal<String> USERNAME_TL = new InheritableThreadLocal<>();
 
     private static final AtomicLong UI_NOTIFY_EPOCH = new AtomicLong();
     private static final ExecutorService UI_MESSAGES = Executors.newSingleThreadExecutor(r -> {
@@ -247,7 +249,7 @@ public class Util {
         return s == null ? "" : s;
     }
 
-    /** 绑定远端 userId（裸值，不含 u: 前缀）。 */
+    /** 绑定远端 userId（裸 UUID，不含 u: 前缀）。 */
     public static void setUserId(String id) {
         if (id == null || id.isEmpty()) USER_ID_TL.remove();
         else USER_ID_TL.set(id.trim());
@@ -259,6 +261,21 @@ public class Util {
 
     public static String userId() {
         String s = USER_ID_TL.get();
+        return s == null ? "" : s;
+    }
+
+    /** 绑定远端登录名（裸用户名）；仅 cookie 目录用。 */
+    public static void setUsername(String name) {
+        if (name == null || name.isEmpty()) USERNAME_TL.remove();
+        else USERNAME_TL.set(name.trim());
+    }
+
+    public static void clearUsername() {
+        USERNAME_TL.remove();
+    }
+
+    public static String username() {
+        String s = USERNAME_TL.get();
         return s == null ? "" : s;
     }
 
@@ -280,33 +297,69 @@ public class Util {
     }
 
     /**
-     * 站点凭证落盘用的逻辑 scope：本机（含本机登录）→ 空；仅远端 {@code u:} 保留。
-     * {@link Path#tv} 据此决定目录，见 {@link #tvDirName(String)}。
+     * 站点凭证落盘键：本机 → 空；远端 → {@code u:<用户名>}。
+     * {@link Path#tv} 只认这个，不认 userId。
      */
     public static String tvScopeId() {
-        String s = scopeId();
-        if (s.startsWith("u:")) return s;
-        return "";
+        String name = username();
+        if (name.isEmpty()) return "";
+        return "u:" + name;
     }
 
     /**
-     * {@code Path.tv} 子目录名片段（收拢在此，桌面/安卓 Path 共用）。
-     * 空 → 落 {@code /TV/}；{@code u_…} → {@code /TV/s_u_…}/；永不产生 {@code c_…}/{@code s_c_*}。
+     * {@code Path.tv} 子目录名片段（收拢于此；桌面/安卓 Path 只调本方法）。
+     * 入参：{@code u:用户名} / {@code u_用户名} / 裸用户名。
+     * 空或 {@code c:} → 空（落 {@code /TV/}）；否则返回 {@code u_用户名}
+     * （Path 再加 {@code s_} → {@code /TV/s_u_用户名/}）。永不产生 {@code s_c_*}。
      */
-    public static String tvDirName(String scopeId) {
-        if (scopeId == null) return "";
-        String t = scopeId.trim();
+    public static String tvDirName(String scopeOrName) {
+        String name = tvUsernameOf(scopeOrName);
+        if (name.isEmpty()) return "";
+        return "u_" + name;
+    }
+
+    /** 从 scope/用户名抽出可落盘的用户名片段（非法路径字符替换为 _）。 */
+    public static String tvUsernameOf(String scopeOrName) {
+        if (scopeOrName == null) return "";
+        String t = scopeOrName.trim();
         if (t.isEmpty() || t.startsWith("c:") || t.startsWith("c_")) return "";
-        if (!(t.startsWith("u:") || t.startsWith("u_"))) return "";
-        String s = t.replace(':', '_').replaceAll("[^a-zA-Z0-9._-]", "_");
-        if (s.isEmpty() || s.startsWith("c_")) return "";
-        if (s.length() > 64) s = s.substring(0, 64);
-        return s;
+        if (t.startsWith("u:")) t = t.substring(2);
+        else if (t.startsWith("s_u_")) t = t.substring(4);
+        else if (t.startsWith("u_")) t = t.substring(2);
+        return sanitizeTvUsername(t);
+    }
+
+    private static String sanitizeTvUsername(String name) {
+        if (name == null) return "";
+        StringBuilder b = new StringBuilder(name.length());
+        for (int i = 0; i < name.length(); ) {
+            int cp = name.codePointAt(i);
+            i += Character.charCount(cp);
+            if (cp == '/' || cp == '\\' || cp == ':' || cp == '*' || cp == '?'
+                    || cp == '"' || cp == '<' || cp == '>' || cp == '|'
+                    || cp == '#' || cp == '$') {
+                b.append('_');
+                continue;
+            }
+            if (Character.isISOControl(cp)) continue;
+            b.appendCodePoint(cp);
+        }
+        String out = b.toString().trim();
+        while (out.startsWith(".")) out = out.substring(1).trim();
+        if (out.length() > 64) {
+            out = out.substring(0, 64);
+            // 避免截断半个代理对
+            if (!out.isEmpty() && Character.isHighSurrogate(out.charAt(out.length() - 1))) {
+                out = out.substring(0, out.length() - 1);
+            }
+        }
+        return out.trim();
     }
 
     public static void clearScope() {
         clearClientId();
         clearUserId();
+        clearUsername();
     }
 
     /** 远端客户端走安卓 jar 时 sticky：AlertDialog.show() 常 post 到主线程，ThreadLocal 会丢。 */
@@ -314,10 +367,12 @@ public class Util {
             new java.util.concurrent.atomic.AtomicInteger();
     private static volatile String REMOTE_UI_CLIENT = "";
     private static volatile String REMOTE_UI_USER = "";
+    private static volatile String REMOTE_UI_USERNAME = "";
 
-    public static void enterRemoteUi(String clientId, String userId) {
+    public static void enterRemoteUi(String clientId, String userId, String username) {
         REMOTE_UI_CLIENT = clientId == null ? "" : clientId;
         REMOTE_UI_USER = userId == null ? "" : userId;
+        REMOTE_UI_USERNAME = username == null ? "" : username.trim();
         REMOTE_UI_DEPTH.incrementAndGet();
     }
 
@@ -333,6 +388,7 @@ public class Util {
         if (REMOTE_UI_DEPTH.get() <= 0) {
             REMOTE_UI_CLIENT = "";
             REMOTE_UI_USER = "";
+            REMOTE_UI_USERNAME = "";
             REMOTE_UI_DEPTH.set(0);
         }
     }
@@ -352,6 +408,11 @@ public class Util {
         return s == null ? "" : s;
     }
 
+    public static String remoteUsername() {
+        String s = REMOTE_UI_USERNAME;
+        return s == null ? "" : s;
+    }
+
     /**
      * Notify host via the UI socket; also logs.
      * {@code UI:}/{@code UI_CLOSE:} are sent synchronously so waitUiAction can start after delivery.
@@ -368,6 +429,7 @@ public class Util {
         // 异步队列在另一线程执行，必须捕获当前 Scope，否则会丢路由。
         final String cid = clientId();
         final String uid = userId();
+        final String uname = username();
         UI_MESSAGES.execute(() -> {
             if (epoch != UI_NOTIFY_EPOCH.get()) {
                 SpiderDebug.log("界面消息已丢弃");
@@ -376,6 +438,7 @@ public class Util {
             try {
                 setClientId(cid);
                 setUserId(uid);
+                setUsername(uname);
                 sendUi(msg);
             } catch (Exception e) {
                 SpiderDebug.log("界面消息发送失败: " + e.getClass().getSimpleName() + ": " + e.getMessage());

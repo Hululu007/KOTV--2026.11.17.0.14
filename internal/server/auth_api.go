@@ -215,12 +215,16 @@ func (s *Server) handleAdminUserAction(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.Method == http.MethodDelete && action == "":
+		uname := ""
+		if u := auth.GetUser(id); u != nil {
+			uname = u.Username
+		}
 		if err := auth.DeleteUser(id); err != nil {
 			writeAPIError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if s.contentAPI != nil {
-			s.contentAPI.PurgeUserData(id)
+			s.contentAPI.PurgeUserData(id, uname)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case r.Method == http.MethodPost && action == "enable":

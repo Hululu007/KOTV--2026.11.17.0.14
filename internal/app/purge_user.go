@@ -12,8 +12,10 @@ import (
 )
 
 // PurgeUserData 删除远端用户的全部用户态（owner 为空即本机，不可调用）。
-func (a *App) PurgeUserData(userID string) {
+// username 用于删 /TV/s_u_<用户名>/；可空（仅清库与运行时）。
+func (a *App) PurgeUserData(userID, username string) {
 	userID = strings.TrimSpace(userID)
+	username = strings.TrimSpace(username)
 	if a == nil || userID == "" {
 		return
 	}
@@ -35,6 +37,7 @@ func (a *App) PurgeUserData(userID string) {
 	}
 	spider.KillUserRuntime(userID)
 	parse.CancelUserSniffs(userID)
+	paths.RemoveTVUserDirs(username)
 	// 清理迁移前残留目录
 	_ = os.RemoveAll(filepath.Join(paths.Data(), "users", userID))
 }

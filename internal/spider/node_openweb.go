@@ -14,6 +14,7 @@ import (
 type callerSnap struct {
 	ClientID   string
 	UserID     string
+	Username   string
 	Scope      string
 	PublicBase string
 	AuthToken  string
@@ -29,6 +30,7 @@ func (c callerSnap) bindRequest() hostclient.Request {
 	return hostclient.Request{
 		ClientID:   c.ClientID,
 		UserID:     c.UserID,
+		Username:   c.Username,
 		Dedicated:  c.Dedicated,
 		Platform:   c.Platform,
 		PublicBase: c.PublicBase,
@@ -45,6 +47,7 @@ func (p *nodePkg) rememberCaller() {
 	snap := callerSnap{
 		ClientID:   req.ClientID,
 		UserID:     req.UserID,
+		Username:   req.Username,
 		Scope:      hostclient.ScopeID(),
 		PublicBase: req.PublicBase,
 		AuthToken:  req.AuthToken,

@@ -77,15 +77,14 @@ public class Path {
     }
 
     /**
-     * 站点凭证：本机 → {@code /TV/.name}；远端用户 → {@code /TV/s_u_*}/。
-     * 目录名规则只在 {@link Util#tvDirName(String)}；改落盘必须同步安卓宿主 Path。
-     * 潇洒等 jar 网盘走自管路径，不经本方法。
+     * 站点凭证：本机 → {@code /TV/.name}；远端 → {@code /TV/s_u_<用户名>/}。
+     * 目录名只经 {@link Util#tvDirName(String)}；安卓宿主 Path 同步调用，勿复制规则。
      */
     public static File tv(String name) {
         return tv(Util.tvScopeId(), name);
     }
 
-    /** 指定 scope 的凭证文件（异步线程可传已捕获的 {@link Util#tvScopeId()}）。 */
+    /** 指定 {@link Util#tvScopeId()}（或已捕获的同形键）的凭证文件。 */
     public static File tv(String scopeId, String name) {
         if (name == null) name = "";
         if (!name.isEmpty() && !name.startsWith(".")) name = "." + name;

@@ -177,6 +177,7 @@ class SpiderService private constructor(
           SpiderBridge.bindCallScope(
             obj.optString("clientId", ""),
             obj.optString("userId", ""),
+            obj.optString("username", ""),
             remoteUi,
           )
           try {

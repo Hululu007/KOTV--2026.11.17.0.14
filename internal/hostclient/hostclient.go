@@ -1,6 +1,8 @@
-// Package hostclient 在一次 HTTP/爬虫调用的 goroutine 上绑定前端 clientId / userId，
+// Package hostclient 在一次 HTTP/爬虫调用的 goroutine 上绑定前端 clientId / userId / username，
 // 供 JAR bridge 请求携带，并把界面消息与每用户运行时路由回正确客户端。
 //
+// userId：鉴权 UUID（Scope / DB owner / 独立引擎桶）。
+// username：登录名（Path.tv 的 /TV/s_u_<用户名>/、下载人读子目录）。
 // 脚本文件（JAR/Py/JS 下载缓存）全局共享；仅「远端租户」请求使用独立 JVM/Py/JS 引擎。
 package hostclient
 
@@ -14,6 +16,7 @@ import (
 type binding struct {
 	ClientID   string
 	UserID     string
+	Username   string // 远端登录名；仅 Path.tv / 下载子目录等人读路径用
 	Platform   string
 	PublicBase string // 非本机请求：scheme://host[:port]，供代理 URL 改写
 	AuthToken  string // 登录令牌；供 Node OPENWEB 远端 URL 附带 ?token=
@@ -42,15 +45,25 @@ func Enter(id string) func() {
 
 // EnterSession 绑定 clientId/userId，并声明是否使用独立运行时引擎。
 // dedicated=false：本机或未开远端鉴权 → 共享 JVM/Py/JS；脚本仍全局缓存。
+// 同 goroutine 嵌套时保留当前 Username（若 userID 未变）。
 func EnterSession(clientID, userID string, dedicated bool) func() {
 	clientID = strings.TrimSpace(clientID)
 	userID = strings.TrimSpace(userID)
 	if clientID == "" && userID == "" && !dedicated {
 		return func() {}
 	}
+	username := ""
+	if userID != "" && userID == CurrentUserID() {
+		username = CurrentUsername()
+	}
 	gid := goid()
 	prev, _ := byG.Load(gid)
-	byG.Store(gid, binding{ClientID: clientID, UserID: userID, Dedicated: dedicated && userID != ""})
+	byG.Store(gid, binding{
+		ClientID:  clientID,
+		UserID:    userID,
+		Username:  username,
+		Dedicated: dedicated && userID != "",
+	})
 	return func() {
 		if prev == nil {
 			byG.Delete(gid)
@@ -64,6 +77,7 @@ func EnterSession(clientID, userID string, dedicated bool) func() {
 type Request struct {
 	ClientID   string
 	UserID     string
+	Username   string // 远端登录名；Path.tv 用
 	Dedicated  bool   // 远端租户：独立运行时
 	Platform   string // 前端平台（android/windows/…）
 	PublicBase string // 非本机请求的对外根地址（可带媒体钥匙前缀），供改写代理地址；本机为空
@@ -78,6 +92,7 @@ func Bind(req Request) func() {
 	byG.Store(gid, binding{
 		ClientID:   strings.TrimSpace(req.ClientID),
 		UserID:     userID,
+		Username:   strings.TrimSpace(req.Username),
 		Platform:   strings.ToLower(strings.TrimSpace(req.Platform)),
 		PublicBase: strings.TrimRight(strings.TrimSpace(req.PublicBase), "/"),
 		AuthToken:  strings.TrimSpace(req.AuthToken),
@@ -106,7 +121,7 @@ func Current() string {
 	return s
 }
 
-// CurrentUserID 返回当前 goroutine 绑定的 userId（鉴权身份；无则空串）。
+// CurrentUserID 返回当前 goroutine 绑定的 userId（鉴权 UUID；无则空串）。
 func CurrentUserID() string {
 	v, ok := byG.Load(goid())
 	if !ok {
@@ -114,6 +129,18 @@ func CurrentUserID() string {
 	}
 	if b, ok := v.(binding); ok {
 		return b.UserID
+	}
+	return ""
+}
+
+// CurrentUsername 返回当前 goroutine 绑定的登录名（Path.tv / 人读路径；无则空串）。
+func CurrentUsername() string {
+	v, ok := byG.Load(goid())
+	if !ok {
+		return ""
+	}
+	if b, ok := v.(binding); ok {
+		return b.Username
 	}
 	return ""
 }
@@ -167,6 +194,7 @@ func Snapshot() Request {
 	return Request{
 		ClientID:   b.ClientID,
 		UserID:     b.UserID,
+		Username:   b.Username,
 		Dedicated:  b.Dedicated,
 		Platform:   b.Platform,
 		PublicBase: b.PublicBase,
@@ -176,7 +204,7 @@ func Snapshot() Request {
 
 // ScopeID 会话/队列/媒体/遥控隔离键（不是站点 cookie 落盘路径）。
 // 远端租户（dedicated）：u:<userId>；本机（含本机已登录/admin）只按 c:<clientId>。
-// cookie 落盘：本机 /TV/，远端 /TV/s_u_*/，见 Util.tvScopeId / tvDirName。
+// cookie 落盘：本机 /TV/，远端 /TV/s_u_<用户名>/（Util.tvScopeId / paths.TVDirName）。
 func ScopeID() string {
 	if DedicatedRuntime() {
 		if u := CurrentUserID(); u != "" {

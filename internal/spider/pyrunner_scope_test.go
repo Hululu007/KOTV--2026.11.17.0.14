@@ -47,6 +47,9 @@ check("u:user-1", "u:user-1", "user-1", "u:user-1")
 check("c:abc", "c:abc", "", "c:abc")
 check("", "", "", "")
 check("plain", "plain", "", "plain")
+mod._bind_ui_scope("u:deadbeef", "alice")
+if util.username() != "alice" or util.tvScopeId() != "u:alice":
+    raise SystemExit("username/tvScopeId got %r %r" % (util.username(), util.tvScopeId()))
 print("ok")
 `
 	cmd := exec.Command("python3", "-c", script)

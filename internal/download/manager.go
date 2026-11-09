@@ -155,7 +155,11 @@ func (m *Manager) runOne(id string) {
 	m.mu.Unlock()
 
 	// 远端用户的任务按他的身份解析，用他自己选的点播源。
-	restore := hostclient.Bind(hostclient.Request{UserID: snap.Owner, Dedicated: snap.Owner != ""})
+	restore := hostclient.Bind(hostclient.Request{
+		UserID:    snap.Owner,
+		Username:  snap.OwnerName,
+		Dedicated: snap.Owner != "",
+	})
 	err := m.execute(ctx, &snap)
 	restore()
 	cancel()

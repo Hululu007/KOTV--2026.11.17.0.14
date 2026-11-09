@@ -93,9 +93,8 @@ public class Path {
     }
 
     /**
-     * 站点凭证：本机 → {@code /TV/.name}；远端用户 → {@code /TV/s_u_*}/。
-     * 目录名规则以 bridge {@code Util.tvDirName} 为准；改落盘须同步桌面 Path。
-     * 潇洒等 jar 网盘走自管路径，不经本方法。
+     * 站点凭证：本机 → {@code /TV/.name}；远端 → {@code /TV/s_u_<用户名>/}。
+     * 目录名只经 bridge {@link Util#tvDirName(String)}，此处不复制规则。
      */
     public static File tv(String name) {
         return tv(tvScope(), name);
@@ -114,7 +113,6 @@ public class Path {
         return mkdir(new File(base, "s_" + seg));
     }
 
-    /** 宿主 CL 可能仍是旧 Util：优先 tvDirName / tvScopeId，缺方法再本地算。 */
     private static String tvScope() {
         try {
             return Util.tvScopeId();
@@ -123,18 +121,12 @@ public class Path {
         }
     }
 
+    /** 旧 CL 缺方法时本机落 /TV/，勿在此再实现一套命名。 */
     private static String tvDirName(String scopeId) {
         try {
             return Util.tvDirName(scopeId);
         } catch (Throwable ignored) {
-            if (scopeId == null) return "";
-            String t = scopeId.trim();
-            if (t.isEmpty() || t.startsWith("c:") || t.startsWith("c_")) return "";
-            if (!(t.startsWith("u:") || t.startsWith("u_"))) return "";
-            String s = t.replace(':', '_').replaceAll("[^a-zA-Z0-9._-]", "_");
-            if (s.isEmpty() || s.startsWith("c_")) return "";
-            if (s.length() > 64) s = s.substring(0, 64);
-            return s;
+            return "";
         }
     }
 

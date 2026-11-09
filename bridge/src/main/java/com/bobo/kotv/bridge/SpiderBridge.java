@@ -341,6 +341,7 @@ public class SpiderBridge {
         }
         String clientId = "";
         String userId = "";
+        String username = "";
         boolean remoteUi = false;
         try {
             JsonObject req = GSON.fromJson(input, JsonObject.class);
@@ -352,13 +353,17 @@ public class SpiderBridge {
                 userId = req.get("userId").getAsString();
                 if (userId == null) userId = "";
             }
+            if (req.has("username") && !req.get("username").isJsonNull()) {
+                username = req.get("username").getAsString();
+                if (username == null) username = "";
+            }
             if (req.has("remoteUi") && !req.get("remoteUi").isJsonNull()) {
                 try {
                     remoteUi = req.get("remoteUi").getAsBoolean();
                 } catch (Throwable ignored) {
                 }
             }
-            bindCallScope(clientId, userId, remoteUi);
+            bindCallScope(clientId, userId, username, remoteUi);
             String method = req.get("method").getAsString();
             long callGen = Long.MAX_VALUE;
             if (req.has("jarGen") && !req.get("jarGen").isJsonNull()) {
@@ -498,10 +503,11 @@ public class SpiderBridge {
         }
     }
 
-    /** 绑定这次调用的会话。clientId 为 u:/c: 键。结束时用 clearCallScope。 */
-    public static void bindCallScope(String clientId, String userId, boolean remoteUi) {
+    /** 绑定这次调用的会话。clientId 为 u:/c: 键；username 仅 Path.tv。结束时用 clearCallScope。 */
+    public static void bindCallScope(String clientId, String userId, String username, boolean remoteUi) {
         if (clientId == null) clientId = "";
         if (userId == null) userId = "";
+        if (username == null) username = "";
         if (userId.isEmpty() && clientId.startsWith("u:") && clientId.length() > 2) {
             userId = clientId.substring(2);
         }
@@ -511,8 +517,11 @@ public class SpiderBridge {
         if (!userId.isEmpty()) {
             com.github.catvod.utils.Util.setUserId(userId);
         }
+        if (!username.isEmpty()) {
+            com.github.catvod.utils.Util.setUsername(username);
+        }
         if (remoteUi) {
-            com.github.catvod.utils.Util.enterRemoteUi(clientId, userId);
+            com.github.catvod.utils.Util.enterRemoteUi(clientId, userId, username);
         } else {
             com.github.catvod.utils.Util.clearRemoteUi();
         }

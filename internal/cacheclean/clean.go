@@ -1,5 +1,5 @@
 // Package cacheclean 清理爬虫/磁力/日志等用户缓存（不删设置与数据库）。
-// 「全部」时扫数据根：保留 db/、ui/client.json、TV/ 凭证与 s_u_*；清掉 s_c_* 与其它残留。
+// 「全部」时扫数据根：保留 db/、ui/client.json、TV/ 根凭证与 s_u_<用户名>；清掉 s_c_* 与其它残留。
 package cacheclean
 
 import (
@@ -233,7 +233,7 @@ func scrubDirKeepFileNames(dir string, keep ...string) (int64, error) {
 	return freed, nil
 }
 
-// removeLegacyClientTVDirs 删除历史 TV/s_c_*；保留 /TV/ 根凭证与 s_u_*。
+// removeLegacyClientTVDirs 删除历史 TV/s_c_*；保留 /TV/ 根凭证与 s_u_<用户名>。
 func removeLegacyClientTVDirs(tvRoot string) (int64, error) {
 	entries, err := os.ReadDir(tvRoot)
 	if err != nil {

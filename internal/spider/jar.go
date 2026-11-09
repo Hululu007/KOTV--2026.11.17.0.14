@@ -586,6 +586,7 @@ type bridgeRequest struct {
 	Args     map[string]interface{} `json:"args"`
 	ClientID string                 `json:"clientId,omitempty"`
 	UserID   string                 `json:"userId,omitempty"`
+	Username string                 `json:"username,omitempty"`
 	RemoteUI bool                   `json:"remoteUi,omitempty"`
 	JarGen   uint64                 `json:"jarGen"`
 }
@@ -593,6 +594,7 @@ type bridgeRequest struct {
 func fillBridgeClient(req *bridgeRequest) {
 	req.ClientID = hostclient.ScopeID()
 	req.UserID = hostclient.CurrentUserID()
+	req.Username = hostclient.CurrentUsername()
 	req.RemoteUI = hostclient.PublicBase() != ""
 	req.JarGen = jarWireGen.Load()
 }

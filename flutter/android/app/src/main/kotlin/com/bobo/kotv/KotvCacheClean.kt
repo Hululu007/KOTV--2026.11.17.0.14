@@ -41,7 +41,7 @@ object KotvCacheClean {
         Log.w(TAG, "exo clear failed", t)
       }
     }
-    // 与 Go sweep 一致：仅「全部」删历史 TV/s_c_*；保留 /TV/ 根凭证与 s_u_*。
+    // 与 Go sweep 一致：仅「全部」删历史 TV/s_c_*；保留 /TV/ 根凭证与 s_u_<用户名>。
     if (all) {
       removeLegacyClientTVDirs()
     }
@@ -58,7 +58,7 @@ object KotvCacheClean {
     }
   }
 
-  /** 外置 `/TV/s_c_*`；本机凭证在 `/TV/.name`，远端在 `/TV/s_u_*`。 */
+  /** 外置 `/TV/s_c_*`；本机凭证在 `/TV/.name`，远端在 `/TV/s_u_<用户名>`。 */
   private fun removeLegacyClientTVDirs() {
     val tv = File(Environment.getExternalStorageDirectory(), "TV")
     if (!tv.isDirectory) return

@@ -334,6 +334,7 @@ func javaInvokePayload(body []byte) ([]byte, error) {
 		Args     json.RawMessage `json:"args"`
 		ClientID string          `json:"clientId,omitempty"`
 		UserID   string          `json:"userId,omitempty"`
+		Username string          `json:"username,omitempty"`
 		RemoteUI bool            `json:"remoteUi,omitempty"`
 		JarGen   uint64          `json:"jarGen"`
 	}{
@@ -341,6 +342,7 @@ func javaInvokePayload(body []byte) ([]byte, error) {
 		Args:     body,
 		ClientID: meta.ClientID,
 		UserID:   meta.UserID,
+		Username: meta.Username,
 		RemoteUI: meta.RemoteUI,
 		JarGen:   meta.JarGen,
 	})

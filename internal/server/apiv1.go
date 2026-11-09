@@ -67,7 +67,7 @@ type ContentAPI interface {
 	APIDownloadRemove(id string, deleteFile bool) map[string]any
 	APIDownloadClearFinished() map[string]any
 	APIFsList(path string) (map[string]any, error)
-	PurgeUserData(userID string)
+	PurgeUserData(userID, username string)
 }
 
 func (s *Server) SetContentAPI(api ContentAPI) {
