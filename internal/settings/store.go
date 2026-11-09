@@ -87,7 +87,7 @@ const (
 	ExoDiskPreloadMs         Type = "exoDiskPreloadMs"
 	MpvTlsVerify             Type = "mpvTlsVerify"
 	MpvDiskCache             Type = "mpvDiskCache"
-	MpvDirect                Type = "mpvDirect" // Win7 硬解直出（默认关）；关掉时解码交给 mpv 的 auto
+	MpvDirect                Type = "mpvDirect" // Win7 硬解直出（默认关）；关=d3d11va-copy，开=dxva2（不行则软解）
 	VideoEq                  Type = "videoEq"
 	AudioEq                  Type = "audioEq"
 	VideoBrightness          Type = "videoBrightness"

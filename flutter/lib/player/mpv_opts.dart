@@ -32,7 +32,7 @@ const kotvImageExts = '';
 /// ## 平台能力
 /// | 选项 | Android 原生 | 桌面 media_kit |
 /// |------|-------------|----------------|
-/// | hwdec | 硬=直出；自动=直出硬解优先再软解 | Windows 交给 mpv 的 auto；Win7 开「硬解直出」时 dxva2 直出 |
+/// | hwdec | 硬=直出；自动=直出硬解优先再软解 | Win10+ auto；Win7 开直出=dxva2（否则软解），关=d3d11va-copy |
 /// | gpu-next | vo=gpu-next（Surface） | ❌（Texture/libmpv） |
 /// | Vulkan | gpu-api=vulkan（设备支持时） | ❌（libmpv 渲染 API 由 media_kit 定为 OpenGL） |
 /// | 音频直通 | audio-spdif | ❌（不设 audio-spdif，音效照常写 af） |
@@ -79,7 +79,7 @@ class KotvMpvOpts {
   final bool tlsVerify;
   final bool audioPassThrough;
   final bool diskCache;
-  /// Win7 硬解直出（默认关）：开 = ANGLE 用 D3D9 后端 + dxva2 零拷贝；关 = ANGLE 用 D3D11 后端，解码交给 mpv 的 auto。
+  /// Win7 硬解直出（默认关）：开 = ANGLE D3D9 + dxva2 零拷贝（不行则软解）；关 = ANGLE D3D11 + d3d11va-copy。
   final bool direct;
   /// 杜比视界策略：0=AUTO 1=假定支持 2=假定不支持（与 exoDolbyVision 枚举一致）。
   final int dolbyVisionPolicy;
@@ -226,7 +226,7 @@ class KotvMpvOpts {
   /// 供 setProperty / VideoController 使用的 hwdec 值。
   ///
   /// 「自动」= 优先硬解，失败再软解；UI 仍显示自动。
-  /// Windows 用 mpv 的 auto（Win7 开直出时除外，见下）；其它平台按平台写死链：
+  /// Windows：Win10+ 用 mpv `auto`；Win7 见 [_windowsHwdec]。其它平台按平台写死链：
   /// Android / macOS / Linux 为直出，iOS 为 videotoolbox-copy。
   String hwdecValue() {
     if (soft) return 'no';
@@ -235,17 +235,7 @@ class KotvMpvOpts {
       return hard ? 'mediacodec' : 'mediacodec,no';
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      // Win7 开「硬解直出」：dxva2 解码面经 dxva2-egl 交给 ANGLE，须用 ANGLE 的 D3D9 后端。
-      // Win7 的 mpv 补丁在下列情况自动改走 dxva2-copy，否则会绿屏：10 位（P010）片源；
-      // Intel Haswell/Broadwell（驱动用混合解码）上的 H265。
-      // ANGLE 后端由 media_kit_video 补丁在建播放器时按这里的 hwdec 选：列表里有 dxva2 就 D3D9 优先，
-      // 否则保持 D3D11 优先（见 scripts/patch-media-kit.sh）。
-      if (kotvIsWindows7() && direct) {
-        return hard ? 'dxva2,dxva2-copy' : 'dxva2,dxva2-copy,no';
-      }
-      // 其余情况交给 mpv 的 auto：依次试 d3d11va、d3d11va-copy、dxva2-copy，都不行再软解。
-      // Win7（装了平台更新）实测落到 d3d11va-copy。
-      return 'auto';
+      return _windowsHwdec(hard: hard);
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       // 画面经 OpenGL ES 画进 FBO。直出 videotoolbox 的帧进不了这块缓冲，只能拷贝后再画。
@@ -257,6 +247,25 @@ class KotvMpvOpts {
     // Linux 等：直出硬解链，自动再兜底软解
     const linuxHw = 'vaapi,vulkan,nvdec,cuda,vdpau';
     return hard ? linuxHw : '$linuxHw,no';
+  }
+
+  /// Win7 / Win10+ 的 hwdec 列表（收拢在此，避免详情/直播各写一份）。
+  ///
+  /// Win7 开「硬解直出」：只试 `dxva2`（须 ANGLE D3D9 + dxva2-egl）。mpv 补丁对
+  /// 10 位 / Haswell·Broadwell 的 H265 拒绝互通以免绿屏，下一档直接软解，**不要**
+  /// `dxva2-copy`。ANGLE 是否 D3D9 优先由 media_kit_video 按 hwdec 是否含 `dxva2` 决定。
+  ///
+  /// Win7 关直出：`d3d11va` → `d3d11va-copy` → 软解。`d3d11va-copy` 只是解码面回读到
+  /// 系统内存再上传，**不依赖** dxva2-egl；实测 Win7 上 d3d11va 直出挂不上。不掺
+  /// `dxva2-copy`。
+  String _windowsHwdec({required bool hard}) {
+    if (kotvIsWindows7()) {
+      if (direct) {
+        return hard ? 'dxva2' : 'dxva2,no';
+      }
+      return hard ? 'd3d11va,d3d11va-copy' : 'd3d11va,d3d11va-copy,no';
+    }
+    return 'auto';
   }
 
   /// Android 可切 gpu/gpu-next；桌面 media_kit 必须 libmpv（Flutter Texture）。

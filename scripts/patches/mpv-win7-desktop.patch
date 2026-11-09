@@ -234,8 +234,8 @@
          new_fctx->sw_format = imgfmt2pixfmt(ctx->hwdec_opts->hwdec_image_format);
  
 +#if HAVE_D3D9_HWACCEL
-+    // Fail here so the decoder moves on to the next method, normally
-+    // dxva2-copy, which handles these frames correctly.
++    // Refuse dxva2-egl for these frames (green otherwise). Next hwdec method
++    // runs instead — KOTV Win7 uses dxva2,no so that is software decode.
 +    if (!ctx->hwdec.copying &&
 +        new_fctx->device_ctx->type == AV_HWDEVICE_TYPE_DXVA2 &&
 +        !d3d9_interop_allowed(new_fctx->device_ref, avctx->codec_id,
@@ -260,8 +260,8 @@
 +}
 +
 +// Haswell and Broadwell have no fixed-function HEVC decoder. The driver's
-+// hybrid CPU+GPU HEVC decoder works with dxva2-copy, but its surfaces come
-+// out green when converted with StretchRect for dxva2-egl.
++// hybrid CPU+GPU HEVC decoder yields surfaces that go green when converted
++// with StretchRect for dxva2-egl; refuse interop and fall through to soft.
 +static bool d3d9_intel_hybrid_hevc(UINT device_id)
 +{
 +    switch (device_id & 0xff00) {
