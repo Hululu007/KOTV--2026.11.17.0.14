@@ -662,7 +662,9 @@ func (p *nodePkg) Proxy(w http.ResponseWriter, r *http.Request, path string) {
 
 var (
 	reLocalNodeURL = regexp.MustCompile(`(?i)https?://(?:127\.0\.0\.1|localhost):(\d+)`)
-	reJS2P         = regexp.MustCompile(`(?i)js2p://_WEB_`)
+	// 带可选 path/query/fragment，便于 /website 与 /spider 分流改写。
+	reLocalNodeURLParts = regexp.MustCompile(`(?i)https?://(?:127\.0\.0\.1|localhost):(\d+)((?:/[^?\s"'\\]*)?(?:\?[^#\s"'\\]*)?(?:#[^\s"'\\]*)?)`)
+	reJS2P              = regexp.MustCompile(`(?i)js2p://_WEB_`)
 )
 
 // nodeProxyBase 本包在引擎上的 /node/<pkg> 根。
@@ -672,34 +674,66 @@ func (p *nodePkg) nodeProxyBase() string {
 	return playproxy.PublicizeURL(loop)
 }
 
-// rewriteToNodeProxy 把本包回环地址与 js2p://_WEB_ 换成 nodeProxyBase（播放 JSON / 弹幕 / OPENWEB 共用）。
+// engineRootURL 引擎根上的路径（如 /website）；经 PublicizeURL 供远端客户端可达。
+func (p *nodePkg) engineRootURL(pathQueryFrag string) string {
+	if pathQueryFrag == "" {
+		pathQueryFrag = "/"
+	}
+	if !strings.HasPrefix(pathQueryFrag, "/") {
+		pathQueryFrag = "/" + pathQueryFrag
+	}
+	return playproxy.PublicizeURL(fmt.Sprintf("http://127.0.0.1:%d%s", localproxy.Port(), pathQueryFrag))
+}
+
+func isWebsitePath(path string) bool {
+	return path == "/website" || strings.HasPrefix(path, "/website/")
+}
+
+// rewriteToNodeProxy 本包回环地址与 js2p://_WEB_ 的统一改写入口。
+// /website… → 引擎根 /website…（配置中心绝对路径 API）；其余 → /node/<pkg>/…。
 func (p *nodePkg) rewriteToNodeProxy(raw string) string {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return raw
 	}
-	engine := p.nodeProxyBase()
+	nodeBase := p.nodeProxyBase()
 	port := p.Port()
 	if port > 0 {
 		ps := fmt.Sprintf("%d", port)
-		raw = strings.ReplaceAll(raw, "http://127.0.0.1:"+ps, engine)
-		raw = strings.ReplaceAll(raw, "http://localhost:"+ps, engine)
-		raw = reLocalNodeURL.ReplaceAllStringFunc(raw, func(m string) string {
-			sub := reLocalNodeURL.FindStringSubmatch(m)
-			if len(sub) == 2 && sub[1] == ps {
-				return engine
+		raw = reLocalNodeURLParts.ReplaceAllStringFunc(raw, func(m string) string {
+			sub := reLocalNodeURLParts.FindStringSubmatch(m)
+			if len(sub) < 2 || sub[1] != ps {
+				return m
 			}
-			return m
+			rest := ""
+			if len(sub) > 2 {
+				rest = sub[2]
+			}
+			pathOnly := rest
+			if i := strings.IndexAny(rest, "?#"); i >= 0 {
+				pathOnly = rest[:i]
+			}
+			if pathOnly == "" {
+				pathOnly = "/"
+			}
+			if isWebsitePath(pathOnly) {
+				return p.engineRootURL(rest)
+			}
+			if rest == "" {
+				return strings.TrimRight(nodeBase, "/")
+			}
+			return strings.TrimRight(nodeBase, "/") + rest
 		})
 	}
-	return reJS2P.ReplaceAllString(raw, engine)
+	return reJS2P.ReplaceAllString(raw, nodeBase)
 }
 
-// RewritePlayJSON 把播放 JSON 里的本机 node 地址与 js2p://_WEB_ 改成引擎 /node/<pkg>/…。
+// RewritePlayJSON 播放 JSON：本机 node 地址与 js2p://_WEB_ → 引擎可达地址。
 func (p *nodePkg) RewritePlayJSON(raw string) string {
 	return p.rewriteToNodeProxy(raw)
 }
 
-// RewriteNodeURL 把指向本包 node 端口的 URL 改成远端客户端可达的 /node/<pkg>/…。
+// RewriteNodeURL 单条 URL：/website… 走引擎根，其余走 /node/<pkg>/…。
 func (p *nodePkg) RewriteNodeURL(raw string) string {
 	return p.rewriteToNodeProxy(strings.TrimSpace(raw))
 }

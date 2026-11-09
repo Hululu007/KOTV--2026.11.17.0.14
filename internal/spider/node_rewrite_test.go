@@ -6,6 +6,7 @@ import (
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
+	"github.com/bobo/KOTV/internal/playproxy"
 )
 
 func TestRewritePlayJSON(t *testing.T) {
@@ -42,14 +43,21 @@ func TestRewriteNodeURL(t *testing.T) {
 		t.Fatalf("got %q want %q", got, want)
 	}
 	got = p.RewriteNodeURL("http://127.0.0.1:9999/website")
-	want = "http://127.0.0.1:9978/node/pkg1/website"
+	want = "http://127.0.0.1:9978/website"
 	if got != want {
 		t.Fatalf("website got %q want %q", got, want)
+	}
+	got = p.RewriteNodeURL("http://127.0.0.1:9999/website/api/status")
+	want = "http://127.0.0.1:9978/website/api/status"
+	if got != want {
+		t.Fatalf("website api got %q want %q", got, want)
 	}
 }
 
 func TestRewriteNodeURLRemotePublicize(t *testing.T) {
 	localproxy.SetPort(9978)
+	playproxy.SetEngineRoutes([]string{"/node/", "/website", "/website/"})
+	t.Cleanup(func() { playproxy.SetEngineRoutes(nil) })
 	defer hostclient.Bind(hostclient.Request{
 		ClientID:   "node-pub",
 		PublicBase: "https://tv.example.com/k/KEY",
@@ -59,6 +67,11 @@ func TestRewriteNodeURLRemotePublicize(t *testing.T) {
 	want := "https://tv.example.com/k/KEY/node/pkg1/danmu/abc"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
+	}
+	got = p.RewriteNodeURL("http://127.0.0.1:9999/website")
+	wantWeb := "https://tv.example.com/website"
+	if got != wantWeb {
+		t.Fatalf("website remote got %q want %q", got, wantWeb)
 	}
 	out := p.RewritePlayJSON(`{"url":"js2p://_WEB_/x.m3u8"}`)
 	if !strings.Contains(out, want[:strings.Index(want, "/danmu")]) {

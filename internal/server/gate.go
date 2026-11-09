@@ -190,13 +190,27 @@ func requestPlatform(r *http.Request) string {
 	return strings.ToLower(strings.TrimSpace(plat))
 }
 
-// requestToken 登录令牌：Authorization: Bearer；界面套接字 /ui 放在网址参数 token 里。
+// websiteAuthCookie 配置中心页内后续 fetch('/website/…') 用的会话 Cookie（Path=/website）。
+const websiteAuthCookie = "kotv_website_auth"
+
+// requestToken 登录令牌：Authorization: Bearer；
+// /ui 与 /website… 也可带查询参数 token（浏览器打不开自定义头）；
+// /website… 还可读 Cookie（首屏带 token 后写入，供页内绝对路径 API）。
 func requestToken(r *http.Request) string {
 	if tok := auth.BearerFromHeader(r.Header.Get("Authorization")); tok != "" {
 		return tok
 	}
-	if r.URL.Path == "/ui" {
-		return strings.TrimSpace(r.URL.Query().Get("token"))
+	path := r.URL.Path
+	website := path == "/website" || strings.HasPrefix(path, "/website/")
+	if path == "/ui" || website {
+		if t := strings.TrimSpace(r.URL.Query().Get("token")); t != "" {
+			return t
+		}
+	}
+	if website {
+		if c, err := r.Cookie(websiteAuthCookie); err == nil {
+			return strings.TrimSpace(c.Value)
+		}
 	}
 	return ""
 }

@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api/kotv_api.dart';
+import '../api/kotv_auth_token.dart';
 import '../api/kotv_engine_url.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_traffic.dart';
@@ -316,16 +317,9 @@ class PostMsgHost {
     }
 
     if (msg.startsWith('OPENWEB:')) {
-      var url = msg.substring(8).trim();
-      if (url.isEmpty) return;
-      // /msg 回调无远端 PublicBase，引擎侧常仍是 127.0.0.1；客户端按连接根改写。
-      url = _rewriteEngineLocalUrl(url);
-      final custom = onOpenWeb;
-      if (custom != null) {
-        custom(url);
-        return;
-      }
-      unawaited(_openExternal(url));
+      final raw = msg.substring(8).trim();
+      if (raw.isEmpty) return;
+      unawaited(_openEngineWeb(raw));
       return;
     }
 
@@ -1036,6 +1030,39 @@ class PostMsgHost {
         ? api.baseUrl
         : KotvTraffic.engineBaseUrl;
     return kotvRewriteEngineLocalUrl(raw, base);
+  }
+
+  /// 配置中心等引擎页：先改写回环，远端再附带登录 token（gate / Cookie）。
+  Future<void> _openEngineWeb(String raw) async {
+    var url = _rewriteEngineLocalUrl(raw);
+    url = await _withWebsiteAuthToken(url);
+    final custom = onOpenWeb;
+    if (custom != null) {
+      custom(url);
+      return;
+    }
+    await _openExternal(url);
+  }
+
+  Future<String> _withWebsiteAuthToken(String url) async {
+    final u = Uri.tryParse(url);
+    if (u == null || u.host.isEmpty) return url;
+    final path = u.path;
+    if (path != '/website' && !path.startsWith('/website/')) return url;
+    final base = api.baseUrl.trim().isNotEmpty
+        ? api.baseUrl
+        : KotvTraffic.engineBaseUrl;
+    if (kotvIsLocalEngineBaseUrl(base) &&
+        (u.host == '127.0.0.1' ||
+            u.host == 'localhost' ||
+            u.host == '::1')) {
+      return url;
+    }
+    final token = (await kotvAuthToken()).trim();
+    if (token.isEmpty) return url;
+    final q = Map<String, String>.from(u.queryParameters);
+    q.putIfAbsent('token', () => token);
+    return u.replace(queryParameters: q).toString();
   }
 
   Future<bool> _openExternal(String raw) async {
