@@ -1590,6 +1590,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           headers: headers,
           title: _title,
           vod: false,
+          context: context,
         );
         if (mounted && serial == _playSerial && !result.opened) {
           setState(() => _status = '未打开外部播放器');
@@ -2616,6 +2617,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
             headers: _playHeaders,
             title: _title,
             vod: false,
+            context: context,
           );
           if (!mounted) return;
           if (!result.opened) {

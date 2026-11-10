@@ -1,6 +1,7 @@
 import Cocoa
 import FlutterMacOS
 import Darwin
+import UniformTypeIdentifiers
 #if arch(x86_64)
 import ObjectiveC
 #endif
@@ -35,6 +36,18 @@ class MainFlutterWindow: NSWindow {
         result(Self.interfaceRxBytes())
       case "getMemoryInfo":
         result(Self.memoryInfo())
+      case "hasExternalVideoApp":
+        result(!Self.listExternalVideoApps().isEmpty)
+      case "listExternalVideoApps":
+        result(Self.listExternalVideoApps())
+      case "openExternalVideoApp":
+        guard let args = call.arguments as? [String: Any],
+              let id = args["id"] as? String,
+              let url = args["url"] as? String else {
+          result(FlutterError(code: "args", message: "id/url required", details: nil))
+          return
+        }
+        result(Self.openExternalVideoApp(id: id, url: url))
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -42,6 +55,80 @@ class MainFlutterWindow: NSWindow {
     hostChannel = ch
 
     super.awakeFromNib()
+  }
+
+  /// 浏览器会抢 http URL；外置列表只留视频类应用。
+  private static let browserBundleIds: Set<String> = [
+    "com.apple.Safari",
+    "com.apple.SafariTechnologyPreview",
+    "com.google.Chrome",
+    "com.google.Chrome.canary",
+    "com.google.Chrome.beta",
+    "org.mozilla.firefox",
+    "org.mozilla.firefoxdeveloperedition",
+    "com.microsoft.edgemac",
+    "com.microsoft.edgemac.canary",
+    "com.operasoftware.Opera",
+    "com.brave.Browser",
+    "com.vivaldi.Vivaldi",
+    "company.thebrowser.Browser",
+    "com.apple.WebKit.Networking",
+  ]
+
+  private static func listExternalVideoApps() -> [[String: String]] {
+    var appURLs: [URL] = []
+    if #available(macOS 12.0, *) {
+      let workspace = NSWorkspace.shared
+      appURLs += workspace.urlsForApplications(toOpen: .mpeg4Movie)
+      appURLs += workspace.urlsForApplications(toOpen: .quickTimeMovie)
+      appURLs += workspace.urlsForApplications(toOpen: .mpeg2TransportStream)
+      if let avi = UTType(filenameExtension: "avi") {
+        appURLs += workspace.urlsForApplications(toOpen: avi)
+      }
+      if let m3u = UTType(filenameExtension: "m3u") {
+        appURLs += workspace.urlsForApplications(toOpen: m3u)
+      }
+      if let m3u8 = UTType(filenameExtension: "m3u8") {
+        appURLs += workspace.urlsForApplications(toOpen: m3u8)
+      }
+    } else {
+      for name in ["IINA", "VLC", "mpv", "QuickTime Player", "Elmedia Video Player"] {
+        if let path = NSWorkspace.shared.fullPath(forApplication: name) {
+          appURLs.append(URL(fileURLWithPath: path))
+        }
+      }
+    }
+
+    let selfId = Bundle.main.bundleIdentifier ?? ""
+    var seen = Set<String>()
+    var out: [[String: String]] = []
+    for appURL in appURLs {
+      guard let bid = Bundle(url: appURL)?.bundleIdentifier, !bid.isEmpty else { continue }
+      if bid == selfId || browserBundleIds.contains(bid) { continue }
+      if !seen.insert(bid).inserted { continue }
+      let name = FileManager.default.displayName(atPath: appURL.path)
+      out.append(["id": bid, "name": name])
+    }
+    out.sort { ($0["name"] ?? "") localizedCompare ($1["name"] ?? "") == .orderedAscending }
+    return out
+  }
+
+  private static func openExternalVideoApp(id: String, url: String) -> Bool {
+    let bid = id.trimmingCharacters(in: .whitespacesAndNewlines)
+    let raw = url.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !bid.isEmpty, !raw.isEmpty, let media = URL(string: raw) else { return false }
+    guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bid) else {
+      return false
+    }
+    let conf = NSWorkspace.OpenConfiguration()
+    var ok = false
+    let sem = DispatchSemaphore(value: 0)
+    NSWorkspace.shared.open([media], withApplicationAt: appURL, configuration: conf) { _, error in
+      ok = error == nil
+      sem.signal()
+    }
+    _ = sem.wait(timeout: .now() + 8)
+    return ok
   }
 
   /// 网卡累计下行字节（跳过 lo0）。缓冲期差分即网速。

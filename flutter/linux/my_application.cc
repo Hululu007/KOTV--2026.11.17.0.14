@@ -5,10 +5,83 @@
 #include <gdk/gdkx.h>
 #endif
 
+#include <gio/gio.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "flutter/generated_plugin_registrant.h"
+
+static gboolean kotv_is_browser_app_id(const gchar* id) {
+  if (id == nullptr || id[0] == '\0') return TRUE;
+  static const char* kBrowsers[] = {
+      "firefox", "chrome", "chromium", "brave", "opera", "vivaldi",
+      "microsoft-edge", "epiphany", "org.mozilla.firefox",
+      "google-chrome", "chromium-browser", "org.gnome.Epiphany",
+  };
+  for (size_t i = 0; i < G_N_ELEMENTS(kBrowsers); i++) {
+    if (g_str_has_prefix(id, kBrowsers[i]) || strstr(id, kBrowsers[i]) != nullptr) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+static FlValue* kotv_list_external_video_apps() {
+  FlValue* list = fl_value_new_list();
+  GHashTable* seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, nullptr);
+  static const char* kTypes[] = {
+      "video/mp4", "video/x-matroska", "video/webm", "video/mpeg",
+      "application/vnd.apple.mpegurl", "audio/x-mpegurl", "audio/mpegurl",
+  };
+  for (size_t t = 0; t < G_N_ELEMENTS(kTypes); t++) {
+    GList* apps = g_app_info_get_all_for_type(kTypes[t]);
+    for (GList* it = apps; it != nullptr; it = it->next) {
+      GAppInfo* app = G_APP_INFO(it->data);
+      const gchar* id = g_app_info_get_id(app);
+      if (id == nullptr || kotv_is_browser_app_id(id)) continue;
+      if (g_hash_table_contains(seen, id)) continue;
+      g_hash_table_add(seen, g_strdup(id));
+      const gchar* name = g_app_info_get_display_name(app);
+      FlValue* row = fl_value_new_map();
+      fl_value_set_string_take(row, "id", fl_value_new_string(id));
+      fl_value_set_string_take(row, "name",
+                               fl_value_new_string(name != nullptr ? name : id));
+      fl_value_append_take(list, row);
+    }
+    g_list_free_full(apps, g_object_unref);
+  }
+  g_hash_table_destroy(seen);
+  return list;
+}
+
+static gboolean kotv_open_external_video_app(const gchar* id, const gchar* url) {
+  if (id == nullptr || url == nullptr || id[0] == '\0' || url[0] == '\0') {
+    return FALSE;
+  }
+  GAppInfo* app = nullptr;
+  GList* all = g_app_info_get_all();
+  for (GList* it = all; it != nullptr; it = it->next) {
+    GAppInfo* cand = G_APP_INFO(it->data);
+    const gchar* cand_id = g_app_info_get_id(cand);
+    if (cand_id != nullptr && g_strcmp0(cand_id, id) == 0) {
+      app = G_APP_INFO(g_object_ref(cand));
+      break;
+    }
+  }
+  g_list_free_full(all, g_object_unref);
+  if (app == nullptr) return FALSE;
+
+  GList* uris = nullptr;
+  uris = g_list_append(uris, g_strdup(url));
+  GError* err = nullptr;
+  const gboolean ok = g_app_info_launch_uris(app, uris, nullptr, &err);
+  if (err != nullptr) {
+    g_error_free(err);
+  }
+  g_list_free_full(uris, g_free);
+  g_object_unref(app);
+  return ok;
+}
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -115,6 +188,31 @@ static void kotv_host_method_call(FlMethodChannel* /*channel*/,
     fl_value_set_string_take(map, "availBytes",
                              fl_value_new_int(kotv_memory_avail_bytes()));
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(map));
+  } else if (strcmp(method, "hasExternalVideoApp") == 0) {
+    g_autoptr(FlValue) apps = kotv_list_external_video_apps();
+    const gboolean ok = fl_value_get_length(apps) > 0;
+    response = FL_METHOD_RESPONSE(
+        fl_method_success_response_new(fl_value_new_bool(ok)));
+  } else if (strcmp(method, "listExternalVideoApps") == 0) {
+    response = FL_METHOD_RESPONSE(
+        fl_method_success_response_new(kotv_list_external_video_apps()));
+  } else if (strcmp(method, "openExternalVideoApp") == 0) {
+    FlValue* args = fl_method_call_get_args(method_call);
+    const gchar* id = nullptr;
+    const gchar* url = nullptr;
+    if (fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+      FlValue* id_v = fl_value_lookup_string(args, "id");
+      FlValue* url_v = fl_value_lookup_string(args, "url");
+      if (id_v != nullptr && fl_value_get_type(id_v) == FL_VALUE_TYPE_STRING) {
+        id = fl_value_get_string(id_v);
+      }
+      if (url_v != nullptr && fl_value_get_type(url_v) == FL_VALUE_TYPE_STRING) {
+        url = fl_value_get_string(url_v);
+      }
+    }
+    const gboolean ok = kotv_open_external_video_app(id, url);
+    response = FL_METHOD_RESPONSE(
+        fl_method_success_response_new(fl_value_new_bool(ok)));
   } else {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }

@@ -2459,6 +2459,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             title: '${d.name} · ${ep.name}',
             positionMs: startMs,
             vod: true,
+            context: context,
           );
         } catch (e) {
           if (serial == _playAtSerial && mounted) setState(() => _status = '$e');
@@ -3272,6 +3273,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             title: _detail?.name ?? '',
             positionMs: _playback.position.inMilliseconds,
             vod: true,
+            context: context,
           );
           if (!mounted || !result.opened) return false;
           if (result.endBy == 'playback_completion') {

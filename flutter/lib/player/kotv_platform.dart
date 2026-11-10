@@ -140,7 +140,7 @@ List<(String, String)> kotvPlayerOptions() {
     ('内置 MPV（默认）', 'innie#mpv'),
     // KOTV_MACOS_NO_FVP=1 打的 macOS 包不带 FVP。
     if (!(Platform.isMacOS && kotvMacosNoFvp)) ('内置 FVP', 'innie#fvp'),
-    // 一项「外部播放器」；打开方式见 [kotvLaunchExternalPlayer]。
+    // 一项「外部播放器」；桌面由宿主列本机视频应用或系统打开方式。
     ('外部播放器', 'outie#view'),
   ];
 }

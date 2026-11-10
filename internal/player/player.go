@@ -3,6 +3,7 @@ package player
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -54,7 +55,7 @@ func Play(url string, histKey string) error {
 		log.Printf("source fetch → %s", stream)
 		url = stream
 	} else if isEd2k(url) {
-		if err := openSystemURL(url); err != nil {
+		if err := openSystemPath(url); err != nil {
 			return fmt.Errorf("电驴链接需用系统下载器打开: %w", err)
 		}
 		return nil
@@ -96,7 +97,7 @@ func Play(url string, histKey string) error {
 		return nil
 	}
 
-	// 外置：桌面走系统打开；安卓由 Flutter 原生选择器，一般不经这里。
+	// 外置：客户端 GUI 应走原生选择器；此处仅 API/无界面兜底。
 	return ExternalPlay(url)
 }
 
@@ -106,7 +107,7 @@ func Stop() {
 }
 
 // Available 返回当前机器上可用的播放器说明（设置页展示用）。
-// view：桌面由系统打开；安卓是否另有视频应用由 Flutter 再探测。
+// view：桌面是否另有视频应用由 Flutter 宿主再探测。
 func Available() map[string]bool {
 	return map[string]bool{
 		"view":      true,
@@ -116,15 +117,40 @@ func Available() map[string]bool {
 	}
 }
 
-// ExternalPlay 用系统打开 URL（供 Flutter 切到 outie#view 时调用）。
+// ExternalPlay API/无界面兜底：写成临时 m3u 再交给系统打开。
+// 勿直接 open http(s) URL——默认常落到浏览器。客户端 GUI 请用宿主选择器。
 func ExternalPlay(url string) error {
 	url = strings.TrimSpace(url)
 	if url == "" {
 		return fmt.Errorf("empty url")
 	}
 	Stop()
-	log.Printf("系统打开外部播放: %s", url)
-	return openSystemURL(url)
+	path, err := writeTempM3U(url)
+	if err != nil {
+		log.Printf("临时 m3u 失败，回退直接打开: %v", err)
+		return openSystemPath(url)
+	}
+	log.Printf("系统打开外部播放(m3u): %s", path)
+	return openSystemPath(path)
+}
+
+func writeTempM3U(mediaURL string) (string, error) {
+	f, err := os.CreateTemp("", "kotv-ext-*.m3u")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	body := "#EXTM3U\n#EXTINF:-1,KO\n" + mediaURL + "\n"
+	if _, err := f.WriteString(body); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
 }
 
 func isEd2k(u string) bool {
@@ -132,8 +158,8 @@ func isEd2k(u string) bool {
 	return strings.HasPrefix(u, "ed2k:")
 }
 
-// openSystemURL 按平台用系统关联打开（macOS open / Windows FileProtocolHandler / Linux xdg-open）。
-func openSystemURL(u string) error {
+// openSystemPath 按平台打开本地路径或 URL。
+func openSystemPath(u string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		return exec.Command("open", u).Start()
