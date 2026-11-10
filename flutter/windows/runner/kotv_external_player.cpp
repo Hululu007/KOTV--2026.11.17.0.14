@@ -2,9 +2,9 @@
 
 #include "utils.h"
 
+#include <windows.h>
 #include <shellapi.h>
 #include <shobjidl.h>
-#include <windows.h>
 
 #include <algorithm>
 #include <cwchar>

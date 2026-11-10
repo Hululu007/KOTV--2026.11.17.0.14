@@ -181,6 +181,8 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
               widget.text,
               style: style,
               textAlign: widget.textAlign,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           );
         }

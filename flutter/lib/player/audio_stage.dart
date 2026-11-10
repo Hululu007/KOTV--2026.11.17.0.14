@@ -10,10 +10,10 @@ bool kotvNeedsBlankSurfaceCover(KotvPlayback pb) =>
     !pb.isAudioOnlyContent && pb.width <= 0 && pb.height <= 0;
 
 /// 纯音频封面/动效叠层：只重建本层，不重建底层 Texture。
+/// 不在此画标题——详情顶栏/正文、全屏顶栏、直播台名已有片名，避免小画幅里标题压住底栏控件。
 Widget kotvAudioStageOverlay({
   required KotvPlayback playback,
   String coverUrl = '',
-  String title = '',
 }) {
   return ListenableBuilder(
     listenable: playback,
@@ -23,7 +23,6 @@ Widget kotvAudioStageOverlay({
         child: KotvAudioStage(
           playing: playback.playing,
           coverUrl: coverUrl,
-          title: title,
         ),
       );
     },
@@ -36,12 +35,10 @@ class KotvAudioStage extends StatefulWidget {
     super.key,
     required this.playing,
     this.coverUrl = '',
-    this.title = '',
   });
 
   final bool playing;
   final String coverUrl;
-  final String title;
 
   @override
   State<KotvAudioStage> createState() => _KotvAudioStageState();
@@ -80,7 +77,6 @@ class _KotvAudioStageState extends State<KotvAudioStage> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     final cover = widget.coverUrl.trim();
-    final title = widget.title.trim();
     return ColoredBox(
       color: const Color(0xFF141018),
       child: Stack(
@@ -95,31 +91,19 @@ class _KotvAudioStageState extends State<KotvAudioStage> with SingleTickerProvid
               );
             },
           ),
-          Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _CoverDisc(coverUrl: cover, playing: widget.playing, pulse: _pulse),
-                if (title.isNotEmpty) ...[
-                  const SizedBox(height: 20),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 28),
-                    child: Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Color(0xE6FFFFFF),
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        height: 1.25,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
+          LayoutBuilder(
+            builder: (context, c) {
+              // 手机 16:9 槽约 200px 高；碟片随槽缩放，避免撑出槽外压住底栏。
+              final side = (math.min(c.maxWidth, c.maxHeight) * 0.55).clamp(72.0, 168.0);
+              return Center(
+                child: _CoverDisc(
+                  coverUrl: cover,
+                  playing: widget.playing,
+                  pulse: _pulse,
+                  size: side,
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -132,14 +116,17 @@ class _CoverDisc extends StatelessWidget {
     required this.coverUrl,
     required this.playing,
     required this.pulse,
+    required this.size,
   });
 
   final String coverUrl;
   final bool playing;
   final Animation<double> pulse;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
+    final iconSize = (size * 0.33).clamp(28.0, 56.0);
     return AnimatedBuilder(
       animation: pulse,
       builder: (context, child) {
@@ -147,8 +134,8 @@ class _CoverDisc extends StatelessWidget {
         return Transform.scale(scale: scale, child: child);
       },
       child: Container(
-        width: 168,
-        height: 168,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           boxShadow: [
@@ -161,16 +148,16 @@ class _CoverDisc extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: coverUrl.isEmpty
-            ? const ColoredBox(
-                color: Color(0xFF2A3340),
-                child: Icon(Icons.audiotrack_rounded, color: Color(0xCCFFFFFF), size: 56),
+            ? ColoredBox(
+                color: const Color(0xFF2A3340),
+                child: Icon(Icons.audiotrack_rounded, color: const Color(0xCCFFFFFF), size: iconSize),
               )
             : KotvNetworkImage(
                 coverUrl,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const ColoredBox(
-                  color: Color(0xFF2A3340),
-                  child: Icon(Icons.audiotrack_rounded, color: Color(0xCCFFFFFF), size: 56),
+                errorBuilder: (_, __, ___) => ColoredBox(
+                  color: const Color(0xFF2A3340),
+                  child: Icon(Icons.audiotrack_rounded, color: const Color(0xCCFFFFFF), size: iconSize),
                 ),
               ),
       ),

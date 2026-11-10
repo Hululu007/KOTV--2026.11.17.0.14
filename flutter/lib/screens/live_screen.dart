@@ -1921,7 +1921,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           kotvAudioStageOverlay(
             playback: _playback,
             coverUrl: _currentLogo,
-            title: _title,
           ),
         ],
       ),

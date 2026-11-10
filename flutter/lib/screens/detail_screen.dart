@@ -2777,7 +2777,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           kotvAudioStageOverlay(
             playback: pb,
             coverUrl: _detail?.pic ?? '',
-            title: _detail?.name ?? '',
           ),
       ],
     );

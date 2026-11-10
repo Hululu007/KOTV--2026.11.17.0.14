@@ -1994,11 +1994,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /**
    * 播到片尾，每次加载只报一次 completed。
    * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；有排队项时在这里 playlist-next 并解除 pause。
-   * 未强制 HLS 却几秒就 EOF、时长仍未知：先按 lavf hls 重开，避免假片尾切下一集。
+   * 地址本身像 HLS 却未 forceHls、且几秒就 EOF、时长仍未知：按 lavf hls 重开一次，避免假片尾切下一集。
    */
   private fun markEnded() {
     if (eof) return
-    if (tryReloadAsHlsAfterShortEof()) return
+    if (tryReloadAsHls(reason = "short-eof", seekSec = -1.0, requireUrlLooksLikeHls = true)) return
     val next = queuedNext
     if (next != null) {
       main.post {
@@ -2019,21 +2019,38 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     emit(mapOf("event" to "completed"))
   }
 
-  /** 代理节目单 / 路径含 m3u8 却未 forceHls 时，短 EOF 重开一次。 */
-  private fun tryReloadAsHlsAfterShortEof(): Boolean {
+  /**
+   * 未 forceHls 时强制 lavf hls 再开一次。短 EOF 与 LOADING_FAILED 共用，避免两处各写一套。
+   * [requireUrlLooksLikeHls]：短 EOF 只认地址像 HLS（勿把所有 /proxy/play 当节目单）。
+   * 错误路径还可凭 [errorText] 命中 Dart [kotvMpvHlsOpenFailed] 同款文案。
+   */
+  private fun tryReloadAsHls(
+    reason: String,
+    seekSec: Double,
+    requireUrlLooksLikeHls: Boolean,
+    error: Int = 0,
+    errorText: String? = null,
+  ): Boolean {
     if (forceLavfHls || ioHlsRetried || livePlayback || repeatOne) return false
-    if (durationSec > 30.0 || positionSec > 30.0) return false
-    val url = loadedUrl.ifBlank { return false }
-    if (!looksLikeUnsetHls(url)) return false
+    val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
+    if (url.isBlank() || !networkPlayUrl(url)) return false
+    val urlHls = urlLooksLikeHls(url)
+    if (requireUrlLooksLikeHls) {
+      if (!urlHls) return false
+      if (durationSec > 30.0 || positionSec > 30.0) return false
+    } else {
+      if (error != MPVLib.MpvError.MPV_ERROR_LOADING_FAILED) return false
+      if (!urlHls && !hlsOpenFailedHint(errorText)) return false
+    }
     ioHlsRetried = true
     forceLavfHls = true
-    Log.w(TAG, "short eof without duration; reload as hls url=$url")
+    Log.w(TAG, "hls reload reason=$reason err=$error text=$errorText url=$url")
     val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
     val gen = loadGen.get()
     buffering = true
     playing = false
     eof = false
-    retrySeekSec = -1.0
+    retrySeekSec = seekSec
     main.post {
       if (!created.get() || gen != loadGen.get()) return@post
       try {
@@ -2045,15 +2062,43 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return true
   }
 
-  /** 与 Dart [kotvMpvUrlIsHls] / 引擎透传节目单对齐的轻量判断（未带 forceHls 时的兜底）。 */
-  private fun looksLikeUnsetHls(url: String): Boolean {
-    val lower = url.lowercase()
-    if (lower.contains("m3u8")) return true
-    val uri = Uri.parse(url)
-    if (uri.path?.contains("/proxy/play") == true && uri.getQueryParameter("u").isNullOrEmpty()) {
-      return true
+  /** 与 Dart [kotvMpvUrlIsHls] 对齐：只看地址本身，不把引擎 /proxy/play?id= 一律当成 HLS。 */
+  private fun urlLooksLikeHls(url: String): Boolean {
+    val raw = url.trim()
+    if (raw.isEmpty()) return false
+    val lower = raw.lowercase()
+    if (lower.contains("=m3u8")) return true
+    if (lower.contains("=mpd")) return false
+    val uri = Uri.parse(raw)
+    val scheme = uri.scheme?.lowercase().orEmpty()
+    if (scheme == "rtsp" || scheme == "rtspt") return false
+    for (seg in uri.pathSegments) {
+      if (seg.isEmpty()) continue
+      val s = seg.lowercase()
+      if (s == "m3u8" || s.contains("m3u8")) return true
+      val dot = s.lastIndexOf('.')
+      if (dot >= 0 && dot < s.length - 1) {
+        val ext = s.substring(dot + 1)
+        if (ext == "m3u8" || ext == "php") return true
+      }
     }
     return false
+  }
+
+  /** 与 Dart [kotvMpvHlsOpenFailed] 对齐。 */
+  private fun hlsOpenFailedHint(errorText: String?): Boolean {
+    val t = errorText?.lowercase().orEmpty()
+    return t.contains("avformat_open_input() failed") || t.contains("not detecting m3u8/hls")
+  }
+
+  private fun networkPlayUrl(url: String): Boolean {
+    val scheme = Uri.parse(url).scheme?.lowercase().orEmpty()
+    return scheme == "http" ||
+      scheme == "https" ||
+      scheme == "rtmp" ||
+      scheme == "rtsp" ||
+      scheme == "rtspt" ||
+      scheme == "proxy"
   }
 
   override fun endFile(reason: Int, error: Int, errorText: String?) {
@@ -2064,45 +2109,21 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         markEnded()
       }
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
-        val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
-        if (!forceLavfHls && !ioHlsRetried && shouldRetryHls(url, error)) {
-          ioHlsRetried = true
-          forceLavfHls = true
-          Log.w(TAG, "hls retry err=$error text=$errorText")
-          val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
-          val gen = loadGen.get()
-          if (url.isNotBlank()) {
-            buffering = true
-            playing = false
-            retrySeekSec = positionSec.coerceAtLeast(0.0)
-            main.post {
-              if (!created.get() || gen != loadGen.get()) return@post
-              try {
-                startLoad(url, headers)
-              } catch (t: Throwable) {
-                emit(mapOf("event" to "error", "message" to (t.message ?: "HLS retry failed")))
-              }
-            }
-            return
-          }
+        if (tryReloadAsHls(
+            reason = "loading-failed",
+            seekSec = positionSec.coerceAtLeast(0.0),
+            requireUrlLooksLikeHls = false,
+            error = error,
+            errorText = errorText,
+          )
+        ) {
+          return
         }
         val msg = errorText?.takeIf { it.isNotBlank() } ?: "MPV error $error"
         emit(mapOf("event" to "error", "message" to msg))
       }
       else -> {}
     }
-  }
-
-  /** 只有网络地址上的 LOADING_FAILED 才重试。认不出格式不重试。 */
-  private fun shouldRetryHls(url: String, error: Int): Boolean {
-    if (error != MPVLib.MpvError.MPV_ERROR_LOADING_FAILED) return false
-    val scheme = Uri.parse(url).scheme?.lowercase().orEmpty()
-    return scheme == "http" ||
-      scheme == "https" ||
-      scheme == "rtmp" ||
-      scheme == "rtsp" ||
-      scheme == "rtspt" ||
-      scheme == "proxy"
   }
 
   private fun emitSize() {

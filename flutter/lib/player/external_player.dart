@@ -274,7 +274,8 @@ class _ExternalAppIcon extends StatelessWidget {
       height: 56,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
+        // Win7 / Flutter 3.19 无 surfaceContainerHighest。
+        color: Color.lerp(scheme.surface, scheme.onSurface, 0.12) ?? scheme.surface,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
