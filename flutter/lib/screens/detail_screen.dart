@@ -543,7 +543,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// 释放本页持有的桌面 media_kit Player（包装 + [Player]）。
-  /// 离开页走 [_stopHard]；换集/换源/起播失败重试走这里，避免 Win7 复用卡死实例。
+  /// 调用方：[_stopHard]（离开页）、[_playAt] 硬切（在 [_stopAllBackends] 之后）、起播失败重试。
+  /// 无缝切集不调用。Android 原生 MPV 不走这里。
   /// [softStopFirst]：尚未 stop 时先 pause/stop，避免与新引擎抢 AO。
   Future<void> _disposeDesktopMpvOwned({bool softStopFirst = false}) async {
     if (kotvIsAndroid()) return;
@@ -641,8 +642,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 换集/换源：停声并卸当前文件；桌面 MPV 再拆掉 Player（与离开页同语义）。
-  /// 无缝切集不走 [_playAt]，仍复用实例。Android / Exo / FVP 仍只卸文件。
+  /// 硬切换集/换源：只停声、卸当前文件。各后端实例默认保留。
+  /// 无缝切集走 [skipToNext] / [queuedStartStream]，不调用本方法，也不经 [_playAt]。
   Future<void> _stopAllBackends() async {
     await kotvStopPlayersForEpisodeSwitch([
       _mk,
@@ -653,7 +654,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _xg,
       _zw,
     ]);
-    await _disposeDesktopMpvOwned();
   }
 
   @override
@@ -2236,8 +2236,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         await _writeWatchProgress(flushPos, flushDur, force: true, episodeName: prevEpName);
       } catch (_) {}
     }
-    // 解析/拉流可能要数秒：先停播，避免上一集在后台继续出声。
+    // 硬切：先卸文件；桌面 MPV 再拆 Player（Win7 卡死实例不能复用）。
+    // 无缝：[_advanceToNextEpisode]→skipToNext / 引擎 transition，不进 [_playAt]，此处不影响。
     await _stopAllBackends();
+    await _disposeDesktopMpvOwned();
     if (serial != _playAtSerial || !mounted) return;
     // 先 await 软取消上一集，再 play。unawaited 会与本次 play 竞态，
     // 软取消未结束就开新解析时，JS/JAR 可能报「脚本调用已中断」。
@@ -2561,12 +2563,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             return;
           }
           lastOpenError = e;
-          // 起播失败：桌面 MPV 拆掉再建（[_stopAllBackends] 已在本轮开头拆过；此处清掉半开实例）。
+          // 起播失败：清掉本轮半开的桌面 MPV，下一轮 [_playback] 再建。
           if (pb is MediaKitPlayback) {
             await _disposeDesktopMpvOwned(softStopFirst: true);
           }
           if (!failover.enabled) {
-            // 关闭自动切换：桌面 MPV 重建后再试；其它后端保持原行为。
             if (pb is MediaKitPlayback) continue;
             opened = true;
             break;
