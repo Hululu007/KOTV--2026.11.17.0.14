@@ -91,7 +91,7 @@ static FlValue* kotv_list_external_video_apps() {
   return list;
 }
 
-// 把播放地址 URI 直接交给选定应用（与 macOS open -b 同思路；勿改成临时 m3u）。
+// 把当前播放地址 URI 原样交给选定应用。
 static gboolean kotv_open_external_video_app(const gchar* id, const gchar* url) {
   if (id == nullptr || url == nullptr || id[0] == '\0' || url[0] == '\0') {
     return FALSE;

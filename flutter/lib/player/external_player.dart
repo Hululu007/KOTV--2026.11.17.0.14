@@ -71,10 +71,9 @@ Future<List<(String, String)>> kotvInstalledPlayerOptions({
 }
 
 /// 打开外部播放器：
-/// - 安卓：系统 Intent 选择器（video/*）
-/// - Windows：临时 m3u + 系统「打开方式」（直接 open http 会进浏览器）
-/// - macOS / Linux：宿主列出本机视频应用 → 网格点选 → 把播放地址交给该应用
-/// 取消选择时 [KotvExternalPlayResult.opened] 为假。
+/// - 安卓：系统 Intent 选择器（video/*），地址即当前播放地址（含代理）
+/// - 桌面：宿主列出本机视频应用 → 网格点选 → 把同一播放地址交给该应用
+/// 取消选择时 [KotvExternalPlayResult.opened] 为假；外部播不了也不再改写地址。
 Future<KotvExternalPlayResult> kotvLaunchExternalPlayer({
   required String player,
   required String url,
@@ -99,14 +98,7 @@ Future<KotvExternalPlayResult> kotvLaunchExternalPlayer({
   if (kIsWeb) {
     throw StateError('外部播放器仅支持桌面与安卓');
   }
-  if (Platform.isWindows) {
-    final ok = await _host.invokeMethod<bool>('openExternalVideoChooser', {
-      'url': url,
-      'title': title,
-    });
-    return KotvExternalPlayResult(opened: ok == true);
-  }
-  if (Platform.isMacOS || Platform.isLinux) {
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
     return _launchDesktopPickedApp(context: context, url: url);
   }
   throw StateError('当前平台不支持外部播放器');

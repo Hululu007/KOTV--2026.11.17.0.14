@@ -3,7 +3,6 @@ package player
 import (
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -117,41 +116,16 @@ func Available() map[string]bool {
 	}
 }
 
-// ExternalPlay API/无界面兜底：写成临时 m3u 再交给系统打开。
-// 客户端有 GUI 时应走宿主选择器（macOS/Linux 直接把地址交给选定应用；
-// Windows 用临时 m3u +「打开方式」）。此处勿当 GUI 路径。
+// ExternalPlay API/无界面兜底：把播放地址交给系统默认打开。
+// 客户端 GUI 请走宿主选择器，把同一地址交给用户选定的视频应用。
 func ExternalPlay(url string) error {
 	url = strings.TrimSpace(url)
 	if url == "" {
 		return fmt.Errorf("empty url")
 	}
 	Stop()
-	path, err := writeTempM3U(url)
-	if err != nil {
-		log.Printf("临时 m3u 失败，回退直接打开: %v", err)
-		return openSystemPath(url)
-	}
-	log.Printf("系统打开外部播放(m3u): %s", path)
-	return openSystemPath(path)
-}
-
-func writeTempM3U(mediaURL string) (string, error) {
-	f, err := os.CreateTemp("", "kotv-ext-*.m3u")
-	if err != nil {
-		return "", err
-	}
-	path := f.Name()
-	body := "#EXTM3U\n#EXTINF:-1,KO\n" + mediaURL + "\n"
-	if _, err := f.WriteString(body); err != nil {
-		_ = f.Close()
-		_ = os.Remove(path)
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
-		return "", err
-	}
-	return path, nil
+	log.Printf("系统打开外部播放: %s", url)
+	return openSystemPath(url)
 }
 
 func isEd2k(u string) bool {

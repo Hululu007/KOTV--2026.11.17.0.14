@@ -124,8 +124,7 @@ class MainFlutterWindow: NSWindow {
     return out
   }
 
-  /// 用 `/usr/bin/open -b <bundleId> <地址>` 交给选定应用。
-  /// 直接传播放地址（非临时 m3u）：QuickTime / Movist 等读不了 m3u 里的远程条目；IINA/VLC 对 http(s) 亦可。
+  /// `/usr/bin/open -b <bundleId> <播放地址>`：把当前播放地址原样交给选定应用。
   private static func openExternalVideoApp(id: String, url: String, completion: @escaping (Bool) -> Void) {
     let bid = id.trimmingCharacters(in: .whitespacesAndNewlines)
     let raw = url.trimmingCharacters(in: .whitespacesAndNewlines)

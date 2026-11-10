@@ -1,63 +1,13 @@
 #include "flutter_window.h"
 
 #include <optional>
-#include <string>
 
 #include <flutter/standard_method_codec.h>
-#include <shellapi.h>
 #include <windows.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "kotv_external_player.h"
 #include "kotv_iface_rx.h"
-
-namespace {
-
-// Windows：写成临时 m3u，再用「打开方式」交给本机播放器（VLC / PotPlayer / MPC / mpv 等）。
-// 不可直接 ShellExecute http(s)：默认常落到浏览器。macOS/Linux 则把地址直接交给选定应用。
-bool KotvOpenExternalVideoChooser(const std::string& url, const std::string& title) {
-  wchar_t temp_dir[MAX_PATH];
-  const DWORD dir_len = GetTempPathW(MAX_PATH, temp_dir);
-  if (dir_len == 0 || dir_len >= MAX_PATH) return false;
-
-  wchar_t temp_file[MAX_PATH];
-  if (GetTempFileNameW(temp_dir, L"kotv", 0, temp_file) == 0) return false;
-
-  // GetTempFileName 生成 .tmp；改成 .m3u 便于关联到播放器。
-  std::wstring m3u_path(temp_file);
-  const size_t dot = m3u_path.find_last_of(L'.');
-  if (dot != std::wstring::npos) {
-    m3u_path.resize(dot);
-  }
-  m3u_path += L".m3u";
-  MoveFileExW(temp_file, m3u_path.c_str(), MOVEFILE_REPLACE_EXISTING);
-
-  std::string body = "#EXTM3U\r\n";
-  if (!title.empty()) {
-    body += "#EXTINF:-1,";
-    body += title;
-    body += "\r\n";
-  } else {
-    body += "#EXTINF:-1,KO\r\n";
-  }
-  body += url;
-  body += "\r\n";
-
-  HANDLE file = CreateFileW(m3u_path.c_str(), GENERIC_WRITE, 0, nullptr,
-                            CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
-  if (file == INVALID_HANDLE_VALUE) return false;
-  DWORD written = 0;
-  const BOOL wrote = WriteFile(file, body.data(),
-                               static_cast<DWORD>(body.size()), &written, nullptr);
-  CloseHandle(file);
-  if (!wrote || written != body.size()) return false;
-
-  // 系统「打开方式」对话框，让用户选本机视频应用。
-  const HINSTANCE hi = ShellExecuteW(nullptr, L"openas", m3u_path.c_str(),
-                                     nullptr, nullptr, SW_SHOWNORMAL);
-  return reinterpret_cast<INT_PTR>(hi) > 32;
-}
-
-}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -119,30 +69,32 @@ void FlutterWindow::RegisterHostChannel() {
           }
           result->Success(flutter::EncodableValue(mem));
         } else if (call.method_name() == "hasExternalVideoApp") {
-          result->Success(flutter::EncodableValue(true));
-        } else if (call.method_name() == "openExternalVideoChooser") {
+          result->Success(flutter::EncodableValue(!KotvListExternalVideoApps().empty()));
+        } else if (call.method_name() == "listExternalVideoApps") {
+          result->Success(flutter::EncodableValue(KotvListExternalVideoApps()));
+        } else if (call.method_name() == "openExternalVideoApp") {
           const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+          std::string id;
           std::string url;
-          std::string title;
           if (args != nullptr) {
+            const auto id_it = args->find(flutter::EncodableValue("id"));
+            if (id_it != args->end()) {
+              if (const auto* s = std::get_if<std::string>(&id_it->second)) {
+                id = *s;
+              }
+            }
             const auto url_it = args->find(flutter::EncodableValue("url"));
             if (url_it != args->end()) {
               if (const auto* s = std::get_if<std::string>(&url_it->second)) {
                 url = *s;
               }
             }
-            const auto title_it = args->find(flutter::EncodableValue("title"));
-            if (title_it != args->end()) {
-              if (const auto* s = std::get_if<std::string>(&title_it->second)) {
-                title = *s;
-              }
-            }
           }
-          if (url.empty()) {
-            result->Error("url", "empty url");
+          if (id.empty() || url.empty()) {
+            result->Error("args", "id/url required");
             return;
           }
-          result->Success(flutter::EncodableValue(KotvOpenExternalVideoChooser(url, title)));
+          result->Success(flutter::EncodableValue(KotvOpenExternalVideoApp(id, url)));
         } else {
           result->NotImplemented();
         }
