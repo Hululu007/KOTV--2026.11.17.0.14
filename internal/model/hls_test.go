@@ -10,6 +10,8 @@ func TestURLIsHls(t *testing.T) {
 		"https://cdn/m3u8",
 		"https://cdn/v?file=m3u8",
 		"data:application/vnd.apple.mpegurl,abc",
+		"http://111.1.1.1:9090/nby/m3u8/getM3u8?name=x&url=NBY-1.m3u8",
+		"https://cdn/api/getM3u8?id=1",
 	}
 	no := []string{
 		"https://cdn/fengshows?id=2.m3u8",

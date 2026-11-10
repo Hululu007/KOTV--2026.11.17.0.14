@@ -11,6 +11,8 @@ void main() {
     expect(kotvIsHls('https://cdn/m3u8/', null), isTrue);
     expect(kotvIsHls('https://cdn/v?file=m3u8', null), isTrue);
     expect(kotvIsHls('https://cdn/fengshows?id=2.m3u8', null), isFalse);
+    expect(kotvIsHls('http://111.1.1.1:9090/nby/m3u8/getM3u8?name=x&url=NBY-1.m3u8', null), isTrue);
+    expect(kotvIsHls('https://cdn/api/getM3u8?id=1', null), isTrue);
     expect(kotvIsHls('https://cdn/a.mp4', null), isFalse);
     expect(kotvIsHls('https://cdn/a.m3u', null), isFalse);
     expect(kotvIsHls('rtsp://cdn/a.m3u8', null), isFalse);
@@ -35,6 +37,13 @@ void main() {
 
   test('open failure text', () {
     expect(kotvMpvHlsOpenFailed('lavf', 'avformat_open_input() failed'), isTrue);
+    expect(
+      kotvMpvHlsOpenFailed(
+        'ffmpeg',
+        'Not detecting m3u8/hls with non standard extension and non standard mime type',
+      ),
+      isTrue,
+    );
     expect(kotvMpvHlsOpenFailed('cplayer', 'Failed to recognize file format.'), isFalse);
     expect(kotvMpvNetworkUrl('https://cdn/a.mp4'), isTrue);
     expect(kotvMpvNetworkUrl('file:///tmp/a.mp4'), isFalse);

@@ -1994,9 +1994,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /**
    * 播到片尾，每次加载只报一次 completed。
    * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；有排队项时在这里 playlist-next 并解除 pause。
+   * 未强制 HLS 却几秒就 EOF、时长仍未知：先按 lavf hls 重开，避免假片尾切下一集。
    */
   private fun markEnded() {
     if (eof) return
+    if (tryReloadAsHlsAfterShortEof()) return
     val next = queuedNext
     if (next != null) {
       main.post {
@@ -2015,6 +2017,43 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     eof = true
     playing = false
     emit(mapOf("event" to "completed"))
+  }
+
+  /** 代理节目单 / 路径含 m3u8 却未 forceHls 时，短 EOF 重开一次。 */
+  private fun tryReloadAsHlsAfterShortEof(): Boolean {
+    if (forceLavfHls || ioHlsRetried || livePlayback || repeatOne) return false
+    if (durationSec > 30.0 || positionSec > 30.0) return false
+    val url = loadedUrl.ifBlank { return false }
+    if (!looksLikeUnsetHls(url)) return false
+    ioHlsRetried = true
+    forceLavfHls = true
+    Log.w(TAG, "short eof without duration; reload as hls url=$url")
+    val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
+    val gen = loadGen.get()
+    buffering = true
+    playing = false
+    eof = false
+    retrySeekSec = -1.0
+    main.post {
+      if (!created.get() || gen != loadGen.get()) return@post
+      try {
+        startLoad(url, headers)
+      } catch (t: Throwable) {
+        emit(mapOf("event" to "error", "message" to (t.message ?: "HLS reload failed")))
+      }
+    }
+    return true
+  }
+
+  /** 与 Dart [kotvMpvUrlIsHls] / 引擎透传节目单对齐的轻量判断（未带 forceHls 时的兜底）。 */
+  private fun looksLikeUnsetHls(url: String): Boolean {
+    val lower = url.lowercase()
+    if (lower.contains("m3u8")) return true
+    val uri = Uri.parse(url)
+    if (uri.path?.contains("/proxy/play") == true && uri.getQueryParameter("u").isNullOrEmpty()) {
+      return true
+    }
+    return false
   }
 
   override fun endFile(reason: Int, error: Int, errorText: String?) {

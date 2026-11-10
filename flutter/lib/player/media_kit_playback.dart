@@ -69,13 +69,18 @@ class MediaKitPlayback extends KotvPlayback {
     }));
     _subs.add(player.stream.width.listen((w) {
       if (!_acceptSize) return;
-      _w = w ?? 0;
-      if (_w > 0) _hlsRetryAllowed = false;
+      final next = w ?? 0;
+      // 无缝切入时可能先推 null/0；勿盖掉仍有效的尺寸（含换集分辨率变化前的过渡）。
+      if (next <= 0) return;
+      _w = next;
+      _hlsRetryAllowed = false;
       notifyListeners();
     }));
     _subs.add(player.stream.height.listen((h) {
       if (!_acceptSize) return;
-      _h = h ?? 0;
+      final next = h ?? 0;
+      if (next <= 0) return;
+      _h = next;
       notifyListeners();
     }));
     _subs.add(player.stream.volume.listen((_) => notifyListeners()));

@@ -12,22 +12,18 @@ bool kotvMpvUrlIsHls(String url) {
   }
   if (raw.contains('=m3u8')) return true;
   if (raw.contains('=mpd')) return false;
-  final seg = _lastSegment(uri);
-  if (seg == null) return false;
-  if (seg.toLowerCase() == 'm3u8') return true;
-  final dot = seg.lastIndexOf('.');
-  if (dot < 0 || dot == seg.length - 1) return false;
-  final ext = seg.substring(dot + 1).toLowerCase();
-  return ext == 'm3u8' || ext == 'php';
-}
-
-/// 结尾斜杠会产生空段，取最后一段非空路径。
-String? _lastSegment(Uri uri) {
-  for (var i = uri.pathSegments.length - 1; i >= 0; i--) {
-    final seg = uri.pathSegments[i];
-    if (seg.isNotEmpty) return seg;
+  // 任一路径段含 m3u8（getM3u8、/m3u8/xxx）；仅查询参数里的 id=2.m3u8 不算。
+  for (final seg in uri.pathSegments) {
+    if (seg.isEmpty) continue;
+    final lower = seg.toLowerCase();
+    if (lower == 'm3u8' || lower.contains('m3u8')) return true;
+    final dot = lower.lastIndexOf('.');
+    if (dot >= 0 && dot < lower.length - 1) {
+      final ext = lower.substring(dot + 1);
+      if (ext == 'm3u8' || ext == 'php') return true;
+    }
   }
-  return null;
+  return false;
 }
 
 /// 这一次打开是 HLS。地址命中后，别的 mime 不能把它改回去。
@@ -48,11 +44,15 @@ String? kotvPlayMime(String url, String? format) {
   return null;
 }
 
-/// 主文件打开失败。认不出容器不算，解码器报错也不算。
+/// 主文件打开失败，或 lavf 明确说认不出非标准后缀/MIME 的 m3u8：应强制 demuxer-lavf-format=hls 重开。
+/// 解码器报错不算。
 bool kotvMpvHlsOpenFailed(String prefix, String text) {
   final p = prefix.toLowerCase();
   if (p == 'vd' || p == 'ad') return false;
-  return text.toLowerCase().contains('avformat_open_input() failed');
+  final t = text.toLowerCase();
+  if (t.contains('avformat_open_input() failed')) return true;
+  if (t.contains('not detecting m3u8/hls')) return true;
+  return false;
 }
 
 bool kotvMpvNetworkUrl(String url) {

@@ -1274,12 +1274,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (!_playbackLive || _endConsumedGen == _playGen) return;
     final pos = _playback.position.inMilliseconds;
     final dur = _playback.duration.inMilliseconds;
+    // 未知片长：坏 HLS/假 EOF 常见；勿当播完切集（直播走其它路径）。
+    if (dur <= 0) return;
     // 黑屏/假结束：几乎没播过就不自动下一集
     if (pos < 8000) return;
-    if (dur > 0) {
-      final nearEnd = pos + 8000 >= dur || pos >= (dur * 0.92).round();
-      if (!nearEnd) return;
-    }
+    final nearEnd = pos + 8000 >= dur || pos >= (dur * 0.92).round();
+    if (!nearEnd) return;
     await _advanceToNextEpisode();
   }
 
@@ -2554,7 +2554,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             return;
           }
           lastOpenError = e;
+          // 桌面 media_kit 卡死（有时长/缓冲、进度不动）后须拆掉 Player，否则换源/换站仍复用坏实例。
+          final wedgedDesktopMpv = !kotvIsAndroid() && pb is MediaKitPlayback;
+          if (wedgedDesktopMpv) {
+            await _disposeDesktopMpvOwned(softStopFirst: true);
+          }
           if (!failover.enabled) {
+            if (wedgedDesktopMpv) {
+              // 不切引擎：同 MPV 新建 Player 再试。
+              continue;
+            }
             // 关闭自动切换：不换引擎、不判失败，继续当前播放器。
             opened = true;
             break;
@@ -2569,6 +2578,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           try {
             await pb.stop();
           } catch (_) {}
+        }
+        if (!kotvIsAndroid() && identical(pb, _mk)) {
+          await _disposeDesktopMpvOwned(softStopFirst: true);
         }
         await _stopInactiveBackends(kotvEmbedBackend(step.playerVal));
         if (!mounted || serial != _playAtSerial) return;

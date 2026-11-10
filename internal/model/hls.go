@@ -33,23 +33,20 @@ func URLIsHls(raw string) bool {
 	if strings.Contains(raw, "=mpd") {
 		return false
 	}
-	seg := lastNonEmptySegment(u.Path)
-	if seg == "" {
-		return false
-	}
-	if strings.EqualFold(seg, "m3u8") {
-		return true
-	}
-	ext := strings.ToLower(path.Ext(seg))
-	return ext == ".m3u8" || ext == ".php"
-}
-
-func lastNonEmptySegment(p string) string {
-	parts := strings.Split(p, "/")
-	for i := len(parts) - 1; i >= 0; i-- {
-		if parts[i] != "" {
-			return parts[i]
+	// 任一路径段含 m3u8（getM3u8、/m3u8/xxx）；仅查询参数里的 id=2.m3u8 不算。
+	for _, seg := range strings.Split(u.Path, "/") {
+		if seg == "" {
+			continue
+		}
+		lower := strings.ToLower(seg)
+		if lower == "m3u8" || strings.Contains(lower, "m3u8") {
+			return true
+		}
+		ext := strings.ToLower(path.Ext(seg))
+		if ext == ".m3u8" || ext == ".php" {
+			return true
 		}
 	}
-	return ""
+	return false
 }
+

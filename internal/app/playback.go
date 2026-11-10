@@ -106,8 +106,9 @@ func vodAdFilter(raw string) bool {
 	return settings.IsAdFilterEnabled() && strings.Contains(strings.ToLower(raw), "m3u8")
 }
 
-// proxyHlsFormat 透传丢掉扩展名。登记前的地址是 HLS 时，响应补上这个 mime。
-// 已经是 application/x-mpegURL 则保持原样。直播原地址和爬虫 /proxy 不改。
+// proxyHlsFormat 透传丢掉扩展名。登记前的地址是 HLS 时，响应补上这个 mime，
+// 供 MPV demuxer-lavf-format=hls；否则 Exo 靠 Content-Type 能播、MPV 只播几秒就 EOF。
+// 已经是 application/x-mpegURL 则保持原样。直播原地址和未走透传的不改。
 func proxyHlsFormat(before, after, format string) string {
 	if !strings.Contains(after, "/proxy/play?") || !model.URLIsHls(before) {
 		return format

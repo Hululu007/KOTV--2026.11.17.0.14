@@ -54,6 +54,7 @@ Future<void> kotvGuardSilentVideo({
 
     final baseline = posOf();
     DateTime? stallSince;
+    DateTime? bufferingNoProgressSince;
     final watchStart = DateTime.now();
 
     while (true) {
@@ -82,16 +83,25 @@ Future<void> kotvGuardSilentVideo({
         return;
       }
 
-      // 缓冲中（含 playing+buffering 的补缓存）不计进度停滞，避免误切播放器。
+      if (!sessionAlive()) {
+        throw const KotvSilentVideoException('起播会话中断无画面');
+      }
+
+      // 点播已出时长却进度一直为 0：即便一直 buffering 也不能无限等（Win7 MPV 常见卡死）。
       if (buffering) {
+        if (dur > Duration.zero && pos < progressMinDelta) {
+          bufferingNoProgressSince ??= now;
+          if (now.difference(bufferingNoProgressSince) >= progressStallTimeout) {
+            throw const KotvSilentVideoException('播放中进度停滞');
+          }
+        } else {
+          bufferingNoProgressSince = null;
+        }
         stallSince = null;
         await Future<void>.delayed(tick);
         continue;
       }
-
-      if (!sessionAlive()) {
-        throw const KotvSilentVideoException('起播会话中断无画面');
-      }
+      bufferingNoProgressSince = null;
 
       if (playing) {
         stallSince ??= now;
