@@ -47,7 +47,6 @@ class MainFlutterWindow: NSWindow {
           result(FlutterError(code: "args", message: "id/url required", details: nil))
           return
         }
-        // 异步回传，避免在主线程 semaphore.wait 与 NSWorkspace 完成回调互锁。
         Self.openExternalVideoApp(id: id, url: url) { ok in
           result(ok)
         }
@@ -78,7 +77,8 @@ class MainFlutterWindow: NSWindow {
     "com.apple.WebKit.Networking",
   ]
 
-  private static func listExternalVideoApps() -> [[String: String]] {
+  /// 本机可处理常见视频/播放列表类型的应用（排除浏览器与自身），带 64px PNG 图标。
+  private static func listExternalVideoApps() -> [[String: Any]] {
     var appURLs: [URL] = []
     if #available(macOS 12.0, *) {
       let workspace = NSWorkspace.shared
@@ -95,7 +95,7 @@ class MainFlutterWindow: NSWindow {
         appURLs += workspace.urlsForApplications(toOpen: m3u8)
       }
     } else {
-      for name in ["IINA", "VLC", "mpv", "QuickTime Player", "Elmedia Video Player"] {
+      for name in ["IINA", "VLC", "mpv", "QuickTime Player", "Elmedia Video Player", "Movist Pro"] {
         if let path = NSWorkspace.shared.fullPath(forApplication: name) {
           appURLs.append(URL(fileURLWithPath: path))
         }
@@ -104,34 +104,71 @@ class MainFlutterWindow: NSWindow {
 
     let selfId = Bundle.main.bundleIdentifier ?? ""
     var seen = Set<String>()
-    var out: [[String: String]] = []
+    var out: [[String: Any]] = []
     for appURL in appURLs {
       guard let bid = Bundle(url: appURL)?.bundleIdentifier, !bid.isEmpty else { continue }
       if bid == selfId || browserBundleIds.contains(bid) { continue }
       if !seen.insert(bid).inserted { continue }
       let name = FileManager.default.displayName(atPath: appURL.path)
-      out.append(["id": bid, "name": name])
+      var row: [String: Any] = ["id": bid, "name": name]
+      if let png = pngIcon(forAppAt: appURL, side: 64) {
+        row["icon"] = FlutterStandardTypedData(bytes: png)
+      }
+      out.append(row)
     }
-    out.sort { ($0["name"] ?? "").localizedCompare($1["name"] ?? "") == .orderedAscending }
+    out.sort {
+      let a = ($0["name"] as? String) ?? ""
+      let b = ($1["name"] as? String) ?? ""
+      return a.localizedCompare(b) == .orderedAscending
+    }
     return out
   }
 
+  /// 用 `/usr/bin/open -b <bundleId> <地址>` 交给选定应用。
+  /// 直接传播放地址（非临时 m3u）：QuickTime / Movist 等读不了 m3u 里的远程条目；IINA/VLC 对 http(s) 亦可。
   private static func openExternalVideoApp(id: String, url: String, completion: @escaping (Bool) -> Void) {
     let bid = id.trimmingCharacters(in: .whitespacesAndNewlines)
     let raw = url.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !bid.isEmpty, !raw.isEmpty, let media = URL(string: raw) else {
+    guard !bid.isEmpty, !raw.isEmpty else {
       completion(false)
       return
     }
-    guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bid) else {
-      completion(false)
-      return
-    }
-    NSWorkspace.shared.open([media], withApplicationAt: appURL, configuration: NSWorkspace.OpenConfiguration()) { _, error in
-      DispatchQueue.main.async {
-        completion(error == nil)
+    DispatchQueue.global(qos: .userInitiated).async {
+      let proc = Process()
+      proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+      proc.arguments = ["-b", bid, raw]
+      do {
+        try proc.run()
+        proc.waitUntilExit()
+        let ok = proc.terminationStatus == 0
+        DispatchQueue.main.async { completion(ok) }
+      } catch {
+        DispatchQueue.main.async { completion(false) }
       }
     }
+  }
+
+  private static func pngIcon(forAppAt appURL: URL, side: Int) -> Data? {
+    let src = NSWorkspace.shared.icon(forFile: appURL.path)
+    guard let rep = NSBitmapImageRep(
+      bitmapDataPlanes: nil,
+      pixelsWide: side,
+      pixelsHigh: side,
+      bitsPerSample: 8,
+      samplesPerPixel: 4,
+      hasAlpha: true,
+      isPlanar: false,
+      colorSpaceName: .deviceRGB,
+      bytesPerRow: 0,
+      bitsPerPixel: 0
+    ) else {
+      return nil
+    }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    src.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+    NSGraphicsContext.restoreGraphicsState()
+    return rep.representation(using: .png, properties: [:])
   }
 
   /// 网卡累计下行字节（跳过 lo0）。缓冲期差分即网速。

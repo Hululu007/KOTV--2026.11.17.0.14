@@ -118,7 +118,8 @@ func Available() map[string]bool {
 }
 
 // ExternalPlay API/无界面兜底：写成临时 m3u 再交给系统打开。
-// 勿直接 open http(s) URL——默认常落到浏览器。客户端 GUI 请用宿主选择器。
+// 客户端有 GUI 时应走宿主选择器（macOS/Linux 直接把地址交给选定应用；
+// Windows 用临时 m3u +「打开方式」）。此处勿当 GUI 路径。
 func ExternalPlay(url string) error {
 	url = strings.TrimSpace(url)
 	if url == "" {

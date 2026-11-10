@@ -12,7 +12,8 @@
 
 namespace {
 
-// 写成临时 m3u，用系统「打开方式」选视频应用；勿直接 open http（常落到浏览器）。
+// Windows：写成临时 m3u，再用「打开方式」交给本机播放器（VLC / PotPlayer / MPC / mpv 等）。
+// 不可直接 ShellExecute http(s)：默认常落到浏览器。macOS/Linux 则把地址直接交给选定应用。
 bool KotvOpenExternalVideoChooser(const std::string& url, const std::string& title) {
   wchar_t temp_dir[MAX_PATH];
   const DWORD dir_len = GetTempPathW(MAX_PATH, temp_dir);

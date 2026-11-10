@@ -15,6 +15,14 @@ class KotvExternalPlayResult {
   final int positionMs;
 }
 
+class _ExternalApp {
+  const _ExternalApp({required this.id, required this.name, this.icon});
+
+  final String id;
+  final String name;
+  final Uint8List? icon;
+}
+
 const _android = MethodChannel('kotv_android');
 const _host = MethodChannel('kotv_host');
 
@@ -64,8 +72,8 @@ Future<List<(String, String)>> kotvInstalledPlayerOptions({
 
 /// 打开外部播放器：
 /// - 安卓：系统 Intent 选择器（video/*）
-/// - Windows：临时 m3u + 系统「打开方式」
-/// - macOS / Linux：宿主列出本机视频应用 → 点选 → 用该应用打开 URL
+/// - Windows：临时 m3u + 系统「打开方式」（直接 open http 会进浏览器）
+/// - macOS / Linux：宿主列出本机视频应用 → 网格点选 → 把播放地址交给该应用
 /// 取消选择时 [KotvExternalPlayResult.opened] 为假。
 Future<KotvExternalPlayResult> kotvLaunchExternalPlayer({
   required String player,
@@ -148,41 +156,138 @@ Future<KotvExternalPlayResult> _launchDesktopPickedApp({
   return KotvExternalPlayResult(opened: ok == true);
 }
 
-List<({String id, String name})> _parseExternalApps(dynamic raw) {
+List<_ExternalApp> _parseExternalApps(dynamic raw) {
   if (raw is! List) return const [];
-  final out = <({String id, String name})>[];
+  final out = <_ExternalApp>[];
   for (final e in raw) {
     if (e is! Map) continue;
     final id = '${e['id'] ?? ''}'.trim();
     final name = '${e['name'] ?? ''}'.trim();
     if (id.isEmpty) continue;
-    out.add((id: id, name: name.isEmpty ? id : name));
+    out.add(_ExternalApp(
+      id: id,
+      name: name.isEmpty ? id : name,
+      icon: _asIconBytes(e['icon']),
+    ));
   }
   return out;
 }
 
-Future<String?> _pickExternalVideoApp(
-  BuildContext context,
-  List<({String id, String name})> apps,
-) {
+Uint8List? _asIconBytes(dynamic raw) {
+  if (raw is Uint8List) return raw.isEmpty ? null : raw;
+  if (raw is ByteData) {
+    final view = raw.buffer.asUint8List(raw.offsetInBytes, raw.lengthInBytes);
+    return view.isEmpty ? null : view;
+  }
+  if (raw is List) {
+    if (raw.isEmpty) return null;
+    return Uint8List.fromList(raw.cast<int>());
+  }
+  return null;
+}
+
+Future<String?> _pickExternalVideoApp(BuildContext context, List<_ExternalApp> apps) {
   return showDialog<String>(
     context: context,
     useRootNavigator: true,
     builder: (ctx) {
       final scheme = Theme.of(ctx).colorScheme;
-      return SimpleDialog(
+      final wide = MediaQuery.sizeOf(ctx).width;
+      final cols = wide >= 720 ? 4 : (wide >= 520 ? 3 : 2);
+      final maxH = MediaQuery.sizeOf(ctx).height * 0.55;
+      return AlertDialog(
         title: const Text('选择外部播放器'),
-        children: [
-          for (final app in apps)
-            SimpleDialogOption(
-              onPressed: () => Navigator.of(ctx, rootNavigator: true).pop(app.id),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Text(app.name, style: TextStyle(color: scheme.onSurface)),
+        content: SizedBox(
+          width: cols * 108.0,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxH),
+            child: GridView.builder(
+              shrinkWrap: true,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: cols,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 0.82,
               ),
+              itemCount: apps.length,
+              itemBuilder: (_, i) {
+                final app = apps[i];
+                return InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => Navigator.of(ctx, rootNavigator: true).pop(app.id),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _ExternalAppIcon(bytes: app.icon, name: app.name, scheme: scheme),
+                        const SizedBox(height: 8),
+                        Text(
+                          app.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 12, color: scheme.onSurface),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx, rootNavigator: true).pop(),
+            child: const Text('取消'),
+          ),
         ],
       );
     },
   );
+}
+
+class _ExternalAppIcon extends StatelessWidget {
+  const _ExternalAppIcon({required this.bytes, required this.name, required this.scheme});
+
+  final Uint8List? bytes;
+  final String name;
+  final ColorScheme scheme;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = bytes;
+    if (data != null && data.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.memory(
+          data,
+          width: 56,
+          height: 56,
+          filterQuality: FilterQuality.medium,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => _fallback(),
+        ),
+      );
+    }
+    return _fallback();
+  }
+
+  Widget _fallback() {
+    final label = name.trim().isEmpty ? '?' : String.fromCharCodes(name.runes.take(1));
+    return Container(
+      width: 56,
+      height: 56,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: scheme.onSurface),
+      ),
+    );
+  }
 }

@@ -5,7 +5,9 @@
 #include <gdk/gdkx.h>
 #endif
 
+#include <gdk-pixbuf/gdk-pixbuf.h>
 #include <gio/gio.h>
+#include <gtk/gtk.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -24,6 +26,37 @@ static gboolean kotv_is_browser_app_id(const gchar* id) {
     }
   }
   return FALSE;
+}
+
+// 64px PNG；失败则不加 icon 字段，Dart 侧用首字占位。
+static FlValue* kotv_app_icon_png(GAppInfo* app) {
+  GIcon* icon = g_app_info_get_icon(app);
+  if (icon == nullptr) return nullptr;
+  GtkIconTheme* theme = gtk_icon_theme_get_default();
+  GtkIconInfo* info =
+      gtk_icon_theme_lookup_by_gicon(theme, icon, 64, GTK_ICON_LOOKUP_FORCE_SIZE);
+  if (info == nullptr) return nullptr;
+  GError* err = nullptr;
+  GdkPixbuf* pix = gtk_icon_info_load_icon(info, &err);
+  g_object_unref(info);
+  if (pix == nullptr) {
+    if (err != nullptr) g_error_free(err);
+    return nullptr;
+  }
+  gchar* buf = nullptr;
+  gsize len = 0;
+  const gboolean ok =
+      gdk_pixbuf_save_to_buffer(pix, &buf, &len, "png", &err, nullptr);
+  g_object_unref(pix);
+  if (!ok || buf == nullptr || len == 0) {
+    if (err != nullptr) g_error_free(err);
+    g_free(buf);
+    return nullptr;
+  }
+  FlValue* bytes = fl_value_new_uint8_list(reinterpret_cast<const uint8_t*>(buf),
+                                           static_cast<size_t>(len));
+  g_free(buf);
+  return bytes;
 }
 
 static FlValue* kotv_list_external_video_apps() {
@@ -46,6 +79,10 @@ static FlValue* kotv_list_external_video_apps() {
       fl_value_set_string_take(row, "id", fl_value_new_string(id));
       fl_value_set_string_take(row, "name",
                                fl_value_new_string(name != nullptr ? name : id));
+      FlValue* icon = kotv_app_icon_png(app);
+      if (icon != nullptr) {
+        fl_value_set_string_take(row, "icon", icon);
+      }
       fl_value_append_take(list, row);
     }
     g_list_free_full(apps, g_object_unref);
@@ -54,6 +91,7 @@ static FlValue* kotv_list_external_video_apps() {
   return list;
 }
 
+// 把播放地址 URI 直接交给选定应用（与 macOS open -b 同思路；勿改成临时 m3u）。
 static gboolean kotv_open_external_video_app(const gchar* id, const gchar* url) {
   if (id == nullptr || url == nullptr || id[0] == '\0' || url[0] == '\0') {
     return FALSE;
