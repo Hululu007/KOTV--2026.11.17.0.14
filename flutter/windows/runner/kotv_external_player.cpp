@@ -10,7 +10,6 @@
 #include <cwchar>
 #include <set>
 #include <string>
-#include <vector>
 
 namespace {
 

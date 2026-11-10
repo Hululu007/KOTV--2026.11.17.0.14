@@ -2020,9 +2020,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 未 forceHls 时强制 lavf hls 再开一次。短 EOF 与 LOADING_FAILED 共用，避免两处各写一套。
-   * [requireUrlLooksLikeHls]：短 EOF 只认地址像 HLS（勿把所有 /proxy/play 当节目单）。
-   * 错误路径还可凭 [errorText] 命中 Dart [kotvMpvHlsOpenFailed] 同款文案。
+   * 未 forceHls 时强制 lavf hls 再开一次。短 EOF 与 LOADING_FAILED 共用。
+   * [requireUrlLooksLikeHls]：短 EOF 只认 [KotvMpvHls.urlLooksLikeHls]（勿把所有 /proxy/play 当节目单）。
+   * 错误路径还可凭 [errorText] 命中 [KotvMpvHls.openFailedHint]。
    */
   private fun tryReloadAsHls(
     reason: String,
@@ -2033,14 +2033,14 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   ): Boolean {
     if (forceLavfHls || ioHlsRetried || livePlayback || repeatOne) return false
     val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
-    if (url.isBlank() || !networkPlayUrl(url)) return false
-    val urlHls = urlLooksLikeHls(url)
+    if (url.isBlank() || !KotvMpvHls.networkPlayUrl(url)) return false
+    val urlHls = KotvMpvHls.urlLooksLikeHls(url)
     if (requireUrlLooksLikeHls) {
       if (!urlHls) return false
       if (durationSec > 30.0 || positionSec > 30.0) return false
     } else {
       if (error != MPVLib.MpvError.MPV_ERROR_LOADING_FAILED) return false
-      if (!urlHls && !hlsOpenFailedHint(errorText)) return false
+      if (!urlHls && !KotvMpvHls.openFailedHint(errorText)) return false
     }
     ioHlsRetried = true
     forceLavfHls = true
@@ -2060,45 +2060,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     }
     return true
-  }
-
-  /** 与 Dart [kotvMpvUrlIsHls] 对齐：只看地址本身，不把引擎 /proxy/play?id= 一律当成 HLS。 */
-  private fun urlLooksLikeHls(url: String): Boolean {
-    val raw = url.trim()
-    if (raw.isEmpty()) return false
-    val lower = raw.lowercase()
-    if (lower.contains("=m3u8")) return true
-    if (lower.contains("=mpd")) return false
-    val uri = Uri.parse(raw)
-    val scheme = uri.scheme?.lowercase().orEmpty()
-    if (scheme == "rtsp" || scheme == "rtspt") return false
-    for (seg in uri.pathSegments) {
-      if (seg.isEmpty()) continue
-      val s = seg.lowercase()
-      if (s == "m3u8" || s.contains("m3u8")) return true
-      val dot = s.lastIndexOf('.')
-      if (dot >= 0 && dot < s.length - 1) {
-        val ext = s.substring(dot + 1)
-        if (ext == "m3u8" || ext == "php") return true
-      }
-    }
-    return false
-  }
-
-  /** 与 Dart [kotvMpvHlsOpenFailed] 对齐。 */
-  private fun hlsOpenFailedHint(errorText: String?): Boolean {
-    val t = errorText?.lowercase().orEmpty()
-    return t.contains("avformat_open_input() failed") || t.contains("not detecting m3u8/hls")
-  }
-
-  private fun networkPlayUrl(url: String): Boolean {
-    val scheme = Uri.parse(url).scheme?.lowercase().orEmpty()
-    return scheme == "http" ||
-      scheme == "https" ||
-      scheme == "rtmp" ||
-      scheme == "rtsp" ||
-      scheme == "rtspt" ||
-      scheme == "proxy"
   }
 
   override fun endFile(reason: Int, error: Int, errorText: String?) {

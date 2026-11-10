@@ -1,4 +1,5 @@
 /// 地址按协议、路径和查询判断是不是 HLS。
+/// 安卓原生 MPV 片尾/加载失败重开用同一套规则，见 `KotvMpvHls.kt`。
 bool kotvMpvUrlIsHls(String url) {
   final raw = url.trim();
   if (raw.isEmpty) return false;

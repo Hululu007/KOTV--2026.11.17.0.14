@@ -116,20 +116,37 @@ static gboolean kotv_has_external_video_app() {
 static gboolean kotv_list_visit(GAppInfo* /*app*/, const gchar* id,
                                 const gchar* name, FlValue* icon,
                                 gpointer user_data) {
-  FlValue* list = static_cast<FlValue*>(user_data);
+  GPtrArray* rows = static_cast<GPtrArray*>(user_data);
   FlValue* row = fl_value_new_map();
   fl_value_set_string_take(row, "id", fl_value_new_string(id));
   fl_value_set_string_take(row, "name", fl_value_new_string(name));
   if (icon != nullptr) {
     fl_value_set_string_take(row, "icon", icon);
   }
-  fl_value_append_take(list, row);
+  g_ptr_array_add(rows, row);
   return TRUE;
 }
 
+static gint kotv_external_app_name_cmp(gconstpointer a, gconstpointer b) {
+  FlValue* ma = *static_cast<FlValue* const*>(a);
+  FlValue* mb = *static_cast<FlValue* const*>(b);
+  FlValue* na = fl_value_lookup_string(ma, "name");
+  FlValue* nb = fl_value_lookup_string(mb, "name");
+  const gchar* sa = na != nullptr ? fl_value_get_string(na) : "";
+  const gchar* sb = nb != nullptr ? fl_value_get_string(nb) : "";
+  return g_utf8_collate(sa, sb);
+}
+
 static FlValue* kotv_list_external_video_apps() {
+  GPtrArray* rows = g_ptr_array_new();
+  kotv_for_each_external_video_app(TRUE, kotv_list_visit, rows);
+  g_ptr_array_sort(rows, kotv_external_app_name_cmp);
   FlValue* list = fl_value_new_list();
-  kotv_for_each_external_video_app(TRUE, kotv_list_visit, list);
+  for (guint i = 0; i < rows->len; i++) {
+    fl_value_append_take(list, static_cast<FlValue*>(g_ptr_array_index(rows, i)));
+  }
+  // 行已交给 list；只拆数组壳。
+  g_ptr_array_free(rows, FALSE);
   return list;
 }
 
