@@ -249,9 +249,14 @@ kotv_macos_verify_libmpv_self_contained() {
     done < <(otool -L "$f" 2>/dev/null | awk 'NR>1 {print $1}')
   done
   [[ "$bad" == 0 ]] || return 1
-  # 无 Homebrew 路径时也应能 dlopen（依赖已在同目录 @rpath）
-  if command -v python3 >/dev/null; then
-    (cd "$(dirname "$lib")" && python3 - <<PY
+}
+
+# 须在 ad-hoc 签名之后调用：macOS 15+ 对未签名 dylib 的 dlopen 会直接 SIGKILL。
+kotv_macos_verify_libmpv_dlopen() {
+  local lib="$1"
+  [[ -f "$lib" ]] || return 1
+  command -v python3 >/dev/null || return 0
+  (cd "$(dirname "$lib")" && python3 - <<PY
 import ctypes, os, sys
 os.chdir(r"""$(dirname "$lib")""")
 # 阻断 fallback 到 /usr/local，确认只靠 Frameworks
@@ -265,7 +270,6 @@ except OSError as e:
 print("ok dlopen Frameworks/libmpv.dylib")
 PY
 )
-  fi
 }
 
 # mdk/fvp 自带 /usr/local/lib、/opt/homebrew/lib rpath 时，会优先加载 Cellar FFmpeg，
@@ -479,6 +483,7 @@ EOF
       echo "  - removed fvp/mdk.framework (MPV-only macOS)"
     fi
     kotv_macos_adhoc_sign_app "$DEST"
+    kotv_macos_verify_libmpv_dlopen "$FW/libmpv.dylib"
     strip_runtime_libmpv
     echo "bundled macOS Frameworks/libmpv.dylib (+ deps)"
     ;;
