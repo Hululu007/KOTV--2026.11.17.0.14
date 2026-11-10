@@ -1429,23 +1429,31 @@ PY
 
 ensure_windows_vulkan() {
   # libplacebo / mpv 需要 Vulkan 头与 vulkan-1（Win7 同 Win10+）。
-  if [[ -n "${VULKAN_SDK:-}" && -f "${VULKAN_SDK}/Include/vulkan/vulkan.h" ]]; then
-    echo "ok VULKAN_SDK=$VULKAN_SDK"
-  elif [[ -f "/c/VulkanSDK" ]] || ls /c/VulkanSDK/*/Include/vulkan/vulkan.h >/dev/null 2>&1; then
-    local sdk
-    sdk="$(ls -d /c/VulkanSDK/*/ 2>/dev/null | tail -1)"
-    export VULKAN_SDK="$(cygpath -m "$sdk" 2>/dev/null || echo "$sdk")"
-    echo "ok VULKAN_SDK=$VULKAN_SDK"
-  else
-    echo "WARN: VULKAN_SDK not set; libplacebo/meson may fail (CI should choco install vulkan-sdk)" >&2
-  fi
+  local sdk="" pref inc lib
   if [[ -n "${VULKAN_SDK:-}" ]]; then
-    local pref inc lib
-    pref="$(cygpath -m "${VULKAN_SDK}" 2>/dev/null || echo "${VULKAN_SDK}")"
-    inc="$pref/Include"
-    lib="$pref/Lib"
-    mkdir -p "$PREFIX/lib/pkgconfig"
-    cat >"$PREFIX/lib/pkgconfig/vulkan.pc" <<EOF
+    sdk="$(cygpath -u "${VULKAN_SDK}" 2>/dev/null || echo "${VULKAN_SDK}")"
+    sdk="${sdk%/}"
+  fi
+  if [[ -z "$sdk" || ! -f "$sdk/Include/vulkan/vulkan.h" ]]; then
+    sdk="$(ls -d /c/VulkanSDK/*/ 2>/dev/null | tail -1 || true)"
+    sdk="${sdk%/}"
+  fi
+  if [[ -z "$sdk" || ! -f "$sdk/Include/vulkan/vulkan.h" ]]; then
+    echo "ERROR: Vulkan SDK missing (need Include/vulkan/vulkan.h). CI: scripts/ci-ensure-windows-vulkan-sdk.sh" >&2
+    exit 1
+  fi
+  if [[ ! -f "$sdk/Lib/vulkan-1.lib" && ! -f "$sdk/Lib/vulkan-1.dll.a" && ! -f "$sdk/Lib/libvulkan-1.a" ]]; then
+    echo "ERROR: Vulkan SDK Lib/vulkan-1.* missing under $sdk/Lib" >&2
+    ls -la "$sdk/Lib" >&2 || true
+    exit 1
+  fi
+  export VULKAN_SDK="$(cygpath -m "$sdk" 2>/dev/null || echo "$sdk")"
+  echo "ok VULKAN_SDK=$VULKAN_SDK"
+  pref="$(cygpath -m "$sdk" 2>/dev/null || echo "$sdk")"
+  inc="$pref/Include"
+  lib="$pref/Lib"
+  mkdir -p "$PREFIX/lib/pkgconfig"
+  cat >"$PREFIX/lib/pkgconfig/vulkan.pc" <<EOF
 prefix=$pref
 includedir=$inc
 libdir=$lib
@@ -1456,9 +1464,8 @@ Version: 1.4.0
 Libs: -L\${libdir} -lvulkan-1
 Cflags: -I\${includedir}
 EOF
-    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-    echo "ok vulkan.pc -> $PREFIX/lib/pkgconfig/vulkan.pc"
-  fi
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  echo "ok vulkan.pc -> $PREFIX/lib/pkgconfig/vulkan.pc"
 }
 
 build_mpv_linux() {
