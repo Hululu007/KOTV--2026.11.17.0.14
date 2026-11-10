@@ -52,7 +52,6 @@ Future<List<(String, String)>> kotvInstalledPlayerOptions({
 /// 安卓：系统应用选择器，并等待对方交回进度。
 /// 桌面：引擎按平台系统打开（open / FileProtocolHandler / xdg-open）。
 /// 用户关掉安卓选择器时 [KotvExternalPlayResult.opened] 为假。
-/// 旧桌面 outie#mpv / vlc / iina 一并按 outie#view 处理。
 Future<KotvExternalPlayResult> kotvLaunchExternalPlayer({
   required KotvApi api,
   required String player,

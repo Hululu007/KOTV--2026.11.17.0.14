@@ -1842,7 +1842,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         _playerLabel = flutterPlayerLabel(next);
       });
     }
-    if (next.startsWith('outie#')) {
+    if (kotvIsExternalPlayer(next)) {
       final url = widget.playUrl;
       if (url.isEmpty) {
         if (mounted) {

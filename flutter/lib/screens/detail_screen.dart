@@ -2768,31 +2768,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         child: inner,
       );
     }
+    final pb = _existingPlayback;
     return Stack(
       fit: StackFit.expand,
       children: [
         inner,
-        _buildAudioStageOverlay(),
-      ],
-    );
-  }
-
-  /// 纯音频封面/动效；仅叠层重建，不重建底层 Texture。
-  Widget _buildAudioStageOverlay() {
-    final pb = _existingPlayback;
-    if (pb == null) return const SizedBox.shrink();
-    return ListenableBuilder(
-      listenable: pb,
-      builder: (context, _) {
-        if (!pb.isAudioOnlyContent) return const SizedBox.shrink();
-        return IgnorePointer(
-          child: KotvAudioStage(
-            playing: pb.playing,
+        if (pb != null)
+          kotvAudioStageOverlay(
+            playback: pb,
             coverUrl: _detail?.pic ?? '',
             title: _detail?.name ?? '',
           ),
-        );
-      },
+      ],
     );
   }
 
@@ -2999,10 +2986,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                   final parsing = _status.contains('解析') ||
                       _status.contains('嗅探') ||
                       _status.contains('换集中');
-                  // 纯音频无尺寸是正常态，勿盖黑挡掉 [KotvAudioStage]。
-                  final noFrame = !_playback.isAudioOnlyContent &&
-                      _playback.width <= 0 &&
-                      _playback.height <= 0;
+                  // 纯音频无尺寸是正常态，勿盖黑挡掉音频叠层。
+                  final noFrame = kotvNeedsBlankSurfaceCover(_playback);
                   final startBuf = !_playback.playing && _playback.buffering;
                   final cover = parsing || noFrame || startBuf;
                   if (!cover) return const SizedBox.shrink();

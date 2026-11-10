@@ -151,13 +151,6 @@ func New() (*App, error) {
 		a.startDLNARenderer()
 	}
 
-	player.SetProgressHandler(func(p player.Progress) {
-		if p.HistoryKey == "" || settings.IsIncognito() {
-			return
-		}
-		_ = db.UpdateHistoryProgress(hostclient.DataOwner(), p.HistoryKey, p.PositionMs, p.DurationMs)
-	})
-
 	st := appruntime.Status()
 	log.Printf("运行时[%s] java=%s python=%s chromium=%s ffmpeg=%s bridge=%s",
 		appruntime.Platform(), st["java"], st["python"], st["chromium"], st["ffmpeg"], st["bridge"])

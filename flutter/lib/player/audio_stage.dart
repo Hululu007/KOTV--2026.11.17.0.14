@@ -3,6 +3,32 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../widgets/kotv_network_image.dart';
+import 'kotv_playback.dart';
+
+/// 无视频尺寸且非纯音频时，Android Hybrid 才需要盖黑防叠影。
+bool kotvNeedsBlankSurfaceCover(KotvPlayback pb) =>
+    !pb.isAudioOnlyContent && pb.width <= 0 && pb.height <= 0;
+
+/// 纯音频封面/动效叠层：只重建本层，不重建底层 Texture。
+Widget kotvAudioStageOverlay({
+  required KotvPlayback playback,
+  String coverUrl = '',
+  String title = '',
+}) {
+  return ListenableBuilder(
+    listenable: playback,
+    builder: (context, _) {
+      if (!playback.isAudioOnlyContent) return const SizedBox.shrink();
+      return IgnorePointer(
+        child: KotvAudioStage(
+          playing: playback.playing,
+          coverUrl: coverUrl,
+          title: title,
+        ),
+      );
+    },
+  );
+}
 
 /// 纯音频时盖在视频槽上：有封面用封面，否则呼吸光晕，避免黑屏。
 class KotvAudioStage extends StatefulWidget {

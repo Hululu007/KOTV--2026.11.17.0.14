@@ -1918,26 +1918,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         fit: StackFit.expand,
         children: [
           view,
-          _buildLiveAudioStageOverlay(),
-        ],
-      ),
-    );
-  }
-
-  /// 纯音频封面/动效；仅叠层重建，不重建底层 Texture。
-  Widget _buildLiveAudioStageOverlay() {
-    return ListenableBuilder(
-      listenable: _playback,
-      builder: (context, _) {
-        if (!_playback.isAudioOnlyContent) return const SizedBox.shrink();
-        return IgnorePointer(
-          child: KotvAudioStage(
-            playing: _playback.playing,
+          kotvAudioStageOverlay(
+            playback: _playback,
             coverUrl: _currentLogo,
             title: _title,
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 
@@ -1952,10 +1939,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
             _status.contains('解析') ||
             _status.contains('加载') ||
             _status.contains('嗅探');
-        // 纯音频无尺寸是正常态，勿盖黑挡掉 [KotvAudioStage]。
-        final noFrame = !_playback.isAudioOnlyContent &&
-            _playback.width <= 0 &&
-            _playback.height <= 0;
+        // 纯音频无尺寸是正常态，勿盖黑挡掉音频叠层。
+        final noFrame = kotvNeedsBlankSurfaceCover(_playback);
         final startBuf = !_playback.playing && _playback.buffering;
         // 换台中若仍有上一帧尺寸，不盖黑。
         final cover = loading ||
@@ -2621,7 +2606,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       try {
         await _persistLiveSetting('playerLive', v);
       } catch (_) {}
-      if (v.startsWith('outie#') && _playUrl.isNotEmpty) {
+      if (kotvIsExternalPlayer(v) && _playUrl.isNotEmpty) {
         try {
           await _playback.pause();
           final result = await kotvLaunchExternalPlayer(

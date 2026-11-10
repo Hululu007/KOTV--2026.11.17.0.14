@@ -7,47 +7,12 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/bobo/KOTV/internal/player/embed"
 	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/source"
 	"github.com/bobo/KOTV/internal/thunder"
 )
-
-// Progress 播放进度回调。
-type Progress struct {
-	PositionMs int64
-	DurationMs int64
-	URL        string
-	HistoryKey string
-}
-
-var (
-	mu           sync.Mutex
-	historyKey   string
-	playURL      string
-	onProgress   func(Progress)
-	lastPosition int64
-	lastDuration int64
-)
-
-// SetProgressHandler 设置进度回调（用于写入历史续播）。
-func SetProgressHandler(fn func(Progress)) {
-	mu.Lock()
-	onProgress = fn
-	mu.Unlock()
-}
-
-// PreferEmbed 当前设置是否应为页内嵌入（innie#mpv）。
-func PreferEmbed() bool {
-	player := settings.Get(settings.Player)
-	if player == "" {
-		player = "innie#mpv"
-	}
-	mode, name := ParsePlayer(player)
-	return mode == "innie" && name == "mpv"
-}
 
 // ParsePlayer 拆开 mode#name。名字空着时按 mpv；模式空着时保持空。
 func ParsePlayer(raw string) (mode, name string) {
@@ -92,10 +57,6 @@ func Play(url string, histKey string) error {
 		if err := openSystemURL(url); err != nil {
 			return fmt.Errorf("电驴链接需用系统下载器打开: %w", err)
 		}
-		mu.Lock()
-		historyKey = histKey
-		playURL = url
-		mu.Unlock()
 		return nil
 	}
 
@@ -106,15 +67,14 @@ func Play(url string, histKey string) error {
 		if !embed.MPVAvailable() {
 			return fmt.Errorf("未找到捆绑 libmpv：页内 MPV 由 Flutter 原生通道提供，或改用外部播放器")
 		}
-		Stop() // 停掉旁路进程
+		Stop()
 		eng := embed.Controller(embed.EnsureMPV())
 		// 切内核时只停另一个；同内核换台/回看由 Play 内部 stop+load，勿 StopAll。
 		if prev := embed.Active(); prev != eng {
 			prev.Stop()
 		}
 		embed.SetActive(eng)
-		// 解码方式必须在打开片源前设置：MPV 的 hwdec 影响首帧，
-		// VLC 的 :avcodec-hw 只能在建 media 时下发。不支持的内核会返回 false，无副作用。
+		// 解码方式必须在打开片源前设置：MPV 的 hwdec 影响首帧。
 		if enhanced, ok := eng.(embed.Enhanced); ok {
 			mode := settings.Get(settings.PlayerDecode)
 			if mode == "" {
@@ -133,60 +93,16 @@ func Play(url string, histKey string) error {
 				enhanced.SetSpeed(speed)
 			}
 		}
-		mu.Lock()
-		historyKey = histKey
-		playURL = url
-		mu.Unlock()
 		return nil
 	}
 
-	// 外置：各平台走系统打开（安卓由 Flutter 原生选择器，不经这里）。
-	return launchExternal(url, histKey)
+	// 外置：桌面走系统打开；安卓由 Flutter 原生选择器，一般不经这里。
+	return ExternalPlay(url)
 }
 
-func launchExternal(url, histKey string) error {
-	mu.Lock()
-	defer mu.Unlock()
-	stopLocked()
-	embed.StopAll()
-
-	historyKey = histKey
-	playURL = url
-	lastPosition = -1
-	lastDuration = 0
-
-	log.Printf("系统打开外部播放: %s", url)
-	if err := openSystemURL(url); err != nil {
-		return err
-	}
-	return nil
-}
-
-func flushProgressLocked() {
-	if onProgress == nil || historyKey == "" || lastPosition < 0 {
-		return
-	}
-	fn := onProgress
-	p := Progress{
-		PositionMs: lastPosition,
-		DurationMs: lastDuration,
-		URL:        playURL,
-		HistoryKey: historyKey,
-	}
-	// 回调可能写数据库或刷新 UI，不应在 player 全局锁内同步执行。
-	go fn(p)
-}
-
-// Stop 停止旁路与内嵌播放器。
+// Stop 停止页内嵌入播放器。
 func Stop() {
-	mu.Lock()
-	defer mu.Unlock()
-	stopLocked()
 	embed.StopAll()
-}
-
-func stopLocked() {
-	flushProgressLocked()
 }
 
 // Available 返回当前机器上可用的播放器说明（设置页展示用）。
@@ -200,14 +116,15 @@ func Available() map[string]bool {
 	}
 }
 
-// ExternalPlay 用系统打开 URL（供 Flutter 切到 outie#view 时调用）。不挂进度通道。
-func ExternalPlay(url, name string) error {
+// ExternalPlay 用系统打开 URL（供 Flutter 切到 outie#view 时调用）。
+func ExternalPlay(url string) error {
 	url = strings.TrimSpace(url)
 	if url == "" {
 		return fmt.Errorf("empty url")
 	}
-	_ = name // 旧 outie#mpv/vlc/iina 已统一为系统打开，忽略具体名。
-	return launchExternal(url, "")
+	Stop()
+	log.Printf("系统打开外部播放: %s", url)
+	return openSystemURL(url)
 }
 
 func isEd2k(u string) bool {
