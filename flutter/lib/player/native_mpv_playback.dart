@@ -202,6 +202,7 @@ class NativeMpvPlayback extends KotvPlayback {
     Map<String, String>? headers,
     String? format,
     List<Map<String, dynamic>> subs = const [],
+    Duration startAt = Duration.zero,
   }) async {
     final h = kotvNormalizePlayHeaders(headers, url: url);
     try {
@@ -210,6 +211,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'url': url,
         'headers': h,
         'forceHls': kotvIsHls(url, format),
+        if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
       });
       _queued = ok == true ? (id: id, url: url, headers: h) : null;
     } catch (_) {

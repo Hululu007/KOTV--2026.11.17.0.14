@@ -108,6 +108,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var loadedHeaders: Map<String, String> = emptyMap()
   /** 排在 mpv 播放列表第 2 项的下一集；播到它时由 playlist-pos 切成当前集。mpv 事件线程也会读。 */
   @Volatile private var queuedNext: QueuedNext? = null
+  /** 正在 playlist-next 切入排队项；挡住旧文件 end-file 误报 completed。 */
+  @Volatile private var pendingSeamlessId: String? = null
   private var volume = 80.0
   private var rate = 1.0
   /** 画面调色（mpv brightness/contrast/… ∈ [-100,100]）。 */
@@ -396,6 +398,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             url = call.argument<String>("url")?.trim().orEmpty(),
             headers = stringMapArg(call, "headers"),
             forceHls = call.argument<Boolean>("forceHls") == true,
+            startAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L } ?: 0L,
           )
         main.post { result.success(queueNext(next)) }
       }
@@ -407,12 +410,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "skipToNext" -> {
         main.post {
-          if (created.get() && queuedNext != null) {
-            MPVLib.command(arrayOf("playlist-next"))
-            result.success(true)
-          } else {
-            result.success(false)
-          }
+          val next = queuedNext
+          result.success(next != null && skipToQueued(next))
         }
       }
       "stop" -> {
@@ -434,6 +433,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             durationSec = 0.0
             loadedUrl = ""
             queuedNext = null
+            pendingSeamlessId = null
             result.success(null)
           } catch (e: Throwable) {
             result.error("STOP_FAILED", e.message, null)
@@ -1695,6 +1695,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private fun startLoad(url: String, headers: Map<String, String>) {
     try {
       queuedNext = null
+      pendingSeamlessId = null
       loadedUrl = url
       loadedHeaders = headers
       applySpdif()
@@ -1728,8 +1729,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 把下一集追加到 mpv 播放列表（请求头、HLS 选项只写在这一项上）；prefetch-playlist 让 mpv 在本集
-   * 将完时就打开它，播完直接接上。
+   * 把下一集追加到 mpv 播放列表（请求头、HLS、片头 start 只写在这一项上）；prefetch-playlist 让 mpv
+   * 在本集将完时就打开它，播完直接接上。
    */
   private fun queueNext(next: QueuedNext): Boolean {
     if (!created.get() || livePlayback || next.id.isEmpty() || next.url.isEmpty() || loadedUrl.isEmpty() || repeatOne) {
@@ -1739,6 +1740,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       // 只留正在播的一项，新排的总在第 2 项（下标 1）。
       MPVLib.command(arrayOf("playlist-clear"))
       val opts = ArrayList<String>(6)
+      if (next.startAtMs > 0L) opts.add("start=${next.startAtMs / 1000.0}")
       if (next.forceHls) appendHlsOptions(opts)
       appendHeaderOptions(next.headers, opts)
       if (opts.isEmpty()) {
@@ -1756,8 +1758,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   /** 只留正在播的一项。 */
   private fun clearQueuedNext() {
-    if (queuedNext == null) return
+    if (queuedNext == null && pendingSeamlessId == null) return
     queuedNext = null
+    pendingSeamlessId = null
     if (created.get()) {
       try {
         MPVLib.command(arrayOf("playlist-clear"))
@@ -1766,9 +1769,31 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
+  /**
+   * 切入已 append 的下一集：playlist-next + 解除 keep-open 停在片尾的 pause。
+   * 片尾跳过、EOF、按钮下一集共用这一处，避免散落各写一遍。
+   */
+  private fun skipToQueued(next: QueuedNext): Boolean {
+    if (!created.get() || queuedNext !== next) return false
+    return try {
+      pendingSeamlessId = next.id
+      MPVLib.command(arrayOf("playlist-next"))
+      MPVLib.setPropertyBoolean("pause", false)
+      paused = false
+      playing = true
+      eof = false
+      true
+    } catch (t: Throwable) {
+      pendingSeamlessId = null
+      Log.w(TAG, "skip to queued failed", t)
+      false
+    }
+  }
+
   /** 已播到排好的下一集：它成为当前集，通知 Dart 换集。播完的上一项等下次排队时一并清掉。 */
   private fun enterQueuedNext(next: QueuedNext) {
     queuedNext = null
+    pendingSeamlessId = null
     loadGen.incrementAndGet()
     loadedUrl = next.url
     loadedHeaders = next.headers
@@ -1968,10 +1993,25 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   /**
    * 播到片尾，每次加载只报一次 completed。
-   * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；EOF 结束文件也走这里。
+   * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；有排队项时在这里 playlist-next 并解除 pause。
    */
   private fun markEnded() {
     if (eof) return
+    val next = queuedNext
+    if (next != null) {
+      main.post {
+        if (queuedNext !== next) return@post
+        if (!skipToQueued(next)) {
+          eof = true
+          playing = false
+          queuedNext = null
+          pendingSeamlessId = null
+          emit(mapOf("event" to "completed"))
+        }
+      }
+      return
+    }
+    if (pendingSeamlessId != null) return
     eof = true
     playing = false
     emit(mapOf("event" to "completed"))
@@ -1979,8 +2019,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   override fun endFile(reason: Int, error: Int, errorText: String?) {
     when (reason) {
-      // 播放列表里还有排好的下一集时，mpv 会接着播它，本集不算播完。
-      MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_EOF -> if (queuedNext == null) markEnded()
+      // 有排队或正在无缝切入：不算播完（keep-open 下由 eof-reached / skipToQueued 切集；旧文件 end-file 晚到也忽略）。
+      MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_EOF -> {
+        if (queuedNext != null || pendingSeamlessId != null) return
+        markEnded()
+      }
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
         val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
         if (!forceLavfHls && !ioHlsRetried && shouldRetryHls(url, error)) {
@@ -2039,6 +2082,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val url: String,
     val headers: Map<String, String>,
     val forceHls: Boolean,
+    val startAtMs: Long = 0L,
   )
 
   companion object {

@@ -1902,11 +1902,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           headers: target.headers,
           format: format,
           subs: _playSubsOf(data),
+          startAt: _queueOpeningStartAt(),
         );
         if (!queued || stale()) return;
         _queuedNext = (key: key, idx: nextIdx, playUrl: playUrl, headers: rawHeaders, data: Map<String, dynamic>.from(data));
       } catch (_) {}
     }());
+  }
+
+  /// 无缝排队用的片头起点；写入各引擎 queueNext(startAt)，切入时由列表项自身定位。
+  Duration _queueOpeningStartAt() {
+    if (!_skipOpeningEnding || _openingSec <= 0) return Duration.zero;
+    return Duration(seconds: _openingSec);
   }
 
   /// 播放器已无缝播到排好的下一集：只做换集的记账（进度、选集、历史、弹幕、遥控上报），不停播、不重开。
@@ -1928,9 +1935,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _nextPreloadRequested = false;
     _tickDurationMs = 0;
     _queuedEpisodeUnconfirmed = true;
-    // 片头跳过：普通换集靠 open(startAt)，这里直接定位。
-    _openingSeekDone = _skipOpeningEnding && _openingSec > 0;
-    if (_openingSeekDone) unawaited(_playback.seek(Duration(seconds: _openingSec)));
+    // 片头已写入 queueNext(startAt)；此处勿再 seek，避免 keep-open/EOF 切集窗口打到旧文件。
+    _openingSeekDone = true;
     _playHeaders = q.headers;
     _danmakuItems.value = const [];
     _spiderDanmakuSources = kotvDanmakuSourcesFrom(q.data['danmaku']);

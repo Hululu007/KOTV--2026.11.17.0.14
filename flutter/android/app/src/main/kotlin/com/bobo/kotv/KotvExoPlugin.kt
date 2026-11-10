@@ -548,6 +548,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             headers = normalizeHeaders(headerArg(call)),
             mime = call.argument<String>("mime")?.trim()?.ifEmpty { null },
             subs = call.argument<List<Map<String, Any?>>>("subs") ?: emptyList(),
+            startAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L } ?: 0L,
           )
         main.post { result.success(queueNext(next)) }
       }
@@ -1148,7 +1149,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       return false
     }
     clearQueuedNext()
-    p.addMediaItem(buildMediaItem(next.url, next.mime, null, next.headers, next.subs, next.id))
+    p.addMediaItem(
+      buildMediaItem(
+        next.url,
+        next.mime,
+        null,
+        next.headers,
+        next.subs,
+        next.id,
+        startPositionMs = if (next.startAtMs > 0L) next.startAtMs else C.TIME_UNSET,
+      ),
+    )
     queuedNext = next
     return true
   }
@@ -1565,6 +1576,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     headers: Map<String, String> = emptyMap(),
     subs: List<Map<String, Any?>> = currentSubs,
     mediaId: String? = null,
+    startPositionMs: Long = C.TIME_UNSET,
   ): MediaItem {
     val b = MediaItem.Builder().setUri(playUri(url))
     if (!mediaId.isNullOrEmpty()) b.setMediaId(mediaId)
@@ -1592,6 +1604,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val subConfigs = buildSubtitleConfigs(subs)
     if (subConfigs.isNotEmpty()) {
       b.setSubtitleConfigurations(subConfigs)
+    }
+    // 无缝排队的片头：写进 ClippingConfiguration，切入时从该点起播（勿靠 transition 后再 seek）。
+    if (startPositionMs != C.TIME_UNSET && startPositionMs > 0L) {
+      b.setClippingConfiguration(
+        MediaItem.ClippingConfiguration.Builder()
+          .setStartPositionMs(startPositionMs)
+          .build(),
+      )
     }
     return b.build()
   }
@@ -2622,6 +2642,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val headers: Map<String, String>,
     val mime: String?,
     val subs: List<Map<String, Any?>>,
+    val startAtMs: Long = 0L,
   )
 
   companion object {

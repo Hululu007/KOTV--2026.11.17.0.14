@@ -158,6 +158,8 @@ class MediaKitPlayback extends KotvPlayback {
   int _w = 0;
   int _h = 0;
   bool _acceptSize = false;
+  /// 无缝切入后 player.state.completed 可能仍为 true；用闸门对外报未完成，直到真正 EOF。
+  bool? _completedGate;
   Map<String, String> _extraOpenProps = const {};
 
   void setExtraOpenProps(Map<String, String> props) {
@@ -238,7 +240,7 @@ class MediaKitPlayback extends KotvPlayback {
   bool get playing => player.state.playing;
 
   @override
-  bool get completed => player.state.completed;
+  bool get completed => _completedGate ?? player.state.completed;
 
   @override
   bool get repeatOne => _repeatOne;
@@ -286,6 +288,7 @@ class MediaKitPlayback extends KotvPlayback {
   /// 有排队项时拦截 completed，改走 [_skipToQueued]；无排队项才向外报片尾。
   Future<void> _onPlayerCompleted(bool done) async {
     if (!done) {
+      _completedGate = false;
       if (!_completedCtrl.isClosed) _completedCtrl.add(false);
       return;
     }
@@ -293,11 +296,13 @@ class MediaKitPlayback extends KotvPlayback {
     if (q != null && await _skipToQueued(q)) return;
     // 无排队或切入失败：清掉排队态，交给详情硬切下一集。
     _queued = null;
+    _completedGate = true;
     if (!_completedCtrl.isClosed) _completedCtrl.add(true);
   }
 
   /// 只排请求头与 HLS 强制解析都和本集相同的：UA、Referer、demuxer-lavf-format
   /// 是整个播放器共用的属性；其余请求头按媒体写（加载该项时写 http-header-fields）。
+  /// [startAt] 写入 Media.start，切入时由 libmpv 定位（片头），勿等 transition 后再 seek。
   @override
   Future<bool> queueNext({
     required String id,
@@ -305,6 +310,7 @@ class MediaKitPlayback extends KotvPlayback {
     Map<String, String>? headers,
     String? format,
     List<Map<String, dynamic>> subs = const [],
+    Duration startAt = Duration.zero,
   }) async {
     final h = kotvNormalizePlayHeaders(headers, url: url);
     if (_url.isEmpty || _live || !mapEquals(h, _headers) || kotvIsHls(url, format) != _hlsForced) {
@@ -312,7 +318,11 @@ class MediaKitPlayback extends KotvPlayback {
     }
     await clearNext();
     final fields = kotvSplitMpvHeaders(h).fields;
-    final media = Media(url, httpHeaders: fields.isEmpty ? null : fields);
+    final media = Media(
+      url,
+      httpHeaders: fields.isEmpty ? null : fields,
+      start: startAt > Duration.zero ? startAt : null,
+    );
     try {
       await player.add(media);
     } catch (_) {
@@ -388,8 +398,10 @@ class MediaKitPlayback extends KotvPlayback {
     _hlsRetryAllowed = !_hlsForced;
     _hlsMedia = q.media;
     _openSerial++;
-    _clearVideoSize();
+    // 无缝换集：勿清成 0x0。同分辨率时 width/height 流可能不重发，清掉会一直显示 0x0。
     _acceptSize = true;
+    _adoptPlayerSize();
+    _completedGate = false;
     if (!_completedCtrl.isClosed) _completedCtrl.add(false);
     if (!_queuedStartCtrl.isClosed) _queuedStartCtrl.add(q.id);
     notifyListeners();
@@ -482,6 +494,7 @@ class MediaKitPlayback extends KotvPlayback {
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     // 换源清尺寸（与 Exo / 原生 MPV 一致）；避免 libmpv 残留宽高误判就绪。
     _clearVideoSize();
+    _completedGate = null;
     notifyListeners();
     final clearKeyHex = kotvIsLocalClearKey(drm) ? kotvClearKeyHex(drm) : null;
     if (drm != null && drm.isNotEmpty && clearKeyHex == null) {
@@ -567,6 +580,7 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> _stopUnload({required String reason}) async {
     _url = '';
     _queued = null;
+    _completedGate = null;
     _clearVideoSize();
     _speedBps = 0;
     try {

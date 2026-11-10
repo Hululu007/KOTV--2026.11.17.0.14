@@ -1228,6 +1228,7 @@ class ExoPlayback extends KotvPlayback {
     Map<String, String>? headers,
     String? format,
     List<Map<String, dynamic>> subs = const [],
+    Duration startAt = Duration.zero,
   }) async {
     final h = kotvNormalizePlayHeaders(headers, url: url);
     try {
@@ -1237,6 +1238,7 @@ class ExoPlayback extends KotvPlayback {
         'headers': h,
         'mime': kotvPlayMime(url, format),
         'subs': subs,
+        if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
       });
       _queued = ok == true ? (id: id, url: url, headers: h, format: format, subs: subs) : null;
     } catch (_) {
