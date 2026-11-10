@@ -20,7 +20,7 @@
 | 局域网 API / 遥控 / 手机同步（历史·收藏） | ✅ |
 | 弹幕 / 自更新 | ✅ |
 | 页内嵌入播放（Exo / 原生 MPV / FVP） | ✅ |
-| 旁路播放（外部 VLC / MPV）+ 续播 | ✅ |
+| 外置播放（系统打开 / 安卓选择器） | ✅ |
 | 单集循环（页内 MPV/FVP） | ✅ |
 | 浏览器 Web 包（引擎同端口放出） | ✅（见下，由主 CI `build-web` 产出） |
 | Windows 7 兼容发行包 | ✅（见下，由主 CI `build-flutter-win7` 产出） |
@@ -125,7 +125,7 @@ README.txt
 
 **Java / Python 仅使用捆绑路径**，不读 `JAVA_HOME` 或系统 PATH。JAR 爬虫通过捆绑 JRE 启动常驻 `spider-bridge --serve` 进程（JVM 只初始化一次，崩溃可自动拉起），不嵌入主进程。
 
-**播放**：Android 默认 Exo；桌面默认 FVP；内置 MPV 走原生 Surface（接入中）。外部 VLC/MPV 使用系统安装。
+**播放**：Android 默认 Exo；桌面默认页内 MPV（可切 FVP）；外置播放走系统打开 / 安卓选择器。
 
 ## 浏览器 Web 包
 

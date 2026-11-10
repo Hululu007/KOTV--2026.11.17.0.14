@@ -90,8 +90,8 @@ if [[ "${jre_lib_files:-0}" -lt 10 ]]; then
   die "jre/lib too incomplete: only ${jre_lib_files} files (Java bridge will EOF)"
 fi
 
-# 外部播放器可执行文件不进包；页内 libmpv 与 fvp/mdk 同目录，不进 runtime。
-[[ ! -d "$RT/mpv" ]] || die "runtime/mpv must not ship (outie#mpv uses system mpv)"
+# 外置播放走系统打开，不进包；页内 libmpv 与 fvp/mdk 同目录，不进 runtime。
+[[ ! -d "$RT/mpv" ]] || die "runtime/mpv must not ship (external play uses system open)"
 [[ ! -d "$RT/libvlc" ]] || die "runtime/libvlc must not ship"
 [[ ! -d "$RT/vlc" ]] || die "runtime/vlc must not ship"
 [[ ! -d "$RT/libmpv" ]] || die "runtime/libmpv must not ship (libmpv sits next to the app binary)"

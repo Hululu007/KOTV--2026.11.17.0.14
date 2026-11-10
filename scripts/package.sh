@@ -204,7 +204,7 @@ Windows 运行时（Win7 尽力兼容）：
   FFmpeg = Gyan 7.0
   页内 MPV = 原生通道（mpv-2.dll / libmpv 与 fvp 同目录，不进 runtime/）
   页内 FVP = Flutter fvp/libmdk（备选）
-  外部 MPV/IINA = 系统安装或 PATH
+  外置播放 = 系统打开（不捆绑外部播放器）
   CGO/QuickJS = MinGW MSVCRT win32-seh + 子系统 Win7(6.01) + static-libgcc（posix 则再静态 winpthread）
                CI 用 scripts/check-win7-deps.ps1 拒绝 UCRT / libgcc_s / libwinpthread
 
@@ -214,7 +214,7 @@ Windows 运行时（Win7 尽力兼容）：
   Web 包（引擎+webapp 同端口）见 scripts/package-flutter-web.sh / CI「Flutter Web」
 
 默认播放核心为「页内 MPV」（innie#mpv）；桌面可切「页内 FVP」（innie#fvp）。
-外部 MPV/IINA/VLC 需系统安装或 PATH，发行包不捆绑外部播放器。
+外置播放走系统关联打开，发行包不捆绑外部播放器。
 
 环境变量(可选):
  KOTV_RUNTIME=/path/to/runtime 覆盖运行时根目录

@@ -309,42 +309,7 @@ func macAppBinary(app, bin string) []string {
 	return out
 }
 
-// MacApp 返回已安装的 .app 目录。非 macOS 或不存在时为空。
-func MacApp(name string) string {
-	name = strings.TrimSpace(name)
-	if runtime.GOOS != "darwin" || name == "" {
-		return ""
-	}
-	for _, root := range macAppDirs() {
-		p := filepath.Join(root, name+".app")
-		if st, err := os.Stat(p); err == nil && st.IsDir() {
-			return p
-		}
-	}
-	return ""
-}
-
-// VLC 仅探测系统安装的外部播放器。
-func VLC() string {
-	switch runtime.GOOS {
-	case "darwin":
-		if p := firstPresent(macAppBinary("VLC", "VLC")...); p != "" {
-			return p
-		}
-	case "windows":
-		for _, base := range programFilesBases() {
-			if p := firstPresent(filepath.Join(base, "VideoLAN", "VLC", "vlc.exe")); p != "" {
-				return p
-			}
-		}
-	}
-	if p, err := exec.LookPath("vlc"); err == nil {
-		return p
-	}
-	return ""
-}
-
-// MPV 返回外部 mpv 可执行文件（发行包目录优先，再系统安装，再 PATH）。
+// MPV 返回本机 mpv 可执行文件（诊断 Status 用；页内播放走 LibMPV）。
 func MPV() string {
 	cands := underRoots(
 		filepath.Join("mpv", "mpv"),

@@ -370,13 +370,10 @@ String flutterPlayerLabel(String val) {
       return '内置 ExoPlayer';
     case 'innie#fvp':
       return '内置 FVP';
-    case 'outie#mpv':
-      return '外部 MPV';
-    case 'outie#vlc':
-      return '外部 VLC';
-    case 'outie#iina':
-      return 'IINA';
     case 'outie#view':
+    case 'outie#mpv':
+    case 'outie#vlc':
+    case 'outie#iina':
       return '外部播放器';
     default:
       return v;

@@ -12,6 +12,7 @@ import '../api/kotv_api.dart';
 import '../api/kotv_engine_url.dart';
 import '../desktop/mini_player_window.dart';
 import '../models/models.dart';
+import '../player/audio_stage.dart';
 import '../player/danmaku_layer.dart';
 import '../player/external_player.dart';
 import '../player/exo_playback.dart';
@@ -2733,6 +2734,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   /// 全屏/详情共用画面。原位全屏时 Element 不挪树；Android 原生 Surface 另加 KeyedSubtree。
   /// 固定画幅：Exo/其它用 [AspectRatio]；Android MPV 走原生 video-aspect-override，勿再套一层。
+  /// 纯音频时叠 [KotvAudioStage]，各入口共用，避免黑屏。
   Widget _buildSharedVideo({BoxFit fit = BoxFit.contain}) {
     // 桌面 MPV 还没有实例时不要在 build 里创建，避免离页交错留下无人释放的 Player。
     if (!kotvIsAndroid() && _backend == KotvEmbedBackend.mpv && _mk == null) {
@@ -2760,12 +2762,38 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     if (_backend == KotvEmbedBackend.mpv && kotvIsAndroid() && _mk is NativeMpvPlayback) {
       final m = _mk! as NativeMpvPlayback;
-      return ValueListenableBuilder<int>(
+      inner = ValueListenableBuilder<int>(
         valueListenable: m.surfaceRev,
-        builder: (context, _, __) => inner,
+        builder: (context, _, child) => child!,
+        child: inner,
       );
     }
-    return inner;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        inner,
+        _buildAudioStageOverlay(),
+      ],
+    );
+  }
+
+  /// 纯音频封面/动效；仅叠层重建，不重建底层 Texture。
+  Widget _buildAudioStageOverlay() {
+    final pb = _existingPlayback;
+    if (pb == null) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: pb,
+      builder: (context, _) {
+        if (!pb.isAudioOnlyContent) return const SizedBox.shrink();
+        return IgnorePointer(
+          child: KotvAudioStage(
+            playing: pb.playing,
+            coverUrl: _detail?.pic ?? '',
+            title: _detail?.name ?? '',
+          ),
+        );
+      },
+    );
   }
 
   /// 全平台：Texture/PlatformView 留在同一 Positioned 宿主，全屏只改几何。
@@ -2971,7 +2999,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                   final parsing = _status.contains('解析') ||
                       _status.contains('嗅探') ||
                       _status.contains('换集中');
-                  final noFrame = _playback.width <= 0 && _playback.height <= 0;
+                  // 纯音频无尺寸是正常态，勿盖黑挡掉 [KotvAudioStage]。
+                  final noFrame = !_playback.isAudioOnlyContent &&
+                      _playback.width <= 0 &&
+                      _playback.height <= 0;
                   final startBuf = !_playback.playing && _playback.buffering;
                   final cover = parsing || noFrame || startBuf;
                   if (!cover) return const SizedBox.shrink();

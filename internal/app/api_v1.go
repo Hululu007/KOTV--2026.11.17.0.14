@@ -2045,7 +2045,7 @@ func (a *App) APIPlayerControl(cmd string, value float64, mode string) error {
 	return nil
 }
 
-// APIPlayerExternal 用外部播放器打开 URL；playerVal 如 outie#vlc / outie#mpv / outie#iina。
+// APIPlayerExternal 用系统打开 URL；统一为 outie#view（旧 outie#mpv/vlc/iina 一并迁过来）。
 func (a *App) APIPlayerExternal(playURL, playerVal string) error {
 	playURL = strings.TrimSpace(playURL)
 	if playURL == "" {
@@ -2055,8 +2055,10 @@ func (a *App) APIPlayerExternal(playURL, playerVal string) error {
 	if playerVal == "" {
 		playerVal = settings.Get(settings.Player)
 	}
-	if playerVal == "" {
-		playerVal = "outie#mpv"
+	if playerVal == "" || !strings.HasPrefix(playerVal, "outie#") {
+		playerVal = "outie#view"
+	} else if playerVal != "outie#view" {
+		playerVal = "outie#view"
 	}
 	mode, name := player.ParsePlayer(playerVal)
 	if mode == "innie" {

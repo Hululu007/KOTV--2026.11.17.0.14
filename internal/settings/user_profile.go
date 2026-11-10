@@ -93,10 +93,9 @@ func playerChoices(platform string) (def string, allowed []string, ok bool) {
 	switch platform {
 	case "android":
 		return "innie#exo", []string{"innie#exo", "innie#mpv", "innie#fvp", "outie#view"}, true
-	case "windows", "linux":
-		return "innie#mpv", []string{"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc"}, true
-	case "macos":
-		return "innie#mpv", []string{"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc", "outie#iina"}, true
+	case "windows", "linux", "macos":
+		// 桌面外置与安卓相同：仅 outie#view，由系统打开。
+		return "innie#mpv", []string{"innie#mpv", "innie#fvp", "outie#view"}, true
 	case "ios":
 		return "innie#html", []string{"innie#html", "innie#mpv", "innie#fvp"}, true
 	case "web":
@@ -108,6 +107,11 @@ func playerChoices(platform string) (def string, allowed []string, ok bool) {
 
 func clampListedPlayer(v, def string, allowed ...string) string {
 	v = strings.TrimSpace(v)
+	// 旧桌面外置名迁到统一的「外部播放器」。
+	switch v {
+	case "outie#mpv", "outie#vlc", "outie#iina":
+		v = "outie#view"
+	}
 	for _, a := range allowed {
 		if v == a {
 			return v

@@ -2,7 +2,7 @@ import 'kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
 
-/// 桌面客户端：可展示引擎侧捆绑运行时与本机外部 MPV。
+/// 桌面客户端：可展示引擎侧捆绑运行时（含本机 mpv 探测，仅诊断用）。
 const kotvRuntimeDisplayKeysDesktop = <String>[
   'platform',
   'arch',
