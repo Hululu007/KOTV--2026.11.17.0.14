@@ -137,16 +137,8 @@ class MediaKitPlayback extends KotvPlayback {
 
   /// 每次打开都写。没有则写空，避免上一集的 UA / Referer 留在会话里。
   Future<void> _applyMpvHeaderProps() async {
-    final platform = player.platform;
-    if (platform == null) return;
-    Future<void> set(String k, String v) async {
-      try {
-        await (platform as dynamic).setProperty(k, v);
-      } catch (_) {}
-    }
-
-    await set('user-agent', _mpvUserAgent);
-    await set('referrer', _mpvReferer);
+    await _mpvSet('user-agent', _mpvUserAgent);
+    await _mpvSet('referrer', _mpvReferer);
   }
 
   final Player player;
@@ -206,17 +198,9 @@ class MediaKitPlayback extends KotvPlayback {
     try {
       await player.stop();
     } catch (_) {}
-    final platform = player.platform;
-    if (platform == null) return;
-    Future<void> set(String k, String v) async {
-      try {
-        await (platform as dynamic).setProperty(k, v);
-      } catch (_) {}
-    }
-
     final base = kotvLavfOWithClearKey(clearKey);
-    await set('demuxer-lavf-o', on ? '$base,http_persistent=0' : base);
-    await set('demuxer-lavf-format', on ? 'hls' : '');
+    await _mpvSet('demuxer-lavf-o', on ? '$base,http_persistent=0' : base);
+    await _mpvSet('demuxer-lavf-format', on ? 'hls' : '');
   }
 
   Future<void> _prepareOpts() async {
@@ -306,10 +290,9 @@ class MediaKitPlayback extends KotvPlayback {
       return;
     }
     final q = _queued;
-    if (q != null) {
-      await _skipToQueued(q);
-      return;
-    }
+    if (q != null && await _skipToQueued(q)) return;
+    // 无排队或切入失败：清掉排队态，交给详情硬切下一集。
+    _queued = null;
     if (!_completedCtrl.isClosed) _completedCtrl.add(true);
   }
 
@@ -507,14 +490,9 @@ class MediaKitPlayback extends KotvPlayback {
     await _optsReady;
     await _opts.applyAfterAttach(player, live: live);
     if (_extraOpenProps.isNotEmpty) {
-      try {
-        final platform = player.platform;
-        if (platform != null) {
-          for (final e in _extraOpenProps.entries) {
-            await (platform as dynamic).setProperty(e.key, e.value);
-          }
-        }
-      } catch (_) {}
+      for (final e in _extraOpenProps.entries) {
+        await _mpvSet(e.key, e.value);
+      }
       _extraOpenProps = const {};
     }
     // start 经 Media 在 load 时定位（等同原生 loadfile start=），勿 open 后再 seek。
@@ -654,26 +632,20 @@ class MediaKitPlayback extends KotvPlayback {
       changed = true;
     }
     if (!changed) return;
-    final platform = player.platform;
-    if (platform == null) return;
     final props = _opts.fxPreviewProperties(
       videoOriginal: _previewVideoOriginal,
       audioOriginal: _previewAudioOriginal,
     );
     for (final e in props.entries) {
-      try {
-        await (platform as dynamic).setProperty(e.key, e.value);
-      } catch (_) {}
+      await _mpvSet(e.key, e.value);
     }
   }
 
   @override
   Future<void> setStableVolume(bool on) async {
     _opts = _opts.copyWith(stableVolume: on);
-    try {
-      // 和其它音效合成同一条 af，后续 applyOpts 也不会把它冲掉。
-      await (player.platform as dynamic).setProperty('af', _opts.equalizerChannelArgs()['audioAf']);
-    } catch (_) {}
+    // 和其它音效合成同一条 af，后续 applyOpts 也不会把它冲掉。
+    await _mpvSet('af', '${_opts.equalizerChannelArgs()['audioAf']}');
   }
 
   /// 桌面 libmpv：Texture 常与视口同尺寸，Flutter BoxFit 无效；须写 keepaspect/panscan/video-aspect-override。
@@ -848,31 +820,27 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> setSecondarySubtitleTrack(String id) async {
-    try {
-      final platform = player.platform;
-      if (platform == null) return;
-      final key = id.trim().toLowerCase();
-      if (key.isEmpty || key == 'no' || key == 'off' || key == 'none') {
-        await (platform as dynamic).setProperty('secondary-sid', 'no');
+    final key = id.trim().toLowerCase();
+    if (key.isEmpty || key == 'no' || key == 'off' || key == 'none') {
+      await _mpvSet('secondary-sid', 'no');
+      _currentSecondarySubtitleId = null;
+    } else if (key == 'auto') {
+      // 自动：选主轨以外的第一条字幕。
+      final subs = subtitleTracks;
+      final primary = currentSubtitleId;
+      final alt = subs.where((t) => t.id != primary).toList();
+      if (alt.isEmpty) {
+        await _mpvSet('secondary-sid', 'no');
         _currentSecondarySubtitleId = null;
-      } else if (key == 'auto') {
-        // 自动：选主轨以外的第一条字幕。
-        final subs = subtitleTracks;
-        final primary = currentSubtitleId;
-        final alt = subs.where((t) => t.id != primary).toList();
-        if (alt.isEmpty) {
-          await (platform as dynamic).setProperty('secondary-sid', 'no');
-          _currentSecondarySubtitleId = null;
-        } else {
-          await (platform as dynamic).setProperty('secondary-sid', alt.first.id);
-          _currentSecondarySubtitleId = alt.first.id;
-        }
       } else {
-        await (platform as dynamic).setProperty('secondary-sid', id.trim());
-        _currentSecondarySubtitleId = id.trim();
+        await _mpvSet('secondary-sid', alt.first.id);
+        _currentSecondarySubtitleId = alt.first.id;
       }
-      notifyListeners();
-    } catch (_) {}
+    } else {
+      await _mpvSet('secondary-sid', id.trim());
+      _currentSecondarySubtitleId = id.trim();
+    }
+    notifyListeners();
   }
 
   @override
@@ -894,73 +862,55 @@ class MediaKitPlayback extends KotvPlayback {
     String? font,
     String? fontPath,
   }) async {
-    try {
-      final platform = player.platform;
-      if (platform == null) return;
-      if (scale != null) {
-        await (platform as dynamic).setProperty(
-          'sub-scale',
-          scale.clamp(0.5, 2.0).toStringAsFixed(2),
-        );
-      }
-      if (pos != null) {
-        final mpvPos = kotvSubtitlePosToMpv(pos);
-        await (platform as dynamic).setProperty('sub-pos', mpvPos.toStringAsFixed(1));
-      }
-      if (secondaryPos != null) {
-        await (platform as dynamic).setProperty(
-          'secondary-sub-pos',
-          secondaryPos.toStringAsFixed(1),
-        );
-      }
-      final applyLooks = forceStyle || useSystemStyle;
-      if (applyLooks && color != null && color.trim().isNotEmpty) {
-        await (platform as dynamic).setProperty('sub-color', color.trim());
-      }
-      if (applyLooks && borderColor != null && borderColor.trim().isNotEmpty) {
-        await (platform as dynamic).setProperty('sub-border-color', borderColor.trim());
-      }
-      if (applyLooks && borderSize != null) {
-        await (platform as dynamic).setProperty(
-          'sub-border-size',
-          borderSize.clamp(0.0, 8.0).toStringAsFixed(1),
-        );
-      }
-      if (applyLooks && bgColor != null && bgColor.trim().isNotEmpty) {
-        await (platform as dynamic).setProperty('sub-back-color', bgColor.trim());
-      }
-      final edge = (edgeType ?? '').trim().toLowerCase();
-      final strength = ((shadowStrength ?? 50).clamp(0, 100) / 50.0).clamp(0.0, 2.5);
-      if (applyLooks && edge == 'none') {
-        await (platform as dynamic).setProperty('sub-border-size', '0');
-        await (platform as dynamic).setProperty('sub-shadow-offset', '0');
-      } else if (applyLooks && edge == 'shadow') {
-        await (platform as dynamic).setProperty('sub-shadow-offset', (2.0 * strength).toStringAsFixed(2));
-      } else if (applyLooks && (edge == 'raised' || edge == 'depressed')) {
-        await (platform as dynamic).setProperty('sub-shadow-offset', (1.5 * strength).toStringAsFixed(2));
-      }
-      if (applyLooks && font != null && font.trim().isNotEmpty && font.trim().toLowerCase() != 'default') {
-        final f = font.trim().toLowerCase();
-        final mpvFont = switch (f) {
-          'sans' || 'sans-serif' => 'sans-serif',
-          'serif' => 'serif',
-          'mono' || 'monospace' => 'monospace',
-          _ => font.trim(),
-        };
-        await (platform as dynamic).setProperty('sub-font', mpvFont);
-      }
-      await (platform as dynamic).setProperty('sub-ass-override', forceStyle ? 'force' : 'scale');
-    } catch (_) {}
+    if (scale != null) {
+      await _mpvSet('sub-scale', scale.clamp(0.5, 2.0).toStringAsFixed(2));
+    }
+    if (pos != null) {
+      await _mpvSet('sub-pos', kotvSubtitlePosToMpv(pos).toStringAsFixed(1));
+    }
+    if (secondaryPos != null) {
+      await _mpvSet('secondary-sub-pos', secondaryPos.toStringAsFixed(1));
+    }
+    final applyLooks = forceStyle || useSystemStyle;
+    if (applyLooks && color != null && color.trim().isNotEmpty) {
+      await _mpvSet('sub-color', color.trim());
+    }
+    if (applyLooks && borderColor != null && borderColor.trim().isNotEmpty) {
+      await _mpvSet('sub-border-color', borderColor.trim());
+    }
+    if (applyLooks && borderSize != null) {
+      await _mpvSet('sub-border-size', borderSize.clamp(0.0, 8.0).toStringAsFixed(1));
+    }
+    if (applyLooks && bgColor != null && bgColor.trim().isNotEmpty) {
+      await _mpvSet('sub-back-color', bgColor.trim());
+    }
+    final edge = (edgeType ?? '').trim().toLowerCase();
+    final strength = ((shadowStrength ?? 50).clamp(0, 100) / 50.0).clamp(0.0, 2.5);
+    if (applyLooks && edge == 'none') {
+      await _mpvSet('sub-border-size', '0');
+      await _mpvSet('sub-shadow-offset', '0');
+    } else if (applyLooks && edge == 'shadow') {
+      await _mpvSet('sub-shadow-offset', (2.0 * strength).toStringAsFixed(2));
+    } else if (applyLooks && (edge == 'raised' || edge == 'depressed')) {
+      await _mpvSet('sub-shadow-offset', (1.5 * strength).toStringAsFixed(2));
+    }
+    if (applyLooks && font != null && font.trim().isNotEmpty && font.trim().toLowerCase() != 'default') {
+      final f = font.trim().toLowerCase();
+      final mpvFont = switch (f) {
+        'sans' || 'sans-serif' => 'sans-serif',
+        'serif' => 'serif',
+        'mono' || 'monospace' => 'monospace',
+        _ => font.trim(),
+      };
+      await _mpvSet('sub-font', mpvFont);
+    }
+    await _mpvSet('sub-ass-override', forceStyle ? 'force' : 'scale');
   }
 
   @override
   Future<void> setSubtitleOffsetMs(int offsetMs) async {
-    try {
-      final platform = player.platform;
-      if (platform == null) return;
-      final sec = (offsetMs.clamp(-300000, 300000) / 1000.0);
-      await (platform as dynamic).setProperty('sub-delay', sec.toStringAsFixed(3));
-    } catch (_) {}
+    final sec = (offsetMs.clamp(-300000, 300000) / 1000.0);
+    await _mpvSet('sub-delay', sec.toStringAsFixed(3));
   }
 
   @override
