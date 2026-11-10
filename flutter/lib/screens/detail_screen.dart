@@ -570,6 +570,58 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await kotvDisposeMpvPlayer(mkPlayer);
   }
 
+  /// 起播无画面：按 [kotvPlanSilentRecover] 拆机 / 换引擎 / 同引擎再建。
+  /// `true` = 外层 for continue；`false` = break；`null` = 会话已作废，直接 return。
+  Future<bool?> _recoverAfterSilentVideo({
+    required KotvPlayback pb,
+    required KotvPlaybackFailover failover,
+    required int serial,
+  }) async {
+    final canRecreateDesktopMpv = !kotvIsAndroid() && pb is MediaKitPlayback;
+    final plan = kotvPlanSilentRecover(
+      failover: failover,
+      canRecreateDesktopMpv: canRecreateDesktopMpv,
+    );
+
+    switch (plan.action) {
+      case KotvSilentRecoverAction.keepSession:
+        return false;
+      case KotvSilentRecoverAction.giveUp:
+        if (canRecreateDesktopMpv) {
+          await _disposeDesktopMpvOwned(softStopFirst: true);
+        }
+        return false;
+      case KotvSilentRecoverAction.retrySameEngine:
+        if (canRecreateDesktopMpv) {
+          await _disposeDesktopMpvOwned(softStopFirst: true);
+        }
+        if (!mounted || serial != _playAtSerial) return null;
+        return true;
+      case KotvSilentRecoverAction.applyStep:
+        final step = plan.step!;
+        if (canRecreateDesktopMpv) {
+          await _disposeDesktopMpvOwned(softStopFirst: true);
+        } else {
+          try {
+            await pb.release();
+          } catch (_) {
+            try {
+              await pb.stop();
+            } catch (_) {}
+          }
+        }
+        await _stopInactiveBackends(kotvEmbedBackend(step.playerVal));
+        if (!mounted || serial != _playAtSerial) return null;
+        setState(() {
+          _playerVal = step.playerVal;
+          _decodeMode = step.decodeMode;
+          _status = step.status;
+        });
+        _syncFullscreen();
+        return true;
+    }
+  }
+
   /// 硬停并限时等待；离开页 / 换片 / 停播控件共用，避免 Win7 上旧实例占 AO。
   Future<void> _stopHardAwait({bool skipFlush = false, Duration timeout = const Duration(seconds: 4)}) async {
     try {
@@ -2559,33 +2611,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             return;
           }
           lastOpenError = e;
-          // 起播失败：清掉半开的桌面 MPV；failover 关则同引擎再建，开则下面换引擎。
-          if (pb is MediaKitPlayback) {
-            await _disposeDesktopMpvOwned(softStopFirst: true);
-            if (!failover.enabled) continue;
-          } else if (!failover.enabled) {
+          final retry = await _recoverAfterSilentVideo(
+            pb: pb,
+            failover: failover,
+            serial: serial,
+          );
+          if (retry == null) return;
+          if (retry) continue;
+          if (!failover.enabled) {
+            // keepSession：关闭自动切换时不判失败，留在当前引擎。
             opened = true;
-            break;
           }
+          break;
         }
-        final step = failover.nextStep();
-        if (step == null) break;
-        if (!mounted || serial != _playAtSerial) return;
-        try {
-          await pb.release();
-        } catch (_) {
-          try {
-            await pb.stop();
-          } catch (_) {}
-        }
-        await _stopInactiveBackends(kotvEmbedBackend(step.playerVal));
-        if (!mounted || serial != _playAtSerial) return;
-        setState(() {
-          _playerVal = step.playerVal;
-          _decodeMode = step.decodeMode;
-          _status = step.status;
-        });
-        _syncFullscreen();
       }
       if (!opened) {
         throw lastOpenError ?? const KotvSilentVideoException();

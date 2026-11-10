@@ -239,7 +239,7 @@ dependencies {
     implementation "wang.harlon.quickjs:wrapper-android:3.2.3"
     // YouTube 提取（NewPipeExtractor）
     implementation "com.github.TeamNewPipe:NewPipeExtractor:v0.26.5"
-    // Exo ASS / libass（排除其自带 Media3，统一用 FongMi 产物）
+    // Exo ASS / libass（排除其自带 Media3，统一用 scripts/build-fongmi-media3.sh 产出的 AAR）
     implementation("io.github.peerless2012:ass-media:0.5.1") {
       exclude group: "androidx.media3"
     }

@@ -174,3 +174,51 @@ class KotvFailoverStep {
   final String decodeMode;
   final String status;
 }
+
+/// 起播无画面后的恢复动作（决策集中在此，页面只负责拆机/换引擎）。
+enum KotvSilentRecoverAction {
+  /// 同引擎再建（桌面 MPV 半开实例须先 dispose Player）。
+  retrySameEngine,
+
+  /// 采用 [KotvSilentRecover.step] 换解码或换播放器。
+  applyStep,
+
+  /// 关闭自动切换：保留当前会话，不判失败。
+  keepSession,
+
+  /// 自动切换开着但已无下一档：放弃。
+  giveUp,
+}
+
+class KotvSilentRecover {
+  const KotvSilentRecover(this.action, {this.step});
+
+  final KotvSilentRecoverAction action;
+  final KotvFailoverStep? step;
+}
+
+/// 无画面后的恢复策略。若返回 [KotvSilentRecoverAction.applyStep]，
+/// [failover.nextStep] 已写入新的 player/decode。
+///
+/// [canRecreateDesktopMpv]：当前是桌面 media_kit 半开实例，可拆掉再建。
+KotvSilentRecover kotvPlanSilentRecover({
+  required KotvPlaybackFailover failover,
+  required bool canRecreateDesktopMpv,
+}) {
+  if (!failover.enabled) {
+    return KotvSilentRecover(
+      canRecreateDesktopMpv
+          ? KotvSilentRecoverAction.retrySameEngine
+          : KotvSilentRecoverAction.keepSession,
+    );
+  }
+  final step = failover.nextStep();
+  if (step != null) {
+    return KotvSilentRecover(KotvSilentRecoverAction.applyStep, step: step);
+  }
+  // 自动切换开着但环上无下一档（如纯 MPV 包）：仍拆机再建，避免卡死半开 Player。
+  if (canRecreateDesktopMpv) {
+    return const KotvSilentRecover(KotvSilentRecoverAction.retrySameEngine);
+  }
+  return const KotvSilentRecover(KotvSilentRecoverAction.giveUp);
+}

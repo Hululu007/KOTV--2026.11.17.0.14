@@ -85,4 +85,61 @@ void main() {
     expect(f.playerVal, 'innie#mpv');
     expect(f.decodeMode, 'hard');
   });
+
+  test('plan: off + desktop mpv retries same engine', () {
+    final f = KotvPlaybackFailover(
+      playerVal: 'innie#mpv',
+      decodeMode: 'auto',
+      enabled: false,
+    );
+    f.markAttempt();
+    final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: true);
+    expect(plan.action, KotvSilentRecoverAction.retrySameEngine);
+    expect(f.playerVal, 'innie#mpv');
+  });
+
+  test('plan: off + other engine keeps session', () {
+    final f = KotvPlaybackFailover(
+      playerVal: 'innie#fvp',
+      decodeMode: 'auto',
+      enabled: false,
+    );
+    f.markAttempt();
+    final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: false);
+    expect(plan.action, KotvSilentRecoverAction.keepSession);
+  });
+
+  test('plan: on + next player applies step', () {
+    final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'auto');
+    f.markAttempt();
+    final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: true);
+    expect(plan.action, KotvSilentRecoverAction.applyStep);
+    expect(plan.step!.playerVal, 'innie#fvp');
+    expect(f.playerVal, 'innie#fvp');
+  });
+
+  test('plan: on + exhausted ring recreates desktop mpv', () {
+    final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'auto');
+    f.markAttempt();
+    // 先耗尽环上其它引擎。
+    while (true) {
+      final s = f.nextStep();
+      if (s == null) break;
+      f.markAttempt();
+    }
+    final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: true);
+    expect(plan.action, KotvSilentRecoverAction.retrySameEngine);
+  });
+
+  test('plan: on + exhausted ring without recreate gives up', () {
+    final f = KotvPlaybackFailover(playerVal: 'innie#fvp', decodeMode: 'auto');
+    f.markAttempt();
+    while (true) {
+      final s = f.nextStep();
+      if (s == null) break;
+      f.markAttempt();
+    }
+    final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: false);
+    expect(plan.action, KotvSilentRecoverAction.giveUp);
+  });
 }

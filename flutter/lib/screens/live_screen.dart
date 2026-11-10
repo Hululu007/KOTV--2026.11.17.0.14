@@ -206,6 +206,57 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     await kotvDisposeMpvPlayer(mkPlayer);
   }
 
+  /// 起播/出画失败：按 [kotvPlanSilentRecover] 拆机 / 换引擎 / 同引擎再建。
+  /// `true` = 外层 for continue；`false` = break 后抛错；`null` = 直接结束本次 open。
+  Future<bool?> _recoverAfterSilentVideo({
+    required KotvPlayback pb,
+    required KotvPlaybackFailover failover,
+    required int serial,
+  }) async {
+    bool stale() => !mounted || serial != _playSerial;
+    final canRecreateDesktopMpv = !kotvIsAndroid() && pb is MediaKitPlayback;
+    final plan = kotvPlanSilentRecover(
+      failover: failover,
+      canRecreateDesktopMpv: canRecreateDesktopMpv,
+    );
+
+    switch (plan.action) {
+      case KotvSilentRecoverAction.keepSession:
+        return null;
+      case KotvSilentRecoverAction.giveUp:
+        if (canRecreateDesktopMpv) await _releaseMpv();
+        return false;
+      case KotvSilentRecoverAction.retrySameEngine:
+        if (canRecreateDesktopMpv) await _releaseMpv();
+        if (stale()) {
+          await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
+          return null;
+        }
+        return true;
+      case KotvSilentRecoverAction.applyStep:
+        final step = plan.step!;
+        if (canRecreateDesktopMpv) {
+          await _releaseMpv();
+        } else {
+          try {
+            await pb.release();
+          } catch (_) {
+            try {
+              await pb.stop();
+            } catch (_) {}
+          }
+        }
+        await _stopInactiveBackends(kotvEmbedBackend(step.playerVal));
+        if (stale()) return null;
+        setState(() {
+          _playerVal = step.playerVal;
+          _decodeMode = step.decodeMode;
+          _status = step.status;
+        });
+        return true;
+    }
+  }
+
   /// 切到其它内置后端时停掉闲置引擎。
   /// 调用方须在改 [_playerVal] **之前**调用，以便旧 FVP/Surface 仍在树上时完成 release。
   /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
@@ -1664,31 +1715,27 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         return;
       } on KotvSilentVideoException catch (e) {
         lastError = e;
-        if (!failover.enabled) return;
+        final retry = await _recoverAfterSilentVideo(
+          pb: pb,
+          failover: failover,
+          serial: serial,
+        );
+        if (retry == null) return;
+        if (retry) continue;
+        break;
       } catch (e) {
         lastError = e;
         if (!failover.enabled) rethrow;
+        // 其它开播错误：与无画面同一套换引擎 / 桌面 MPV 再建。
+        final retry = await _recoverAfterSilentVideo(
+          pb: pb,
+          failover: failover,
+          serial: serial,
+        );
+        if (retry == null) return;
+        if (retry) continue;
+        break;
       }
-      if (stale()) {
-        await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
-        return;
-      }
-      final step = failover.nextStep();
-      if (step == null) break;
-      try {
-        await pb.release();
-      } catch (_) {
-        try {
-          await pb.stop();
-        } catch (_) {}
-      }
-      await _stopInactiveBackends(kotvEmbedBackend(step.playerVal));
-      if (stale()) return;
-      setState(() {
-        _playerVal = step.playerVal;
-        _decodeMode = step.decodeMode;
-        _status = step.status;
-      });
     }
     if (lastError != null) throw lastError;
     throw const KotvSilentVideoException();
@@ -1716,39 +1763,33 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await _onLiveNotReady(serial);
     } on KotvSilentVideoException {
       if (stale()) return;
-      if (failover.enabled) {
-        final step = failover.nextStep();
-        if (step != null) {
-          try {
-            await pb.release();
-          } catch (_) {
-            try {
-              await pb.stop();
-            } catch (_) {}
-          }
-          if (stale()) return;
-          setState(() {
-            _playerVal = step.playerVal;
-            _decodeMode = step.decodeMode;
-            _prefPlayerVal = step.playerVal;
-            _prefDecodeMode = step.decodeMode;
-            _status = step.status;
-          });
-          try {
-            await _openLiveUrl(
-              url,
-              serial: serial,
-              directUrl: directUrl,
-              headers: headers,
-              drm: drm,
-              format: format,
-              live: live,
-              startAt: startAt,
-              externalSubs: externalSubs,
-            );
-          } catch (_) {}
-          return;
-        }
+      final retry = await _recoverAfterSilentVideo(
+        pb: pb,
+        failover: failover,
+        serial: serial,
+      );
+      if (retry == null) {
+        await _onLiveNotReady(serial);
+        return;
+      }
+      if (retry) {
+        // applyStep 已写入 _playerVal；retrySameEngine 同引擎再建。
+        _prefPlayerVal = _playerVal;
+        _prefDecodeMode = _decodeMode;
+        try {
+          await _openLiveUrl(
+            url,
+            serial: serial,
+            directUrl: directUrl,
+            headers: headers,
+            drm: drm,
+            format: format,
+            live: live,
+            startAt: startAt,
+            externalSubs: externalSubs,
+          );
+        } catch (_) {}
+        return;
       }
       await _onLiveNotReady(serial);
     } catch (_) {}
