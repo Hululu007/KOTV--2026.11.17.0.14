@@ -241,11 +241,11 @@ class MainActivity : FlutterActivity() {
             result.error("traffic", t.message ?: t.toString(), null)
           }
         }
-        // FEATURE_VULKAN_HARDWARE_VERSION ≥ 1.2
         "hasExternalVideoApp" -> result.success(externalVideoTargets().any { it.activityInfo?.packageName != packageName })
         "openExternalPlayer" -> openExternalPlayer(call, result)
         "openView" -> result.success(openView(call.argument<String>("url")))
         "isVulkanAvailable" -> {
+          // FEATURE_VULKAN_HARDWARE_VERSION ≥ 1.2
           result.success(
             packageManager.hasSystemFeature(
               PackageManager.FEATURE_VULKAN_HARDWARE_VERSION,

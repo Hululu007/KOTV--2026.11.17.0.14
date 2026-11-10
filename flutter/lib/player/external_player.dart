@@ -66,6 +66,7 @@ Future<List<(String, String)>> kotvInstalledPlayerOptions({
     } catch (_) {}
   }
   final avail = await _kotvPlayerAvailability(engineAvail);
+  // 别名目前指向同一表；保留 live 分支便于日后点播/直播选项分叉。
   final all = live ? kotvLivePlayerOptions() : kotvVodPlayerOptions();
   return kotvVisiblePlayerOptions(all, avail);
 }

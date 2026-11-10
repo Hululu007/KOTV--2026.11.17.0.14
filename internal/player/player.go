@@ -96,7 +96,8 @@ func Play(url string, histKey string) error {
 		return nil
 	}
 
-	// 外置：客户端 GUI 应走原生选择器；此处仅 API/无界面兜底。
+	// 非页内 MPV（含 outie#*，以及未走上方嵌入分支的其它 innie）：
+	// API/无界面兜底交给系统打开；客户端 GUI 应走宿主选择器。
 	return ExternalPlay(url)
 }
 

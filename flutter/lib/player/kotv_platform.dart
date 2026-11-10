@@ -77,15 +77,14 @@ String kotvHtmlPlayerLabel() => kotvIsIOS() ? 'AVPlayer' : '浏览器 HTML5';
 
 String kotvClampPlayerVal(String raw, {required bool live}) {
   final v = raw.trim();
-  final opts = live ? kotvLivePlayerOptions() : kotvVodPlayerOptions();
-  for (final o in opts) {
+  // 点播/直播选项表相同，默认值仍按 live 区分。
+  for (final o in kotvPlayerOptions()) {
     if (o.$2 == v) return v;
   }
   return live ? kotvDefaultLivePlayer() : kotvDefaultVodPlayer();
 }
 
-bool kotvCanSwitchPlayer({required bool live}) =>
-    (live ? kotvLivePlayerOptions() : kotvVodPlayerOptions()).length > 1;
+bool kotvCanSwitchPlayer({required bool live}) => kotvPlayerOptions().length > 1;
 
 enum KotvEmbedBackend { mpv, fvp, exo, html, art, xg, zw }
 
@@ -145,6 +144,7 @@ List<(String, String)> kotvPlayerOptions() {
   ];
 }
 
+/// 点播/直播共用 [kotvPlayerOptions]；保留别名方便调用处语义区分。
 List<(String, String)> kotvVodPlayerOptions() => kotvPlayerOptions();
 
 List<(String, String)> kotvLivePlayerOptions() => kotvPlayerOptions();

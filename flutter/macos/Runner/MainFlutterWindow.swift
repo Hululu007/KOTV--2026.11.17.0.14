@@ -7,6 +7,7 @@ import ObjectiveC
 #endif
 
 class MainFlutterWindow: NSWindow {
+  /// 强引用 MethodChannel，避免 awakeFromNib 返回后通道被释放。
   private var hostChannel: FlutterMethodChannel?
 
   override func awakeFromNib() {
