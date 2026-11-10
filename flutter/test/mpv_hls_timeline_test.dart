@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kotv/player/kotv_playback.dart';
 import 'package:kotv/player/mpv_hls_timeline.dart';
 
 void main() {
@@ -49,5 +50,16 @@ void main() {
     expect(kotvMpvNetworkUrl('file:///tmp/a.mp4'), isFalse);
     expect(kotvMpvHlsOpenFailed('lavf', 'could not open codec'), isFalse);
     expect(kotvMpvHlsOpenFailed('vd', 'could not open codec'), isFalse);
+  });
+
+  test('image media codecs are not real video tracks', () {
+    expect(kotvIsImageMediaCodec('png'), isTrue);
+    expect(kotvIsImageMediaCodec('mjpeg'), isTrue);
+    expect(kotvIsImageMediaCodec('h264'), isFalse);
+    expect(kotvIsImageMediaCodec(null), isFalse);
+    expect(kotvIsRealVideoTrack(id: '1', codec: 'png'), isFalse);
+    expect(kotvIsRealVideoTrack(id: '1', codec: 'h264'), isTrue);
+    expect(kotvIsRealVideoTrack(id: 'auto', codec: 'h264'), isFalse);
+    expect(kotvIsRealVideoTrack(id: '1', codec: 'h264', image: true), isFalse);
   });
 }

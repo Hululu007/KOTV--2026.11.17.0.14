@@ -391,11 +391,18 @@ String kotvFormatSpeed(int bytesPerSec, {bool showZero = false}) {
 }
 
 class KotvTrack {
-  const KotvTrack({required this.id, required this.label, this.language = ''});
+  const KotvTrack({
+    required this.id,
+    required this.label,
+    this.language = '',
+    this.codec = '',
+  });
   final String id;
   final String label;
   /// 轨道语言（容器元数据）；未知为空。
   final String language;
+  /// 解码器/编码名（如 h264、png）；未知为空。
+  final String codec;
 }
 
 /// 语言主标签（zh-Hans / zh_CN → zh）；未知或 und 为空串。
@@ -438,6 +445,47 @@ bool kotvIsPseudoMediaTrack(String id) {
     default:
       return id.trim().isEmpty;
   }
+}
+
+/// 静止图/封面类「视频」编码（HLS 分片常为 png/mjpeg）。
+/// 不算可出画的实视频轨：不应挡纯音频叠层，也不应把瞬时 EOF 当正常片尾连播。
+bool kotvIsImageMediaCodec(String? codec) {
+  final raw = (codec ?? '').trim().toLowerCase();
+  if (raw.isEmpty) return false;
+  final base = raw.split(RegExp(r'[.\s/]')).firstWhere(
+        (s) => s.isNotEmpty,
+        orElse: () => raw,
+      );
+  switch (base) {
+    case 'png':
+    case 'mjpeg':
+    case 'mjpg':
+    case 'jpeg':
+    case 'jpg':
+    case 'webp':
+    case 'bmp':
+    case 'gif':
+    case 'tiff':
+    case 'tif':
+    case 'ppm':
+    case 'pgm':
+      return true;
+    default:
+      return raw.contains('png') || raw.startsWith('mjpeg') || raw.startsWith('mjpg');
+  }
+}
+
+/// 是否算「实视频轨」：非伪轨、非图片编码；[image]/[albumart] 为 true 时也排除。
+bool kotvIsRealVideoTrack({
+  required String id,
+  String? codec,
+  bool image = false,
+  bool albumart = false,
+}) {
+  if (kotvIsPseudoMediaTrack(id)) return false;
+  if (image || albumart) return false;
+  if (kotvIsImageMediaCodec(codec)) return false;
+  return true;
 }
 
 bool kotvSubtitleIsOff(String? id) {

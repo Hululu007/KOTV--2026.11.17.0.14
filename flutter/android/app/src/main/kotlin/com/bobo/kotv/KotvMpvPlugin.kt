@@ -14,6 +14,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.Surface
@@ -134,6 +135,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var createdDiskCache: Boolean? = null
   /** 最近一次写入的 audio-spdif；空=当前输出不直通。 */
   private var appliedSpdif: String? = null
+  /** 本次 loadfile / 无缝切入的墙钟；用于识别「开播即 seek 末帧」假片尾。 */
+  private var loadWallMs = 0L
+  /** 正向播放中见到的最大 time-pos（seek 到末帧不计入）。 */
+  private var maxPlayedSec = 0.0
 
   private val tick = object : Runnable {
     override fun run() {
@@ -150,6 +155,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         durationSec = dur
         paused = pause
         playing = !pause && !idle && !coreIdle
+        if (playing && !seeking && !eof && pos > maxPlayedSec) {
+          maxPlayedSec = pos
+        }
         buffering = seeking || pausedForCache || (!playing && !eof && pendingUrl == null && pos <= 0.05)
         val bufSec = MPVLib.getPropertyDouble("demuxer-cache-duration") ?: 0.0
         val speed = ((MPVLib.getPropertyDouble("cache-speed") ?: 0.0)).toLong().coerceAtLeast(0)
@@ -341,6 +349,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             durationSec = 0.0
             width = 0
             height = 0
+            maxPlayedSec = 0.0
+            loadWallMs = SystemClock.elapsedRealtime()
             ioHlsRetried = false
             forceLavfHls = forceHls
             // 作废上一集还没落地的失败重试。
@@ -1703,6 +1713,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setPropertyDouble("speed", rate)
       val startMs = pendingStartAtMs
       pendingStartAtMs = 0L
+      maxPlayedSec = 0.0
+      loadWallMs = SystemClock.elapsedRealtime()
       // 只写在这一次 loadfile 上，播完恢复，不留在会话里。
       val opts = ArrayList<String>(6)
       if (startMs > 0L) opts.add("start=${startMs / 1000.0}")
@@ -1800,6 +1812,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     forceLavfHls = next.forceHls
     ioHlsRetried = false
     eof = false
+    maxPlayedSec = 0.0
+    loadWallMs = SystemClock.elapsedRealtime()
+    width = 0
+    height = 0
     emit(mapOf("event" to "transition", "id" to next.id))
   }
 
@@ -1995,10 +2011,20 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
    * 播到片尾，每次加载只报一次 completed。
    * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；有排队项时在这里 playlist-next 并解除 pause。
    * 地址本身像 HLS 却未 forceHls、且几秒就 EOF、时长仍未知：按 lavf hls 重开一次，避免假片尾切下一集。
+   * 仅图片轨且未出画、几乎没播过：seek 末帧的假 EOF，报 error 而不是 completed（避免连跳）。
    */
   private fun markEnded() {
     if (eof) return
     if (tryReloadAsHls(reason = "short-eof", seekSec = -1.0, requireUrlLooksLikeHls = true)) return
+    if (isUnplayableImageEof()) {
+      eof = true
+      playing = false
+      queuedNext = null
+      pendingSeamlessId = null
+      Log.w(TAG, "image-only eof suppressed url=$loadedUrl played=$maxPlayedSec")
+      emit(mapOf("event" to "error", "message" to "无法解码该片源画面"))
+      return
+    }
     val next = queuedNext
     if (next != null) {
       main.post {
@@ -2017,6 +2043,57 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     eof = true
     playing = false
     emit(mapOf("event" to "completed"))
+  }
+
+  /**
+   * keep-open 在解不出画面的 png/mjpeg「视频」上会立刻 seek 到末帧并 eof-reached。
+   * 有音轨且真正播过则放行；仅图片轨、无尺寸、开播数秒内几乎未前进 → 假片尾。
+   */
+  private fun isUnplayableImageEof(): Boolean {
+    if (width > 0 && height > 0) return false
+    val elapsed = SystemClock.elapsedRealtime() - loadWallMs
+    if (elapsed > 8_000L || maxPlayedSec >= 1.0) return false
+    var hasAudio = false
+    var hasVideo = false
+    var allVideoImage = true
+    val count = try {
+      MPVLib.getPropertyInt("track-list/count") ?: 0
+    } catch (_: Throwable) {
+      0
+    }
+    for (i in 0 until count) {
+      val type = try {
+        MPVLib.getPropertyString("track-list/$i/type")
+      } catch (_: Throwable) {
+        null
+      } ?: continue
+      when (type) {
+        "audio" -> hasAudio = true
+        "video" -> {
+          hasVideo = true
+          val codec = try {
+            MPVLib.getPropertyString("track-list/$i/codec")
+          } catch (_: Throwable) {
+            null
+          }
+          val image = try {
+            MPVLib.getPropertyBoolean("track-list/$i/image") ?: false
+          } catch (_: Throwable) {
+            false
+          }
+          val albumart = try {
+            MPVLib.getPropertyBoolean("track-list/$i/albumart") ?: false
+          } catch (_: Throwable) {
+            false
+          }
+          if (!image && !albumart && !KotvMpvHls.imageCodec(codec)) {
+            allVideoImage = false
+          }
+        }
+      }
+    }
+    if (hasAudio) return false
+    return hasVideo && allVideoImage
   }
 
   /**

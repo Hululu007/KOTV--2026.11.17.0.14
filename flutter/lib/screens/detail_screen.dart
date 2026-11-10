@@ -1147,11 +1147,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _lastVideoW = w;
         _lastVideoH = h;
       }
-      // Android 全屏换集黑盖：出尺寸/开播后撤掉。
-      if (_immersiveEpCover &&
-          w > 0 &&
-          h > 0 &&
-          (sizeChanged || (p.playing && !p.stalling))) {
+      // Android 全屏换集黑盖：出尺寸或确认为纯音频后撤掉（纯音频永远无宽高，勿一直盖黑）。
+      if (_immersiveEpCover && !kotvNeedsBlankSurfaceCover(p)) {
         setState(() => _immersiveEpCover = false);
         return;
       }

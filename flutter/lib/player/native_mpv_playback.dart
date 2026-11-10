@@ -249,10 +249,29 @@ class NativeMpvPlayback extends KotvPlayback {
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffered = Duration.zero;
+    // 清掉上一集轨表，避免视频→纯音频时残留「有视频轨」挡掉音频叠层。
+    // 宽高仍保留到新 size/ready：同分辨率无缝时属性可能不重发。
+    _audioTracks = const [];
+    _videoTracks = const [];
+    _subtitleTracks = const [];
+    _currentAudioId = null;
+    _currentVideoId = null;
+    _currentSubtitleId = null;
+    _currentSecondarySubtitleId = null;
     if (!_posCtrl.isClosed) _posCtrl.add(Duration.zero);
     if (!_queuedStartCtrl.isClosed) _queuedStartCtrl.add(id);
     notifyListeners();
-    unawaited(_refreshTracks());
+    unawaited(_refreshTracksAfterQueued());
+  }
+
+  /// 无缝切入后刷新轨；若新集是纯音频则清掉上一集残留宽高，否则音频叠层不出现。
+  Future<void> _refreshTracksAfterQueued() async {
+    await _refreshTracks();
+    if (_audioTracks.isEmpty || _hasRealVideoTrack) return;
+    if (_w <= 0 && _h <= 0) return;
+    _w = 0;
+    _h = 0;
+    notifyListeners();
   }
 
   List<KotvTrack> _audioTracks = const [];
@@ -306,10 +325,13 @@ class NativeMpvPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
+  bool get _hasRealVideoTrack =>
+      _videoTracks.any((t) => kotvIsRealVideoTrack(id: t.id, codec: t.codec));
+
   bool get _isAudioOnlyUnlocked {
     if (_lastError != null || !_ready) return false;
     if (_w > 0 && _h > 0) return false;
-    if (_videoTracks.isNotEmpty) return false;
+    if (_hasRealVideoTrack) return false;
     return _audioTracks.isNotEmpty;
   }
 
@@ -337,7 +359,12 @@ class NativeMpvPlayback extends KotvPlayback {
     var label = title.isNotEmpty ? title : (lang.isNotEmpty ? lang : id);
     if (codec.isNotEmpty) label = '$label ($codec)';
     if (w > 0 && h > 0) label = '$label ${w}x$h';
-    return KotvTrack(id: id.isEmpty ? 'auto' : id, label: label);
+    return KotvTrack(
+      id: id.isEmpty ? 'auto' : id,
+      label: label,
+      language: lang,
+      codec: codec,
+    );
   }
 
   /// Android：Hybrid Composition PlatformView（对应 setRender）。

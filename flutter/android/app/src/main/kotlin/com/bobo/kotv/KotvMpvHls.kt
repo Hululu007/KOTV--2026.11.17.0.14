@@ -54,4 +54,18 @@ internal object KotvMpvHls {
       scheme == "rtspt" ||
       scheme == "proxy"
   }
+
+  /**
+   * 静止图/封面类编码（与 Dart [kotvIsImageMediaCodec] 同一套）。
+   * HLS 分片常标成 png/mjpeg「视频轨」，解不出尺寸时 keep-open 会 seek 到末帧并 eof。
+   */
+  fun imageCodec(codec: String?): Boolean {
+    val raw = codec?.trim()?.lowercase().orEmpty()
+    if (raw.isEmpty) return false
+    val base = raw.split('.', ' ', '/').firstOrNull { it.isNotEmpty() } ?: raw
+    return when (base) {
+      "png", "mjpeg", "mjpg", "jpeg", "jpg", "webp", "bmp", "gif", "tiff", "tif", "ppm", "pgm" -> true
+      else -> raw.contains("png") || raw.startsWith("mjpeg") || raw.startsWith("mjpg")
+    }
+  }
 }

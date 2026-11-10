@@ -45,6 +45,20 @@ String _trackLabel(dynamic t) {
   return t.id as String;
 }
 
+KotvTrack _kotvTrackFromMediaKit(dynamic t) {
+  final codec = '${t.codec ?? ''}'.trim();
+  var label = _trackLabel(t);
+  if (codec.isNotEmpty && !label.toLowerCase().contains(codec.toLowerCase())) {
+    label = '$label ($codec)';
+  }
+  return KotvTrack(
+    id: '${t.id}',
+    label: label,
+    language: '${t.language ?? ''}'.trim(),
+    codec: codec,
+  );
+}
+
 /// media_kit / libmpv（桌面 / iOS 等非 Android 原生插件路径）。
 class MediaKitPlayback extends KotvPlayback {
   /// [live]=true：构造期就关 cache-pause，并且不打开磁盘缓存。字节上限与点播相同。
@@ -297,12 +311,36 @@ class MediaKitPlayback extends KotvPlayback {
       if (!_completedCtrl.isClosed) _completedCtrl.add(false);
       return;
     }
+    // 仅图片轨、无音、无出画：keep-open 会 seek 到末帧并 completed，勿当正常片尾连播。
+    if (_isUnplayableImageEof()) {
+      _queued = null;
+      _completedGate = false;
+      if (!_completedCtrl.isClosed) _completedCtrl.add(false);
+      notifyListeners();
+      return;
+    }
     final q = _queued;
     if (q != null && await _skipToQueued(q)) return;
     // 无排队或切入失败：清掉排队态，交给详情硬切下一集。
     _queued = null;
     _completedGate = true;
     if (!_completedCtrl.isClosed) _completedCtrl.add(true);
+  }
+
+  /// PNG/MJPEG 等当「视频」却解不出尺寸、又无音轨：瞬时 EOF，不是播完。
+  bool _isUnplayableImageEof() {
+    if (width > 0 && height > 0) return false;
+    if (_hasRealAudioTrack) return false;
+    final videos = player.state.tracks.video
+        .where((t) => !kotvIsPseudoMediaTrack('${t.id}'))
+        .toList();
+    if (videos.isEmpty) return false;
+    return videos.every(
+      (t) =>
+          t.image == true ||
+          t.albumart == true ||
+          kotvIsImageMediaCodec(t.codec),
+    );
   }
 
   /// 只排请求头与 HLS 强制解析都和本集相同的：UA、Referer、demuxer-lavf-format
@@ -413,9 +451,15 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   /// media_kit 的 `Tracks` 永远带 `auto` / `no` 两个伪轨（未加载时也在），
-  /// 所以不能用 `isNotEmpty` 判有无轨；只数真实轨。
-  bool get _hasRealVideoTrack =>
-      player.state.tracks.video.any((t) => !kotvIsPseudoMediaTrack('${t.id}'));
+  /// 所以不能用 `isNotEmpty` 判有无轨；只数真实轨。图片/封面轨不算实视频。
+  bool get _hasRealVideoTrack => player.state.tracks.video.any(
+        (t) => kotvIsRealVideoTrack(
+          id: '${t.id}',
+          codec: t.codec,
+          image: t.image == true,
+          albumart: t.albumart == true,
+        ),
+      );
 
   bool get _hasRealAudioTrack =>
       player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack('${t.id}'));
@@ -423,9 +467,11 @@ class MediaKitPlayback extends KotvPlayback {
   /// 文件已 loaded（对应原生 MPV 的 `_ready`）：track-list 已到、或已知时长、
   /// 或已出画/进度已走。之前没有这一层，守卫 open 当刻就把 media_kit
   /// 当成「已在播却黑屏」——立刻踢 play、起 8s 黑屏窗口，慢源加载 >16s 就被误切播放器。
+  /// 图片轨也算 demux 已到（与「实视频」区分：后者才挡纯音频叠层）。
   bool get _loaded =>
       _hasRealVideoTrack ||
       _hasRealAudioTrack ||
+      player.state.tracks.video.any((t) => !kotvIsPseudoMediaTrack('${t.id}')) ||
       player.state.duration > Duration.zero ||
       player.state.position > Duration.zero ||
       (width > 0 && height > 0);
@@ -444,7 +490,7 @@ class MediaKitPlayback extends KotvPlayback {
   List<KotvTrack> get audioTracks {
     return player.state.tracks.audio
         .where((t) => !kotvIsPseudoMediaTrack('${t.id}'))
-        .map((t) => KotvTrack(id: '${t.id}', label: _trackLabel(t)))
+        .map(_kotvTrackFromMediaKit)
         .toList();
   }
 
@@ -452,7 +498,7 @@ class MediaKitPlayback extends KotvPlayback {
   List<KotvTrack> get videoTracks {
     return player.state.tracks.video
         .where((t) => !kotvIsPseudoMediaTrack('${t.id}'))
-        .map((t) => KotvTrack(id: '${t.id}', label: _trackLabel(t)))
+        .map(_kotvTrackFromMediaKit)
         .toList();
   }
 
@@ -460,7 +506,7 @@ class MediaKitPlayback extends KotvPlayback {
   List<KotvTrack> get subtitleTracks {
     return player.state.tracks.subtitle
         .where((t) => !kotvIsPseudoMediaTrack('${t.id}'))
-        .map((t) => KotvTrack(id: '${t.id}', label: _trackLabel(t)))
+        .map(_kotvTrackFromMediaKit)
         .toList();
   }
 
