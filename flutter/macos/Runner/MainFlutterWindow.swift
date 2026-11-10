@@ -109,7 +109,7 @@ class MainFlutterWindow: NSWindow {
       let name = FileManager.default.displayName(atPath: appURL.path)
       out.append(["id": bid, "name": name])
     }
-    out.sort { ($0["name"] ?? "") localizedCompare ($1["name"] ?? "") == .orderedAscending }
+    out.sort { ($0["name"] ?? "").localizedCompare($1["name"] ?? "") == .orderedAscending }
     return out
   }
 
