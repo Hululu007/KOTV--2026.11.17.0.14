@@ -1166,7 +1166,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _playbackLive = false;
     _advanceBusy = true;
     try {
-      // 下一集已排进播放器：直接跳过去，换集记账由 [_onQueuedEpisodeStarted] 做。
+      // 无缝：playlist 已排好 → skipToNext，不经 [_playAt]/不拆 Player。
       if (_queuedNext?.idx == next && await _playback.skipToNext()) return;
       if (mounted) setState(() => _status = fromEnd ? '自动播放下一集…' : '播放下一集…');
       // 仅自动连播需要抖音式动画；手势/按钮已在全屏页内播过，勿再 animate。
