@@ -295,6 +295,12 @@ func (p *nodePkg) start(h *NodeHost) error {
 
 func (p *nodePkg) startLocked(h *NodeHost) error {
 	p.stopLocked()
+	// stopLocked 会置 stopping；启动失败须清掉，否则后续 Ensure/watch 被当成「正在停」而空转。
+	defer func() {
+		if p.cmd == nil {
+			p.stopping = false
+		}
+	}()
 	nodeBin, err := appruntime.RequireNode()
 	if err != nil {
 		return err

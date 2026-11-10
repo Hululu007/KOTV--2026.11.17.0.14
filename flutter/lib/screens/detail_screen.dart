@@ -2226,8 +2226,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     // 解析/拉流可能要数秒：先停播，避免上一集在后台继续出声。
     await _stopAllBackends();
     if (serial != _playAtSerial || !mounted) return;
-    // 先 await 软取消上一集，再 play。unawaited 会与本次 play 竞态：
-    // SoftCancel 抬 epoch → JS/JAR 立刻报「脚本调用已中断」。
+    // 先 await 软取消上一集，再 play。unawaited 会与本次 play 竞态，
+    // 软取消未结束就开新解析时，JS/JAR 可能报「脚本调用已中断」。
     await ref.read(apiProvider).cancelPending(
           hard: false,
           thunder: !canDirect && _detailMagnet,

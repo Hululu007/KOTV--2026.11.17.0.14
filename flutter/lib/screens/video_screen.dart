@@ -692,6 +692,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final pc = (pcRaw is num) ? pcRaw.toInt() : 0;
       final home = replace && (_tid == null || _tid!.isEmpty);
       final emptyHome = home && types.isEmpty && list.isEmpty;
+      // 首页 list 空但本地仍有海报：保留格子，勿清成空白；横幅只在真·空首页时提示。
       final keepGrid = home && list.isEmpty && _items.isNotEmpty;
       final pageStyle = KotvGridStyle.parse(data['style']);
       // fp() 类站 home 恒空且可搜：横幅引导顶部搜索；type4 推送空首页静默。
@@ -713,7 +714,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                 : (pushEmptyHome
                     ? null
                     : '首页没有返回分类和推荐，请重试'))
-            : (keepGrid ? '首页没有返回推荐，请重试' : null);
+            : null;
         // id/name 未变不整表替换，避免分类条跟着内容刷新重建。
         if (types.isNotEmpty && !_sameTypeNav(_types, types)) {
           _types = types;

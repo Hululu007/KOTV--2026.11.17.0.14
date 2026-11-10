@@ -135,33 +135,29 @@ func (s *nodeSpider) HomeVideoContent() (string, error) {
 	return s.postHomeVideoList()
 }
 
-// postHomeVideoList 先 homeVod；无该路由再 homeVideo；其它错误不阻断首页。
+// postHomeVideoList 先 homeVod；失败或空体再 homeVideo（两路由常只实现其一）。
 func (s *nodeSpider) postHomeVideoList() (string, error) {
 	vodRaw, vodErr := s.post("homeVod", map[string]any{})
-	var videoRaw string
-	var videoErr error
-	if nodeRouteMissing(vodErr) {
-		videoRaw, videoErr = s.postOptional("homeVideo", map[string]any{})
+	if vodErr == nil && strings.TrimSpace(vodRaw) != "" {
+		return vodRaw, nil
 	}
+	videoRaw, videoErr := s.postOptional("homeVideo", map[string]any{})
 	return pickHomeVideoRaw(vodRaw, vodErr, videoRaw, videoErr)
 }
 
-// pickHomeVideoRaw 合并 homeVod / homeVideo 结果（供单测）。
+// pickHomeVideoRaw 合并 homeVod / homeVideo（供单测）。优先非空 body；真实错误上抛，勿软吞成 {}。
 func pickHomeVideoRaw(vodRaw string, vodErr error, videoRaw string, videoErr error) (string, error) {
-	if vodErr == nil {
-		if strings.TrimSpace(vodRaw) == "" {
-			return "{}", nil
-		}
+	if vodErr == nil && strings.TrimSpace(vodRaw) != "" {
 		return vodRaw, nil
 	}
-	if nodeRouteMissing(vodErr) {
-		if videoErr != nil && !nodeRouteMissing(videoErr) {
-			return "", videoErr
-		}
-		if strings.TrimSpace(videoRaw) == "" || nodeRouteMissing(videoErr) {
-			return "{}", nil
-		}
+	if videoErr == nil && strings.TrimSpace(videoRaw) != "" {
 		return videoRaw, nil
+	}
+	if vodErr != nil && !nodeRouteMissing(vodErr) {
+		return "", vodErr
+	}
+	if videoErr != nil && !nodeRouteMissing(videoErr) {
+		return "", videoErr
 	}
 	return "{}", nil
 }

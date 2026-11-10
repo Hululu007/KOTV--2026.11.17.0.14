@@ -1468,16 +1468,16 @@ WM_REFRESH_BLIND = """void WindowManager::ForceChildRefresh() {
 }"""
 WM_REFRESH_SYNC = """bool WindowManager::ForceChildRefresh() {
   HWND main = GetMainWindow();
-  if (!main) return true;
+  if (!main) return false;
   RECT client;
-  if (!::GetClientRect(main, &client)) return true;
+  if (!::GetClientRect(main, &client)) return false;
   const int w = client.right - client.left;
   const int h = client.bottom - client.top;
-  if (w <= 0 || h <= 0) return true;
+  if (w <= 0 || h <= 0) return false;
   HWND view = ::FindWindowEx(main, nullptr, kFlutterViewWindowClassName, nullptr);
-  if (!view) return true;
+  if (!view) return false;
   RECT view_rect;
-  if (!::GetClientRect(view, &view_rect)) return true;
+  if (!::GetClientRect(view, &view_rect)) return false;
   const int vw = view_rect.right - view_rect.left;
   const int vh = view_rect.bottom - view_rect.top;
   // KOTV: 先对齐客户区。未对齐返回 false 让调用方延后重试；已对齐再 ±1 逼重绘。
@@ -1605,6 +1605,32 @@ PLUGIN_REFRESH_TIMER = """  if (message == WM_APP + 0x51) {
   }
 """
 PLUGIN_REFRESH_SYNC = """  if (message == WM_APP + 0x51) {
+    // 未对齐客户区则延后重试；对齐后再用 0x4B52 确认踢一次（ANGLE/纹理可能更晚落稳）。
+    if (!window_manager->ForceChildRefresh()) {
+      if (wParam < 8) {
+        ::PostMessage(hWnd, WM_APP + 0x51, wParam + 1, 0);
+      }
+    } else {
+      ::SetTimer(hWnd, 0x4B52, 120, nullptr);
+    }
+    return 0;
+  }
+  if (message == WM_TIMER && wParam == 0x4B52) {
+    ::KillTimer(hWnd, 0x4B52);
+    window_manager->ForceChildRefresh();
+    return 0;
+  }
+"""
+if "0x4B52" not in plugin:
+    if PLUGIN_REFRESH_TIMER in plugin:
+        plugin = plugin.replace(PLUGIN_REFRESH_TIMER, PLUGIN_REFRESH_SYNC, 1)
+        print(f"patched window_manager plugin ({wm_version}): condition child sync + confirm")
+    elif PLUGIN_REFRESH_ONCE in plugin:
+        plugin = plugin.replace(PLUGIN_REFRESH_ONCE, PLUGIN_REFRESH_SYNC, 1)
+        print(f"patched window_manager plugin ({wm_version}): condition child sync + confirm")
+    elif "wParam < 8" in plugin and "0x4B52" not in plugin:
+        # 旧条件同步：整段换成带确认踢的 SYNC。
+        old_sync = """  if (message == WM_APP + 0x51) {
     // 未对齐客户区则延后重试；对齐后 ForceChildRefresh 内再 ±1 重绘。
     if (!window_manager->ForceChildRefresh() && wParam < 8) {
       ::PostMessage(hWnd, WM_APP + 0x51, wParam + 1, 0);
@@ -1612,13 +1638,23 @@ PLUGIN_REFRESH_SYNC = """  if (message == WM_APP + 0x51) {
     return 0;
   }
 """
-if "wParam < 8" not in plugin:
-    if PLUGIN_REFRESH_TIMER in plugin:
-        plugin = plugin.replace(PLUGIN_REFRESH_TIMER, PLUGIN_REFRESH_SYNC, 1)
-        print(f"patched window_manager plugin ({wm_version}): condition child sync")
-    elif PLUGIN_REFRESH_ONCE in plugin:
-        plugin = plugin.replace(PLUGIN_REFRESH_ONCE, PLUGIN_REFRESH_SYNC, 1)
-        print(f"patched window_manager plugin ({wm_version}): condition child sync")
+        if old_sync in plugin:
+            plugin = plugin.replace(old_sync, PLUGIN_REFRESH_SYNC, 1)
+            print(f"patched window_manager plugin ({wm_version}): add confirm kick after align")
+        else:
+            plugin_anchor = "  std::optional<LRESULT> result = std::nullopt;\n"
+            if plugin_anchor not in plugin:
+                print(
+                    f"ERROR: window_manager plugin ({wm_version}) HandleWindowProc anchor missing",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            plugin = plugin.replace(
+                plugin_anchor,
+                "  std::optional<LRESULT> result = std::nullopt;\n\n" + PLUGIN_REFRESH_SYNC,
+                1,
+            )
+            print(f"patched window_manager plugin ({wm_version}): condition child sync + confirm")
     else:
         plugin_anchor = "  std::optional<LRESULT> result = std::nullopt;\n"
         if plugin_anchor not in plugin:
@@ -1632,9 +1668,9 @@ if "wParam < 8" not in plugin:
             "  std::optional<LRESULT> result = std::nullopt;\n\n" + PLUGIN_REFRESH_SYNC,
             1,
         )
-        print(f"patched window_manager plugin ({wm_version}): condition child sync")
+        print(f"patched window_manager plugin ({wm_version}): condition child sync + confirm")
 elif "0x4B51" in plugin:
-    # 旧盲踢 timer 残留：条件同步已在时仍可能夹着 SetTimer，整段换成 SYNC。
+    # 旧盲踢 timer 残留：换成确认踢 SYNC。
     if PLUGIN_REFRESH_TIMER in plugin:
         plugin = plugin.replace(PLUGIN_REFRESH_TIMER, PLUGIN_REFRESH_SYNC, 1)
         print(f"patched window_manager plugin ({wm_version}): drop blind SetTimer kick")
@@ -1661,6 +1697,9 @@ if enter.find("::SendMessage(mainWindow, WM_SYSCOMMAND, SC_MAXIMIZE, 0);") < ent
 plugin_check = wm_plugin.read_text(encoding="utf-8")
 if "message == WM_APP + 0x51" not in plugin_check or "wParam < 8" not in plugin_check:
     print("ERROR: window_manager plugin missing condition child sync", file=sys.stderr)
+    sys.exit(1)
+if "0x4B52" not in plugin_check:
+    print("ERROR: window_manager plugin missing confirm kick after align", file=sys.stderr)
     sys.exit(1)
 if "0x4B51" in plugin_check:
     print("ERROR: window_manager plugin still has blind SetTimer kick", file=sys.stderr)

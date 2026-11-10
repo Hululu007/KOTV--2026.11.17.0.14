@@ -139,8 +139,8 @@ func (s *SiteService) HomeContent() (model.Result, error) {
 	epoch := s.loadEpoch.Load()
 	site := s.cfg.Home()
 	s.mu.Lock()
-	// 与写入条件一致：仅 Types>0 才命中，避免「有 list 无 class」假命中却永不写入。
-	if s.homeCacheSite == site.Key && len(s.HomeResult.Types) > 0 {
+	// 有分类且已有推荐才命中整包；仅有分类、list 空时不命中，避免 Node homeVod 软空被钉死。
+	if s.homeCacheSite == site.Key && len(s.HomeResult.Types) > 0 && len(s.HomeResult.List) > 0 {
 		result := s.HomeResult
 		s.mu.Unlock()
 		return result, nil
@@ -159,8 +159,8 @@ func (s *SiteService) HomeContent() (model.Result, error) {
 	}
 	result := v.(model.Result)
 	s.mu.Lock()
-	// 没有分类的结果不写入缓存。列表有片但 class 为空时，下一次仍重新请求。
-	if len(result.Types) > 0 {
+	// 仅缓存「有分类且有推荐」；空 list 留给下次重试 / UI 首分类顶上。
+	if len(result.Types) > 0 && len(result.List) > 0 {
 		s.HomeResult = result
 		s.homeCacheSite = site.Key
 	}

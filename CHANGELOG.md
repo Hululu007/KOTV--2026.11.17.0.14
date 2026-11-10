@@ -2,6 +2,9 @@
 
 ## v0.3.1
 
+- Node 首页：`homeVod` 失败/空体再试 `homeVideo`，真实错误上抛；空推荐不钉死 home 缓存；去掉误导性「没有返回推荐」横幅。
+- Win7 全屏：子窗对齐失败继续重试；对齐后再确认踢一次（ANGLE/纹理晚落稳）。
+- Node 切站：启动失败清掉 `stopping`，避免 Ensure/watch 空转无限转圈。
 - 远程 OPENWEB：Go 统一代理（会话戳记、`/node/<pkg>/`、根别名反代 + Cookie）；本机不改写；Flutter 原样打开下发 URL。
 - 下载列表已完成任务可点开播放（本机直读路径，远端 play 换成 `/file/`）。
 - Node 切站：修复 watch 休眠后误杀新进程；未登记 api 时保留已起源包，避免 Win7 长时间转圈。

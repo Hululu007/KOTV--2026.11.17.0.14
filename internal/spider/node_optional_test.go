@@ -26,6 +26,7 @@ func TestNodeRouteMissing(t *testing.T) {
 
 func TestPickHomeVideoRaw(t *testing.T) {
 	miss := fmt.Errorf("POST /spider/x/3/homeVod http 404: missing")
+	boom := errors.New("boom")
 	cases := []struct {
 		name     string
 		vodRaw   string
@@ -33,15 +34,23 @@ func TestPickHomeVideoRaw(t *testing.T) {
 		videoRaw string
 		videoErr error
 		want     string
+		wantErr  bool
 	}{
-		{"vod ok", `{"list":[1]}`, nil, "", nil, `{"list":[1]}`},
-		{"vod empty body", "  ", nil, `{"list":[2]}`, nil, "{}"},
-		{"vod missing use video", "", miss, `{"list":[2]}`, nil, `{"list":[2]}`},
-		{"both missing", "", miss, "", miss, "{}"},
-		{"vod other err soft empty", "", errors.New("boom"), `{"list":[2]}`, nil, "{}"},
+		{"vod ok", `{"list":[1]}`, nil, "", nil, `{"list":[1]}`, false},
+		{"vod empty use video", "  ", nil, `{"list":[2]}`, nil, `{"list":[2]}`, false},
+		{"vod missing use video", "", miss, `{"list":[2]}`, nil, `{"list":[2]}`, false},
+		{"both missing", "", miss, "", miss, "{}", false},
+		{"vod err use video", "", boom, `{"list":[2]}`, nil, `{"list":[2]}`, false},
+		{"vod err no video", "", boom, "", miss, "", true},
 	}
 	for _, c := range cases {
 		got, err := pickHomeVideoRaw(c.vodRaw, c.vodErr, c.videoRaw, c.videoErr)
+		if c.wantErr {
+			if err == nil {
+				t.Fatalf("%s: want err", c.name)
+			}
+			continue
+		}
 		if err != nil {
 			t.Fatalf("%s: unexpected err %v", c.name, err)
 		}
