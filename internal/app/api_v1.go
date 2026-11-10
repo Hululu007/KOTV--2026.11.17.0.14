@@ -2045,7 +2045,8 @@ func (a *App) APIPlayerControl(cmd string, value float64, mode string) error {
 	return nil
 }
 
-// APIPlayerExternal 用系统打开 URL；设置统一记为 outie#view。
+// APIPlayerExternal 无 GUI 兜底外置打开（临时 m3u）；设置统一记为 outie#view。
+// 客户端界面请走 Flutter 宿主选择器，不要依赖本接口选播放器。
 func (a *App) APIPlayerExternal(playURL, playerVal string) error {
 	playURL = strings.TrimSpace(playURL)
 	if playURL == "" {

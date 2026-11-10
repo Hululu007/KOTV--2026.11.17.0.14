@@ -94,7 +94,7 @@ func playerChoices(platform string) (def string, allowed []string, ok bool) {
 	case "android":
 		return "innie#exo", []string{"innie#exo", "innie#mpv", "innie#fvp", "outie#view"}, true
 	case "windows", "linux", "macos":
-		// 桌面外置仅 outie#view，由系统打开。
+		// 桌面外置仅 outie#view，由客户端宿主选择本机视频应用。
 		return "innie#mpv", []string{"innie#mpv", "innie#fvp", "outie#view"}, true
 	case "ios":
 		return "innie#html", []string{"innie#html", "innie#mpv", "innie#fvp"}, true

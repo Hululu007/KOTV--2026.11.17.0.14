@@ -1584,7 +1584,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       });
       try {
         final result = await kotvLaunchExternalPlayer(
-          api: ref.read(apiProvider),
           player: startPlayer,
           url: url,
           headers: headers,
@@ -2610,8 +2609,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (kotvIsExternalPlayer(v) && _playUrl.isNotEmpty) {
         try {
           await _playback.pause();
+          if (!mounted) return;
           final result = await kotvLaunchExternalPlayer(
-            api: ref.read(apiProvider),
             player: v,
             url: _playUrl,
             headers: _playHeaders,

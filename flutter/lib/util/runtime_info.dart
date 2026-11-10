@@ -53,7 +53,7 @@ List<String> formatKotvRuntimeLines(Map<String, String> runtime) {
     final v = runtime[k]?.trim();
     if (v != null && v.isNotEmpty) {
       if (hideMissingPlayerLibs && v == '(missing)') continue;
-      // 外部 mpv 未安装时不必占一行（页内 MPV 不走 runtime）。
+      // 捆绑 libmpv 未装入 runtime 时不占一行。
       if (k == 'mpv' && v == '(missing)') continue;
       // 无 Node 时不占一行（仅猫爪源需要）。
       if (k == 'node' && v == '(missing)') continue;

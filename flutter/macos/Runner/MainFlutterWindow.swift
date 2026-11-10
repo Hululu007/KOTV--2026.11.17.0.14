@@ -47,7 +47,10 @@ class MainFlutterWindow: NSWindow {
           result(FlutterError(code: "args", message: "id/url required", details: nil))
           return
         }
-        result(Self.openExternalVideoApp(id: id, url: url))
+        // 异步回传，避免在主线程 semaphore.wait 与 NSWorkspace 完成回调互锁。
+        Self.openExternalVideoApp(id: id, url: url) { ok in
+          result(ok)
+        }
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -113,22 +116,22 @@ class MainFlutterWindow: NSWindow {
     return out
   }
 
-  private static func openExternalVideoApp(id: String, url: String) -> Bool {
+  private static func openExternalVideoApp(id: String, url: String, completion: @escaping (Bool) -> Void) {
     let bid = id.trimmingCharacters(in: .whitespacesAndNewlines)
     let raw = url.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !bid.isEmpty, !raw.isEmpty, let media = URL(string: raw) else { return false }
+    guard !bid.isEmpty, !raw.isEmpty, let media = URL(string: raw) else {
+      completion(false)
+      return
+    }
     guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bid) else {
-      return false
+      completion(false)
+      return
     }
-    let conf = NSWorkspace.OpenConfiguration()
-    var ok = false
-    let sem = DispatchSemaphore(value: 0)
-    NSWorkspace.shared.open([media], withApplicationAt: appURL, configuration: conf) { _, error in
-      ok = error == nil
-      sem.signal()
+    NSWorkspace.shared.open([media], withApplicationAt: appURL, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+      DispatchQueue.main.async {
+        completion(error == nil)
+      }
     }
-    _ = sem.wait(timeout: .now() + 8)
-    return ok
   }
 
   /// 网卡累计下行字节（跳过 lo0）。缓冲期差分即网速。

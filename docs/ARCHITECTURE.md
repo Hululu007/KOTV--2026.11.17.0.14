@@ -123,7 +123,7 @@ Go Engine（单进程，:9978）
 |------|------|------|
 | **MPV** | Android：原生插件（Surface/Texture）；桌面 / Windows / iOS：`media_kit` + 自带 libmpv（`scripts/fetch-desktop-mpv-libs.sh` 捆绑） | 选项 `mpv.conf` / hwdec；Android 可开 gpu-next；桌面 / iOS 走 `vo=libmpv` Texture；Vulkan / gpu-api 桌面与 Win7 均可配（Win7 硬解用 dxva2，与 Vulkan 渲染无关） |
 | **FVP**（libmdk） | Android + 桌面 | 备选页内引擎，硬/软/自动解码列表由设置下发 |
-| 外部播放器 | 全平台 | 安卓系统选择器；桌面 open / FileProtocolHandler / xdg-open |
+| 外部播放器 | 全平台 | 安卓 Intent 选择器；Windows「打开方式」+ 临时 m3u；macOS/Linux 宿主列本机视频应用后打开 URL；引擎 API 仅无 GUI 兜底 |
 
 续播、单集循环基于媒体态（按 ScopeID 分桶）。
 

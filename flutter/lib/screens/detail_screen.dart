@@ -2452,7 +2452,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         final KotvExternalPlayResult handed;
         try {
           handed = await kotvLaunchExternalPlayer(
-            api: ref.read(apiProvider),
             player: startPlayer,
             url: playUrl,
             headers: rawHeaders,
@@ -3266,7 +3265,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         onPlayerStatus: api.playerStatus,
         onExternalPlayer: (player) async {
           final result = await kotvLaunchExternalPlayer(
-            api: api,
             player: player,
             url: _playUrl,
             headers: _playHeaders,

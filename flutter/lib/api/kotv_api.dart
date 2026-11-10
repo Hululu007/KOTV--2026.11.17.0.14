@@ -559,16 +559,6 @@ class KotvApi {
 
   Future<Map<String, dynamic>> playerStatus() => _get('/api/v1/player');
 
-  Future<Map<String, dynamic>> playerExternal({
-    required String url,
-    required String player,
-  }) =>
-      _post('/api/v1/player', {
-        'action': 'external',
-        'url': url,
-        'player': player,
-      });
-
   Future<Map<String, dynamic>> tools(String action, [Map<String, dynamic>? params]) =>
       _post('/api/v1/tools', {
         'action': action,
