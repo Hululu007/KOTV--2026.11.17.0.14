@@ -80,14 +80,15 @@ class MediaKitPlayback extends KotvPlayback {
     }));
     _subs.add(player.stream.volume.listen((_) => notifyListeners()));
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
-    _subs.add(player.stream.completed.listen((_) => notifyListeners()));
+    _subs.add(player.stream.completed.listen((done) {
+      notifyListeners();
+      unawaited(_onPlayerCompleted(done));
+    }));
     _subs.add(player.stream.playlist.listen((pl) {
       final q = _queued;
       if (q == null) return;
-      // media_kit 默认 keep-open=yes 时列表不自动前进；有排队项时我们会改成 no。
       // 以当前项 URI 识别已接到下一集（勿写死下标 1）。
-      if (pl.index < 0 || pl.index >= pl.medias.length) return;
-      if (pl.medias[pl.index].uri == q.media.uri) _enterQueued(q);
+      if (_playlistUriAt(pl, pl.index) == q.media.uri) _enterQueued(q);
     }));
     _subs.add(player.stream.log.listen((log) {
       if (log.level != 'error') return;
@@ -129,6 +130,8 @@ class MediaKitPlayback extends KotvPlayback {
   /// 已排进播放列表的下一集；播到它时由 playlist 下标切成当前集。
   ({String id, String url, Media media})? _queued;
   final _queuedStartCtrl = StreamController<String>.broadcast();
+  /// EOF 且无排队项时才向外报 completed；有排队项时由 [_skipToQueued] 接下一集。
+  final _completedCtrl = StreamController<bool>.broadcast();
   String _mpvUserAgent = '';
   String _mpvReferer = '';
 
@@ -290,16 +293,28 @@ class MediaKitPlayback extends KotvPlayback {
   Stream<Duration> get bufferedStream => player.stream.buffer;
 
   @override
-  Stream<bool> get completedStream => player.stream.completed;
+  Stream<bool> get completedStream => _completedCtrl.stream;
 
   @override
   Stream<String> get queuedStartStream => _queuedStartCtrl.stream;
 
-  /// 只排请求头与 HLS 强制解析都和本集相同的：UA、Referer、demuxer-lavf-format 是整个播放器共用的属性，
-  /// 其余请求头按媒体写（media_kit 在 mpv 加载这一项时写 http-header-fields）。
-  ///
-  /// media_kit 默认 `keep-open=yes`，EOF 不会前进播放列表，无缝换集接不上。
-  /// 成功排队后改为 `no`，让 mpv 接到已 `append`+prefetch 的下一集。
+  /// media_kit 固定 `keep-open=yes`：EOF 只置 completed，播放列表不前进。
+  /// 有排队项时拦截 completed，改走 [_skipToQueued]；无排队项才向外报片尾。
+  Future<void> _onPlayerCompleted(bool done) async {
+    if (!done) {
+      if (!_completedCtrl.isClosed) _completedCtrl.add(false);
+      return;
+    }
+    final q = _queued;
+    if (q != null) {
+      await _skipToQueued(q);
+      return;
+    }
+    if (!_completedCtrl.isClosed) _completedCtrl.add(true);
+  }
+
+  /// 只排请求头与 HLS 强制解析都和本集相同的：UA、Referer、demuxer-lavf-format
+  /// 是整个播放器共用的属性；其余请求头按媒体写（加载该项时写 http-header-fields）。
   @override
   Future<bool> queueNext({
     required String id,
@@ -320,7 +335,6 @@ class MediaKitPlayback extends KotvPlayback {
     } catch (_) {
       return false;
     }
-    await _setKeepOpen(false);
     _queued = (id: id, url: url, media: media);
     return true;
   }
@@ -328,7 +342,6 @@ class MediaKitPlayback extends KotvPlayback {
   /// 只留正在播的一项（也删掉无缝接上后留在前面的上一集）。
   @override
   Future<void> clearNext() async {
-    final had = _queued != null;
     _queued = null;
     final current = player.state.playlist.index;
     for (var i = player.state.playlist.medias.length - 1; i >= 0; i--) {
@@ -337,31 +350,55 @@ class MediaKitPlayback extends KotvPlayback {
         await player.remove(i);
       } catch (_) {}
     }
-    if (had) await _setKeepOpen(true);
   }
 
   @override
   Future<bool> skipToNext() async {
-    if (_queued == null) return false;
-    try {
-      await player.next();
-      return true;
-    } catch (_) {
-      return false;
-    }
+    final q = _queued;
+    if (q == null) return false;
+    return _skipToQueued(q);
   }
 
-  Future<void> _setKeepOpen(bool keep) async {
-    final platform = player.platform;
-    if (platform == null) return;
-    try {
-      await (platform as dynamic).setProperty('keep-open', keep ? 'yes' : 'no');
-    } catch (_) {}
+  /// 切入已 append 的下一集。
+  ///
+  /// 禁止 [Player.next] / [Player.jump] / [Player.play]：media_kit 在
+  /// `completed==true` 时会先把 `playlist-pos` 置 0，等于重开本集。
+  /// 统一经 [_mpvSet] 写 `playlist-pos` 与 `pause=no`。
+  Future<bool> _skipToQueued(({String id, String url, Media media}) q) async {
+    if (!identical(_queued, q) && _queued?.id != q.id) return false;
+    final pl = player.state.playlist;
+    if (_playlistUriAt(pl, pl.index) == q.media.uri) {
+      _enterQueued(q);
+      return true;
+    }
+    var nextIdx = _playlistIndexOfUri(pl, q.media.uri);
+    if (nextIdx < 0) nextIdx = pl.index + 1;
+    if (nextIdx < 0 || nextIdx >= pl.medias.length) return false;
+    if (!await _mpvSet('playlist-pos', '$nextIdx')) return false;
+    if (!await _mpvSet('pause', 'no')) return false;
+    // playlist 观察回调可能稍后才到；若状态已切到目标则立刻记账。
+    final after = player.state.playlist;
+    if (_playlistUriAt(after, after.index) == q.media.uri) {
+      _enterQueued(q);
+    }
+    return true;
+  }
+
+  String? _playlistUriAt(Playlist pl, int index) {
+    if (index < 0 || index >= pl.medias.length) return null;
+    return pl.medias[index].uri;
+  }
+
+  int _playlistIndexOfUri(Playlist pl, String uri) {
+    for (var i = 0; i < pl.medias.length; i++) {
+      if (pl.medias[i].uri == uri) return i;
+    }
+    return -1;
   }
 
   void _enterQueued(({String id, String url, Media media}) q) {
+    if (_queued == null || _queued!.id != q.id) return;
     _queued = null;
-    unawaited(_setKeepOpen(true));
     _url = q.url;
     _hlsGen++;
     _hlsRetried = false;
@@ -370,6 +407,7 @@ class MediaKitPlayback extends KotvPlayback {
     _openSerial++;
     _clearVideoSize();
     _acceptSize = true;
+    if (!_completedCtrl.isClosed) _completedCtrl.add(false);
     if (!_queuedStartCtrl.isClosed) _queuedStartCtrl.add(q.id);
     notifyListeners();
   }
@@ -737,12 +775,15 @@ class MediaKitPlayback extends KotvPlayback {
     }
   }
 
-  Future<void> _mpvSet(String name, String value) async {
+  Future<bool> _mpvSet(String name, String value) async {
     try {
       final platform = player.platform;
-      if (platform == null) return;
+      if (platform == null) return false;
       await (platform as dynamic).setProperty(name, value);
-    } catch (_) {}
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _mpvCmd(List<String> args) async {
@@ -928,6 +969,7 @@ class MediaKitPlayback extends KotvPlayback {
       s.cancel();
     }
     unawaited(_queuedStartCtrl.close());
+    unawaited(_completedCtrl.close());
     super.dispose();
   }
 }
