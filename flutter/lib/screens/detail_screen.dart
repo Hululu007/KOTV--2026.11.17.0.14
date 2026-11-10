@@ -542,9 +542,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return _mk!;
   }
 
-  /// 释放本页持有的桌面 media_kit Player（包装 + [Player]）。
-  /// 调用方：[_stopHard]（离开页）、[_playAt] 硬切（在 [_stopAllBackends] 之后）、起播失败重试。
-  /// 无缝切集不调用。Android 原生 MPV 不走这里。
+  /// 释放桌面 media_kit 的包装 + [Player]（Android 原生 MPV 不走这里）。
+  /// 硬切 [_playAt]、换引擎、起播失败重试、改直出选项时调用；无缝 skipToNext 不调用。
+  /// 离开页由 [_stopHard] 自行卸 Player，不必再调本方法。
   /// [softStopFirst]：尚未 stop 时先 pause/stop，避免与新引擎抢 AO。
   Future<void> _disposeDesktopMpvOwned({bool softStopFirst = false}) async {
     if (kotvIsAndroid()) return;
@@ -570,7 +570,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await kotvDisposeMpvPlayer(mkPlayer);
   }
 
-  /// 离开页硬停：最多等 [timeout]，避免 Win7 上 unawaited 导致返回后实例仍占着 AO。
+  /// 硬停并限时等待；离开页 / 换片 / 停播控件共用，避免 Win7 上旧实例占 AO。
   Future<void> _stopHardAwait({bool skipFlush = false, Duration timeout = const Duration(seconds: 4)}) async {
     try {
       await _stopHard(skipFlush: skipFlush).timeout(timeout);
@@ -847,7 +847,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         unawaited(_playback.seek(next.isNegative ? Duration.zero : next));
         break;
       case 'stop':
-        unawaited(_stopHard());
+        unawaited(_stopHardAwait());
         break;
     }
   }
@@ -901,13 +901,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   Future<void> _prepareQuit() async {
-    try {
-      await _stopHard();
-    } catch (_) {}
-    // _stopHard 已摘引用；仅异常中断时再兜底，避免重复 dispose。
-    if (_mk != null || _mkPlayer != null) {
-      await _disposeDesktopMpvOwned(softStopFirst: true);
-    }
+    await _stopHardAwait();
+    // _stopHard 中途失败时桌面 Player 可能仍在。
+    await _disposeDesktopMpvOwned(softStopFirst: true);
   }
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
@@ -2563,12 +2559,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             return;
           }
           lastOpenError = e;
-          // 起播失败：清掉本轮半开的桌面 MPV，下一轮 [_playback] 再建。
+          // 起播失败：清掉半开的桌面 MPV；failover 关则同引擎再建，开则下面换引擎。
           if (pb is MediaKitPlayback) {
             await _disposeDesktopMpvOwned(softStopFirst: true);
-          }
-          if (!failover.enabled) {
-            if (pb is MediaKitPlayback) continue;
+            if (!failover.enabled) continue;
+          } else if (!failover.enabled) {
             opened = true;
             break;
           }
@@ -2582,9 +2577,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           try {
             await pb.stop();
           } catch (_) {}
-        }
-        if (pb is MediaKitPlayback) {
-          await _disposeDesktopMpvOwned(softStopFirst: true);
         }
         await _stopInactiveBackends(kotvEmbedBackend(step.playerVal));
         if (!mounted || serial != _playAtSerial) return;
@@ -3530,7 +3522,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       onMini: () => unawaited(_miniDesktop ? _exitMini() : _enterMini()),
       onExpand: (kind) => unawaited(_enterFullscreen(kind)),
       onStop: () async {
-        await _stopHard();
+        await _stopHardAwait();
         if (_miniDesktop) await _exitMini();
         if (mounted) {
           setState(() {
@@ -3762,7 +3754,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               onMini: () => unawaited(_exitMini()),
               onExpand: (kind) => unawaited(_enterFullscreen(kind)),
               onStop: () async {
-                await _stopHard();
+                await _stopHardAwait();
                 if (_miniDesktop) await _exitMini();
                 if (mounted) {
                   setState(() {
