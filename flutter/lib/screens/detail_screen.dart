@@ -144,7 +144,7 @@ class DetailScreen extends ConsumerStatefulWidget {
     return until != null && DateTime.now().isBefore(until);
   }
 
-  /// 换源/切 Tab：尽快放开 PopScope；并 await 硬停，避免卸树后 FVP/HTML 后台出声。
+  /// 换源/切 Tab：放开 PopScope，并 await 硬停（含桌面 MPV dispose），避免卸树后仍占 AO/出声。
   /// 并发调用会挂到同一 Completer，禁止「提前 return 后立刻卸树」。
   static Future<void> prepareLeave() async {
     final inFlight = _DetailScreenState._leaveDone;
@@ -181,7 +181,7 @@ class DetailScreen extends ConsumerStatefulWidget {
       try {
         active._chromeCover.release(active.ref.read(detailChromeCoverProvider.notifier));
       } catch (_) {}
-      // 与 _leavePage 同一套：短超时 flush/软停，硬释放后台，勿 await 最多 4s。
+      // 与 _leavePage 同一套：短超时 flush/软停，硬停最多等 4s（须 await，勿丢后台）。
       try {
         await active
             ._flushWatchProgress(force: true)
@@ -200,7 +200,7 @@ class DetailScreen extends ConsumerStatefulWidget {
           ],
         ).timeout(const Duration(milliseconds: 400));
       } catch (_) {}
-      unawaited(active._stopHard(skipFlush: true));
+      await active._stopHardAwait(skipFlush: true);
       if (active._miniDesktop) {
         active._miniDesktop = false;
         try {
@@ -543,7 +543,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// 释放本页持有的桌面 media_kit Player（包装 + [Player]）。
-  /// [softStopFirst]：切走 MPV 后端时先 pause/stop，避免与新引擎抢 AO。
+  /// 离开页走 [_stopHard]；换集/换源/起播失败重试走这里，避免 Win7 复用卡死实例。
+  /// [softStopFirst]：尚未 stop 时先 pause/stop，避免与新引擎抢 AO。
   Future<void> _disposeDesktopMpvOwned({bool softStopFirst = false}) async {
     if (kotvIsAndroid()) return;
     if (_mk == null && _mkPlayer == null) return;
@@ -566,6 +567,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     } catch (_) {}
     _mk = null;
     await kotvDisposeMpvPlayer(mkPlayer);
+  }
+
+  /// 离开页硬停：最多等 [timeout]，避免 Win7 上 unawaited 导致返回后实例仍占着 AO。
+  Future<void> _stopHardAwait({bool skipFlush = false, Duration timeout = const Duration(seconds: 4)}) async {
+    try {
+      await _stopHard(skipFlush: skipFlush).timeout(timeout);
+    } catch (_) {}
   }
 
   /// 切到其它内置后端时停掉闲置引擎。
@@ -633,8 +641,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 换集/换源：只停声、卸当前文件。播放器实例留着，下一集在同一实例上打开。
-  /// 离开页或换引擎才拆实例。
+  /// 换集/换源：停声并卸当前文件；桌面 MPV 再拆掉 Player（与离开页同语义）。
+  /// 无缝切集不走 [_playAt]，仍复用实例。Android / Exo / FVP 仍只卸文件。
   Future<void> _stopAllBackends() async {
     await kotvStopPlayersForEpisodeSwitch([
       _mk,
@@ -645,6 +653,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _xg,
       _zw,
     ]);
+    await _disposeDesktopMpvOwned();
   }
 
   @override
@@ -687,9 +696,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         await _exitMini();
       } catch (_) {}
     }
-    try {
-      await _stopHard().timeout(const Duration(seconds: 4));
-    } catch (_) {}
+    await _stopHardAwait();
     _stoppedHard = false;
     if (!mounted || _active != this) return;
     await _load();
@@ -996,7 +1003,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (_active == this) _active = null;
     _chromeCover.release(ref.read(detailChromeCoverProvider.notifier));
     try {
-      // 进度/软停短超时：不挡返回；硬释放一律 pop 后后台跑。
+      // 进度/软停短超时不挡返回；先 pop，再 await 硬停（最多 4s），避免旧 Player 残留。
       try {
         await _flushWatchProgress(force: true)
             .timeout(const Duration(milliseconds: 400));
@@ -1017,7 +1024,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         } catch (_) {}
       }
       if (!mounted) {
-        unawaited(_stopHard(skipFlush: true));
+        await _stopHardAwait(skipFlush: true);
         afterPop?.call();
         return;
       }
@@ -1025,13 +1032,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       setState(() {});
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) {
-        unawaited(_stopHard(skipFlush: true));
+        await _stopHardAwait(skipFlush: true);
         afterPop?.call();
         return;
       }
       Navigator.of(context).pop();
       afterPop?.call();
-      unawaited(_stopHard(skipFlush: true));
+      await _stopHardAwait(skipFlush: true);
     } finally {
       if (!done.isCompleted) done.complete();
       if (_leaveDone == done) {
@@ -2554,17 +2561,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             return;
           }
           lastOpenError = e;
-          // 桌面 media_kit 卡死（有时长/缓冲、进度不动）后须拆掉 Player，否则换源/换站仍复用坏实例。
-          final wedgedDesktopMpv = !kotvIsAndroid() && pb is MediaKitPlayback;
-          if (wedgedDesktopMpv) {
+          // 起播失败：桌面 MPV 拆掉再建（[_stopAllBackends] 已在本轮开头拆过；此处清掉半开实例）。
+          if (pb is MediaKitPlayback) {
             await _disposeDesktopMpvOwned(softStopFirst: true);
           }
           if (!failover.enabled) {
-            if (wedgedDesktopMpv) {
-              // 不切引擎：同 MPV 新建 Player 再试。
-              continue;
-            }
-            // 关闭自动切换：不换引擎、不判失败，继续当前播放器。
+            // 关闭自动切换：桌面 MPV 重建后再试；其它后端保持原行为。
+            if (pb is MediaKitPlayback) continue;
             opened = true;
             break;
           }
@@ -2579,7 +2582,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             await pb.stop();
           } catch (_) {}
         }
-        if (!kotvIsAndroid() && identical(pb, _mk)) {
+        if (pb is MediaKitPlayback) {
           await _disposeDesktopMpvOwned(softStopFirst: true);
         }
         await _stopInactiveBackends(kotvEmbedBackend(step.playerVal));
