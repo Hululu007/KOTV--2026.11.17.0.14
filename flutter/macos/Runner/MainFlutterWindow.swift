@@ -37,7 +37,7 @@ class MainFlutterWindow: NSWindow {
       case "getMemoryInfo":
         result(Self.memoryInfo())
       case "hasExternalVideoApp":
-        result(!Self.listExternalVideoApps().isEmpty)
+        result(Self.hasExternalVideoApp())
       case "listExternalVideoApps":
         result(Self.listExternalVideoApps())
       case "openExternalVideoApp":
@@ -77,8 +77,8 @@ class MainFlutterWindow: NSWindow {
     "com.apple.WebKit.Networking",
   ]
 
-  /// 本机可处理常见视频/播放列表类型的应用（排除浏览器与自身），带 64px PNG 图标。
-  private static func listExternalVideoApps() -> [[String: Any]] {
+  /// 候选应用 URL（按视频/播放列表类型合并去重前的原始列表）。
+  private static func candidateExternalVideoAppURLs() -> [URL] {
     var appURLs: [URL] = []
     if #available(macOS 12.0, *) {
       let workspace = NSWorkspace.shared
@@ -101,20 +101,41 @@ class MainFlutterWindow: NSWindow {
         }
       }
     }
+    return appURLs
+  }
 
+  /// 遍历本机视频应用；[visit] 返回 false 时提前结束（供 has/list 共用）。
+  private static func forEachExternalVideoApp(_ visit: (_ appURL: URL, _ id: String, _ name: String) -> Bool) {
     let selfId = Bundle.main.bundleIdentifier ?? ""
     var seen = Set<String>()
-    var out: [[String: Any]] = []
-    for appURL in appURLs {
+    for appURL in candidateExternalVideoAppURLs() {
       guard let bid = Bundle(url: appURL)?.bundleIdentifier, !bid.isEmpty else { continue }
       if bid == selfId || browserBundleIds.contains(bid) { continue }
       if !seen.insert(bid).inserted { continue }
       let name = FileManager.default.displayName(atPath: appURL.path)
+      if !visit(appURL, bid, name) { return }
+    }
+  }
+
+  private static func hasExternalVideoApp() -> Bool {
+    var found = false
+    forEachExternalVideoApp { _, _, _ in
+      found = true
+      return false
+    }
+    return found
+  }
+
+  /// 本机视频应用列表（排除浏览器与自身），带 64px PNG 图标。
+  private static func listExternalVideoApps() -> [[String: Any]] {
+    var out: [[String: Any]] = []
+    forEachExternalVideoApp { appURL, bid, name in
       var row: [String: Any] = ["id": bid, "name": name]
       if let png = pngIcon(forAppAt: appURL, side: 64) {
         row["icon"] = FlutterStandardTypedData(bytes: png)
       }
       out.append(row)
+      return true
     }
     out.sort {
       let a = ($0["name"] as? String) ?? ""

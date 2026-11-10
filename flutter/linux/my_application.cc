@@ -6,6 +6,7 @@
 #endif
 
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <gio/gdesktopappinfo.h>
 #include <gio/gio.h>
 #include <gtk/gtk.h>
 #include <stdio.h>
@@ -59,35 +60,76 @@ static FlValue* kotv_app_icon_png(GAppInfo* app) {
   return bytes;
 }
 
-static FlValue* kotv_list_external_video_apps() {
-  FlValue* list = fl_value_new_list();
+static const char* const kKotvVideoMimeTypes[] = {
+    "video/mp4",
+    "video/x-matroska",
+    "video/webm",
+    "video/mpeg",
+    "application/vnd.apple.mpegurl",
+    "audio/x-mpegurl",
+    "audio/mpegurl",
+};
+
+// visit 返回 FALSE 时停止；with_icons 为假时不做 PNG（has 探测用）。
+static gboolean kotv_for_each_external_video_app(
+    gboolean with_icons,
+    gboolean (*visit)(GAppInfo* app, const gchar* id, const gchar* name,
+                      FlValue* icon_or_null, gpointer user_data),
+    gpointer user_data) {
   GHashTable* seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, nullptr);
-  static const char* kTypes[] = {
-      "video/mp4", "video/x-matroska", "video/webm", "video/mpeg",
-      "application/vnd.apple.mpegurl", "audio/x-mpegurl", "audio/mpegurl",
-  };
-  for (size_t t = 0; t < G_N_ELEMENTS(kTypes); t++) {
-    GList* apps = g_app_info_get_all_for_type(kTypes[t]);
-    for (GList* it = apps; it != nullptr; it = it->next) {
+  gboolean keep = TRUE;
+  for (size_t t = 0; keep && t < G_N_ELEMENTS(kKotvVideoMimeTypes); t++) {
+    GList* apps = g_app_info_get_all_for_type(kKotvVideoMimeTypes[t]);
+    for (GList* it = apps; keep && it != nullptr; it = it->next) {
       GAppInfo* app = G_APP_INFO(it->data);
       const gchar* id = g_app_info_get_id(app);
       if (id == nullptr || kotv_is_browser_app_id(id)) continue;
       if (g_hash_table_contains(seen, id)) continue;
       g_hash_table_add(seen, g_strdup(id));
       const gchar* name = g_app_info_get_display_name(app);
-      FlValue* row = fl_value_new_map();
-      fl_value_set_string_take(row, "id", fl_value_new_string(id));
-      fl_value_set_string_take(row, "name",
-                               fl_value_new_string(name != nullptr ? name : id));
-      FlValue* icon = kotv_app_icon_png(app);
-      if (icon != nullptr) {
-        fl_value_set_string_take(row, "icon", icon);
+      FlValue* icon = with_icons ? kotv_app_icon_png(app) : nullptr;
+      keep = visit(app, id, name != nullptr ? name : id, icon, user_data);
+      if (!keep && icon != nullptr) {
+        fl_value_unref(icon);
       }
-      fl_value_append_take(list, row);
     }
     g_list_free_full(apps, g_object_unref);
   }
   g_hash_table_destroy(seen);
+  return keep;
+}
+
+static gboolean kotv_has_visit(GAppInfo* /*app*/, const gchar* /*id*/,
+                               const gchar* /*name*/, FlValue* /*icon*/,
+                               gpointer user_data) {
+  gboolean* found = static_cast<gboolean*>(user_data);
+  *found = TRUE;
+  return FALSE;
+}
+
+static gboolean kotv_has_external_video_app() {
+  gboolean found = FALSE;
+  kotv_for_each_external_video_app(FALSE, kotv_has_visit, &found);
+  return found;
+}
+
+static gboolean kotv_list_visit(GAppInfo* /*app*/, const gchar* id,
+                                const gchar* name, FlValue* icon,
+                                gpointer user_data) {
+  FlValue* list = static_cast<FlValue*>(user_data);
+  FlValue* row = fl_value_new_map();
+  fl_value_set_string_take(row, "id", fl_value_new_string(id));
+  fl_value_set_string_take(row, "name", fl_value_new_string(name));
+  if (icon != nullptr) {
+    fl_value_set_string_take(row, "icon", icon);
+  }
+  fl_value_append_take(list, row);
+  return TRUE;
+}
+
+static FlValue* kotv_list_external_video_apps() {
+  FlValue* list = fl_value_new_list();
+  kotv_for_each_external_video_app(TRUE, kotv_list_visit, list);
   return list;
 }
 
@@ -96,19 +138,9 @@ static gboolean kotv_open_external_video_app(const gchar* id, const gchar* url) 
   if (id == nullptr || url == nullptr || id[0] == '\0' || url[0] == '\0') {
     return FALSE;
   }
-  GAppInfo* app = nullptr;
-  GList* all = g_app_info_get_all();
-  for (GList* it = all; it != nullptr; it = it->next) {
-    GAppInfo* cand = G_APP_INFO(it->data);
-    const gchar* cand_id = g_app_info_get_id(cand);
-    if (cand_id != nullptr && g_strcmp0(cand_id, id) == 0) {
-      app = G_APP_INFO(g_object_ref(cand));
-      break;
-    }
-  }
-  g_list_free_full(all, g_object_unref);
-  if (app == nullptr) return FALSE;
-
+  GDesktopAppInfo* desktop = g_desktop_app_info_new(id);
+  if (desktop == nullptr) return FALSE;
+  GAppInfo* app = G_APP_INFO(desktop);
   GList* uris = nullptr;
   uris = g_list_append(uris, g_strdup(url));
   GError* err = nullptr;
@@ -117,7 +149,7 @@ static gboolean kotv_open_external_video_app(const gchar* id, const gchar* url) 
     g_error_free(err);
   }
   g_list_free_full(uris, g_free);
-  g_object_unref(app);
+  g_object_unref(desktop);
   return ok;
 }
 
@@ -227,10 +259,8 @@ static void kotv_host_method_call(FlMethodChannel* /*channel*/,
                              fl_value_new_int(kotv_memory_avail_bytes()));
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(map));
   } else if (strcmp(method, "hasExternalVideoApp") == 0) {
-    g_autoptr(FlValue) apps = kotv_list_external_video_apps();
-    const gboolean ok = fl_value_get_length(apps) > 0;
-    response = FL_METHOD_RESPONSE(
-        fl_method_success_response_new(fl_value_new_bool(ok)));
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(
+        fl_value_new_bool(kotv_has_external_video_app())));
   } else if (strcmp(method, "listExternalVideoApps") == 0) {
     response = FL_METHOD_RESPONSE(
         fl_method_success_response_new(kotv_list_external_video_apps()));

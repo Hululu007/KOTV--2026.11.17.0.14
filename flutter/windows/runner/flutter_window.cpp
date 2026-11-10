@@ -69,7 +69,7 @@ void FlutterWindow::RegisterHostChannel() {
           }
           result->Success(flutter::EncodableValue(mem));
         } else if (call.method_name() == "hasExternalVideoApp") {
-          result->Success(flutter::EncodableValue(!KotvListExternalVideoApps().empty()));
+          result->Success(flutter::EncodableValue(KotvHasExternalVideoApp()));
         } else if (call.method_name() == "listExternalVideoApps") {
           result->Success(flutter::EncodableValue(KotvListExternalVideoApps()));
         } else if (call.method_name() == "openExternalVideoApp") {

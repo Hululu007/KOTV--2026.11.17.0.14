@@ -48,7 +48,6 @@ bool IsBrowserExecutable(const std::wstring& path) {
   for (const wchar_t* name : kBrowsers) {
     if (EndsWithInsensitive(lower, name)) return true;
   }
-  // Chrome 等常以 Application\chrome.exe 出现；再按路径片段排除。
   if (lower.find(L"\\google\\chrome\\") != std::wstring::npos) return true;
   if (lower.find(L"\\microsoft\\edge\\") != std::wstring::npos) return true;
   if (lower.find(L"\\mozilla firefox\\") != std::wstring::npos) return true;
@@ -62,57 +61,75 @@ bool IsSelfExecutable(const std::wstring& path) {
   return _wcsicmp(path.c_str(), self) == 0;
 }
 
-void CollectHandlersForExt(const wchar_t* ext, std::set<std::wstring>* seen,
-                           flutter::EncodableList* out) {
-  IEnumAssocHandlers* enumerator = nullptr;
-  if (FAILED(::SHAssocEnumHandlers(ext, ASSOC_FILTER_NONE, &enumerator)) ||
-      enumerator == nullptr) {
-    return;
-  }
-  IAssocHandler* handler = nullptr;
-  while (enumerator->Next(1, &handler, nullptr) == S_OK && handler != nullptr) {
-    LPWSTR name_path = nullptr;
-    LPWSTR ui_name = nullptr;
-    if (SUCCEEDED(handler->GetName(&name_path)) && name_path != nullptr) {
-      std::wstring exe(name_path);
-      ::CoTaskMemFree(name_path);
-      if (EndsWithInsensitive(exe, L".exe") && !IsBrowserExecutable(exe) &&
-          !IsSelfExecutable(exe) && seen->insert(ToLower(exe)).second) {
-        std::wstring label;
-        if (SUCCEEDED(handler->GetUIName(&ui_name)) && ui_name != nullptr) {
-          label = ui_name;
-          ::CoTaskMemFree(ui_name);
-          ui_name = nullptr;
-        }
-        if (label.empty()) {
-          const size_t slash = exe.find_last_of(L"\\/");
-          label = slash == std::wstring::npos ? exe : exe.substr(slash + 1);
-        }
-        flutter::EncodableMap row;
-        row[flutter::EncodableValue("id")] =
-            flutter::EncodableValue(Utf8FromUtf16(exe.c_str()));
-        row[flutter::EncodableValue("name")] =
-            flutter::EncodableValue(Utf8FromUtf16(label.c_str()));
-        out->push_back(flutter::EncodableValue(row));
-      }
-    }
-    if (ui_name != nullptr) ::CoTaskMemFree(ui_name);
-    handler->Release();
-    handler = nullptr;
-  }
-  enumerator->Release();
+bool IsVideoHandlerExe(const std::wstring& exe) {
+  return EndsWithInsensitive(exe, L".exe") && !IsBrowserExecutable(exe) &&
+         !IsSelfExecutable(exe);
 }
 
-}  // namespace
-
-flutter::EncodableList KotvListExternalVideoApps() {
-  flutter::EncodableList out;
+// visit(exe, label) 返回 false 时停止枚举。
+template <typename Visit>
+void ForEachVideoHandler(Visit&& visit) {
   std::set<std::wstring> seen;
   static const wchar_t* kExts[] = {L".mp4",  L".mkv",  L".avi", L".mov",
                                    L".wmv",  L".ts",   L".m3u8", L".m3u"};
   for (const wchar_t* ext : kExts) {
-    CollectHandlersForExt(ext, &seen, &out);
+    IEnumAssocHandlers* enumerator = nullptr;
+    if (FAILED(::SHAssocEnumHandlers(ext, ASSOC_FILTER_NONE, &enumerator)) ||
+        enumerator == nullptr) {
+      continue;
+    }
+    IAssocHandler* handler = nullptr;
+    bool stop = false;
+    while (!stop && enumerator->Next(1, &handler, nullptr) == S_OK &&
+           handler != nullptr) {
+      LPWSTR name_path = nullptr;
+      if (SUCCEEDED(handler->GetName(&name_path)) && name_path != nullptr) {
+        std::wstring exe(name_path);
+        ::CoTaskMemFree(name_path);
+        if (IsVideoHandlerExe(exe) && seen.insert(ToLower(exe)).second) {
+          std::wstring label;
+          LPWSTR ui_name = nullptr;
+          if (SUCCEEDED(handler->GetUIName(&ui_name)) && ui_name != nullptr) {
+            label = ui_name;
+            ::CoTaskMemFree(ui_name);
+          }
+          if (label.empty()) {
+            const size_t slash = exe.find_last_of(L"\\/");
+            label = slash == std::wstring::npos ? exe : exe.substr(slash + 1);
+          }
+          if (!visit(exe, label)) stop = true;
+        }
+      }
+      handler->Release();
+      handler = nullptr;
+    }
+    enumerator->Release();
+    if (stop) return;
   }
+}
+
+}  // namespace
+
+bool KotvHasExternalVideoApp() {
+  bool found = false;
+  ForEachVideoHandler([&](const std::wstring&, const std::wstring&) {
+    found = true;
+    return false;
+  });
+  return found;
+}
+
+flutter::EncodableList KotvListExternalVideoApps() {
+  flutter::EncodableList out;
+  ForEachVideoHandler([&](const std::wstring& exe, const std::wstring& label) {
+    flutter::EncodableMap row;
+    row[flutter::EncodableValue("id")] =
+        flutter::EncodableValue(Utf8FromUtf16(exe.c_str()));
+    row[flutter::EncodableValue("name")] =
+        flutter::EncodableValue(Utf8FromUtf16(label.c_str()));
+    out.push_back(flutter::EncodableValue(row));
+    return true;
+  });
   std::sort(out.begin(), out.end(),
             [](const flutter::EncodableValue& a, const flutter::EncodableValue& b) {
               const auto* ma = std::get_if<flutter::EncodableMap>(&a);
@@ -134,7 +151,6 @@ bool KotvOpenExternalVideoApp(const std::string& exe_utf8,
   const std::wstring exe = Utf16FromUtf8(exe_utf8);
   const std::wstring url = Utf16FromUtf8(url_utf8);
   if (exe.empty() || url.empty()) return false;
-  // 参数加引号，避免地址里的 &/? 被命令行拆开。
   const std::wstring params = L"\"" + url + L"\"";
   const HINSTANCE hi = ::ShellExecuteW(nullptr, L"open", exe.c_str(),
                                        params.c_str(), nullptr, SW_SHOWNORMAL);
