@@ -59,12 +59,33 @@ internal object KotvMpvHls {
 
   /**
    * 短 EOF 是否值得强制 lavf HLS 再开（规则见 Dart `kotvAllowHlsShortEofRetry`）。
-   * 调用方须已排除 forceHls / 已再开 / 直播。
+   * 调用方须已排除 forceHls / 已向 HLS 再开 / 直播。
    */
   fun allowShortEofRetry(url: String, format: String?, durationSec: Double, positionSec: Double): Boolean {
     if (!networkPlayUrl(url)) return false
     if (durationSec > 30.0 || positionSec > 30.0) return false
     if (urlLooksLikeHls(url)) return true
     return format.isNullOrBlank()
+  }
+
+  /** 已强制却几乎没播就 EOF：撤强制（规则见 Dart `kotvAllowHlsForceUndoOnShortEof`）。 */
+  fun allowForceUndoOnShortEof(
+    forceHls: Boolean,
+    alreadyUndone: Boolean,
+    live: Boolean,
+    url: String,
+    durationSec: Double,
+    positionSec: Double,
+  ): Boolean {
+    if (!forceHls || alreadyUndone || live) return false
+    if (!networkPlayUrl(url)) return false
+    if (positionSec > 5.0 || durationSec > 30.0) return false
+    return true
+  }
+
+  /** 已强制且加载失败：撤强制（规则见 Dart `kotvAllowHlsForceUndoOnError`）。 */
+  fun allowForceUndoOnError(forceHls: Boolean, alreadyUndone: Boolean, live: Boolean, url: String): Boolean {
+    if (!forceHls || alreadyUndone || live) return false
+    return networkPlayUrl(url)
   }
 }

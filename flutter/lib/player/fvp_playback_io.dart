@@ -66,8 +66,9 @@ class FvpPlayback extends KotvPlayback {
   Map<String, dynamic>? _lastDrm;
   bool _lastLive = false;
   String? _lastFormat;
-  /// 未预判 HLS 时，initialize 失败再以 avformat.input=hls 重开一次。
-  bool _fvpHlsRetryOnce = false;
+  /// initialize 失败：未强制时试 HLS；已强制时撤强制。各只一次。
+  bool _fvpHlsTowardOnce = false;
+  bool _fvpHlsUndoOnce = false;
   String _videoScale = 'default';
   /// 仅尺寸/比例/错误变化时递增，供 buildView 重建（勿绑 position/buffering）。
   final ValueNotifier<int> _viewGen = ValueNotifier<int>(0);
@@ -312,11 +313,13 @@ class FvpPlayback extends KotvPlayback {
     _lastDrm = drm == null ? null : Map<String, dynamic>.from(drm);
     _lastLive = live;
     _lastFormat = format;
-    final asHlsRetry = _fvpHlsRetryOnce;
-    final wantHls = asHlsRetry || kotvIsHls(url, format);
+    final asHlsToward = _fvpHlsTowardOnce;
+    final asHlsUndo = _fvpHlsUndoOnce;
+    // 撤强制优先于 URL/format 预判，避免误强制后无法回退。
+    final wantHls = asHlsUndo ? false : (asHlsToward || kotvIsHls(url, format));
     _hookFvpDecoderLog();
     _fvpLastVideoDecoder = null;
-    // FVP 无 lavf 失败再开：预判 HLS 时写 avformat.input=hls；否则靠大 probesize 内容探测。
+    // 预判/再开写 avformat.input=hls；否则靠大 probesize 内容探测。
     kotvEnsureFvpRegistered(
       decodeMode: _decodeMode,
       clearKeyHex: clearKeyHex,
@@ -437,9 +440,9 @@ class FvpPlayback extends KotvPlayback {
       await c.initialize();
       if (c.value.hasError) {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
-        // 仅 lavf 打开/未识别 m3u8 类失败时再以 hls input 重开（同 media_kit / 原生 MPV）。
-        if (!wantHls && !asHlsRetry && kotvHlsOpenFailedHint(_lastError)) {
-          _fvpHlsRetryOnce = true;
+        // 未强制：打开失败文案像未识别 m3u8 → 试 HLS。
+        if (!wantHls && !asHlsToward && !asHlsUndo && kotvHlsOpenFailedHint(_lastError)) {
+          _fvpHlsTowardOnce = true;
           try {
             await open(
               url,
@@ -452,7 +455,25 @@ class FvpPlayback extends KotvPlayback {
             );
             return;
           } finally {
-            _fvpHlsRetryOnce = false;
+            _fvpHlsTowardOnce = false;
+          }
+        }
+        // 已强制 HLS 仍 initialize 失败 → 撤强制再开一次。
+        if (wantHls && !asHlsUndo) {
+          _fvpHlsUndoOnce = true;
+          try {
+            await open(
+              url,
+              headers: headers,
+              drm: drm,
+              live: live,
+              format: format,
+              startAt: startAt,
+              waitReady: waitReady,
+            );
+            return;
+          } finally {
+            _fvpHlsUndoOnce = false;
           }
         }
         throw StateError(_lastError!);

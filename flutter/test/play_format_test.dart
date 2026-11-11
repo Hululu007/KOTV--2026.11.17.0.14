@@ -93,6 +93,60 @@ void main() {
     expect(allow(positionSec: 31), isFalse);
   });
 
+  test('forced hls undo gate', () {
+    expect(
+      kotvAllowHlsForceUndoOnShortEof(
+        hlsForced: true,
+        alreadyUndone: false,
+        live: false,
+        url: 'https://cdn/play.php',
+        durationSec: 2,
+        positionSec: 1,
+      ),
+      isTrue,
+    );
+    expect(
+      kotvAllowHlsForceUndoOnShortEof(
+        hlsForced: true,
+        alreadyUndone: false,
+        live: false,
+        url: 'https://cdn/a.m3u8',
+        durationSec: 20,
+        positionSec: 19,
+      ),
+      isFalse, // 已正常播过，不撤
+    );
+    expect(
+      kotvAllowHlsForceUndoOnShortEof(
+        hlsForced: false,
+        alreadyUndone: false,
+        live: false,
+        url: 'https://cdn/play.php',
+        durationSec: 2,
+        positionSec: 1,
+      ),
+      isFalse,
+    );
+    expect(
+      kotvAllowHlsForceUndoOnError(
+        hlsForced: true,
+        alreadyUndone: false,
+        live: false,
+        url: 'https://cdn/a.m3u8',
+      ),
+      isTrue,
+    );
+    expect(
+      kotvAllowHlsForceUndoOnError(
+        hlsForced: true,
+        alreadyUndone: true,
+        live: false,
+        url: 'https://cdn/a.m3u8',
+      ),
+      isFalse,
+    );
+  });
+
   test('image media codecs are not real video tracks', () {
     expect(kotvIsImageMediaCodec('png'), isTrue);
     expect(kotvIsImageMediaCodec('mjpeg'), isTrue);

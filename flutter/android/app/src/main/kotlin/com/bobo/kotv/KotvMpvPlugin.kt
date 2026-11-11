@@ -98,8 +98,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** 首选字幕语言（BCP-47，逗号分隔）→ mpv slang。 */
   private var preferredTextLangs = ""
   private var livePlayback = false
-  /** 这次没指定 hls 时，IO/格式失败后只再指定一次。 */
-  private var ioHlsRetried = false
+  /** 本集是否已「未强制 → 强制 HLS」再开过。 */
+  private var ioHlsTowardRetried = false
+  /** 本集是否已「强制 HLS → 清强制」再开过（误强制回退）。 */
+  private var ioHlsUndoRetried = false
   private var forceLavfHls = false
   /** 错误恢复后 seek 到该秒；&lt;0 表示不恢复。 */
   private var retrySeekSec = -1.0
@@ -354,7 +356,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             height = 0
             maxPlayedSec = 0.0
             loadWallMs = SystemClock.elapsedRealtime()
-            ioHlsRetried = false
+            ioHlsTowardRetried = false
+            ioHlsUndoRetried = false
             forceLavfHls = forceHls
             loadedFormat = openFormat
             // 作废上一集还没落地的失败重试。
@@ -1818,7 +1821,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     loadedHeaders = next.headers
     loadedFormat = next.format
     forceLavfHls = next.forceHls
-    ioHlsRetried = false
+    ioHlsTowardRetried = false
+    ioHlsUndoRetried = false
     eof = false
     maxPlayedSec = 0.0
     loadWallMs = SystemClock.elapsedRealtime()
@@ -2018,12 +2022,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /**
    * 播到片尾，每次加载只报一次 completed。
    * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；有排队项时在这里 playlist-next 并解除 pause。
-   * 未 forceHls 且短 EOF：按 [KotvMpvHls.allowShortEofRetry] 强制 lavf hls 再开一次。
+   * 短 EOF：未强制则试 HLS；已强制且几乎没播则撤强制。
    * 仅图片轨且未出画、几乎没播过：seek 末帧的假 EOF，报 error 而不是 completed。
    */
   private fun markEnded() {
     if (eof) return
-    if (tryReloadAsHls(reason = "short-eof", seekSec = -1.0, shortEof = true)) return
+    if (tryAdjustLavfHls(reason = "short-eof", seekSec = -1.0, shortEof = true)) return
     if (isUnplayableImageEof()) {
       eof = true
       playing = false
@@ -2105,31 +2109,58 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 未 forceHls 时强制 lavf hls 再开一次。短 EOF 与 LOADING_FAILED 共用。
-   * [shortEof]：规则见 [KotvMpvHls.allowShortEofRetry] / Dart `kotvAllowHlsShortEofRetry`。
-   * 错误路径还可凭 [errorText] 命中 [KotvMpvHls.openFailedHint]。
+   * lavf HLS 双向调整：未强制 → 强制；已强制 → 清强制。
+   * 短 EOF / LOADING_FAILED 共用。规则见 [KotvMpvHls] / Dart `play_format.dart`。
    */
-  private fun tryReloadAsHls(
+  private fun tryAdjustLavfHls(
     reason: String,
     seekSec: Double,
     shortEof: Boolean,
     error: Int = 0,
     errorText: String? = null,
   ): Boolean {
-    if (forceLavfHls || ioHlsRetried || livePlayback || repeatOne) return false
+    if (livePlayback || repeatOne) return false
     val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
     if (url.isBlank()) return false
-    if (shortEof) {
-      if (!KotvMpvHls.allowShortEofRetry(url, loadedFormat, durationSec, positionSec)) return false
-    } else {
-      if (error != MPVLib.MpvError.MPV_ERROR_LOADING_FAILED) return false
-      if (!KotvMpvHls.networkPlayUrl(url)) return false
-      val urlHls = KotvMpvHls.urlLooksLikeHls(url)
-      if (!urlHls && !KotvMpvHls.openFailedHint(errorText)) return false
+
+    val forceNext: Boolean
+    when {
+      // 未强制 → 试 HLS
+      !forceLavfHls && !ioHlsTowardRetried -> {
+        if (shortEof) {
+          if (!KotvMpvHls.allowShortEofRetry(url, loadedFormat, durationSec, positionSec)) return false
+        } else {
+          if (error != MPVLib.MpvError.MPV_ERROR_LOADING_FAILED) return false
+          if (!KotvMpvHls.networkPlayUrl(url)) return false
+          val urlHls = KotvMpvHls.urlLooksLikeHls(url)
+          if (!urlHls && !KotvMpvHls.openFailedHint(errorText)) return false
+        }
+        ioHlsTowardRetried = true
+        forceNext = true
+      }
+      // 已强制 → 撤强制（误强制回退）
+      forceLavfHls && !ioHlsUndoRetried -> {
+        if (shortEof) {
+          if (!KotvMpvHls.allowForceUndoOnShortEof(
+              forceLavfHls, ioHlsUndoRetried, livePlayback, url, durationSec, positionSec,
+            )
+          ) {
+            return false
+          }
+        } else {
+          if (error != MPVLib.MpvError.MPV_ERROR_LOADING_FAILED) return false
+          if (!KotvMpvHls.allowForceUndoOnError(forceLavfHls, ioHlsUndoRetried, livePlayback, url)) {
+            return false
+          }
+        }
+        ioHlsUndoRetried = true
+        forceNext = false
+      }
+      else -> return false
     }
-    ioHlsRetried = true
-    forceLavfHls = true
-    Log.w(TAG, "hls reload reason=$reason err=$error text=$errorText url=$url")
+
+    forceLavfHls = forceNext
+    Log.w(TAG, "hls adjust reason=$reason force=$forceNext err=$error text=$errorText url=$url")
     val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
     val gen = loadGen.get()
     buffering = true
@@ -2141,7 +2172,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       try {
         startLoad(url, headers)
       } catch (t: Throwable) {
-        emit(mapOf("event" to "error", "message" to (t.message ?: "HLS reload failed")))
+        emit(mapOf("event" to "error", "message" to (t.message ?: "HLS adjust failed")))
       }
     }
     return true
@@ -2155,7 +2186,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         markEnded()
       }
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
-        if (tryReloadAsHls(
+        if (tryAdjustLavfHls(
             reason = "loading-failed",
             seekSec = positionSec.coerceAtLeast(0.0),
             shortEof = false,

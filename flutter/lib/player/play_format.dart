@@ -84,7 +84,7 @@ bool kotvMpvNetworkUrl(String url) {
 
 /// 短 EOF 是否值得强制 lavf HLS 再开一次（桌面 media_kit / 安卓原生 MPV 共用规则）。
 ///
-/// 已强制 HLS、已再开过、直播、非网络、时长或进度超过 30s → 否。
+/// 已强制 HLS、已向 HLS 再开过、直播、非网络、时长或进度超过 30s → 否。
 /// 允许：URL 强信号，或开播时 format 为空（伪装源依赖 lavf，易误判成短片）。
 /// 站源已声明非空且非 HLS 的 format → 否（避免短 progressive 误重试）。
 bool kotvAllowHlsShortEofRetry({
@@ -101,4 +101,33 @@ bool kotvAllowHlsShortEofRetry({
   if (durationSec > 30 || positionSec > 30) return false;
   if (kotvUrlIsHls(url)) return true;
   return (format ?? '').trim().isEmpty;
+}
+
+/// 已强制 HLS 却几乎没播就 EOF：撤掉强制、按 progressive 再开一次（误强制回退）。
+///
+/// 进度超过 5s 或片长超过 30s → 否（更像正常短片播完，不撤）。
+/// 每个方向各只试一次；与 [kotvAllowHlsShortEofRetry] 配对。
+bool kotvAllowHlsForceUndoOnShortEof({
+  required bool hlsForced,
+  required bool alreadyUndone,
+  required bool live,
+  required String url,
+  required double durationSec,
+  required double positionSec,
+}) {
+  if (!hlsForced || alreadyUndone || live) return false;
+  if (!kotvMpvNetworkUrl(url)) return false;
+  if (positionSec > 5 || durationSec > 30) return false;
+  return true;
+}
+
+/// 已强制 HLS 且打开/加载失败：撤掉强制再开一次。
+bool kotvAllowHlsForceUndoOnError({
+  required bool hlsForced,
+  required bool alreadyUndone,
+  required bool live,
+  required String url,
+}) {
+  if (!hlsForced || alreadyUndone || live) return false;
+  return kotvMpvNetworkUrl(url);
 }
