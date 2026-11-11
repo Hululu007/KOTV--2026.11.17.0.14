@@ -586,7 +586,6 @@ class MediaKitPlayback extends KotvPlayback {
 
   Future<void> _stopUnload({required String reason}) async {
     _url = '';
-    _openFormat = null;
     _queued = null;
     _completedGate = null;
     _clearVideoSize();
