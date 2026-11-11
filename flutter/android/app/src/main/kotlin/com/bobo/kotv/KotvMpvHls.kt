@@ -4,14 +4,14 @@ import android.net.Uri
 
 /**
  * 安卓原生 MPV：HLS 强信号地址 / 网络址 / lavf 打开失败提示 / 图片轨编码名。
+ * 引擎 play 回包会正文嗅探写准 format；本处 URL 规则只作强信号快路径与失败再开。
  * 与 Dart `mpv_hls_timeline.dart`、Go `model.URLIsHls` 同一套语义；原生层不能调 Dart，故留副本。
- * 供短 EOF、LOADING_FAILED 时决定是否 demuxer-lavf-format=hls 再开，以及假片尾抑制。
  */
 internal object KotvMpvHls {
 
   /**
    * 地址是否像 HLS（仅强信号）。引擎 `/proxy/play?id=` 无 m3u8 字样时不算。
-   * 扩展名与路径段只看 path；任意 .php 不算，伪装节目单靠打开失败再开。
+   * 扩展名与路径段只看 path；任意 .php 不算，伪装节目单靠引擎嗅探或打开失败再开。
    */
   fun urlLooksLikeHls(url: String): Boolean {
     val raw = url.trim()

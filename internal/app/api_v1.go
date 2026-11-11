@@ -650,7 +650,9 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		mediaURL = playURL
 	} else if !thunder.IsLocalStream(playURL) {
 		beforeProxy = playURL
-		playURL, directURL, headers = a.PreparePlayback(playURL, headers)
+		var isHls bool
+		playFormat, isHls = resolvePlayFormat(beforeProxy, playFormat, headers)
+		playURL, directURL, headers = a.PreparePlaybackHLS(playURL, headers, isHls)
 		mediaURL = playURL
 	}
 	isMagnetPlay := magnet || thunder.IsLocalStream(playURL)
@@ -1805,6 +1807,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 	}
 	var directURL string
 	beforeProxy := playURL
+	playFormat, _ := resolvePlayFormat(beforeProxy, ch.Format, headers)
 	playURL, directURL, headers = a.PrepareLivePlayback(playURL, headers)
 	if runtime.GOOS != "android" {
 		prepared, derr := model.PrepareForDesktop(ch.Drm)
@@ -1829,7 +1832,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		"line":     ch.URLIndex,
 		"lines":    len(ch.URLs),
 		"lineName": ch.LineLabel(),
-		"format":   proxyHlsFormat(beforeProxy, playURL, ch.Format),
+		"format":   proxyHlsFormat(beforeProxy, playURL, playFormat),
 		"drm":      ch.Drm,
 		"subs":     subsPublicDTO(liveSubs),
 		"error":    errString(err),
@@ -1908,6 +1911,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 		return nil, err
 	}
 	beforeProxy := url
+	playFormat, _ := resolvePlayFormat(beforeProxy, ch.Format, headers)
 	playURL, directURL, headers := a.PrepareLivePlayback(url, headers)
 	var playDrm *model.Drm
 	if runtime.GOOS != "android" {
@@ -1928,7 +1932,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 		"name":    list[prog].Title,
 		"group":   g.Name,
 		"channel": ch.Name,
-		"format":  proxyHlsFormat(beforeProxy, playURL, ch.Format),
+		"format":  proxyHlsFormat(beforeProxy, playURL, playFormat),
 		"drm":     playDrm,
 	}, nil
 }

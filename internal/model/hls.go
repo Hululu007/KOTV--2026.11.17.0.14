@@ -6,7 +6,8 @@ import (
 	"strings"
 )
 
-// URLIsHls 地址是否像 HLS（仅强信号，供预强制 lavf-hls / 透传补 mime）。
+// URLIsHls 地址是否像 HLS（仅强信号快路径）。
+// 引擎侧优先站源 format / 正文嗅探写准 format；本函数只作无网络时的预判。
 // 与 Dart kotvMpvUrlIsHls、Kotlin KotvMpvHls.urlLooksLikeHls 同一套。
 // 扩展名与路径段只看 path（查询里的 id=2.m3u8 不算）；任意 .php 不算。
 func URLIsHls(raw string) bool {

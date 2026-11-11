@@ -62,13 +62,19 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 // PreparePlayback 点播。去广告打开且地址含 m3u8 时走透传并过滤节目单。
 // 其余地址原样返回，请求头交给播放器。远端非引擎回环仍由 PublicizeURL 代拉。
 func (a *App) PreparePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
-	return a.preparePlayback(raw, headers, true)
+	return a.preparePlayback(raw, headers, true, false)
+}
+
+// PreparePlaybackHLS 点播；isHls 为真且地址无 m3u8 字样时仍登记透传（正文嗅探出的伪装节目单）。
+func (a *App) PreparePlaybackHLS(raw string, headers map[string]string, isHls bool) (string, string, map[string]string) {
+	force := isHls && !strings.Contains(strings.ToLower(raw), "m3u8")
+	return a.preparePlayback(raw, headers, true, force)
 }
 
 // PrepareLivePlayback 直播开播、回看。不走去广告，也不因请求头改走透传。
 // 请求头随播放地址交给播放器。远端非引擎回环仍由 PublicizeURL 代拉。
 func (a *App) PrepareLivePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
-	return a.preparePlayback(raw, headers, false)
+	return a.preparePlayback(raw, headers, false, false)
 }
 
 // PreparePlaybackListed 直播列表批量用。与开播同一规则，不拉流。
@@ -76,7 +82,7 @@ func (a *App) PreparePlaybackListed(raw string, headers map[string]string) (stri
 	return a.PrepareLivePlayback(raw, headers)
 }
 
-func (a *App) preparePlayback(raw string, headers map[string]string, vod bool) (string, string, map[string]string) {
+func (a *App) preparePlayback(raw string, headers map[string]string, vod, forceHlsProxy bool) (string, string, map[string]string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || IsEphemeralPlayURL(raw) {
 		return raw, "", headers
@@ -97,6 +103,8 @@ func (a *App) preparePlayback(raw string, headers map[string]string, vod bool) (
 		}
 		if vod && vodAdFilter(raw) {
 			raw = playproxy.RegisterAlways(raw, headers, true)
+		} else if vod && forceHlsProxy {
+			raw = playproxy.RegisterAlways(raw, headers, settings.IsAdFilterEnabled())
 		}
 	}
 	return playproxy.PublicizeURL(raw, headers), "", headers
@@ -106,17 +114,19 @@ func vodAdFilter(raw string) bool {
 	return settings.IsAdFilterEnabled() && strings.Contains(strings.ToLower(raw), "m3u8")
 }
 
-// proxyHlsFormat 透传丢掉扩展名。登记前的地址是 HLS 时，响应补上这个 mime，
-// 供 MPV demuxer-lavf-format=hls；否则 Exo 靠 Content-Type 能播、MPV 只播几秒就 EOF。
-// 已经是 application/x-mpegURL 则保持原样。直播原地址和未走透传的不改。
+// proxyHlsFormat 透传丢掉扩展名时补 HLS mime。format 已是 HLS、或登记前强信号/嗅探已标 HLS 时保持/补上。
+// 直播原地址和未走透传的不改（除非 format 本身已是 HLS）。
 func proxyHlsFormat(before, after, format string) string {
-	if !strings.Contains(after, "/proxy/play?") || !model.URLIsHls(before) {
+	if model.FormatIsHls(format) {
+		return model.FormatHLS
+	}
+	if !strings.Contains(after, "/proxy/play?") {
 		return format
 	}
-	if strings.EqualFold(strings.TrimSpace(format), "application/x-mpegURL") {
-		return format
+	if model.URLIsHls(before) || model.FormatIsHls(format) {
+		return model.FormatHLS
 	}
-	return "application/x-mpegURL"
+	return format
 }
 
 // exposeLocalFile 远端前端播放时，把本机文件改成 /file/ 地址。本机请求保持原路径。content: 不改。

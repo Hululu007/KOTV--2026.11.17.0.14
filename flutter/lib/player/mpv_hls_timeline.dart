@@ -1,6 +1,7 @@
-/// 地址是否像 HLS（仅强信号，供预强制 lavf-hls）。
+/// 地址是否像 HLS（仅强信号快路径）。
+/// 引擎 play 回包会正文嗅探写准 format；此处只补本地/未嗅探场景。
 /// 规则与 `KotvMpvHls.kt` / `model.URLIsHls` 同一套；原生/Go 不能调 Dart，故各留副本。
-/// 扩展名与路径段只看 path（查询里的 id=2.m3u8 不算）；任意 .php 不算，伪装节目单靠打开失败再开。
+/// 扩展名与路径段只看 path（查询里的 id=2.m3u8 不算）；任意 .php 不算，伪装节目单靠引擎嗅探或打开失败再开。
 bool kotvMpvUrlIsHls(String url) {
   final raw = url.trim();
   if (raw.isEmpty) return false;
@@ -27,8 +28,8 @@ bool kotvMpvUrlIsHls(String url) {
   return false;
 }
 
-/// 这一次打开是 HLS。地址命中后，别的 mime 不能把它改回去。
-/// mime 只有 `application/x-mpegURL` 算。
+/// 这一次打开是 HLS：URL 强信号，或引擎嗅探/站源给出的 `application/x-mpegURL`。
+/// 地址命中后，别的 mime 不能把它改回去。
 bool kotvIsHls(String url, String? format) {
   if (kotvMpvUrlIsHls(url)) return true;
   return (format?.trim().toLowerCase() ?? '') == 'application/x-mpegurl';
