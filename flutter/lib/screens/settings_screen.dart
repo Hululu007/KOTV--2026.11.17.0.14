@@ -2730,14 +2730,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             msg: '开机进直播已更新',
                           )),
                         ),
-                        // 下一集排进播放器播放列表：Android Exo/原生 MPV、桌面与 iOS 的 media_kit MPV；
-                        // FVP 与网页不支持无缝（仍会预解析下一集地址，换集走普通 open）。
+                        // 下一集排进播放器播放列表：Android Exo、桌面/iOS media_kit MPV；
+                        // Android 原生 MPV / FVP / 网页不支持无缝（仍会预解析下一集地址）。
                         if (!kIsWeb)
                           KotvSettingsCell(
                             label: '预加载下一集',
                             value: kotvSettingsFlag(g('preloadNextEpisode'))
                                 ? (kotvIsAndroid()
-                                    ? '开启（Exo / MPV 无缝）'
+                                    ? '开启（Exo 无缝）'
                                     : '开启（MPV 无缝）')
                                 : '关闭',
                             onTap: () => unawaited(_set(

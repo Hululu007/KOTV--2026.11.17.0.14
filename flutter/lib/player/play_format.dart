@@ -1,3 +1,5 @@
+import 'package:http/http.dart' as http;
+
 /// 播放容器判定（各播放器共用）。
 ///
 /// 正文探测在引擎 `planPlayback`；客户端以回包 format 为主，URL 仅强信号快路径。
@@ -114,4 +116,39 @@ String? kotvHlsFirstVariantUri(String body) {
     if (!line.startsWith('#')) expectUri = false;
   }
   return null;
+}
+
+/// 拉取点播 HLS 媒体单并加总 `#EXTINF`（毫秒）。直播 / 非 HLS → null。
+/// 主清单时跟第一条 variant 再解析。供 media_kit / FVP 覆盖引擎偏短 demux 时长。
+Future<int?> kotvFetchHlsVodDurationMs({
+  required String url,
+  required Map<String, String> headers,
+  required bool live,
+  String? format,
+}) async {
+  if (live || !kotvIsHls(url, format)) return null;
+  Future<String?> getBody(String u) async {
+    final res = await http
+        .get(Uri.parse(u), headers: headers.isEmpty ? null : headers)
+        .timeout(const Duration(seconds: 12));
+    if (res.statusCode < 200 || res.statusCode >= 300) return null;
+    return res.body;
+  }
+
+  var body = await getBody(url);
+  if (body == null) return null;
+  final direct = kotvHlsVodDurationMs(body);
+  if (direct != null) return direct;
+  final variant = kotvHlsFirstVariantUri(body);
+  if (variant == null || variant.isEmpty) return null;
+  final child = Uri.parse(url).resolve(variant).toString();
+  body = await getBody(child);
+  if (body == null) return null;
+  return kotvHlsVodDurationMs(body);
+}
+
+/// 点播 HLS：节目单加总与引擎 demux 时长取较大者。
+Duration kotvPreferPlaylistDuration(Duration engine, Duration? playlist) {
+  if (playlist == null || playlist <= Duration.zero) return engine;
+  return playlist >= engine ? playlist : engine;
 }

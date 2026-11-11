@@ -79,9 +79,6 @@ class NativeMpvPlayback extends KotvPlayback {
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
   final _endedCtrl = StreamController<bool>.broadcast();
-  final _queuedStartCtrl = StreamController<String>.broadcast();
-  /// 已排进 mpv 播放列表的下一集；播到它时由 transition 事件切成当前集。
-  ({String id, String url, Map<String, String> headers})? _queued;
 
   /// 仅随 Texture/错误/就绪变化递增；供详情页 ValueListenableBuilder 重建画面（勿绑 position）。
   final ValueNotifier<int> surfaceRev = ValueNotifier(0);
@@ -190,67 +187,6 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   Stream<bool> get completedStream => _endedCtrl.stream;
-
-  @override
-  Stream<String> get queuedStartStream => _queuedStartCtrl.stream;
-
-  @override
-  Future<bool> queueNext({
-    required String id,
-    required String url,
-    Map<String, String>? headers,
-    String? format,
-    List<Map<String, dynamic>> subs = const [],
-    Duration startAt = Duration.zero,
-  }) async {
-    // Media3 MpvPlayer 路径不提供无缝 queueNext；返回 false 由上层走普通换集。
-    _queued = null;
-    return false;
-  }
-
-  @override
-  Future<void> clearNext() async {
-    _queued = null;
-  }
-
-  @override
-  Future<bool> skipToNext() async => false;
-
-  void _enterQueued(String id) {
-    final q = _queued;
-    if (q == null || q.id != id) return;
-    _queued = null;
-    _url = q.url;
-    _headers = q.headers;
-    _completed = false;
-    _lastError = null;
-    _position = Duration.zero;
-    _duration = Duration.zero;
-    _buffered = Duration.zero;
-    // 清掉上一集轨表，避免视频→纯音频时残留「有视频轨」挡掉音频叠层。
-    // 宽高仍保留到新 size/ready：同分辨率无缝时属性可能不重发。
-    _audioTracks = const [];
-    _videoTracks = const [];
-    _subtitleTracks = const [];
-    _currentAudioId = null;
-    _currentVideoId = null;
-    _currentSubtitleId = null;
-    _currentSecondarySubtitleId = null;
-    if (!_posCtrl.isClosed) _posCtrl.add(Duration.zero);
-    if (!_queuedStartCtrl.isClosed) _queuedStartCtrl.add(id);
-    notifyListeners();
-    unawaited(_refreshTracksAfterQueued());
-  }
-
-  /// 无缝切入后刷新轨；若新集是纯音频则清掉上一集残留宽高，否则音频叠层不出现。
-  Future<void> _refreshTracksAfterQueued() async {
-    await _refreshTracks();
-    if (_audioTracks.isEmpty || _hasRealVideoTrack) return;
-    if (_w <= 0 && _h <= 0) return;
-    _w = 0;
-    _h = 0;
-    notifyListeners();
-  }
 
   List<KotvTrack> _audioTracks = const [];
   List<KotvTrack> _videoTracks = const [];
@@ -487,9 +423,6 @@ class NativeMpvPlayback extends KotvPlayback {
         if (_w > 0 && _h > 0) _buffering = false;
         notifyListeners();
         break;
-      case 'transition':
-        _enterQueued('${m['id'] ?? ''}');
-        break;
       case 'completed':
         if (_completed) break;
         _completed = true;
@@ -519,7 +452,6 @@ class NativeMpvPlayback extends KotvPlayback {
     _url = url;
     _live = live;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
-    _queued = null;
     _completed = false;
     _ready = false;
     _buffering = true;
@@ -653,7 +585,6 @@ class NativeMpvPlayback extends KotvPlayback {
     _playing = false;
     _buffering = false;
     _completed = false;
-    _queued = null;
     _ready = false;
     _position = Duration.zero;
     _duration = Duration.zero;
@@ -1040,7 +971,6 @@ class NativeMpvPlayback extends KotvPlayback {
     unawaited(_posCtrl.close());
     unawaited(_bufCtrl.close());
     unawaited(_endedCtrl.close());
-    unawaited(_queuedStartCtrl.close());
     super.dispose();
   }
 }

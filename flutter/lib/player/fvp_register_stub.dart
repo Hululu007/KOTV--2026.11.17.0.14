@@ -3,7 +3,6 @@ void kotvEnsureFvpRegistered({
   String decodeMode = 'auto',
   String? clearKeyHex,
   bool syncClearKey = false,
-  bool? androidSurface,
 }) {}
 
 void kotvUseSystemVideoPlayer() {}
@@ -11,5 +10,4 @@ void kotvUseSystemVideoPlayer() {}
 void kotvRegisterFvp({
   String decodeMode = 'auto',
   String? clearKeyHex,
-  bool androidSurface = true,
 }) {}

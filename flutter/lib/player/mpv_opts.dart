@@ -7,6 +7,7 @@ import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'playback_settings.dart';
+import 'player_normalize.dart';
 import 'video_eq.dart';
 
 /// 交给 lavf 的 demuxer 选项。302 / HLS 子列表由播放器自己跟，不要在 Dart 里预跳。
@@ -18,6 +19,15 @@ const kotvDemuxerLavfO =
     'seg_max_retry=5,strict=experimental,'
     'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0,'
     'probesize=8000000,analyzeduration=8000000';
+
+/// FVP/mdk 侧与 [kotvDemuxerLavfO] 同源的探测窗口（avformat.*）。
+Map<String, String> kotvFvpAvformatProbeOpts() => const {
+      'avformat.probesize': '8000000',
+      'avformat.analyzeduration': '8000000',
+      'avformat.extension_picky': '0',
+      'avformat.allowed_extensions': 'ALL',
+      'avformat.allowed_segment_extensions': 'ALL',
+    };
 
 /// 空列表：不要按后缀把 URL 当播放列表 / 图片。
 /// 网关常把 FLV/TS 写成 .m3u8、把 TS 分片写成 .png；交给 lavf 按内容探测。
@@ -120,10 +130,11 @@ class KotvMpvOpts {
     var dolby = kotvDolbyVisionFromSettings(settings);
     if (dolby < 0 || dolby > 2) dolby = 0;
     final preferredTextLangs = kotvPreferredTextLangsFromSettings(settings);
-    var fontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
-    fontScale = fontScale.clamp(0.5, 2.0);
+    final fontScale = kotvClampSubtitleFontScale(
+      double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}'),
+    );
     return KotvMpvOpts(
-      decodeMode: decode.isEmpty ? 'auto' : decode,
+      decodeMode: decode.isEmpty ? 'auto' : kotvNormalizeDecodeMode(decode),
       gpuNext: gpuNext,
       vulkan: vulkan,
       conf: '${settings['mpvConf'] ?? ''}',
@@ -218,10 +229,9 @@ class KotvMpvOpts {
         dynamicNorm: stableVolume,
       );
 
-  bool get soft => decodeMode == 'soft' || decodeMode == 'software' || decodeMode == 'sw';
+  bool get soft => kotvNormalizeDecodeMode(decodeMode) == 'soft';
 
-  bool get hard =>
-      decodeMode == 'hard' || decodeMode == 'hardware' || decodeMode == 'hw';
+  bool get hard => kotvNormalizeDecodeMode(decodeMode) == 'hard';
 
   /// 供 setProperty / VideoController 使用的 hwdec 值。
   ///
@@ -366,7 +376,7 @@ class KotvMpvOpts {
         await set('audio-delay', (audioOffsetMs / 1000.0).toStringAsFixed(3));
       } catch (_) {}
       try {
-        await set('sub-scale', subtitleFontScale.clamp(0.5, 2.0).toStringAsFixed(2));
+        await set('sub-scale', kotvClampSubtitleFontScale(subtitleFontScale).toStringAsFixed(2));
       } catch (_) {}
     } catch (_) {}
   }
@@ -392,7 +402,7 @@ class KotvMpvOpts {
       out[e.$1] = e.$2;
     }
     out.addAll(videoEq.mpvProps());
-    out['sub-scale'] = subtitleFontScale.clamp(0.5, 2.0).toStringAsFixed(2);
+    out['sub-scale'] = kotvClampSubtitleFontScale(subtitleFontScale).toStringAsFixed(2);
     out['audio-delay'] = (audioOffsetMs / 1000.0).toStringAsFixed(3);
     return out;
   }

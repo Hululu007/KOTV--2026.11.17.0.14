@@ -1,6 +1,7 @@
 // 字幕 / 弹幕样式设置值归一。
 
 import 'kotv_playback.dart';
+import 'player_normalize.dart';
 import 'video_eq.dart' show kotvSubtitlePosFromSettings;
 
 String kotvNormalizeSubtitleEdgeType(String? raw) {
@@ -59,7 +60,7 @@ Future<void> kotvApplySubtitleSettings(KotvPlayback p, Map<String, dynamic> sett
   final bg = str('subtitleBgColor', '#00000000');
   final fontPath = str('subtitleFontPath', '');
   await p.setSubtitleStyle(
-    scale: num('subtitleFontScale', 1.0).clamp(0.5, 2.0).toDouble(),
+    scale: kotvClampSubtitleFontScale(num('subtitleFontScale', 1.0)),
     pos: kotvSubtitlePosFromSettings(settings['subtitlePos']).clamp(-20, 30).toDouble(),
     secondaryPos: num('subtitleSecondaryPos', 10).clamp(0, 150).toDouble(),
     color: custom && color.isNotEmpty ? color : null,

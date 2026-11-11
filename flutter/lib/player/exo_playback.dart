@@ -10,6 +10,7 @@ import 'kotv_platform.dart';
 import 'play_format.dart';
 import 'play_headers.dart';
 import 'playback_settings.dart';
+import 'player_normalize.dart';
 import 'position_coalesce.dart';
 import 'silent_video_guard.dart';
 import 'subtitle_style_util.dart';
@@ -718,7 +719,7 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> setRate(double r) async {
-    _rate = r.clamp(0.25, 4.0);
+    _rate = kotvClampPlayRate(r);
     await _ch.invokeMethod('setRate', {'rate': _rate});
     notifyListeners();
   }
@@ -733,12 +734,7 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> setDecodeMode(String mode) async {
-    final m = mode.trim().toLowerCase();
-    _decodeMode = switch (m) {
-      'soft' || 'software' || 'sw' => 'soft',
-      'hard' || 'hardware' || 'hw' => 'hard',
-      _ => 'auto',
-    };
+    _decodeMode = kotvNormalizeDecodeMode(mode);
     try {
       await _ch.invokeMethod('setDecodeMode', {'mode': _decodeMode});
     } catch (_) {}
@@ -947,7 +943,9 @@ class ExoPlayback extends KotvPlayback {
     if (_diskPreloadSizeMb < 128) _diskPreloadSizeMb = 128;
     if (_diskPreloadSizeMb > 4096) _diskPreloadSizeMb = 4096;
     _secondarySubtitle = kotvSecondarySubtitleModeFromSettings(settings);
-    _subtitleFontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
+    _subtitleFontScale = kotvClampSubtitleFontScale(
+      double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}'),
+    );
     _subtitlePos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
     _subtitleSecondaryPos =
         (double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10).clamp(0, 150);
@@ -1144,7 +1142,7 @@ class ExoPlayback extends KotvPlayback {
     String? font,
     String? fontPath,
   }) async {
-    if (scale != null) _subtitleFontScale = scale.clamp(0.5, 2.0);
+    if (scale != null) _subtitleFontScale = kotvClampSubtitleFontScale(scale);
     if (pos != null) _subtitlePos = pos.clamp(-20, 30);
     if (secondaryPos != null) _subtitleSecondaryPos = secondaryPos.clamp(0, 150);
     if (color != null && color.trim().isNotEmpty) _subtitleColor = color.trim();

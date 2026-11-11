@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show mapEquals;
-import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -163,38 +162,18 @@ class MediaKitPlayback extends KotvPlayback {
     required String? format,
   }) async {
     _playlistDuration = null;
-    if (live || !kotvIsHls(url, format)) return;
     try {
-      final ms = await _fetchHlsVodDurationMs(url, headers);
+      final ms = await kotvFetchHlsVodDurationMs(
+        url: url,
+        headers: headers,
+        live: live,
+        format: format,
+      );
       if (ms == null || ms <= 0) return;
       if (_url != url) return;
       _playlistDuration = Duration(milliseconds: ms);
       notifyListeners();
     } catch (_) {}
-  }
-
-  Future<int?> _fetchHlsVodDurationMs(
-    String url,
-    Map<String, String> headers,
-  ) async {
-    Future<String?> getBody(String u) async {
-      final res = await http
-          .get(Uri.parse(u), headers: headers.isEmpty ? null : headers)
-          .timeout(const Duration(seconds: 12));
-      if (res.statusCode < 200 || res.statusCode >= 300) return null;
-      return res.body;
-    }
-
-    var body = await getBody(url);
-    if (body == null) return null;
-    final direct = kotvHlsVodDurationMs(body);
-    if (direct != null) return direct;
-    final variant = kotvHlsFirstVariantUri(body);
-    if (variant == null || variant.isEmpty) return null;
-    final child = Uri.parse(url).resolve(variant).toString();
-    body = await getBody(child);
-    if (body == null) return null;
-    return kotvHlsVodDurationMs(body);
   }
 
   void _clearVideoSize() {
@@ -279,14 +258,8 @@ class MediaKitPlayback extends KotvPlayback {
   Duration get position => player.state.position;
 
   @override
-  Duration get duration {
-    final playlist = _playlistDuration;
-    if (playlist != null && playlist > Duration.zero) {
-      final demux = player.state.duration;
-      return playlist >= demux ? playlist : demux;
-    }
-    return player.state.duration;
-  }
+  Duration get duration =>
+      kotvPreferPlaylistDuration(player.state.duration, _playlistDuration);
 
   @override
   Duration get buffered => player.state.buffer;

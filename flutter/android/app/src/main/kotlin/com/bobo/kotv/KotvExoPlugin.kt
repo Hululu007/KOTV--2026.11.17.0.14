@@ -2675,13 +2675,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       if (soft.isNotEmpty()) soft else infos
     }
 
-    fun normalizeDecodeMode(raw: String): String {
-      return when (raw.lowercase()) {
-        "soft", "software", "sw" -> "soft"
-        "hard", "hardware", "hw" -> "hard"
-        else -> "auto"
-      }
-    }
+    fun normalizeDecodeMode(raw: String): String = KotvPlayerNormalize.decodeModeLabel(raw)
 
     fun normalizeFit(raw: String): String {
       return when (raw.lowercase()) {
@@ -2691,16 +2685,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     }
 
-    fun isTextureRender(raw: String): Boolean {
-      return when (raw.trim().lowercase()) {
-        "texture", "textureview", "1" -> true
-        else -> false
-      }
-    }
+    fun isTextureRender(raw: String): Boolean = KotvPlayerNormalize.isTextureRender(raw)
 
-    fun resolveRenderTexture(requested: String): Boolean {
-      return if (requested.isNotEmpty()) isTextureRender(requested) else false
-    }
+    fun resolveRenderTexture(requested: String): Boolean =
+      KotvPlayerNormalize.resolveRenderTexture(requested)
 
     fun isLocalPlayUrl(url: String): Boolean {
       val t = url.trim()

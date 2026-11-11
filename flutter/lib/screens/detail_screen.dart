@@ -1900,7 +1900,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   static const _nextEpisodeQueueLeadMs = 180000;
 
   /// 「预加载下一集」：解析下一集并排进当前播放器的播放列表，播完无缝接上。
-  /// Exo、安卓原生 MPV、桌面/iOS media_kit MPV 支持；FVP / 网页排不上。
+  /// Exo、桌面/iOS media_kit MPV 支持；Android 原生 MPV / FVP / 网页排不上。
   /// 排不上（磁力、DRM、碟片、请求头与本集不同等）时留下解析结果，换集时少等一次解析。
   void _preloadNextEpisodeNow() {
     final pb = _playback;

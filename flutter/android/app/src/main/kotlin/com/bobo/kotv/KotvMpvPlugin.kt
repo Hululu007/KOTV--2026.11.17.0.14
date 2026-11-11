@@ -1460,14 +1460,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "${it.key}" to "${it.value}"
     }
 
-  private fun resolveDecodeMode(raw: String?): @C.DecodeMode Int {
-    val mode = raw?.trim()?.lowercase().orEmpty()
-    return when (mode) {
-      "no", "soft", "software", "sw" -> C.DECODE_SOFTWARE
-      "mediacodec", "hard", "hardware", "hw" -> C.DECODE_HARDWARE
+  private fun resolveDecodeMode(raw: String?): @C.DecodeMode Int =
+    when (KotvPlayerNormalize.decodeModeLabel(raw.orEmpty())) {
+      "soft" -> C.DECODE_SOFTWARE
+      "hard" -> C.DECODE_HARDWARE
       else -> C.DECODE_HARDWARE // auto → 硬解优先（失败由内核回退）
     }
-  }
 
   private fun resolveDolbyVisionPolicy(raw: Int): Int =
     when (raw) {
@@ -1476,10 +1474,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       else -> androidx.media3.common.DolbyVisionOutputPolicy.AUTO
     }
 
-  private fun resolveRenderTexture(mode: String): Boolean {
-    val m = mode.trim().lowercase()
-    return m == "texture" || m == "textureview"
-  }
+  private fun resolveRenderTexture(mode: String): Boolean =
+    KotvPlayerNormalize.resolveRenderTexture(mode)
 
   private fun normalizeAspectMode(raw: String): String =
     when (raw.trim().lowercase()) {

@@ -13,8 +13,10 @@ import 'fvp_register.dart';
 import 'kotv_playback.dart';
 import 'video_player_toggle.dart';
 import 'kotv_platform.dart';
+import 'play_format.dart';
 import 'play_headers.dart';
 import 'playback_settings.dart';
+import 'player_normalize.dart';
 import 'silent_video_guard.dart';
 import 'video_eq.dart';
 import 'video_scale_fit.dart';
@@ -58,26 +60,12 @@ class FvpPlayback extends KotvPlayback {
   double _volume = 100;
   double _rate = 1;
   String _decodeMode = 'auto';
-  /// 安卓：`playerRender` surface|texture（与 Exo 同源；桌面固定 Texture）。
-  String _renderMode = 'surface';
+  /// 点播 HLS：节目单 EXTINF 加总，覆盖引擎偏短 demux 时长。
+  Duration? _playlistDuration;
   String? _lastUrl;
-  Map<String, String>? _lastHeaders;
-  Map<String, dynamic>? _lastDrm;
-  bool _lastLive = false;
-  String? _lastFormat;
   String _videoScale = 'default';
   /// 仅尺寸/比例/错误变化时递增，供 buildView 重建（勿绑 position/buffering）。
   final ValueNotifier<int> _viewGen = ValueNotifier<int>(0);
-
-  /// 安卓 Surface：platformView + image=0。Texture：textureView。
-  bool get _androidSurface => kotvIsAndroid() && _renderMode == 'surface';
-
-  VideoViewType get _viewType {
-    if (!kotvIsAndroid()) return VideoViewType.textureView;
-    return _renderMode == 'surface'
-        ? VideoViewType.platformView
-        : VideoViewType.textureView;
-  }
 
   List<KotvTrack> _audioTracks = const [];
   List<KotvTrack> _videoTracks = const [];
@@ -124,7 +112,8 @@ class FvpPlayback extends KotvPlayback {
   Duration get position => _c?.value.position ?? Duration.zero;
 
   @override
-  Duration get duration => _c?.value.duration ?? Duration.zero;
+  Duration get duration =>
+      kotvPreferPlaylistDuration(_c?.value.duration ?? Duration.zero, _playlistDuration);
 
   @override
   Duration get buffered {
@@ -156,9 +145,9 @@ class FvpPlayback extends KotvPlayback {
   @override
   String get engineLabel => '内置 FVP';
 
-  /// Android 上 Surface / Texture 决定 viewType 与解码器参数；桌面固定 Texture。
+  /// FVP 仅桌面/iOS Texture；Android 不注册 FVP。
   @override
-  bool get supportsRenderMode => kotvIsAndroid();
+  bool get supportsRenderMode => false;
 
   @override
   Future<String?> activeDecoderLabel() async {
@@ -231,7 +220,6 @@ class FvpPlayback extends KotvPlayback {
           controller: c,
           fit: fit,
           videoScale: _videoScale,
-          surfaceLayout: _androidSurface,
         );
       },
     );
@@ -241,14 +229,7 @@ class FvpPlayback extends KotvPlayback {
     _viewGen.value++;
   }
 
-  /// 停声后拆掉 [VideoPlayerController]。
-  ///
-  /// Android Surface（platformView）：须**先** `c.dispose()`（补丁在
-  /// `mdkPlayerAPI_delete` 前按 handle 清 native `players[surfaceId]`，并在
-  /// Surface 仍在时 `setDecoders({})`），再摘 PlatformView；否则
-  /// `FvpVideoView.release` 会对已删 handle 调 `setDecoders`/`updateNativeSurface`。
-  /// JNI `tunnel` 清面时不读，绑定时的 `directSurface` 才决定是否清 decoder。
-  /// Texture：先摘视图再 dispose（dispose 内 ReleaseRT 清正 textureId）。
+  /// 停声后拆掉 [VideoPlayerController]：先摘 Texture 视图再 dispose。
   Future<void> _disposeController() async {
     final c = _c;
     final l = _listener;
@@ -267,20 +248,6 @@ class FvpPlayback extends KotvPlayback {
     } catch (_) {}
     if (!identical(_c, c)) return;
 
-    if (_androidSurface) {
-      // Surface：dispose 内 ReleasePlayer 卸面，再摘 PlatformView（release 变 no-op）。
-      try {
-        await c.dispose();
-      } catch (_) {}
-      if (!identical(_c, c)) return;
-      _c = null;
-      _bumpView();
-      await SchedulerBinding.instance.endOfFrame;
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      return;
-    }
-
-    // Texture：先摘视图再 dispose。
     _c = null;
     _bumpView();
     await SchedulerBinding.instance.endOfFrame;
@@ -305,10 +272,6 @@ class FvpPlayback extends KotvPlayback {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
     _lastUrl = url;
-    _lastHeaders = headers == null ? null : Map<String, String>.from(headers);
-    _lastDrm = drm == null ? null : Map<String, dynamic>.from(drm);
-    _lastLive = live;
-    _lastFormat = format;
     _hookFvpDecoderLog();
     _fvpLastVideoDecoder = null;
     // 不预锁 avformat.input；靠大 probesize 内容探测。
@@ -316,13 +279,13 @@ class FvpPlayback extends KotvPlayback {
       decodeMode: _decodeMode,
       clearKeyHex: clearKeyHex,
       syncClearKey: true,
-      androidSurface: _androidSurface,
     );
     _opening = true;
     _live = live;
     _vodBufferSet = false;
     _lastError = null;
     _completed = false;
+    _playlistDuration = null;
     _audioTracks = const [];
     _videoTracks = const [];
     _subtitleTracks = const [];
@@ -338,8 +301,14 @@ class FvpPlayback extends KotvPlayback {
       await _disposeController();
       notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
+      unawaited(_refreshPlaylistDuration(
+        url: url,
+        headers: h,
+        live: live,
+        format: format,
+      ));
       // 点播续播/片头：X-KOTV-Prepare-Ms → fvp patch prepare(ms)（mdk prepare startPosition）。
-      // 勿 prepare(0) 后再 seekTo——安卓 AMediaCodec STARTED→FLUSHING 代价高。
+      // 勿 prepare(0) 后再 seekTo——避免解码器二次启动/刷新开销。
       final openHeaders = Map<String, String>.from(h);
       if (startAt > Duration.zero) {
         openHeaders['X-KOTV-Prepare-Ms'] = '${startAt.inMilliseconds}';
@@ -349,8 +318,7 @@ class FvpPlayback extends KotvPlayback {
         Uri.parse(url),
         httpHeaders: openHeaders,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-        // 安卓跟 playerRender：Surface→platformView，Texture→textureView（Win7 adapt 删本行）。
-        viewType: _viewType,
+        viewType: VideoViewType.textureView,
       );
       _c = c;
       _bumpView();
@@ -636,8 +604,30 @@ class FvpPlayback extends KotvPlayback {
   Future<void> stop() async {
     _opening = false;
     _lastError = null;
+    _playlistDuration = null;
     await _disposeController();
     notifyListeners();
+  }
+
+  Future<void> _refreshPlaylistDuration({
+    required String url,
+    required Map<String, String> headers,
+    required bool live,
+    required String? format,
+  }) async {
+    _playlistDuration = null;
+    try {
+      final ms = await kotvFetchHlsVodDurationMs(
+        url: url,
+        headers: headers,
+        live: live,
+        format: format,
+      );
+      if (ms == null || ms <= 0) return;
+      if (_lastUrl != url) return;
+      _playlistDuration = Duration(milliseconds: ms);
+      notifyListeners();
+    } catch (_) {}
   }
 
   @override
@@ -677,7 +667,7 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   Future<void> setRate(double r) async {
-    _rate = r.clamp(0.25, 4.0);
+    _rate = kotvClampPlayRate(r);
     await _c?.setPlaybackSpeed(_rate);
     notifyListeners();
   }
@@ -691,60 +681,22 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   Future<void> setDecodeMode(String mode) async {
-    final next = switch (mode.trim().toLowerCase()) {
-      'soft' || 'software' || 'sw' => 'soft',
-      'hard' || 'hardware' || 'hw' => 'hard',
-      _ => 'auto',
-    };
+    final next = kotvNormalizeDecodeMode(mode);
     if (next == _decodeMode) {
       _applyDecodeMode(_c);
       return;
     }
     _decodeMode = next;
     // 下一次 prepare 走新列表；已经在播的这一路要当场换解码器。
-    kotvEnsureFvpRegistered(decodeMode: next, androidSurface: _androidSurface);
+    kotvEnsureFvpRegistered(decodeMode: next);
     _applyDecodeMode(_c);
-  }
-
-  @override
-  Future<void> setRenderMode(String mode) async {
-    final next = kotvNormalizePlayerRender(mode);
-    if (next == _renderMode) return;
-    _renderMode = next;
-    kotvEnsureFvpRegistered(decodeMode: _decodeMode, androidSurface: _androidSurface);
-    final url = _lastUrl;
-    if (url == null || url.isEmpty || _c == null) {
-      notifyListeners();
-      return;
-    }
-    // viewType / 解码器在 create 时定死，须重建；进度经 startAt 在首次 play 前恢复。
-    final pos = position;
-    final wasPlaying = playing && !buffering;
-    try {
-      await open(
-        url,
-        headers: _lastHeaders,
-        drm: _lastDrm,
-        live: _lastLive,
-        format: _lastFormat,
-        startAt: pos > Duration.zero ? pos : Duration.zero,
-      );
-      if (!wasPlaying) {
-        try {
-          await pause();
-        } catch (_) {}
-      }
-    } catch (_) {}
-    notifyListeners();
   }
 
   /// 仅对已经 initialize 的播放器生效。开播那次的列表在 registerWith 里。
   void _applyDecodeMode(VideoPlayerController? c) {
     if (c == null || !c.value.isInitialized) return;
     try {
-      c.setVideoDecoders(
-        kotvFvpVideoDecoders(_decodeMode, androidSurface: _androidSurface),
-      );
+      c.setVideoDecoders(kotvFvpVideoDecoders(_decodeMode));
     } catch (_) {}
     // 全局 shader_resource=1 仅 win8+；Win7 写了会卡住平台线程。
     if (kotvIsWindows() && !kotvIsWindows7()) {
@@ -755,8 +707,9 @@ class FvpPlayback extends KotvPlayback {
   }
 
   void applyPlayerOptions(Map<String, dynamic> settings) {
-    _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
-    _subtitleFontScale = _subtitleFontScale.clamp(0.5, 2.0);
+    _subtitleFontScale = kotvClampSubtitleFontScale(
+      double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}'),
+    );
     _secondarySubtitleMode = kotvSecondarySubtitleModeFromSettings(settings);
     _preferredTextLangs = kotvPreferredTextLangsFromSettings(settings);
     _videoEq = KotvVideoEq.fromSettings(settings);
@@ -1112,7 +1065,7 @@ class FvpPlayback extends KotvPlayback {
     if (c == null || !c.value.isInitialized) return;
     try {
       if (scale != null) {
-        _subtitleFontScale = scale.clamp(0.5, 2.0);
+        _subtitleFontScale = kotvClampSubtitleFontScale(scale);
         c.setProperty('subtitle.scale', _subtitleFontScale.toStringAsFixed(2));
       }
       if (pos != null) {
@@ -1258,13 +1211,11 @@ class _FvpVideoShell extends StatefulWidget {
     required this.controller,
     required this.fit,
     required this.videoScale,
-    required this.surfaceLayout,
   });
 
   final VideoPlayerController controller;
   final BoxFit fit;
   final String videoScale;
-  final bool surfaceLayout;
 
   @override
   State<_FvpVideoShell> createState() => _FvpVideoShellState();
@@ -1299,23 +1250,18 @@ class _FvpVideoShellState extends State<_FvpVideoShell> {
           }
           final w = box.width.isFinite && box.width > 0 ? box.width : max.width;
           final h = box.height.isFinite && box.height > 0 ? box.height : max.height;
-          final Widget painted;
-          if (widget.surfaceLayout) {
-            painted = SizedBox(width: w, height: h, child: _video);
-          } else {
-            painted = SizedBox(
-              width: w,
-              height: h,
-              child: FittedBox(
-                fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
-                child: SizedBox(
-                  width: videoSize.width,
-                  height: videoSize.height,
-                  child: _video,
-                ),
+          final painted = SizedBox(
+            width: w,
+            height: h,
+            child: FittedBox(
+              fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
+              child: SizedBox(
+                width: videoSize.width,
+                height: videoSize.height,
+                child: _video,
               ),
-            );
-          }
+            ),
+          );
           final centered = Center(child: painted);
           if (effective == BoxFit.cover) {
             return ClipRect(child: centered);

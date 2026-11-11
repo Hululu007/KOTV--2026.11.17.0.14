@@ -4,6 +4,7 @@ import 'package:fvp/fvp.dart' as fvp;
 import 'drm_opts.dart';
 import 'fvp_decoders.dart';
 import 'kotv_platform.dart';
+import 'mpv_opts.dart'; // kotvFvpAvformatProbeOpts
 
 /// 注册 libmdk 为 [video_player] 实现（非 Web）。
 ///
@@ -16,32 +17,23 @@ String _kotvFvpSig = '';
 /// 当前开播要用的 ClearKey。解码方式单独变化时保留，避免下一次 prepare 丢掉密钥。
 String _kotvFvpClearKey = '';
 
-/// 安卓是否走 Surface（`playerRender`）：Surface→image=0 + platformView + tunnel；
-/// Texture→普通 AMediaCodec、tunnel 关。此处 tunnel 仅绑定时写 `directSurface`。
-bool _kotvFvpAndroidSurface = true;
-
 /// [decodeMode] 决定 prepare 用的解码器。
 /// [syncClearKey] 为 true 时用 [clearKeyHex] 覆盖已记住的密钥（空串表示这次没有密钥）。
-/// [androidSurface] 为 null 时沿用上次。
 void kotvEnsureFvpRegistered({
   String decodeMode = 'auto',
   String? clearKeyHex,
   bool syncClearKey = false,
-  bool? androidSurface,
 }) {
   if (kIsWeb || kotvIsAndroid()) return;
   if (syncClearKey) _kotvFvpClearKey = (clearKeyHex ?? '').trim();
-  if (androidSurface != null) _kotvFvpAndroidSurface = androidSurface;
-  final surface = _kotvFvpAndroidSurface;
   final sig =
-      '${kotvFvpVideoDecoders(decodeMode, androidSurface: surface).join('\u0001')}|$_kotvFvpClearKey|$_kotvFvpAndroidSurface';
+      '${kotvFvpVideoDecoders(decodeMode).join('\u0001')}|$_kotvFvpClearKey';
   if (_kotvFvpRegistered && _kotvFvpSig == sig) return;
   _kotvFvpRegistered = true;
   _kotvFvpSig = sig;
   kotvRegisterFvp(
     decodeMode: decodeMode,
     clearKeyHex: _kotvFvpClearKey,
-    androidSurface: _kotvFvpAndroidSurface,
   );
 }
 
@@ -76,18 +68,11 @@ void kotvUseSystemVideoPlayer() {
 void kotvRegisterFvp({
   String decodeMode = 'auto',
   String? clearKeyHex,
-  bool androidSurface = true,
 }) {
   if (kIsWeb || kotvIsAndroid()) return;
   const platforms = ['windows', 'macos', 'linux', 'ios'];
   final playerOpts = <String, String>{
-    // 直播 / 伪扩展名：给足探测窗口（勿用 lowLatency 的极小 analyzeduration，易 prepare 失败）
-    'avformat.probesize': '8000000',
-    'avformat.analyzeduration': '8000000',
-    // 伪装扩展名靠探测，不设 protocol_whitelist（否则 RTSP/RTMP/RTP 会被挡）。
-    'avformat.extension_picky': '0',
-    'avformat.allowed_extensions': 'ALL',
-    'avformat.allowed_segment_extensions': 'ALL',
+    ...kotvFvpAvformatProbeOpts(),
     'avio.reconnect': '1',
     'avio.reconnect_delay_max': '7',
     // mdk 属性 buffer = setBufferRange。"0+0" = minMs=0 + maxMs=INT64_MAX。
@@ -105,8 +90,7 @@ void kotvRegisterFvp({
   }
   final options = <String, dynamic>{
     'platforms': platforms,
-    'video.decoders':
-        kotvFvpVideoDecoders(decodeMode, androidSurface: androidSurface),
+    'video.decoders': kotvFvpVideoDecoders(decodeMode),
     'player': playerOpts,
   };
   if (windows) {
