@@ -18,7 +18,6 @@ const playSniffBytes = 512
 const playSniffTimeout = 3 * time.Second
 
 // playMode 区分点播透传与直播直连；format 判定（含正文嗅探）统一走 planPlayback。
-// Media3 AAR 无 ContentTypeResolvingMediaSource；开播前正文探测收在本文件，写准 format 供各播放器。
 type playMode int
 
 const (
