@@ -427,7 +427,10 @@ class KotvMpvOpts {
         'eqContrast': videoEq.enabled ? videoEq.contrast : 0,
         'eqSaturation': videoEq.enabled ? videoEq.saturation : 0,
         'eqGamma': videoEq.enabled ? videoEq.gamma : 0,
-        'eqHue': videoEq.enabled ? videoEq.hue : 0,
+        'eqHue': videoEq.enabled
+            ? (videoEq.hue + videoEq.temperature ~/ 2).clamp(-100, 100)
+            : 0,
+        'eqSharpness': videoEq.enabled ? videoEq.sharpness : 0,
         'audioAf': _composedAf(),
         'videoVf': videoEq.mpvVf(),
         'subtitleFontScale': subtitleFontScale.clamp(0.5, 2.0),

@@ -112,8 +112,8 @@ class KotvPlaybackFailover {
       return const ['innie#html', 'innie#art', 'innie#xg', 'innie#zw'];
     }
     if (kotvIsAndroid()) {
-      // P1 已就绪：Exo（默认/DRM）→ 原生 MPV → FVP。
-      return const ['innie#exo', 'innie#mpv', 'innie#fvp'];
+      // Android 仅 Exo + Media3 MPV（无 FVP）。
+      return const ['innie#exo', 'innie#mpv'];
     }
     if (kotvIsIOS()) {
       return const ['innie#html', 'innie#mpv', 'innie#fvp'];

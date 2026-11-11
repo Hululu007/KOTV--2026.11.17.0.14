@@ -1,20 +1,14 @@
 package com.bobo.kotv
 
 import android.content.Context
-import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
-import android.media.AudioAttributes
-import android.media.AudioDeviceInfo
-import android.media.AudioFormat
-import android.media.AudioManager
-import android.media.AudioTrack
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.Surface
@@ -23,7 +17,26 @@ import android.view.SurfaceView
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
+import android.view.accessibility.CaptioningManager
 import android.widget.FrameLayout
+import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.MediaChapter
+import androidx.media3.common.MediaEdition
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
+import androidx.media3.common.VideoSize
+import androidx.media3.mpvplayer.MpvAndroidOptions
+import androidx.media3.mpvplayer.MpvPlayer
+import androidx.media3.mpvplayer.MpvPlayerConfig
+import androidx.media3.mpvplayer.MpvSubtitleOptions
+import androidx.media3.mpvplayer.audio.MpvAudioFilter
+import androidx.media3.mpvplayer.video.MpvVideoEqualizer
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -31,20 +44,16 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
-import `is`.xyz.mpv.MPVLib
 import java.io.File
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 原生 MPV：[MPVLib] + SurfaceView/TextureView（PlayerView.setRender）。
- * 套件在 jniLibs；assets/mpv-libs 只留 Vulkan stub。
+ * Android 原生 MPV：Media3 [MpvPlayer] + PlatformView SurfaceView/TextureView。
+ * MethodChannel `kotv_mpv` / EventChannel `kotv_mpv/events` / viewType `kotv_mpv/surface`。
  */
-class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler,
-  MPVLib.EventObserver {
+class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
   private var channel: MethodChannel? = null
   private var events: EventChannel? = null
@@ -53,124 +62,92 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var surfaceHost: KotvMpvSurfaceHost? = null
 
   private val main = Handler(Looper.getMainLooper())
-  private val loadGen = AtomicInteger(0)
-  private val created = AtomicBoolean(false)
+  private var player: MpvPlayer? = null
+  private var playerListener: Player.Listener? = null
+
   private var playing = false
   private var buffering = false
-  private var paused = false
-  private var durationSec = 0.0
-  private var positionSec = 0.0
-  private var width = 0
-  private var height = 0
-  private var eof = false
-  /** 单集循环；重建 mpv 实例时要重新写入 loop-file。 */
   private var repeatOne = false
-  private var pendingUrl: String? = null
-  private var pendingHeaders: Map<String, String> = emptyMap()
-  private var surfaceReady = false
-  /** 同一 Surface 只更新尺寸（attachedSurface）。 */
-  private var attachedSurface: Surface? = null
-  private var surfaceAttached = false
-  private var appliedSurfaceSize: String? = null
+  private var livePlayback = false
   private var decodeMode = "auto"
   private var gpuNext = false
   private var vulkanEnabled = false
   private var conf = ""
-  /** 默认校验证书；坏 CA 盒子可关（设置 mpvTlsVerify=false）。 */
   private var tlsVerify = true
-  /** 音频直通（audio-spdif）。 */
   private var audioPassThrough = true
-  /** 点播磁盘缓存。 */
   private var diskCache = false
-  /** 杜比视界策略：0=AUTO 1=假定支持 2=假定不支持（与 exoDolbyVision 枚举一致）。 */
   private var dolbyVisionPolicy = 0
-  /** 当前是否允许杜比视界直出（android-dolby-vision-output=direct）。 */
-  private var dvDirect = false
-  /** 当前上下文是否以硬解直出建立（vo=mediacodec_embed）；null = 尚未建立。 */
-  private var createdDirect: Boolean? = null
-  /** mpv 正在用直出 vo（含杜比视界自动换成的直出）；此时画面比例由宿主摆放 SurfaceView。 */
-  private var directActive = false
-  /** 片源显示比例（video-params/aspect）。 */
-  private var videoAspect = 0.0
-  /** 已交给 mpv 的 OSD Surface（android-osd-wid）。 */
-  private var attachedOsdSurface: Surface? = null
-  private var appliedOsdSize: String? = null
-  /** 首选字幕语言（BCP-47，逗号分隔）→ mpv slang。 */
   private var preferredTextLangs = ""
-  private var livePlayback = false
-  /** 错误恢复后 seek 到该秒；&lt;0 表示不恢复。 */
-  private var retrySeekSec = -1.0
-  /** open(startAtMs)：loadfile 后、unpause 前 seek，避免 play 后再 seek。 */
-  private var pendingStartAtMs = 0L
-  private var loadedUrl: String = ""
-  private var loadedHeaders: Map<String, String> = emptyMap()
-  /** 排在 mpv 播放列表第 2 项的下一集；播到它时由 playlist-pos 切成当前集。mpv 事件线程也会读。 */
-  @Volatile private var queuedNext: QueuedNext? = null
-  /** 正在 playlist-next 切入排队项；挡住旧文件 end-file 误报 completed。 */
-  @Volatile private var pendingSeamlessId: String? = null
-  private var volume = 80.0
+  private var volumePct = 80.0
   private var rate = 1.0
-  /** 画面调色（mpv brightness/contrast/… ∈ [-100,100]）。 */
+  private var renderTexture = false
+  private var surfaceLayerEnabled = false
+  private var aspectMode = "default"
+  private var videoWidth = 0
+  private var videoHeight = 0
+  private var videoAspect = 0.0
+
+  private var currentUrl = ""
+  private var currentHeaders: Map<String, String> = emptyMap()
+  private var pendingStartAtMs = 0L
+
   private var eqBrightness = 0
   private var eqContrast = 0
   private var eqSaturation = 0
   private var eqGamma = 0
   private var eqHue = 0
-  /** 音频 af；空=不套。 */
+  private var eqSharpness = 0.0
   private var audioAf = ""
-  /** 画面 vf（锐度等）；空=清掉。 */
-  private var videoVf = ""
-  private var renderTexture = false
-  /** 点播挂 Surface；停播卸下（未点播不建，避免详情滑动重影）。 */
-  private var surfaceLayerEnabled = false
-  /** default|fill|zoom|16:9|4:3 — Surface 不吃 Flutter BoxFit，用 keepaspect/panscan/override。 */
-  private var aspectMode: String = "default"
-  /** ensurePlayer 时是否按直播初始化（磁盘缓存和 cache-pause 不同，模式变了须重建）。 */
-  private var createdAsLive: Boolean? = null
-  /** ensurePlayer 时写入的 tls-verify；变更须重建上下文。 */
-  private var createdTlsVerify: Boolean? = null
-  private var createdDiskCache: Boolean? = null
-  /** 最近一次写入的 audio-spdif；空=当前输出不直通。 */
-  private var appliedSpdif: String? = null
-  /** 本次 loadfile / 无缝切入的墙钟；用于识别「开播即 seek 末帧」假片尾。 */
-  private var loadWallMs = 0L
-  /** 正向播放中见到的最大 time-pos（seek 到末帧不计入）。 */
-  private var maxPlayedSec = 0.0
+
+  private var subtitleScale = 1.0
+  private var subtitlePos = 0.0
+  private var subtitleSecondaryPos = 10.0
+  private var subtitleForceStyle = false
+  private var subtitleUseSystemStyle = false
+  private var subtitleColor = "#FFFFFF"
+  private var subtitleBorderColor = "#000000"
+  private var subtitleBorderSize = 2.0
+  private var subtitleBgColor = "#00000000"
+  private var subtitleEdgeType = "outline"
+  private var subtitleTextOpacity = 100.0
+  private var subtitleBgOpacity = 100.0
+  private var subtitleEdgeOpacity = 100.0
+  private var subtitleShadowStrength = 50.0
+  private var subtitleOffsetMs = 0L
+  private var secondarySubtitleId = "no"
+
+  /** 配置指纹：变化时重建 [MpvPlayer]。 */
+  private var builtConfigKey: String? = null
+  private var boundSurfaceView: SurfaceView? = null
+  private var boundTextureView: TextureView? = null
+  private var boundOsdSurfaceView: SurfaceView? = null
 
   private val tick = object : Runnable {
     override fun run() {
-      if (!created.get()) return
+      val p = player ?: return
       try {
-        val pos = MPVLib.getPropertyDouble("time-pos") ?: positionSec
-        val dur = MPVLib.getPropertyDouble("duration") ?: durationSec
-        val pause = MPVLib.getPropertyBoolean("pause") ?: paused
-        val idle = MPVLib.getPropertyBoolean("idle-active") ?: false
-        val coreIdle = MPVLib.getPropertyBoolean("core-idle") ?: false
-        val seeking = MPVLib.getPropertyBoolean("seeking") ?: false
-        val pausedForCache = MPVLib.getPropertyBoolean("paused-for-cache") ?: false
-        positionSec = pos
-        durationSec = dur
-        paused = pause
-        playing = !pause && !idle && !coreIdle
-        if (playing && !seeking && !eof && pos > maxPlayedSec) {
-          maxPlayedSec = pos
-        }
-        buffering = seeking || pausedForCache || (!playing && !eof && pendingUrl == null && pos <= 0.05)
-        val bufSec = MPVLib.getPropertyDouble("demuxer-cache-duration") ?: 0.0
-        val speed = ((MPVLib.getPropertyDouble("cache-speed") ?: 0.0)).toLong().coerceAtLeast(0)
+        val pos = p.currentPosition.coerceAtLeast(0L)
+        val dur = p.duration.coerceAtLeast(0L)
+        val buf = p.bufferedPosition.coerceAtLeast(0L)
+        val isPlaying = p.isPlaying
+        val isBuf =
+          p.playbackState == Player.STATE_BUFFERING ||
+            (p.playbackState == Player.STATE_READY && !isPlaying && p.playWhenReady)
+        playing = isPlaying
+        buffering = isBuf
         emit(
           mapOf(
             "event" to "position",
-            "positionMs" to (pos * 1000).toLong(),
-            "durationMs" to (dur * 1000).toLong().coerceAtLeast(0),
-            "bufferedMs" to ((pos + bufSec) * 1000).toLong().coerceAtLeast(0),
-            "playing" to playing,
-            "buffering" to buffering,
-            "speedBps" to speed,
+            "positionMs" to pos,
+            "durationMs" to dur,
+            "bufferedMs" to buf,
+            "playing" to isPlaying,
+            "buffering" to isBuf,
+            "speedBps" to 0L,
           ),
         )
-      } catch (e: Throwable) {
-        Log.w(TAG, "tick", e)
+      } catch (t: Throwable) {
+        Log.w(TAG, "tick", t)
       }
       main.postDelayed(this, 300)
     }
@@ -188,11 +165,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       VIEW_TYPE,
       KotvMpvSurfaceFactory(this),
     )
-    Log.i(TAG, "KotvMpvPlugin attached")
+    Log.i(TAG, "KotvMpvPlugin attached (Media3 MpvPlayer)")
   }
 
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-    destroyPlayer()
+    releasePlayer()
     channel?.setMethodCallHandler(null)
     channel = null
     events?.setStreamHandler(null)
@@ -212,87 +189,51 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   internal fun attachSurfaceHost(host: KotvMpvSurfaceHost) {
     surfaceHost = host
     host.onSurface = { ready ->
-      surfaceReady = ready
       if (ready) {
-        tryAttachSurface()
-        maybeLoadPending()
-      } else if (created.get()) {
-        // 短暂丢 Surface（全屏改 LayoutParams）只 detach，保留 VO，勿 vo=null。
-        parkSurfaceTransient()
+        bindPlayerSurface()
+        syncOsdSurface()
+      } else {
+        unbindPlayerOutput(host, transient = true)
       }
     }
-    host.onSurfaceSize = { w, h -> if (surfaceHost === host) applySurfaceSize("${w}x$h") }
-    host.onOsdSurface = { if (surfaceHost === host) syncOsdSurface() }
-    host.setOsdLayer(osdWanted())
+    host.onSurfaceSize = { _, _ ->
+      if (surfaceHost === host) applyVideoFrame()
+    }
+    host.onOsdSurface = {
+      if (surfaceHost === host) syncOsdSurface()
+    }
+    host.setOsdLayer(!renderTexture)
     if (surfaceLayerEnabled) {
       host.setRender(renderTexture)
-      if (host.currentSurface() != null) {
-        surfaceReady = true
-        tryAttachSurface()
-        maybeLoadPending()
+      if (host.surfaceView != null || host.textureView != null) {
+        bindPlayerSurface()
+        syncOsdSurface()
       }
     } else {
       host.clearVideoLayer()
-      surfaceReady = false
     }
   }
 
   internal fun detachSurfaceHost(host: KotvMpvSurfaceHost) {
     if (surfaceHost === host) {
+      unbindPlayerOutput(host, transient = false)
+      host.release()
       surfaceHost = null
-      surfaceReady = false
-      // PlatformView 真正卸树：clearVideoOutput，vo=null。
-      parkSurfaceTerminal()
     }
-  }
-
-  /** 短暂丢 Surface（全屏改布局等）：只卸 Surface，保留 vo。 */
-  private fun parkSurfaceTransient() {
-    detachOsdSurface()
-    if (!created.get() || !surfaceAttached) {
-      attachedSurface = null
-      surfaceAttached = false
-      return
-    }
-    try {
-      MPVLib.detachSurface()
-    } catch (_: Throwable) {
-    }
-    attachedSurface = null
-    surfaceAttached = false
-    appliedSurfaceSize = null
-  }
-
-  /** PlatformView 卸树：vo=null 并卸 Surface。 */
-  private fun parkSurfaceTerminal() {
-    detachOsdSurface()
-    if (!created.get()) {
-      attachedSurface = null
-      surfaceAttached = false
-      appliedSurfaceSize = null
-      return
-    }
-    try {
-      MPVLib.setPropertyString("vo", "null")
-      MPVLib.setPropertyString("force-window", "no")
-      MPVLib.detachSurface()
-    } catch (_: Throwable) {
-    }
-    attachedSurface = null
-    surfaceAttached = false
-    appliedSurfaceSize = null
   }
 
   override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
     when (call.method) {
       "isVulkanAvailable" -> {
-        // 设备 Vulkan≥1.2：设置页是否露出开关。
         val ctx = appContext
-        result.success(ctx != null && MPVLib.isDeviceVulkanCapable(ctx))
+        result.success(
+          ctx != null &&
+            KotvMpvNativeBootstrap.isDeviceVulkanCapable(ctx) &&
+            !KotvMpvNativeBootstrap.isVulkanStubLoaded(),
+        )
       }
       "create" -> {
         ingestPlayerArgs(call)
-        // 直播须在 ensurePlayer 前写入，磁盘缓存和 cache-pause 按这次会话来。
         call.argument<Boolean>("live")?.let { livePlayback = it }
         call.argument<Boolean>("repeatOne")?.let { repeatOne = it }
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
@@ -307,15 +248,19 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             }
             ensurePlayer()
             applyRepeatOne()
-            result.success(mapOf("ok" to true, "ready" to created.get()))
+            result.success(mapOf("ok" to true, "ready" to (player != null)))
           } catch (e: Throwable) {
-            emitLoadFailure(e)
+            emit(mapOf("event" to "error", "message" to (e.message ?: "create failed")))
             result.error("CREATE_FAILED", e.message, null)
           }
         }
       }
       "open" -> {
-        val url = call.argument<String>("url") ?: ""
+        val url = call.argument<String>("url")?.trim().orEmpty()
+        if (url.isEmpty()) {
+          result.error("OPEN_FAILED", "empty url", null)
+          return
+        }
         val headers = stringMapArg(call, "headers")
         livePlayback = call.argument<Boolean>("live") == true
         ingestPlayerArgs(call)
@@ -324,41 +269,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           renderTexture = resolveRenderTexture(it)
         }
         pendingStartAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L } ?: 0L
-        val props = stringMapArg(call, "props")
         main.post {
           try {
             surfaceHost?.let { host ->
               if (surfaceLayerEnabled) host.setRender(renderTexture) else host.clearVideoLayer()
             }
-            // 会话内复用 libmpv 上下文；仅 loadfile replace。
-            ensurePlayer()
-            applyRuntimeOpts(props)
-            applyGpuApiIfNeeded()
-            applyDolbyVisionOptions()
-            applyPreferredSubtitleLangs()
-            applyEqualizer()
-            applyAspectMode()
-            eof = false
-            buffering = true
-            playing = false
-            positionSec = 0.0
-            durationSec = 0.0
-            width = 0
-            height = 0
-            maxPlayedSec = 0.0
-            loadWallMs = SystemClock.elapsedRealtime()
-            // 作废上一集还没落地的失败重试。
-            loadGen.incrementAndGet()
-            retrySeekSec = -1.0
-            pendingUrl = url
-            pendingHeaders = headers
-            loadedUrl = ""
-            loadedHeaders = emptyMap()
-            // 有 Surface 再 loadfile，避免 android VO「Missing surface pointer」有声无画。
-            maybeLoadPending()
+            openInternal(url, headers, pendingStartAtMs)
             result.success(null)
           } catch (e: Throwable) {
-            emitLoadFailure(e)
+            emit(mapOf("event" to "error", "message" to (e.message ?: "open failed")))
             result.error("OPEN_FAILED", e.message, null)
           }
         }
@@ -366,12 +285,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "play" -> {
         main.post {
           try {
-            if (!created.get()) {
-              result.success(null)
-              return@post
-            }
-            MPVLib.setPropertyBoolean("pause", false)
-            paused = false
+            player?.play()
             playing = true
             result.success(null)
           } catch (e: Throwable) {
@@ -382,12 +296,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "pause" -> {
         main.post {
           try {
-            if (!created.get()) {
-              result.success(null)
-              return@post
-            }
-            MPVLib.setPropertyBoolean("pause", true)
-            paused = true
+            player?.pause()
             playing = false
             result.success(null)
           } catch (e: Throwable) {
@@ -395,48 +304,16 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
-      "queueNext" -> {
-        val next =
-          QueuedNext(
-            id = call.argument<String>("id")?.trim().orEmpty(),
-            url = call.argument<String>("url")?.trim().orEmpty(),
-            headers = stringMapArg(call, "headers"),
-            startAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L } ?: 0L,
-          )
-        main.post { result.success(queueNext(next)) }
-      }
-      "clearNext" -> {
-        main.post {
-          clearQueuedNext()
-          result.success(null)
-        }
-      }
-      "skipToNext" -> {
-        main.post {
-          val next = queuedNext
-          result.success(next != null && skipToQueued(next))
-        }
-      }
       "stop" -> {
         main.post {
           try {
-            pendingUrl = null
-            // 作废进行中的 loadfile。换集只卸文件，上下文留到 dispose 或模式变化再拆。
-            loadGen.incrementAndGet()
-            if (created.get()) {
-              MPVLib.command(arrayOf("stop"))
-            }
+            player?.stop()
+            player?.clearMediaItems()
             playing = false
             buffering = false
-            paused = true
-            eof = false
-            width = 0
-            height = 0
-            positionSec = 0.0
-            durationSec = 0.0
-            loadedUrl = ""
-            queuedNext = null
-            pendingSeamlessId = null
+            currentUrl = ""
+            videoWidth = 0
+            videoHeight = 0
             result.success(null)
           } catch (e: Throwable) {
             result.error("STOP_FAILED", e.message, null)
@@ -444,12 +321,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
       "seek" -> {
-        val ms = (call.argument<Number>("positionMs") ?: 0).toLong()
+        val ms = (call.argument<Number>("positionMs") ?: 0).toLong().coerceAtLeast(0L)
         main.post {
           try {
-            if (created.get()) {
-              MPVLib.command(arrayOf("seek", (ms / 1000.0).toString(), "absolute"))
-            }
+            player?.seekTo(ms)
             result.success(null)
           } catch (e: Throwable) {
             result.error("SEEK_FAILED", e.message, null)
@@ -457,12 +332,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
       "setVolume" -> {
-        volume = (call.argument<Number>("volume") ?: 80).toDouble().coerceIn(0.0, 100.0)
+        val raw = (call.argument<Number>("volume") ?: 80).toDouble()
+        volumePct = raw.coerceIn(0.0, 100.0)
         main.post {
           try {
-            if (created.get()) {
-              MPVLib.setPropertyDouble("volume", volume)
-            }
+            player?.volume = (volumePct / 100.0).toFloat().coerceIn(0f, 1f)
             result.success(null)
           } catch (e: Throwable) {
             result.error("VOLUME_FAILED", e.message, null)
@@ -473,9 +347,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         rate = (call.argument<Number>("rate") ?: 1).toDouble().coerceIn(0.25, 4.0)
         main.post {
           try {
-            if (created.get()) {
-              MPVLib.setPropertyDouble("speed", rate)
-            }
+            player?.playbackParameters = PlaybackParameters(rate.toFloat())
             result.success(null)
           } catch (e: Throwable) {
             result.error("RATE_FAILED", e.message, null)
@@ -495,14 +367,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "setDecode" -> {
         decodeMode = call.argument<String>("decode") ?: decodeMode
-        val props = stringMapArg(call, "props")
         main.post {
           try {
-            if (created.get() && createdDirect != wantDirectOutput()) {
-              ensurePlayerAndReload(props)
-            } else if (created.get()) {
-              MPVLib.setPropertyString("hwdec", playerHwdec(decodeMode))
-            }
+            player?.setDecode(resolveDecodeMode(decodeMode))
             result.success(null)
           } catch (e: Throwable) {
             result.error("DECODE_FAILED", e.message, null)
@@ -514,14 +381,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         main.post {
           try {
             renderTexture = resolveRenderTexture(mode)
+            boundSurfaceView = null
+            boundTextureView = null
             if (surfaceLayerEnabled) {
               surfaceHost?.setRender(renderTexture)
-            }
-            // 直出只在 Surface 方式下可用，换渲染方式后重新判断。
-            if (created.get() && createdDirect != wantDirectOutput()) {
-              ensurePlayerAndReload()
-            } else if (created.get()) {
-              applyDolbyVisionOptions()
+              surfaceHost?.setOsdLayer(!renderTexture)
+              bindPlayerSurface()
+              syncOsdSurface()
             }
             result.success(
               mapOf(
@@ -549,10 +415,19 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "setOpts" -> {
         ingestPlayerArgs(call)
         ingestEqualizerArgs(call)
-        val props = stringMapArg(call, "props")
         main.post {
           try {
-            ensurePlayerAndReload(props)
+            val url = currentUrl
+            val headers = currentHeaders
+            val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+            ensurePlayer(forceRebuild = true)
+            if (url.isNotBlank()) {
+              openInternal(url, headers, pos)
+            } else {
+              applyEqualizer()
+              applySubtitleStyle()
+              applySubtitleOffset()
+            }
             result.success(null)
           } catch (e: Throwable) {
             result.error("OPTS_FAILED", e.message, null)
@@ -570,24 +445,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
-      "setProperty" -> {
-        val key = call.argument<String>("key") ?: ""
-        val value = call.argument<String>("value") ?: ""
-        main.post {
-          try {
-            if (created.get() && key.isNotEmpty()) MPVLib.setPropertyString(key, value)
-            result.success(null)
-          } catch (e: Throwable) {
-            result.error("PROP_FAILED", e.message, null)
-          }
-        }
-      }
       "setAspect" -> {
         val mode = call.argument<String>("mode")?.trim().orEmpty()
         main.post {
           try {
             aspectMode = normalizeAspectMode(mode)
-            applyAspectMode()
             applyVideoFrame()
             result.success(true)
           } catch (e: Throwable) {
@@ -599,13 +461,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val id = call.argument<String>("id") ?: ""
         main.post {
           try {
-            if (created.get()) {
-              if (id.isNotEmpty() && id != "auto") {
-                MPVLib.command(arrayOf("set", "aid", id))
-              } else {
-                MPVLib.command(arrayOf("set", "aid", "auto"))
-              }
-            }
+            selectTrackById(C.TRACK_TYPE_AUDIO, id)
             result.success(null)
           } catch (e: Throwable) {
             result.error("AUDIO_FAILED", e.message, null)
@@ -615,9 +471,185 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "getAudioTracks" -> {
         main.post {
           try {
-            result.success(buildAudioTracksJson())
+            result.success(buildTracksJson(C.TRACK_TYPE_AUDIO))
           } catch (e: Throwable) {
             result.error("TRACKS_FAILED", e.message, null)
+          }
+        }
+      }
+      "getVideoTracks" -> {
+        main.post {
+          try {
+            result.success(buildTracksJson(C.TRACK_TYPE_VIDEO))
+          } catch (e: Throwable) {
+            result.error("TRACKS_FAILED", e.message, null)
+          }
+        }
+      }
+      "getSubtitleTracks" -> {
+        main.post {
+          try {
+            result.success(buildTracksJson(C.TRACK_TYPE_TEXT))
+          } catch (e: Throwable) {
+            result.error("TRACKS_FAILED", e.message, null)
+          }
+        }
+      }
+      "setVideoTrack" -> {
+        val id = call.argument<String>("id") ?: ""
+        main.post {
+          try {
+            selectTrackById(C.TRACK_TYPE_VIDEO, id)
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("VIDEO_FAILED", e.message, null)
+          }
+        }
+      }
+      "setSubtitleTrack" -> {
+        val id = call.argument<String>("id") ?: ""
+        main.post {
+          try {
+            selectSubtitleTrackById(id)
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("SUB_FAILED", e.message, null)
+          }
+        }
+      }
+      "setSecondarySubtitleTrack" -> {
+        val id = call.argument<String>("id") ?: "no"
+        secondarySubtitleId = id
+        main.post {
+          try {
+            applySubtitleStyle()
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("SECONDARY_SUB_FAILED", e.message, null)
+          }
+        }
+      }
+      "setSubtitleStyle" -> {
+        call.argument<Number>("scale")?.toDouble()?.let {
+          subtitleScale = it.coerceIn(0.5, 2.0)
+        }
+        call.argument<Number>("pos")?.toDouble()?.let { subtitlePos = it }
+        call.argument<Number>("secondaryPos")?.toDouble()?.let {
+          subtitleSecondaryPos = it.coerceIn(0.0, 150.0)
+        }
+        call.argument<Boolean>("forceStyle")?.let { subtitleForceStyle = it }
+        call.argument<Boolean>("useSystemStyle")?.let { subtitleUseSystemStyle = it }
+        call.argument<String>("color")?.trim()?.takeIf { it.isNotEmpty() }?.let { subtitleColor = it }
+        call.argument<String>("borderColor")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+          subtitleBorderColor = it
+        }
+        call.argument<Number>("borderSize")?.toDouble()?.let {
+          subtitleBorderSize = it.coerceIn(0.0, 8.0)
+        }
+        call.argument<String>("bgColor")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+          subtitleBgColor = it
+        }
+        call.argument<String>("edgeType")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+          subtitleEdgeType = it.lowercase()
+        }
+        call.argument<Number>("textOpacity")?.toDouble()?.let {
+          subtitleTextOpacity = it.coerceIn(0.0, 100.0)
+        }
+        call.argument<Number>("bgOpacity")?.toDouble()?.let {
+          subtitleBgOpacity = it.coerceIn(0.0, 100.0)
+        }
+        call.argument<Number>("edgeOpacity")?.toDouble()?.let {
+          subtitleEdgeOpacity = it.coerceIn(0.0, 100.0)
+        }
+        call.argument<Number>("shadowStrength")?.toDouble()?.let {
+          subtitleShadowStrength = it.coerceIn(0.0, 100.0)
+        }
+        main.post {
+          try {
+            applySubtitleStyle()
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("SUB_STYLE_FAILED", e.message, null)
+          }
+        }
+      }
+      "setSubtitleOffsetMs" -> {
+        subtitleOffsetMs = (call.argument<Number>("ms")?.toLong() ?: 0L).coerceIn(-300_000L, 300_000L)
+        main.post {
+          try {
+            applySubtitleOffset()
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("SUB_OFFSET_FAILED", e.message, null)
+          }
+        }
+      }
+      "discTitleCount" -> {
+        main.post {
+          try {
+            result.success(player?.currentMediaEditions?.size ?: 0)
+          } catch (e: Throwable) {
+            result.error("DISC_FAILED", e.message, null)
+          }
+        }
+      }
+      "discChapterCount" -> {
+        main.post {
+          try {
+            result.success(player?.currentMediaChapters?.size ?: 0)
+          } catch (e: Throwable) {
+            result.error("DISC_FAILED", e.message, null)
+          }
+        }
+      }
+      "setDiscTitle" -> {
+        val index = call.argument<Number>("index")?.toInt() ?: -1
+        main.post {
+          try {
+            val editions = player?.currentMediaEditions.orEmpty()
+            val edition = editions.firstOrNull { it.index == index }
+            if (edition != null) {
+              player?.selectEdition(edition)
+            }
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("DISC_FAILED", e.message, null)
+          }
+        }
+      }
+      "setDiscChapter" -> {
+        val index = call.argument<Number>("index")?.toInt() ?: -1
+        main.post {
+          try {
+            val chapters = player?.currentMediaChapters.orEmpty()
+            val chapter = chapters.firstOrNull { it.index == index }
+            if (chapter != null) {
+              player?.selectChapter(chapter)
+            }
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("DISC_FAILED", e.message, null)
+          }
+        }
+      }
+      "addSubtitle" -> {
+        val path = call.argument<String>("path")?.trim().orEmpty()
+        val title = call.argument<String>("title")?.trim().orEmpty()
+        main.post {
+          try {
+            val p = player
+            if (p == null || path.isEmpty()) {
+              result.error("SUB_FAILED", "empty path or not ready", null)
+              return@post
+            }
+            val uri = if (path.startsWith("/")) Uri.fromFile(File(path)) else Uri.parse(path)
+            val builder = MediaItem.SubtitleConfiguration.Builder(uri)
+            if (title.isNotEmpty()) builder.setLabel(title)
+            mimeFromPath(path)?.let { builder.setMimeType(it) }
+            val ok = p.addSubtitle(builder.build())
+            result.success(ok)
+          } catch (e: Throwable) {
+            result.error("SUB_FAILED", e.message, null)
           }
         }
       }
@@ -630,268 +662,17 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
-      "getVideoTracks" -> {
-        main.post {
-          try {
-            result.success(buildVideoTracksJson())
-          } catch (e: Throwable) {
-            result.error("TRACKS_FAILED", e.message, null)
-          }
-        }
-      }
-      "getSubtitleTracks" -> {
-        main.post {
-          try {
-            result.success(buildSubtitleTracksJson())
-          } catch (e: Throwable) {
-            result.error("TRACKS_FAILED", e.message, null)
-          }
-        }
-      }
-      "setVideoTrack" -> {
-        val id = call.argument<String>("id") ?: ""
-        main.post {
-          try {
-            if (created.get()) {
-              if (id.isNotEmpty() && id != "auto") {
-                MPVLib.command(arrayOf("set", "vid", id))
-              } else {
-                MPVLib.command(arrayOf("set", "vid", "auto"))
-              }
-            }
-            result.success(null)
-          } catch (e: Throwable) {
-            result.error("VIDEO_FAILED", e.message, null)
-          }
-        }
-      }
-      "setSubtitleTrack" -> {
-        val id = call.argument<String>("id") ?: ""
-        main.post {
-          try {
-            if (created.get()) {
-              when {
-                id.isEmpty() || id == "no" || id == "off" -> MPVLib.command(arrayOf("set", "sid", "no"))
-                id == "auto" -> MPVLib.command(arrayOf("set", "sid", "auto"))
-                else -> MPVLib.command(arrayOf("set", "sid", id))
-              }
-            }
-            result.success(null)
-          } catch (e: Throwable) {
-            result.error("SUB_FAILED", e.message, null)
-          }
-        }
-      }
-      "setSecondarySubtitleTrack" -> {
-        val id = call.argument<String>("id") ?: "no"
-        main.post {
-          try {
-            if (created.get()) {
-              when {
-                id.isEmpty() || id == "no" || id == "off" ->
-                  MPVLib.command(arrayOf("set", "secondary-sid", "no"))
-                id == "auto" ->
-                  MPVLib.command(arrayOf("set", "secondary-sid", "auto"))
-                else -> MPVLib.command(arrayOf("set", "secondary-sid", id))
-              }
-            }
-            result.success(null)
-          } catch (e: Throwable) {
-            result.error("SECONDARY_SUB_FAILED", e.message, null)
-          }
-        }
-      }
-      "setSubtitleStyle" -> {
-        val scale = call.argument<Number>("scale")?.toDouble()
-        val pos = call.argument<Number>("pos")?.toDouble()
-        val secondaryPos = call.argument<Number>("secondaryPos")?.toDouble()
-        val forceStyle = call.argument<Boolean>("forceStyle") == true
-        val useSystemStyle = call.argument<Boolean>("useSystemStyle") == true
-        val color = call.argument<String>("color")?.trim().orEmpty()
-        val borderColor = call.argument<String>("borderColor")?.trim().orEmpty()
-        val borderSize = call.argument<Number>("borderSize")?.toDouble()
-        val edgeType = call.argument<String>("edgeType")?.trim()?.lowercase().orEmpty()
-        val textOpacity = call.argument<Number>("textOpacity")?.toDouble()
-        val bgOpacity = call.argument<Number>("bgOpacity")?.toDouble()
-        val edgeOpacity = call.argument<Number>("edgeOpacity")?.toDouble()
-        val shadowStrength = call.argument<Number>("shadowStrength")?.toDouble()
-        val fontName = call.argument<String>("font")?.trim()?.lowercase().orEmpty()
-        val fontPath = call.argument<String>("fontPath")?.trim().orEmpty()
-        main.post {
-          try {
-            if (created.get()) {
-              if (scale != null) {
-                MPVLib.setPropertyDouble("sub-scale", scale.coerceIn(0.5, 2.0))
-              }
-              if (pos != null) {
-                MPVLib.setPropertyDouble("sub-pos", (100.0 - pos).coerceIn(0.0, 150.0))
-              }
-              if (secondaryPos != null) {
-                MPVLib.setPropertyDouble("secondary-sub-pos", secondaryPos.coerceIn(0.0, 150.0))
-              }
-              val applyLooks = forceStyle || useSystemStyle
-              if (applyLooks && color.isNotEmpty()) {
-                MPVLib.setPropertyString("sub-color", withOpacity(color, textOpacity))
-              }
-              if (applyLooks && borderColor.isNotEmpty()) {
-                MPVLib.setPropertyString("sub-border-color", withOpacity(borderColor, edgeOpacity))
-              }
-              if (applyLooks && borderSize != null) {
-                MPVLib.setPropertyDouble("sub-border-size", borderSize.coerceIn(0.0, 8.0))
-              }
-              val bgColor = call.argument<String>("bgColor")?.trim().orEmpty()
-              if (applyLooks && bgColor.isNotEmpty()) {
-                MPVLib.setPropertyString("sub-back-color", withOpacity(bgColor, bgOpacity))
-              }
-              if (applyLooks) {
-                val strength = ((shadowStrength ?: 50.0).coerceIn(0.0, 100.0) / 50.0).coerceIn(0.0, 2.5)
-                when (edgeType) {
-                  "none" -> {
-                    MPVLib.setPropertyDouble("sub-border-size", 0.0)
-                    MPVLib.setPropertyDouble("sub-shadow-offset", 0.0)
-                  }
-                  "shadow" -> MPVLib.setPropertyDouble("sub-shadow-offset", 2.0 * strength)
-                  "raised", "depressed" -> MPVLib.setPropertyDouble("sub-shadow-offset", 1.5 * strength)
-                  "outline" -> {
-                    if (borderSize == null) {
-                      MPVLib.setPropertyDouble("sub-border-size", 2.0)
-                    }
-                    MPVLib.setPropertyDouble("sub-shadow-offset", 0.0)
-                  }
-                }
-                if (fontPath.isNotEmpty()) {
-                  val fontFile = java.io.File(fontPath)
-                  val parent = fontFile.parent
-                  if (!parent.isNullOrBlank()) {
-                    MPVLib.setPropertyString("sub-fonts-dir", parent)
-                  }
-                  // sub-font 按族名匹配；读不出 name 表再退回文件名。
-                  val family = KotvFontFile.familyName(fontFile) ?: fontFile.nameWithoutExtension
-                  if (family.isNotBlank()) {
-                    MPVLib.setPropertyString("sub-font", family)
-                  }
-                } else if (fontName.isNotEmpty() && fontName != "default") {
-                  val mpvFont =
-                    when (fontName) {
-                      "sans", "sans-serif" -> "sans-serif"
-                      "serif" -> "serif"
-                      "mono", "monospace" -> "monospace"
-                      else -> fontName
-                    }
-                  MPVLib.setPropertyString("sub-font", mpvFont)
-                }
-              }
-              MPVLib.setPropertyString(
-                "secondary-sub-ass-override",
-                if (forceStyle) "force" else "yes",
-              )
-              MPVLib.setPropertyString("sub-ass-override", if (forceStyle) "force" else "scale")
-            }
-            result.success(null)
-          } catch (e: Throwable) {
-            result.error("SUB_STYLE_FAILED", e.message, null)
-          }
-        }
-      }
-      "setSubtitleOffsetMs" -> {
-        val ms = call.argument<Number>("ms")?.toDouble() ?: 0.0
-        main.post {
-          try {
-            if (created.get()) {
-              MPVLib.setPropertyDouble("sub-delay", (ms / 1000.0).coerceIn(-300.0, 300.0))
-            }
-            result.success(null)
-          } catch (e: Throwable) {
-            result.error("SUB_OFFSET_FAILED", e.message, null)
-          }
-        }
-      }
-      "discTitleCount" -> {
-        main.post {
-          try {
-            val n = if (created.get()) (MPVLib.getPropertyInt("disc-titles") ?: 0) else 0
-            result.success(n)
-          } catch (e: Throwable) {
-            result.error("DISC_FAILED", e.message, null)
-          }
-        }
-      }
-      "discChapterCount" -> {
-        main.post {
-          try {
-            val n = if (created.get()) (MPVLib.getPropertyInt("chapters") ?: 0) else 0
-            result.success(n)
-          } catch (e: Throwable) {
-            result.error("DISC_FAILED", e.message, null)
-          }
-        }
-      }
-      "setDiscTitle" -> {
-        val index = call.argument<Number>("index")?.toInt() ?: 0
-        main.post {
-          try {
-            if (created.get() && index >= 1) {
-              MPVLib.setPropertyInt("disc-title", index)
-            }
-            result.success(null)
-          } catch (e: Throwable) {
-            result.error("DISC_FAILED", e.message, null)
-          }
-        }
-      }
-      "setDiscChapter" -> {
-        val index = call.argument<Number>("index")?.toInt() ?: -1
-        main.post {
-          try {
-            if (created.get() && index >= 0) {
-              MPVLib.setPropertyInt("chapter", index)
-            }
-            result.success(null)
-          } catch (e: Throwable) {
-            result.error("DISC_FAILED", e.message, null)
-          }
-        }
-      }
-      "openDiscMenu" -> {
-        main.post {
-          try {
-            if (created.get()) {
-              MPVLib.command(arrayOf("discnav", "menu"))
-            }
-            result.success(null)
-          } catch (e: Throwable) {
-            result.error("DISC_FAILED", e.message, null)
-          }
-        }
-      }
-      "addSubtitle" -> {
-        val path = call.argument<String>("path")?.trim().orEmpty()
-        val title = call.argument<String>("title")?.trim().orEmpty()
-        val select = call.argument<Boolean>("select") != false
-        main.post {
-          try {
-            if (!created.get() || path.isEmpty()) {
-              result.error("SUB_FAILED", "empty path or not ready", null)
-              return@post
-            }
-            val flags = if (select) "select" else "auto"
-            if (title.isNotEmpty()) {
-              MPVLib.command(arrayOf("sub-add", path, flags, title))
-            } else {
-              MPVLib.command(arrayOf("sub-add", path, flags))
-            }
-            result.success(true)
-          } catch (e: Throwable) {
-            result.error("SUB_FAILED", e.message, null)
-          }
-        }
-      }
       "retryVideo" -> {
         main.post {
           try {
-            if (created.get()) {
-              MPVLib.command(arrayOf("playlist-play-index", "current"))
-              MPVLib.setPropertyBoolean("pause", false)
+            val p = player
+            val url = currentUrl
+            if (p != null && url.isNotBlank()) {
+              val pos = p.currentPosition.coerceAtLeast(0L)
+              openInternal(url, currentHeaders, pos)
+            } else {
+              p?.prepare()
+              p?.play()
             }
             result.success(null)
           } catch (e: Throwable) {
@@ -901,7 +682,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "dispose" -> {
         main.post {
-          destroyPlayer()
+          releasePlayer()
           result.success(null)
         }
       }
@@ -909,450 +690,113 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /**
-   * 冷选项或输出方式变了就重建上下文（tls、磁盘缓存、直出等在 init 写入），
-   * 重建后若有已加载的地址就按进度重载。
-   */
-  private fun ensurePlayerAndReload(props: Map<String, String> = emptyMap()) {
-    val url = loadedUrl
-    val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
-    val pos = positionSec
-    val rebuilt = ensurePlayer()
-    applyRuntimeOpts(props)
-    applyGpuApiIfNeeded()
-    applyDolbyVisionOptions()
-    applyPreferredSubtitleLangs()
+  private fun openInternal(url: String, headers: Map<String, String>, startPositionMs: Long) {
+    currentUrl = url
+    currentHeaders = headers
+    ensurePlayer()
+    val p = player ?: error("mpv player missing")
+    applyTrackSelectionPrefs()
     applyEqualizer()
-    applySpdif()
-    if (rebuilt && url.isNotBlank()) {
-      retrySeekSec = pos.coerceAtLeast(0.0)
-      // 与 open 一致：先挂 Surface 再 loadfile，避免有声无画。
-      tryAttachSurface()
-      if (surfaceLayerEnabled && !surfaceAttached) {
-        pendingUrl = url
-        pendingHeaders = LinkedHashMap(headers)
-        maybeLoadPending()
-      } else {
-        startLoad(url, headers)
-      }
+    applySubtitleStyle()
+    applySubtitleOffset()
+    applyRepeatOne()
+    p.volume = (volumePct / 100.0).toFloat().coerceIn(0f, 1f)
+    p.playbackParameters = PlaybackParameters(rate.toFloat())
+    bindPlayerSurface()
+    syncOsdSurface()
+    val mediaItem = buildMediaItem(url, headers)
+    if (startPositionMs > 0L) {
+      p.setMediaItem(mediaItem, startPositionMs)
+    } else {
+      p.setMediaItem(mediaItem, true)
     }
+    p.prepare()
+    p.play()
+    main.removeCallbacks(tick)
+    main.post(tick)
   }
 
-  /** @return true 若因冷选项/模式变更销毁并新建了上下文。 */
-  private fun ensurePlayer(): Boolean {
-    val ctx = appContext ?: throw IllegalStateException("no context")
-    if (!MPVLib.ensureLoaded(ctx)) {
-      val err = MPVLib.getLoadError()
-      val detail = err?.message ?: "unknown"
-      val hint =
-        if (detail.contains("vk", ignoreCase = true) || detail.contains("Vulkan", ignoreCase = true)) {
-          "Vulkan/load failed (missing Vulkan 1.1 symbols on this device). $detail"
-        } else {
-          "MPV native load failed: $detail"
-        }
-      throw IllegalStateException(hint, err)
+  private fun ensurePlayer(forceRebuild: Boolean = false) {
+    val ctx = appContext ?: error("no context")
+    if (!MpvPlayer.isAvailable()) {
+      throw IllegalStateException("MpvPlayer native libraries unavailable")
     }
-    var rebuilt = false
-    // 点播↔直播 demuxer/cache 选项在 init 时写入；模式变了必须重建上下文。
-    if (created.get() && createdAsLive != null && createdAsLive != livePlayback) {
-      Log.i(TAG, "recreate MPV context: live $createdAsLive -> $livePlayback")
-      destroyPlayer()
-      rebuilt = true
-    }
-    if (created.get() && createdTlsVerify != null && createdTlsVerify != tlsVerify) {
-      Log.i(TAG, "recreate MPV context: tlsVerify $createdTlsVerify -> $tlsVerify")
-      destroyPlayer()
-      rebuilt = true
-    }
-    if (created.get() && createdDiskCache != null && createdDiskCache != diskCache) {
-      Log.i(TAG, "recreate MPV context: diskCache $createdDiskCache -> $diskCache")
-      destroyPlayer()
-      rebuilt = true
-    }
-    if (created.get() && createdDirect != null && createdDirect != wantDirectOutput()) {
-      Log.i(TAG, "recreate MPV context: direct output $createdDirect -> ${wantDirectOutput()}")
-      destroyPlayer()
-      rebuilt = true
-    }
-    if (created.get()) return rebuilt
-    synchronized(this) {
-      if (created.get()) return rebuilt
-      val configDir = File(ctx.filesDir, "mpv").apply { mkdirs() }
-      val cacheDir = File(ctx.cacheDir, "mpv").apply { mkdirs() }
-      // libass fontconfig 后端从 config-dir/fonts.conf 找系统字体目录与通用族名 alias。
-      KotvFontConfig.prepare(configDir, cacheDir)
-      if (!MPVLib.tryCreate(ctx)) {
-        // 已有上下文：先销毁再试一次
-        MPVLib.destroyCreatedContext()
-        if (!MPVLib.tryCreate(ctx)) {
-          throw IllegalStateException("MPV create failed")
-        }
-      }
-      MPVLib.setOptionString("config", "yes")
-      MPVLib.setOptionString("config-dir", configDir.absolutePath)
-      MPVLib.setOptionString("gpu-shader-cache-dir", cacheDir.absolutePath)
-      MPVLib.setOptionString("icc-cache-dir", cacheDir.absolutePath)
-      val direct = wantDirectOutput()
-      createdDirect = direct
-      MPVLib.setOptionString("hwdec", playerHwdec(decodeMode))
-      if (direct) {
-        // 直出只能显示 MediaCodec 解出的帧：所有编码都先交给 MediaCodec。
-        MPVLib.setOptionString("hwdec-codecs", "all")
-      }
-      if (isRockchip()) {
-        MPVLib.setOptionString("vd-lavc-dr", "no")
-      }
-      MPVLib.setOptionString("vo", videoOutput())
-      applyGpuApiOptions()
-      // 默认 cacert 校验；坏 CA 可关。
-      applyTlsOptions(ctx)
-      // https→http、以及 HLS 分片伪装成 .png/.jpg：须放行扩展名。
-      // 不设 protocol_whitelist，避免挡掉 RTSP/RTMP/RTP。
-      // FFmpeg 9 默认 extension_picky=1，只认常见后缀；点播常首片 .ts、后面 .png（内容仍是 TS）。
-      MPVLib.setOptionString("demuxer-lavf-o", LAVF_DEMUXER_O)
-      // 不按后缀当播放列表/图片（.m3u8 可能是 FLV，.png 可能是 TS）；lavf 按内容探测。
-      MPVLib.setOptionString("playlist-exts", "")
-      MPVLib.setOptionString("image-exts", "")
-      // ytdl_hook aborts load on devices without youtube-dl; disable.
-      MPVLib.setOptionString("ytdl", "no")
-      if (livePlayback) {
-        MPVLib.setOptionString("cache-pause", "no")
-      }
-      // Do not force gpu-api=vulkan on API 25: GLES path for picture;
-      // libvulkan.so is only to satisfy libmpv DT_NEEDED.
-      MPVLib.setOptionString("force-window", "no")
-      MPVLib.setOptionString("idle", "yes")
-      MPVLib.setOptionString("keep-open", "yes")
-      // 预加载下一集：本集将完时提前打开排在后面的一项。
-      MPVLib.setOptionString("prefetch-playlist", "yes")
-      MPVLib.setOptionString("loop-file", loopFile())
-      if (!livePlayback) {
-        if (diskCache) {
-          val dir = File(ctx.cacheDir, "mpv-cache").apply { mkdirs() }
-          MPVLib.setOptionString("cache-on-disk", "yes")
-          MPVLib.setOptionString("demuxer-cache-dir", dir.absolutePath)
-        } else {
-          MPVLib.setOptionString("cache-on-disk", "no")
-        }
-      }
-      val spdif = spdifCodecs(ctx)
-      MPVLib.setOptionString("audio-spdif", spdif)
-      appliedSpdif = spdif
-      Log.i(TAG, "audio-spdif=$spdif")
-      applyDolbyVisionOptions()
-      applyPreferredSubtitleLangs()
-      // 字幕基础：内嵌字体 + ASS 按比例缩放（细项仍可走 mpv.conf / setSubtitleStyle）。
-      MPVLib.setOptionString("embeddedfonts", "yes")
-      MPVLib.setOptionString("sub-ass-override", "scale")
-      MPVLib.setOptionString("sub-scale", "1.0")
-      MPVLib.setOptionString("sub-scale-signs", "yes")
-      MPVLib.setOptionString("secondary-sub-ass-override", "yes")
-      MPVLib.setOptionString("secondary-sid", "no")
-      applyConfOptions(conf)
-      MPVLib.init()
-      MPVLib.setOptionString("force-window", "no")
-      MPVLib.addObserver(this)
-      observeProps()
-      created.set(true)
-      createdAsLive = livePlayback
-      createdTlsVerify = tlsVerify
-      createdDiskCache = diskCache
-      applyAspectMode()
-      main.removeCallbacks(tick)
-      main.post(tick)
-      Log.i(TAG, "MPV context ready abi=${MPVLib.getLoadedAbi()} live=$livePlayback tlsVerify=$tlsVerify")
-    }
-    return rebuilt
-  }
-
-  /** 从 assets 拷 cacert.pem，设 tls-ca-file；关闭校验时 tls-verify=no。 */
-  private fun applyTlsOptions(ctx: Context) {
-    if (!tlsVerify) {
-      MPVLib.setOptionString("tls-verify", "no")
+    val key = configKey()
+    if (!forceRebuild && player != null && builtConfigKey == key) {
+      bindPlayerSurface()
       return
     }
-    val ca = ensureCacertFile(ctx)
-    if (ca != null) {
-      MPVLib.setOptionString("tls-ca-file", ca.absolutePath)
-      MPVLib.setOptionString("tls-verify", "yes")
-    } else {
-      Log.w(TAG, "cacert.pem missing → tls-verify=no")
-      MPVLib.setOptionString("tls-verify", "no")
-    }
-  }
-
-  private fun ensureCacertFile(ctx: Context): File? {
-    return try {
-      val out = File(ctx.filesDir, "cacert.pem")
-      if (!out.exists() || out.length() < 1024) {
-        ctx.assets.open("cacert.pem").use { input ->
-          out.outputStream().use { output -> input.copyTo(output) }
-        }
-      }
-      if (out.exists() && out.length() > 1024) out else null
-    } catch (t: Throwable) {
-      Log.w(TAG, "ensure cacert failed", t)
-      null
-    }
-  }
-
-  /** 设备 Vulkan≥1.2 且用户开启：gpu-api=vulkan + gpu-context=androidvk；否则 opengl + android。 */
-  private fun applyGpuApiOptions() {
-    val ctx = appContext
-    val useVulkan =
-      vulkanEnabled && ctx != null && MPVLib.isVulkanRendererAvailable(ctx)
-    if (useVulkan) {
-      MPVLib.setOptionString("gpu-api", "vulkan")
-      MPVLib.setOptionString("gpu-context", "androidvk")
-    } else {
-      MPVLib.setOptionString("gpu-api", "opengl")
-      MPVLib.setOptionString("gpu-context", "android")
-      MPVLib.setOptionString("opengl-es", "yes")
-    }
-  }
-
-  private fun applyGpuApiIfNeeded() {
-    if (!created.get()) return
-    val ctx = appContext ?: return
-    val useVulkan = vulkanEnabled && MPVLib.isVulkanRendererAvailable(ctx)
-    try {
-      if (useVulkan) {
-        MPVLib.setPropertyString("gpu-api", "vulkan")
-        MPVLib.setPropertyString("gpu-context", "androidvk")
-      } else {
-        MPVLib.setPropertyString("gpu-api", "opengl")
-        MPVLib.setPropertyString("gpu-context", "android")
-        MPVLib.setPropertyString("opengl-es", "yes")
-      }
-    } catch (_: Throwable) {
-    }
-  }
-
-  /**
-   * 杜比视界输出。direct：遇到杜比视界轨道时 libmpv 自己换成 mediacodec_embed，
-   * 由 MediaCodec 直接把画面送到 Surface，电视才进杜比视界模式；换不成会退回普通渲染。
-   * 直出要 SurfaceView 和非拷贝硬解，Texture 方式或软解一律 configured。
-   */
-  private fun applyDolbyVisionOptions() {
-    val ctx = appContext
-    val displayDv = ctx != null && KotvDisplayHdr.supportsDolbyVision(ctx)
-    val wantDirect = when (dolbyVisionPolicy) {
-      1 -> true
-      2 -> false
-      else -> displayDv
-    }
-    val direct = wantDirect && !renderTexture && resolveHwdec(decodeMode) != "no"
-    // 显示器不支持杜比视界时，双层 Profile 7 只留 HDR10 基础层；用户选「开」则保留原样。
-    val profile7 = if (!displayDv && dolbyVisionPolicy != 1) "hdr10" else "preserve"
-    setMpvOption("android-dolby-vision-output", if (direct) "direct" else "configured")
-    setMpvOption("demuxer-dovi-profile7", profile7)
-    dvDirect = direct
-    surfaceHost?.setOsdLayer(osdWanted())
+    releasePlayerInstance()
+    val config = buildConfig(ctx)
+    val p =
+      MpvPlayer.Builder(ctx)
+        .setConfig(config)
+        .setDecode(resolveDecodeMode(decodeMode))
+        .setLooper(Looper.getMainLooper())
+        .build()
+    attachListener(p)
+    player = p
+    builtConfigKey = key
+    applyTrackSelectionPrefs()
+    applyEqualizer()
+    applySubtitleStyle()
+    applySubtitleOffset()
+    applyRepeatOne()
+    p.volume = (volumePct / 100.0).toFloat().coerceIn(0f, 1f)
+    p.playbackParameters = PlaybackParameters(rate.toFloat())
+    bindPlayerSurface()
     syncOsdSurface()
+    Log.i(TAG, "MpvPlayer ready key=$key forceRebuild=$forceRebuild")
+    main.removeCallbacks(tick)
+    main.post(tick)
   }
 
-  /** 直出（硬解直出或杜比视界直出）时画面不经 mpv 渲染，字幕要叠层 OSD Surface。 */
-  private fun osdWanted(): Boolean = dvDirect || createdDirect == true
+  private fun configKey(): String =
+    listOf(
+      livePlayback,
+      tlsVerify,
+      diskCache && !livePlayback,
+      audioPassThrough,
+      gpuNext,
+      vulkanEnabled,
+      dolbyVisionPolicy,
+      conf.hashCode(),
+    ).joinToString("|")
 
-  /** 直出时画面不经 mpv 渲染，字幕画在叠在视频上方的透明 OSD Surface 上；须在视频 Surface 之后挂。 */
-  private fun syncOsdSurface() {
-    val target = if (osdWanted() && created.get() && surfaceAttached) {
-      surfaceHost?.currentOsdSurface()
+  private fun buildConfig(ctx: Context): MpvPlayerConfig {
+    val configDir = File(ctx.filesDir, "mpv").apply { mkdirs() }
+    val cacheDir = File(ctx.cacheDir, "mpv").apply { mkdirs() }
+    KotvFontConfig.prepare(configDir, cacheDir)
+    val androidOpts =
+      MpvAndroidOptions.Builder()
+        .setShaderCacheDirectory(cacheDir)
+        .setAudioPassthroughEnabled(audioPassThrough)
+        .setGpuNextEnabled(gpuNext)
+        .setVulkanEnabled(vulkanEnabled)
+        .setDolbyVisionOutputPolicy(resolveDolbyVisionPolicy(dolbyVisionPolicy))
+        .build()
+    val builder =
+      MpvPlayerConfig.Builder()
+        .setDefaultUserAgent(defaultUserAgent())
+        .addAndroidDefaults(androidOpts)
+        .addConfigDirectory(configDir)
+        .addAndroidFontConfig(configDir, cacheDir)
+        .addAndroidSubtitleOptions(ctx, buildSubtitleOptions())
+    if (tlsVerify) {
+      val ca = File(ctx.filesDir, "cacert.pem")
+      builder.addTlsCaFileFromAsset(ctx, "cacert.pem", ca)
     } else {
-      null
+      builder.addPreInitStringOption("tls-verify", "no")
     }
-    if (target !== attachedOsdSurface) {
-      detachOsdSurface()
-      if (target == null) return
-      try {
-        MPVLib.attachOsdSurface(target)
-        attachedOsdSurface = target
-      } catch (t: Throwable) {
-        Log.w(TAG, "attachOsdSurface", t)
-        return
-      }
+    if (!livePlayback && diskCache) {
+      val dir = File(ctx.cacheDir, "mpv-cache").apply { mkdirs() }
+      builder.addDiskCacheOptions(dir, 3600)
     }
-    if (target != null) applyOsdSurfaceSize(surfaceHost?.osdSize)
+    applyConfToBuilder(builder, conf)
+    return builder.build()
   }
 
-  /** OSD 层随视频画框缩放，尺寸变了要告诉 mpv（android-osd-surface-size）。 */
-  private fun applyOsdSurfaceSize(size: String?) {
-    if (size == null || size == appliedOsdSize) return
-    try {
-      MPVLib.setPropertyString("android-osd-surface-size", size)
-      appliedOsdSize = size
-    } catch (t: Throwable) {
-      Log.w(TAG, "android-osd-surface-size", t)
-    }
-  }
-
-  private fun detachOsdSurface() {
-    appliedOsdSize = null
-    if (attachedOsdSurface == null) return
-    attachedOsdSurface = null
-    if (!created.get()) return
-    try {
-      MPVLib.detachOsdSurface()
-    } catch (t: Throwable) {
-      Log.w(TAG, "detachOsdSurface", t)
-    }
-  }
-
-  /** 播放信息：hwdec-current、片源色彩、是否杜比视界直出、显示器 HDR 能力。 */
-  private fun videoInfo(): Map<String, String> {
-    val display = appContext?.let { KotvDisplayHdr.label(it) } ?: ""
-    if (!created.get()) return mapOf("display" to display)
-    fun prop(name: String) = MPVLib.getPropertyString(name)?.trim().orEmpty()
-    val dvProfile = prop("current-tracks/video/dolby-vision-profile")
-    var transfer = when (prop("video-params/gamma")) {
-      "" -> ""
-      "pq" -> "PQ"
-      "hlg" -> "HLG"
-      else -> "SDR"
-    }
-    var primaries = prop("video-params/primaries").uppercase()
-    // gamma 缺省但有杜比 profile：补 PQ/BT.2020，避免误标纯 SDR。
-    if (dvProfile.isNotEmpty()) {
-      if (transfer.isEmpty() || transfer == "SDR") transfer = "PQ"
-      if (primaries.isEmpty() || primaries == "BT.709") primaries = "BT.2020"
-    }
-    if (transfer.isEmpty()) transfer = "SDR"
-    return mapOf(
-      "hwdec" to prop("hwdec-current"),
-      "transfer" to transfer,
-      "primaries" to primaries,
-      "dolbyVision" to if (dvProfile.isEmpty()) "" else "杜比视界 P$dvProfile",
-      "output" to when {
-        prop("current-vo") != "mediacodec_embed" -> ""
-        dvProfile.isNotEmpty() -> "杜比视界直出"
-        else -> "直出"
-      },
-      "display" to display,
-    )
-  }
-
-  /** 上下文建好前写 option，之后写 property；libmpv 不认的取值只返回错误码，这里记下来。 */
-  private fun setMpvOption(name: String, value: String) {
-    try {
-      val code = if (created.get()) {
-        MPVLib.setPropertyString(name, value)
-      } else {
-        MPVLib.setOptionString(name, value)
-      }
-      if (code < 0) Log.w(TAG, "mpv $name=$value rejected ($code)")
-    } catch (t: Throwable) {
-      Log.w(TAG, "mpv $name=$value", t)
-    }
-  }
-
-  private fun applyPreferredSubtitleLangs() {
-    val langs = preferredTextLangs.trim().ifEmpty {
-      KotvLangUtil.preferredTextLanguages().joinToString(",")
-    }
-    if (langs.isEmpty()) return
-    try {
-      val normalized = langs.replace(';', ',').replace(Regex("\\s+"), "")
-      if (created.get()) {
-        MPVLib.setPropertyString("slang", normalized)
-      } else {
-        MPVLib.setOptionString("slang", normalized)
-      }
-    } catch (t: Throwable) {
-      Log.w(TAG, "slang", t)
-    }
-  }
-
-  /** 音轨列表（含 AV3A 等 FFmpeg/libarcdav3a 解码轨）。 */
-  private fun buildAudioTracksJson(): String {
-    return buildTracksJson("audio")
-  }
-
-  /** 视频轨列表。 */
-  private fun buildVideoTracksJson(): String {
-    return buildTracksJson("video")
-  }
-
-  /** 字幕轨列表（内嵌 sub）。 */
-  private fun buildSubtitleTracksJson(): String {
-    return buildTracksJson("sub")
-  }
-
-  private fun buildTracksJson(typeFilter: String): String {
-    if (!created.get()) return "[]"
-    val count = MPVLib.getPropertyInt("track-list/count") ?: 0
-    val arr = JSONArray()
-    for (i in 0 until count) {
-      val type = MPVLib.getPropertyString("track-list/$i/type") ?: continue
-      if (type != typeFilter) continue
-      val obj = JSONObject()
-      obj.put("id", MPVLib.getPropertyString("track-list/$i/id") ?: "auto")
-      obj.put("title", MPVLib.getPropertyString("track-list/$i/title") ?: "")
-      obj.put("lang", MPVLib.getPropertyString("track-list/$i/lang") ?: "")
-      obj.put("codec", MPVLib.getPropertyString("track-list/$i/codec") ?: "")
-      val w = MPVLib.getPropertyInt("track-list/$i/demux-w") ?: 0
-      val h = MPVLib.getPropertyInt("track-list/$i/demux-h") ?: 0
-      if (w > 0 && h > 0) {
-        obj.put("width", w)
-        obj.put("height", h)
-      }
-      arr.put(obj)
-    }
-    return arr.toString()
-  }
-
-  /** Rockchip 芯片（RK3399、RK3588 等）。 */
-  private fun isRockchip(): Boolean {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-      Build.SOC_MANUFACTURER.equals("Rockchip", ignoreCase = true)
-    ) {
-      return true
-    }
-    val hw = (Build.HARDWARE ?: "").lowercase()
-    return hw.startsWith("rk") ||
-      listOf(Build.BOARD, Build.PRODUCT, Build.MODEL).any { (it ?: "").lowercase().contains("rk3") } ||
-      (Build.MODEL ?: "").lowercase().contains("cr19")
-  }
-
-  /**
-   * 硬解直出：MediaCodec 把画面直接交给 SurfaceView，由系统合成输出（HDR 也由系统送显），
-   * 不经 mpv 的 GL 渲染（vo=mediacodec_embed）。
-   * - Android 8.0 以下没有 AImageReader，GL 渲染拿不到硬解画面，硬解只能直出；
-   * - Rockchip 盒子默认直出。
-   * 要求 SurfaceView 和硬解；字幕画在叠层 OSD Surface 上，滤镜、着色器等 GL 处理不生效。
-   */
-  private fun wantDirectOutput(): Boolean =
-    !renderTexture && resolveHwdec(decodeMode) != "no" &&
-      (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || isRockchip())
-
-  /** 当前上下文的 vo。 */
-  private fun videoOutput(): String = when {
-    createdDirect == true -> "mediacodec_embed"
-    gpuNext -> "gpu-next"
-    else -> "gpu"
-  }
-
-  /** 交给 mpv 的 hwdec：直出固定 mediacodec，否则按解码设置。 */
-  private fun playerHwdec(raw: String?): String =
-    if (createdDirect == true) "mediacodec" else resolveHwdec(raw)
-
-  /**
-   * 解码设置 → GL 渲染用的 hwdec。8.0 以上 mediacodec 经 AImageReader 零拷贝；
-   * 以下只能 mediacodec-copy（拷回内存再上传）。自动 = 硬解优先、失败软解。
-   */
-  private fun resolveHwdec(raw: String?): String {
-    val mode = raw?.trim().orEmpty()
-    if (mode == "no" || mode == "soft" || mode == "software" || mode == "sw") return "no"
-    // 已是逗号列表（如 mediacodec,no）原样交给 mpv。
-    if (mode.contains(",")) return mode
-    val hw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) "mediacodec" else "mediacodec-copy"
-    return when (mode) {
-      "mediacodec", "hard", "hardware", "hw" -> hw
-      "", "auto", "auto-safe" -> "$hw,no"
-      else -> mode
-    }
-  }
-
-  private fun applyConfOptions(text: String) {
+  private fun applyConfToBuilder(builder: MpvPlayerConfig.Builder, text: String) {
     for (raw in text.split(Regex("[\r\n]+"))) {
       var line = raw.trim()
       if (line.isEmpty() || line.startsWith("#")) continue
@@ -1370,31 +814,613 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         key = line.substring(0, sp.range.first).trim()
         value = line.substring(sp.range.last + 1).trim()
       }
-      if (key.isEmpty()) continue
-      // `kotv-*` 是应用自用开关，不是 mpv 选项。
-      if (key.startsWith("kotv-")) continue
+      if (key.isEmpty() || key.startsWith("kotv-")) continue
       val base = if (key.startsWith("no-")) key.substring(3) else key
-      if (MANAGED_CONF_OPTIONS.contains(key) || MANAGED_CONF_OPTIONS.contains(base)) {
-        Log.i(TAG, "skip conf option managed by UI/engine: $key")
-        continue
+      if (MANAGED_CONF_OPTIONS.contains(key) || MANAGED_CONF_OPTIONS.contains(base)) continue
+      try {
+        builder.addAppOwnedStringOption(key, value.ifEmpty { "yes" })
+      } catch (t: Throwable) {
+        Log.w(TAG, "skip conf option $key", t)
+      }
+    }
+  }
+
+  private fun buildMediaItem(url: String, headers: Map<String, String>): MediaItem {
+    val uri = playUri(url)
+    val b = MediaItem.Builder().setUri(uri).setMediaId(url)
+    if (headers.isNotEmpty()) {
+      val extras = Bundle()
+      headers.forEach { (k, v) -> extras.putString(k, v) }
+      b.setRequestMetadata(
+        MediaItem.RequestMetadata.Builder()
+          .setMediaUri(uri)
+          .setExtras(extras)
+          .build(),
+      )
+      b.setCustomCacheKey(cacheKeyFor(url, headers))
+    }
+    return b.build()
+  }
+
+  private fun playUri(url: String): Uri {
+    val trimmed = url.trim()
+    return when {
+      trimmed.startsWith("content:", ignoreCase = true) ||
+        trimmed.startsWith("file:", ignoreCase = true) ||
+        trimmed.startsWith("http:", ignoreCase = true) ||
+        trimmed.startsWith("https:", ignoreCase = true) ||
+        trimmed.startsWith("rtsp:", ignoreCase = true) ||
+        trimmed.startsWith("rtmp:", ignoreCase = true) -> Uri.parse(trimmed)
+      trimmed.startsWith("/") -> Uri.fromFile(File(trimmed))
+      else -> Uri.parse(trimmed)
+    }
+  }
+
+  private fun cacheKeyFor(url: String, headers: Map<String, String>): String {
+    val ua = headers.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value.orEmpty()
+    val ref = headers.entries.firstOrNull { it.key.equals("Referer", true) }?.value.orEmpty()
+    return "$url|$ua|$ref"
+  }
+
+  private fun attachListener(p: MpvPlayer) {
+    val listener =
+      object : Player.Listener {
+        override fun onTracksChanged(tracks: Tracks) {
+          emit(mapOf("event" to "tracks"))
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+          when (playbackState) {
+            Player.STATE_ENDED -> emit(mapOf("event" to "completed"))
+            Player.STATE_READY -> {
+              val vs = p.videoSize
+              if (vs.width > 0 && vs.height > 0) {
+                videoWidth = vs.width
+                videoHeight = vs.height
+                videoAspect = if (vs.height > 0) vs.width.toDouble() / vs.height else 0.0
+                applyVideoFrame()
+              }
+              emit(
+                mapOf(
+                  "event" to "ready",
+                  "width" to videoWidth,
+                  "height" to videoHeight,
+                  "durationMs" to p.duration.coerceAtLeast(0),
+                ),
+              )
+            }
+            Player.STATE_BUFFERING -> buffering = true
+            Player.STATE_IDLE -> {}
+          }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+          emit(mapOf("event" to "error", "message" to (error.message ?: error.errorCodeName)))
+        }
+
+        override fun onVideoSizeChanged(videoSize: VideoSize) {
+          if (videoSize.width <= 0 || videoSize.height <= 0) return
+          videoWidth = videoSize.width
+          videoHeight = videoSize.height
+          videoAspect = videoSize.width.toDouble() / videoSize.height
+          applyVideoFrame()
+          emit(
+            mapOf(
+              "event" to "size",
+              "width" to videoWidth,
+              "height" to videoHeight,
+            ),
+          )
+        }
+
+        override fun onMediaEditionsChanged(editions: List<MediaEdition>) {
+          emit(mapOf("event" to "editions", "count" to editions.size))
+        }
+
+        override fun onMediaChaptersChanged(chapters: List<MediaChapter>) {
+          emit(mapOf("event" to "chapters", "count" to chapters.size))
+        }
+      }
+    playerListener = listener
+    p.addListener(listener)
+  }
+
+  private fun setSurfaceLayerEnabled(enabled: Boolean) {
+    if (surfaceLayerEnabled == enabled) {
+      if (enabled) bindPlayerSurface()
+      return
+    }
+    surfaceLayerEnabled = enabled
+    val host = surfaceHost
+    if (!enabled) {
+      host?.let { unbindPlayerOutput(it, transient = false) }
+      try {
+        player?.clearVideoSurface()
+      } catch (_: Throwable) {
+      }
+      clearOsd()
+      host?.clearVideoLayer()
+      return
+    }
+    if (host == null) return
+    host.setRender(renderTexture)
+    host.setOsdLayer(!renderTexture)
+    bindPlayerSurface()
+    syncOsdSurface()
+  }
+
+  private fun bindPlayerSurface() {
+    val p = player ?: return
+    if (!surfaceLayerEnabled) return
+    val host = surfaceHost ?: return
+    if (renderTexture) {
+      val tv = host.textureView ?: return
+      if (boundTextureView === tv) {
+        applyVideoFrame()
+        return
+      }
+      clearVideoOutputs(p)
+      p.setVideoTextureView(tv)
+      boundTextureView = tv
+      boundSurfaceView = null
+      clearOsd()
+      applyVideoFrame()
+      return
+    }
+    val sv = host.surfaceView ?: return
+    if (!canBindSurface(sv)) return
+    if (boundSurfaceView === sv) {
+      applyVideoFrame()
+      syncOsdSurface()
+      return
+    }
+    clearVideoOutputs(p)
+    p.setVideoSurfaceView(sv)
+    boundSurfaceView = sv
+    boundTextureView = null
+    applyVideoFrame()
+    syncOsdSurface()
+  }
+
+  private fun clearVideoOutputs(p: MpvPlayer) {
+    try {
+      boundSurfaceView?.let { p.clearVideoSurfaceView(it) }
+    } catch (_: Throwable) {
+    }
+    try {
+      boundTextureView?.let { p.clearVideoTextureView(it) }
+    } catch (_: Throwable) {
+    }
+    try {
+      p.clearVideoSurface()
+    } catch (_: Throwable) {
+    }
+  }
+
+  private fun unbindPlayerOutput(host: KotvMpvSurfaceHost, transient: Boolean) {
+    val p = player
+    if (p != null) {
+      try {
+        host.surfaceView?.let { p.clearVideoSurfaceView(it) }
+      } catch (_: Throwable) {
       }
       try {
-        MPVLib.setOptionString(key, value.ifEmpty { "yes" })
+        host.textureView?.let { p.clearVideoTextureView(it) }
+      } catch (_: Throwable) {
+      }
+      if (!transient) {
+        try {
+          p.clearVideoSurface()
+        } catch (_: Throwable) {
+        }
+      }
+    }
+    clearOsd()
+    if (boundSurfaceView === host.surfaceView) boundSurfaceView = null
+    if (boundTextureView === host.textureView) boundTextureView = null
+  }
+
+  private fun syncOsdSurface() {
+    val p = player ?: return
+    if (renderTexture || !surfaceLayerEnabled) {
+      clearOsd()
+      return
+    }
+    val host = surfaceHost ?: return
+    val osd = host.osdSurfaceView
+    if (osd == null || !host.osdReady) {
+      clearOsd()
+      return
+    }
+    if (boundOsdSurfaceView === osd) return
+    try {
+      boundOsdSurfaceView?.let { p.clearOsdSurfaceView(it) }
+    } catch (_: Throwable) {
+    }
+    p.setOsdSurfaceView(osd)
+    boundOsdSurfaceView = osd
+  }
+
+  private fun clearOsd() {
+    val p = player
+    val prev = boundOsdSurfaceView
+    boundOsdSurfaceView = null
+    if (p != null && prev != null) {
+      try {
+        p.clearOsdSurfaceView(prev)
       } catch (_: Throwable) {
       }
     }
   }
 
-  /** create / open / setOpts 共用的播放选项。 */
-  /** 通道参数里的字典（headers / props）转成字符串表；没传为空表。 */
-  private fun stringMapArg(call: MethodCall, key: String): Map<String, String> =
-    (call.argument<Map<*, *>>(key) ?: emptyMap<Any, Any>()).entries.associate { "${it.key}" to "${it.value}" }
+  private fun canBindSurface(sv: SurfaceView): Boolean {
+    val surface = sv.holder.surface ?: return false
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      surface.isValid
+    } else {
+      true
+    }
+  }
+
+  private fun applyVideoFrame() {
+    val aspect =
+      when (aspectMode) {
+        "16:9" -> 16.0 / 9.0
+        "4:3" -> 4.0 / 3.0
+        else ->
+          if (videoWidth > 0 && videoHeight > 0) {
+            videoWidth.toDouble() / videoHeight
+          } else {
+            videoAspect
+          }
+      }
+    surfaceHost?.setVideoFrame(aspect, aspectMode)
+  }
+
+  private fun applyRepeatOne() {
+    player?.repeatMode =
+      if (repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+  }
+
+  private fun applyTrackSelectionPrefs() {
+    val p = player ?: return
+    try {
+      val builder = p.trackSelectionParameters.buildUpon()
+      val langs = preferredTextLanguageArray()
+      if (langs.isNotEmpty()) {
+        builder.setPreferredTextLanguages(*langs)
+      }
+      p.trackSelectionParameters = builder.build()
+    } catch (t: Throwable) {
+      Log.w(TAG, "applyTrackSelectionPrefs", t)
+    }
+  }
+
+  private fun preferredTextLanguageArray(): Array<String> {
+    val raw =
+      preferredTextLangs.trim().ifEmpty {
+        KotvLangUtil.preferredTextLanguages().joinToString(",")
+      }
+    if (raw.isEmpty()) return emptyArray()
+    return raw
+      .replace(';', ',')
+      .split(',')
+      .map { it.trim() }
+      .filter { it.isNotEmpty() }
+      .toTypedArray()
+  }
+
+  private fun applyEqualizer() {
+    val p = player ?: return
+    try {
+      p.setVideoEqualizer(
+        MpvVideoEqualizer.create(
+          eqBrightness.toDouble(),
+          eqContrast.toDouble(),
+          eqSaturation.toDouble(),
+          eqGamma.toDouble(),
+          eqHue.toDouble(),
+          (eqSharpness / 100.0).coerceIn(0.0, 1.0),
+        ),
+      )
+    } catch (t: Throwable) {
+      Log.w(TAG, "setVideoEqualizer", t)
+    }
+    try {
+      val filter =
+        if (audioAf.isBlank()) {
+          MpvAudioFilter.EMPTY
+        } else {
+          MpvAudioFilter.create(audioAf, audioAf, emptyList())
+        }
+      p.setAudioFilter(filter)
+    } catch (t: Throwable) {
+      Log.w(TAG, "setAudioFilter", t)
+    }
+  }
+
+  private fun applySubtitleOffset() {
+    val p = player ?: return
+    try {
+      if (p.isCommandAvailable(Player.COMMAND_SET_TEXT_OFFSET)) {
+        p.setTextOffsetMs(subtitleOffsetMs)
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "setTextOffsetMs", t)
+    }
+  }
+
+  private fun applySubtitleStyle() {
+    val p = player ?: return
+    try {
+      p.setSubtitleOptions(buildSubtitleOptions())
+    } catch (t: Throwable) {
+      Log.w(TAG, "setSubtitleOptions", t)
+    }
+  }
+
+  private fun buildSubtitleOptions(): MpvSubtitleOptions {
+    val b = MpvSubtitleOptions.Builder()
+    b.setScale(subtitleScale.coerceIn(0.5, 2.0))
+    // Flutter pos → mpv sub-pos（底=100）。
+    b.setPosition((100.0 - subtitlePos).coerceIn(0.0, 150.0))
+    val secondaryTrack = resolveSecondaryTrackId(secondarySubtitleId)
+    b.setSecondarySubtitle(
+      secondaryTrack,
+      subtitleSecondaryPos.coerceIn(0.0, 150.0),
+      subtitleForceStyle,
+    )
+    if (subtitleUseSystemStyle) {
+      b.setSystemCaptionStyle()
+    } else if (subtitleForceStyle) {
+      val fg = parseColorWithOpacity(subtitleColor, subtitleTextOpacity)
+      val bg = parseColorWithOpacity(subtitleBgColor, subtitleBgOpacity)
+      val edge = parseColorWithOpacity(subtitleBorderColor, subtitleEdgeOpacity)
+      val edgeType = mapEdgeType(subtitleEdgeType)
+      val strength = (subtitleShadowStrength / 50.0).coerceIn(0.0, 2.5)
+      val shadow =
+        when (edgeType) {
+          CaptioningManager.CaptionStyle.EDGE_TYPE_DROP_SHADOW -> 2.0 * strength
+          CaptioningManager.CaptionStyle.EDGE_TYPE_RAISED,
+          CaptioningManager.CaptionStyle.EDGE_TYPE_DEPRESSED -> 1.5 * strength
+          else -> 0.0
+        }
+      val edgeSize =
+        if (edgeType == CaptioningManager.CaptionStyle.EDGE_TYPE_OUTLINE) {
+          subtitleBorderSize.coerceIn(0.0, 8.0)
+        } else {
+          0.0
+        }
+      b.setCustomStyle(fg, bg, edgeType, edge, edgeSize, shadow)
+    }
+    return b.build()
+  }
+
+  private fun resolveSecondaryTrackId(raw: String): Int {
+    val key = raw.trim().lowercase()
+    if (key.isEmpty() || key == "no" || key == "off" || key == "none") {
+      return MpvSubtitleOptions.SECONDARY_TRACK_OFF
+    }
+    if (key == "auto") return MpvSubtitleOptions.SECONDARY_TRACK_AUTO
+    val byFormat = findFormatId(C.TRACK_TYPE_TEXT, raw.trim())
+    if (byFormat != null) return byFormat
+    return raw.trim().toIntOrNull() ?: MpvSubtitleOptions.SECONDARY_TRACK_OFF
+  }
+
+  private fun findFormatId(type: Int, id: String): Int? {
+    val p = player ?: return null
+    val gMatch = Regex("""^g(\d+):t(\d+)$""").matchEntire(id)
+    if (gMatch != null) {
+      val gi = gMatch.groupValues[1].toInt()
+      val ti = gMatch.groupValues[2].toInt()
+      val groups = p.currentTracks.groups
+      if (gi in groups.indices) {
+        val g = groups[gi]
+        if (g.type == type && ti in 0 until g.length) {
+          return g.getTrackFormat(ti).id?.toIntOrNull()
+        }
+      }
+    }
+    for (g in p.currentTracks.groups) {
+      if (g.type != type) continue
+      for (i in 0 until g.length) {
+        val f = g.getTrackFormat(i)
+        if (f.id == id) return f.id?.toIntOrNull()
+      }
+    }
+    return null
+  }
+
+  private fun selectTrackById(type: Int, id: String) {
+    val p = player ?: return
+    if (id.isEmpty() || id == "auto") {
+      p.trackSelectionParameters =
+        p.trackSelectionParameters
+          .buildUpon()
+          .clearOverridesOfType(type)
+          .setTrackTypeDisabled(type, false)
+          .build()
+      p.play()
+      return
+    }
+    val groups = p.currentTracks.groups
+    var targetGroup: Tracks.Group? = null
+    var trackIndex = -1
+    val gMatch = Regex("""^g(\d+):t(\d+)$""").matchEntire(id)
+    if (gMatch != null) {
+      val gi = gMatch.groupValues[1].toInt()
+      val ti = gMatch.groupValues[2].toInt()
+      if (gi in groups.indices) {
+        val g = groups[gi]
+        if (g.type == type && ti in 0 until g.length && g.isTrackSupported(ti)) {
+          targetGroup = g
+          trackIndex = ti
+        }
+      }
+    } else {
+      for (g in groups) {
+        if (g.type != type) continue
+        for (i in 0 until g.length) {
+          if (!g.isTrackSupported(i)) continue
+          if (g.getTrackFormat(i).id == id) {
+            targetGroup = g
+            trackIndex = i
+            break
+          }
+        }
+        if (targetGroup != null) break
+      }
+    }
+    val g = targetGroup ?: return
+    if (trackIndex < 0) return
+    p.trackSelectionParameters =
+      p.trackSelectionParameters
+        .buildUpon()
+        .clearOverridesOfType(type)
+        .setTrackTypeDisabled(type, false)
+        .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, trackIndex))
+        .build()
+    p.play()
+  }
+
+  private fun selectSubtitleTrackById(id: String) {
+    val p = player ?: return
+    val key = id.trim().lowercase()
+    if (key.isEmpty() || key == "no" || key == "off") {
+      p.trackSelectionParameters =
+        p.trackSelectionParameters
+          .buildUpon()
+          .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+          .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+          .build()
+      p.play()
+      return
+    }
+    selectTrackById(C.TRACK_TYPE_TEXT, id.trim())
+  }
+
+  private fun buildTracksJson(type: Int): String {
+    val p = player ?: return "[]"
+    val arr = JSONArray()
+    val groups = p.currentTracks.groups
+    for (gi in groups.indices) {
+      val g = groups[gi]
+      if (g.type != type) continue
+      for (i in 0 until g.length) {
+        if (!g.isTrackSupported(i)) continue
+        val f = g.getTrackFormat(i)
+        val obj = JSONObject()
+        val id = f.id?.takeIf { it.isNotBlank() } ?: "g$gi:t$i"
+        obj.put("id", id)
+        obj.put("title", f.label ?: "")
+        obj.put("lang", f.language ?: "")
+        obj.put("codec", f.codecs ?: "")
+        if (f.width > 0 && f.height > 0) {
+          obj.put("width", f.width)
+          obj.put("height", f.height)
+        }
+        obj.put("selected", g.isTrackSelected(i))
+        arr.put(obj)
+      }
+    }
+    return arr.toString()
+  }
+
+  private fun videoInfo(): Map<String, String> {
+    val display = appContext?.let { KotvDisplayHdr.label(it) } ?: ""
+    val p = player
+    if (p == null) return mapOf("display" to display)
+    val f = selectedVideoFormat()
+    val info = f?.colorInfo
+    val dv = f != null && isDolbyVision(f)
+    var transfer =
+      when (info?.colorTransfer) {
+        C.COLOR_TRANSFER_ST2084 -> "PQ"
+        C.COLOR_TRANSFER_HLG -> "HLG"
+        null, Format.NO_VALUE -> ""
+        else -> "SDR"
+      }
+    var primaries =
+      when (info?.colorSpace) {
+        C.COLOR_SPACE_BT2020 -> "BT.2020"
+        C.COLOR_SPACE_BT709 -> "BT.709"
+        C.COLOR_SPACE_BT601 -> "BT.601"
+        else -> ""
+      }
+    if (dv) {
+      if (transfer.isEmpty() || transfer == "SDR") transfer = "PQ"
+      if (primaries.isEmpty() || primaries == "BT.709") primaries = "BT.2020"
+    }
+    if (transfer.isEmpty()) transfer = "SDR"
+    val hw =
+      when (resolveDecodeMode(decodeMode)) {
+        C.DECODE_HARDWARE -> "mediacodec"
+        C.DECODE_SOFTWARE -> "no"
+        else -> "auto"
+      }
+    return mapOf(
+      "hwdec" to hw,
+      "transfer" to transfer,
+      "primaries" to primaries,
+      "dolbyVision" to if (dv) "杜比视界" else "",
+      "output" to "",
+      "display" to display,
+    )
+  }
+
+  private fun selectedVideoFormat(): Format? {
+    val p = player ?: return null
+    for (group in p.currentTracks.groups) {
+      if (group.type != C.TRACK_TYPE_VIDEO) continue
+      for (i in 0 until group.length) {
+        if (!group.isTrackSelected(i)) continue
+        return group.getTrackFormat(i)
+      }
+    }
+    return null
+  }
+
+  private fun isDolbyVision(format: Format): Boolean {
+    if (MimeTypes.VIDEO_DOLBY_VISION == format.sampleMimeType) return true
+    val codecs = format.codecs?.lowercase().orEmpty()
+    return codecs.startsWith("dvh1") || codecs.startsWith("dvhe") || codecs.startsWith("dav1")
+  }
+
+  private fun releasePlayer() {
+    main.removeCallbacks(tick)
+    releasePlayerInstance()
+    currentUrl = ""
+    currentHeaders = emptyMap()
+    videoWidth = 0
+    videoHeight = 0
+  }
+
+  private fun releasePlayerInstance() {
+    val p = player
+    player = null
+    builtConfigKey = null
+    boundSurfaceView = null
+    boundTextureView = null
+    boundOsdSurfaceView = null
+    if (p != null) {
+      try {
+        playerListener?.let { p.removeListener(it) }
+      } catch (_: Throwable) {
+      }
+      playerListener = null
+      try {
+        p.release()
+      } catch (t: Throwable) {
+        Log.w(TAG, "release", t)
+      }
+    }
+  }
 
   private fun ingestPlayerArgs(call: MethodCall) {
-    decodeMode = call.argument<String>("decode") ?: decodeMode
-    gpuNext = call.argument<Boolean>("gpuNext") == true
-    vulkanEnabled = call.argument<Boolean>("vulkan") == true
-    conf = call.argument<String>("conf") ?: conf
+    call.argument<String>("decode")?.let { decodeMode = it }
+    call.argument<Boolean>("gpuNext")?.let { gpuNext = it }
+    call.argument<Boolean>("vulkan")?.let { vulkanEnabled = it }
+    call.argument<String>("conf")?.let { conf = it }
     call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
     call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
     call.argument<Boolean>("diskCache")?.let { diskCache = it }
@@ -1408,726 +1434,145 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     call.argument<Number>("eqSaturation")?.toInt()?.let { eqSaturation = it.coerceIn(-100, 100) }
     call.argument<Number>("eqGamma")?.toInt()?.let { eqGamma = it.coerceIn(-100, 100) }
     call.argument<Number>("eqHue")?.toInt()?.let { eqHue = it.coerceIn(-100, 100) }
+    call.argument<Number>("eqSharpness")?.toDouble()?.let {
+      eqSharpness = it.coerceIn(0.0, 100.0)
+    }
     call.argument<String>("audioAf")?.let { audioAf = it.trim() }
-    call.argument<String>("videoVf")?.let { videoVf = it.trim() }
+    call.argument<String>("videoVf")?.let { vf ->
+      if (call.argument<Number>("eqSharpness") == null) {
+        eqSharpness = parseSharpnessFromVf(vf)
+      }
+    }
     call.argument<Number>("subtitleFontScale")?.toDouble()?.let {
-      try {
-        MPVLib.setPropertyDouble("sub-scale", it.coerceIn(0.5, 2.0))
-      } catch (_: Throwable) {
-      }
+      subtitleScale = it.coerceIn(0.5, 2.0)
     }
   }
 
-  private fun applyEqualizer() {
-    if (!created.get()) return
-    try {
-      MPVLib.setPropertyInt("brightness", eqBrightness)
-      MPVLib.setPropertyInt("contrast", eqContrast)
-      MPVLib.setPropertyInt("saturation", eqSaturation)
-      MPVLib.setPropertyInt("gamma", eqGamma)
-      MPVLib.setPropertyInt("hue", eqHue)
-    } catch (t: Throwable) {
-      Log.w(TAG, "apply video eq", t)
-    }
-    try {
-      MPVLib.setPropertyString("vf", videoVf)
-    } catch (t: Throwable) {
-      Log.w(TAG, "apply video vf", t)
-    }
-    applyAudioAf()
+  private fun parseSharpnessFromVf(vf: String): Double {
+    // lavfi=[unsharp=5:5:AMOUNT:...]
+    val m = Regex("""unsharp=5:5:([0-9.]+)""").find(vf) ?: return eqSharpness
+    val amount = m.groupValues[1].toDoubleOrNull() ?: return eqSharpness
+    return ((amount / 1.5) * 100.0).coerceIn(0.0, 100.0)
   }
 
-  private fun applyAudioAf() {
-    try {
-      // 直通时不强塞 af，避免破 SPDIF。
-      if (!appliedSpdif.isNullOrEmpty() && audioAf.isNotEmpty()) {
-        Log.i(TAG, "skip audio af while passthrough enabled")
-      } else {
-        MPVLib.setPropertyString("af", audioAf)
-      }
-    } catch (t: Throwable) {
-      Log.w(TAG, "apply audio af", t)
+  private fun stringMapArg(call: MethodCall, key: String): Map<String, String> =
+    (call.argument<Map<*, *>>(key) ?: emptyMap<Any, Any>()).entries.associate {
+      "${it.key}" to "${it.value}"
+    }
+
+  private fun resolveDecodeMode(raw: String?): @C.DecodeMode Int {
+    val mode = raw?.trim()?.lowercase().orEmpty()
+    return when (mode) {
+      "no", "soft", "software", "sw" -> C.DECODE_SOFTWARE
+      "mediacodec", "hard", "hardware", "hw" -> C.DECODE_HARDWARE
+      else -> C.DECODE_HARDWARE // auto → 硬解优先（失败由内核回退）
     }
   }
 
-  /** 设置开且当前输出能直出时才直通；手机扬声器等不支持时 MPV 直接解成 PCM。 */
-  private fun spdifCodecs(ctx: Context?): String {
-    if (!audioPassThrough || ctx == null) return ""
-    val candidates = listOf(
-      "ac3" to AudioFormat.ENCODING_AC3,
-      "eac3" to AudioFormat.ENCODING_E_AC3,
-      "truehd" to AudioFormat.ENCODING_DOLBY_TRUEHD,
-      "dts" to AudioFormat.ENCODING_DTS,
-      "dtshd" to AudioFormat.ENCODING_DTS_HD,
-    )
-    val supported = try {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        val attrs = AudioAttributes.Builder()
-          .setUsage(AudioAttributes.USAGE_MEDIA)
-          .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
-          .build()
-        val masks = intArrayOf(AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.CHANNEL_OUT_7POINT1_SURROUND)
-        candidates.filter { (_, enc) ->
-          masks.any { mask ->
-            val fmt = AudioFormat.Builder()
-              .setEncoding(enc)
-              .setSampleRate(48000)
-              .setChannelMask(mask)
-              .build()
-            AudioTrack.isDirectPlaybackSupported(fmt, attrs)
-          }
-        }
-      } else {
-        val encodings = HashSet<Int>()
-        val plug = ctx.registerReceiver(null, IntentFilter(AudioManager.ACTION_HDMI_AUDIO_PLUG))
-        if (plug != null && plug.getIntExtra(AudioManager.EXTRA_AUDIO_PLUG_STATE, 0) == 1) {
-          plug.getIntArrayExtra(AudioManager.EXTRA_ENCODINGS)?.forEach { encodings.add(it) }
-        }
-        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        am?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.forEach { dev ->
-          when (dev.type) {
-            AudioDeviceInfo.TYPE_HDMI, AudioDeviceInfo.TYPE_HDMI_ARC, AudioDeviceInfo.TYPE_LINE_DIGITAL ->
-              dev.encodings.forEach { encodings.add(it) }
-          }
-        }
-        candidates.filter { (_, enc) -> enc in encodings }
-      }
-    } catch (t: Throwable) {
-      Log.w(TAG, "query passthrough support", t)
-      emptyList()
+  private fun resolveDolbyVisionPolicy(raw: Int): Int =
+    when (raw) {
+      1 -> androidx.media3.common.DolbyVisionOutputPolicy.ASSUME_SUPPORTED
+      2 -> androidx.media3.common.DolbyVisionOutputPolicy.ASSUME_UNSUPPORTED
+      else -> androidx.media3.common.DolbyVisionOutputPolicy.AUTO
     }
-    return supported.joinToString(",") { it.first }
+
+  private fun resolveRenderTexture(mode: String): Boolean {
+    val m = mode.trim().lowercase()
+    return m == "texture" || m == "textureview"
   }
 
-  /** 每次 loadfile 前按当前输出设备重算（插拔 HDMI 后下一次起播生效）。 */
-  private fun applySpdif() {
-    val spdif = spdifCodecs(appContext)
-    if (spdif == appliedSpdif) return
-    try {
-      MPVLib.setPropertyString("audio-spdif", spdif)
-      appliedSpdif = spdif
-      Log.i(TAG, "audio-spdif=$spdif")
-      applyAudioAf()
-    } catch (t: Throwable) {
-      Log.w(TAG, "apply audio-spdif", t)
-    }
-  }
-
-  private fun applyRuntimeOpts(props: Map<String, String>) {
-    if (!created.get()) return
-    try {
-      MPVLib.setPropertyString("hwdec", playerHwdec(props["hwdec"] ?: decodeMode))
-    } catch (_: Throwable) {
-    }
-    if (surfaceReady) {
-      try {
-        MPVLib.setPropertyString("vo", videoOutput())
-      } catch (_: Throwable) {
-      }
-    }
-    for ((k, v) in props) {
-      // cache-on-disk / demuxer-cache-dir 由 ensurePlayer(diskCache) 独占，勿被 props 盖掉。
-      if (k == "hwdec" || k == "vo" || k == "wid" || k == "android-surface-size" ||
-        k == "cache-on-disk" || k == "demuxer-cache-dir"
-      ) continue
-      try {
-        MPVLib.setPropertyString(k, v)
-      } catch (_: Throwable) {
-      }
-    }
-  }
-
-  private fun normalizeAspectMode(raw: String): String {
-    return when (raw.trim().lowercase()) {
+  private fun normalizeAspectMode(raw: String): String =
+    when (raw.trim().lowercase()) {
       "fill", "stretch" -> "fill"
       "zoom", "cover", "crop" -> "zoom"
       "16:9", "16/9" -> "16:9"
       "4:3", "4/3" -> "4:3"
       else -> "default"
     }
-  }
 
-  /**
-   * 画面比例（适应·拉伸·Zoom·16:9·4:3）：
-   * - 适应：keepaspect，不裁切
-   * - 拉伸：铺满窗口（可变形）
-   * - Zoom：keepaspect + panscan 裁切铺满
-   * - 16:9 / 4:3：强制片源画幅（如 4:3 片源选 16:9 会横向拉满）
-   */
-  /**
-   * 直出时 mpv 不缩放画面，MediaCodec 会把画面拉满 Surface：按比例设置摆放视频 SurfaceView。
-   * GL 渲染时由 mpv 自己处理比例，SurfaceView 铺满。
-   */
-  private fun applyVideoFrame() {
-    val aspect = when {
-      !directActive -> 0.0
-      aspectMode == "16:9" -> 16.0 / 9.0
-      aspectMode == "4:3" -> 4.0 / 3.0
-      else -> videoAspect
+  private fun mapEdgeType(raw: String): Int =
+    when (raw.trim().lowercase()) {
+      "none" -> CaptioningManager.CaptionStyle.EDGE_TYPE_NONE
+      "shadow" -> CaptioningManager.CaptionStyle.EDGE_TYPE_DROP_SHADOW
+      "raised" -> CaptioningManager.CaptionStyle.EDGE_TYPE_RAISED
+      "depressed" -> CaptioningManager.CaptionStyle.EDGE_TYPE_DEPRESSED
+      else -> CaptioningManager.CaptionStyle.EDGE_TYPE_OUTLINE
     }
-    surfaceHost?.setVideoFrame(aspect, aspectMode)
+
+  private fun parseColorWithOpacity(raw: String, opacityPct: Double): Int {
+    val base = parseColor(raw)
+    val a = ((opacityPct.coerceIn(0.0, 100.0) / 100.0) * 255.0).roundToInt().coerceIn(0, 255)
+    return (base and 0x00FFFFFF) or (a shl 24)
   }
 
-  private fun applyAspectMode() {
-    if (!created.get()) return
-    try {
-      when (aspectMode) {
-        "fill" -> {
-          MPVLib.setPropertyBoolean("keepaspect", false)
-          MPVLib.setPropertyDouble("panscan", 0.0)
-          MPVLib.setPropertyString("video-aspect-override", "no")
-        }
-        "zoom" -> {
-          MPVLib.setPropertyBoolean("keepaspect", true)
-          MPVLib.setPropertyDouble("panscan", 1.0)
-          MPVLib.setPropertyString("video-aspect-override", "no")
-        }
-        "16:9" -> {
-          MPVLib.setPropertyBoolean("keepaspect", true)
-          MPVLib.setPropertyDouble("panscan", 0.0)
-          MPVLib.setPropertyString("video-aspect-override", "16:9")
-        }
-        "4:3" -> {
-          MPVLib.setPropertyBoolean("keepaspect", true)
-          MPVLib.setPropertyDouble("panscan", 0.0)
-          MPVLib.setPropertyString("video-aspect-override", "4:3")
-        }
-        else -> {
-          MPVLib.setPropertyBoolean("keepaspect", true)
-          MPVLib.setPropertyDouble("panscan", 0.0)
-          MPVLib.setPropertyString("video-aspect-override", "no")
-        }
-      }
-    } catch (e: Throwable) {
-      Log.w(TAG, "applyAspectMode $aspectMode", e)
-    }
-  }
-
-  private fun observeProps() {
-    MPVLib.observeProperty("time-pos", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
-    MPVLib.observeProperty("duration", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
-    MPVLib.observeProperty("pause", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
-    MPVLib.observeProperty("paused-for-cache", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
-    MPVLib.observeProperty("seeking", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
-    MPVLib.observeProperty("eof-reached", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
-    MPVLib.observeProperty("playlist-pos", MPVLib.MpvFormat.MPV_FORMAT_INT64)
-    MPVLib.observeProperty("width", MPVLib.MpvFormat.MPV_FORMAT_INT64)
-    MPVLib.observeProperty("height", MPVLib.MpvFormat.MPV_FORMAT_INT64)
-    MPVLib.observeProperty("video-params/w", MPVLib.MpvFormat.MPV_FORMAT_INT64)
-    MPVLib.observeProperty("video-params/h", MPVLib.MpvFormat.MPV_FORMAT_INT64)
-    MPVLib.observeProperty("video-params/aspect", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
-    MPVLib.observeProperty("current-vo", MPVLib.MpvFormat.MPV_FORMAT_STRING)
-  }
-
-  private fun resolveRenderTexture(mode: String): Boolean {
-    val m = mode.trim().lowercase()
-    return m == "texture" || m == "textureview" || m == "1"
-  }
-
-  /**
-   * 绑定视频输出：
-   * - 同一 Surface：只更新 android-surface-size
-   * - 新 Surface：attach + 设 vo，不 loadfile / 不 playlist-play-index
-   */
-  private fun tryAttachSurface() {
-    if (!surfaceLayerEnabled || !created.get()) return
-    val surface = surfaceHost?.currentSurface() ?: return
-    if (!surface.isValid) return
-    try {
-      val size = surfaceSizeOf(surfaceHost)
-      if (surfaceAttached && attachedSurface === surface) {
-        if (size != null) applySurfaceSize(size)
-        return
-      }
-      if (surfaceAttached) {
-        try {
-          MPVLib.detachSurface()
-        } catch (_: Throwable) {
-        }
-        surfaceAttached = false
-        attachedSurface = null
-      }
-      MPVLib.attachSurface(surface)
-      surfaceAttached = true
-      attachedSurface = surface
-      appliedSurfaceSize = null
-      if (size != null) applySurfaceSize(size)
-      MPVLib.setPropertyString("vo", videoOutput())
-      syncOsdSurface()
-      // 绑定输出时不强制 force-window / 不重播；保持 pause 与 time-pos。
-      if (pendingUrl == null) {
-        MPVLib.setPropertyBoolean("pause", paused)
-      }
-    } catch (e: Throwable) {
-      Log.e(TAG, "attachSurface", e)
-    }
-  }
-
-  /** 优先缓冲区回调的宽高，没有时退回 View 宽高。 */
-  private fun surfaceSizeOf(host: KotvMpvSurfaceHost?): String? {
-    if (host == null) return null
-    host.bufferSize?.let { return it }
-    val w = host.width
-    val h = host.height
-    return if (w > 0 && h > 0) "${w}x${h}" else null
-  }
-
-  /** android-surface-size 唯一写入处；未绑 Surface 时由 tryAttachSurface 绑定后再写。 */
-  private fun applySurfaceSize(size: String) {
-    if (!created.get() || !surfaceAttached || size == appliedSurfaceSize) return
-    try {
-      MPVLib.setPropertyString("android-surface-size", size)
-      appliedSurfaceSize = size
-    } catch (t: Throwable) {
-      Log.w(TAG, "android-surface-size", t)
-    }
-  }
-
-  private fun maybeLoadPending() {
-    val url = pendingUrl ?: return
-    if (!created.get()) return
-    tryAttachSurface()
-    // Surface 模式必须先挂上 wid；未就绪则保留 pending，等 onSurface/setSurfaceLayer。
-    if (surfaceLayerEnabled && !surfaceAttached) return
-    pendingUrl = null
-    val headers = LinkedHashMap(pendingHeaders)
-    loadGen.incrementAndGet()
-    startLoad(url, headers)
-  }
-
-  private fun startLoad(url: String, headers: Map<String, String>) {
-    try {
-      queuedNext = null
-      pendingSeamlessId = null
-      loadedUrl = url
-      loadedHeaders = headers
-      applySpdif()
-      MPVLib.setPropertyDouble("volume", volume)
-      MPVLib.setPropertyDouble("speed", rate)
-      val startMs = pendingStartAtMs
-      pendingStartAtMs = 0L
-      maxPlayedSec = 0.0
-      loadWallMs = SystemClock.elapsedRealtime()
-      // 只写在这一次 loadfile 上，播完恢复，不留在会话里。
-      val opts = ArrayList<String>(6)
-      if (startMs > 0L) opts.add("start=${startMs / 1000.0}")
-      appendHeaderOptions(headers, opts)
-      if (opts.isEmpty()) {
-        MPVLib.command(arrayOf("loadfile", url, "replace"))
-      } else {
-        MPVLib.command(arrayOf("loadfile", url, "replace", "-1", encodeLoadfileOptions(opts)))
-      }
-      MPVLib.setPropertyBoolean("pause", false)
-      paused = false
-      playing = true
-      buffering = true
-      eof = false
-    } catch (e: Throwable) {
-      emit(mapOf("event" to "error", "message" to (e.message ?: "load failed")))
-    }
-  }
-
-  /**
-   * 把下一集追加到 mpv 播放列表（请求头、片头 start 只写在这一项上）；prefetch-playlist 让 mpv
-   * 在本集将完时就打开它，播完直接接上。
-   */
-  private fun queueNext(next: QueuedNext): Boolean {
-    if (!created.get() || livePlayback || next.id.isEmpty() || next.url.isEmpty() || loadedUrl.isEmpty() || repeatOne) {
-      return false
-    }
+  private fun parseColor(raw: String): Int {
+    val s = raw.trim()
     return try {
-      // 只留正在播的一项，新排的总在第 2 项（下标 1）。
-      MPVLib.command(arrayOf("playlist-clear"))
-      val opts = ArrayList<String>(6)
-      if (next.startAtMs > 0L) opts.add("start=${next.startAtMs / 1000.0}")
-      appendHeaderOptions(next.headers, opts)
-      if (opts.isEmpty()) {
-        MPVLib.command(arrayOf("loadfile", next.url, "append"))
-      } else {
-        MPVLib.command(arrayOf("loadfile", next.url, "append", "-1", encodeLoadfileOptions(opts)))
-      }
-      queuedNext = next
-      true
-    } catch (t: Throwable) {
-      Log.w(TAG, "queue next failed", t)
-      false
-    }
-  }
-
-  /** 只留正在播的一项。 */
-  private fun clearQueuedNext() {
-    if (queuedNext == null && pendingSeamlessId == null) return
-    queuedNext = null
-    pendingSeamlessId = null
-    if (created.get()) {
-      try {
-        MPVLib.command(arrayOf("playlist-clear"))
-      } catch (_: Throwable) {
-      }
-    }
-  }
-
-  /**
-   * 切入已 append 的下一集：playlist-next + 解除 keep-open 停在片尾的 pause。
-   * 片尾跳过、EOF、按钮下一集共用这一处，避免散落各写一遍。
-   */
-  private fun skipToQueued(next: QueuedNext): Boolean {
-    if (!created.get() || queuedNext !== next) return false
-    return try {
-      pendingSeamlessId = next.id
-      MPVLib.command(arrayOf("playlist-next"))
-      MPVLib.setPropertyBoolean("pause", false)
-      paused = false
-      playing = true
-      eof = false
-      true
-    } catch (t: Throwable) {
-      pendingSeamlessId = null
-      Log.w(TAG, "skip to queued failed", t)
-      false
-    }
-  }
-
-  /** 已播到排好的下一集：它成为当前集，通知 Dart 换集。播完的上一项等下次排队时一并清掉。 */
-  private fun enterQueuedNext(next: QueuedNext) {
-    queuedNext = null
-    pendingSeamlessId = null
-    loadGen.incrementAndGet()
-    loadedUrl = next.url
-    loadedHeaders = next.headers
-    eof = false
-    maxPlayedSec = 0.0
-    loadWallMs = SystemClock.elapsedRealtime()
-    width = 0
-    height = 0
-    emit(mapOf("event" to "transition", "id" to next.id))
-  }
-
-  /** User-Agent、Referer 单独成项，其余头合成一条列表。没有的项不写。 */
-  private fun appendHeaderOptions(headers: Map<String, String>, opts: MutableList<String>) {
-    var ua = ""
-    var referer = ""
-    val fields = ArrayList<String>()
-    for ((rawKey, rawValue) in headers) {
-      val key = rawKey.trim()
-      val value = rawValue.trim()
-      if (key.isEmpty() || value.isEmpty()) continue
       when {
-        key.equals("User-Agent", ignoreCase = true) || key.equals("ua", ignoreCase = true) ->
-          ua = value
-        key.equals("Referer", ignoreCase = true) || key.equals("Referrer", ignoreCase = true) ->
-          referer = value
-        else -> fields.add("${escapeListValue(key)}: ${escapeListValue(value)}")
+        s.startsWith("#") -> Color.parseColor(s)
+        s.startsWith("0x", true) -> Color.parseColor("#${s.substring(2)}")
+        else -> Color.parseColor("#$s")
       }
-    }
-    if (ua.isNotEmpty()) opts.add("user-agent=$ua")
-    if (referer.isNotEmpty()) opts.add("referrer=$referer")
-    if (fields.isNotEmpty()) opts.add("http-header-fields=${fields.joinToString(",")}")
-  }
-
-  /** loadfile 选项按字节长度写，值里的等号和逗号不再被拆开。 */
-  private fun encodeLoadfileOptions(options: List<String>): String {
-    return options.joinToString(",") { option ->
-      val eq = option.indexOf('=')
-      val key = option.substring(0, eq)
-      val value = option.substring(eq + 1)
-      "${encodeLoadfilePart(key)}=${encodeLoadfilePart(value)}"
-    }
-  }
-
-  private fun encodeLoadfilePart(value: String): String {
-    val n = value.toByteArray(Charsets.UTF_8).size
-    return "%$n%$value"
-  }
-
-  private fun escapeListValue(value: String): String =
-    value.replace("\\", "\\\\").replace(",", "\\,")
-
-  private fun setSurfaceLayerEnabled(enabled: Boolean) {
-    if (surfaceLayerEnabled == enabled) {
-      if (enabled) {
-        tryAttachSurface()
-        maybeLoadPending()
-      }
-      return
-    }
-    surfaceLayerEnabled = enabled
-    val host = surfaceHost
-    if (!enabled) {
-      parkSurfaceTransient()
-      host?.clearVideoLayer()
-      surfaceReady = false
-      return
-    }
-    if (host == null) return
-    host.setRender(renderTexture)
-    if (host.currentSurface() != null) {
-      surfaceReady = true
-      tryAttachSurface()
-      maybeLoadPending()
-    }
-  }
-
-  private fun destroyPlayer() {
-    main.removeCallbacks(tick)
-    pendingUrl = null
-    loadGen.incrementAndGet()
-    createdAsLive = null
-    createdTlsVerify = null
-    createdDiskCache = null
-    createdDirect = null
-    directActive = false
-    videoAspect = 0.0
-    appliedSpdif = null
-    if (!created.getAndSet(false)) return
-    try {
-      MPVLib.removeObserver(this)
     } catch (_: Throwable) {
+      Color.WHITE
     }
-    parkSurfaceTerminal()
-    try {
-      MPVLib.destroyCreatedContext()
-    } catch (_: Throwable) {
-    }
-    playing = false
-    buffering = false
   }
 
-  private fun emitLoadFailure(e: Throwable) {
-    val msg = e.message ?: "MPV load failed"
-    Log.e(TAG, msg, e)
-    emit(mapOf("event" to "error", "message" to msg))
+  private fun mimeFromPath(path: String): String? {
+    val lower = path.lowercase()
+    return when {
+      lower.endsWith(".ass") || lower.endsWith(".ssa") -> MimeTypes.TEXT_SSA
+      lower.endsWith(".vtt") -> MimeTypes.TEXT_VTT
+      lower.endsWith(".srt") -> MimeTypes.APPLICATION_SUBRIP
+      lower.endsWith(".ttml") || lower.endsWith(".xml") -> MimeTypes.APPLICATION_TTML
+      else -> null
+    }
   }
+
+  private fun defaultUserAgent(): String =
+    "KOTV/${Build.VERSION.RELEASE} (Linux; Android ${Build.VERSION.RELEASE})"
 
   private fun emit(payload: Map<String, Any?>) {
-    emitOnMain(main, eventSink, payload)
-  }
-
-  override fun eventProperty(property: String) {}
-
-  override fun eventProperty(property: String, value: Long) {
-    when (property) {
-      // 排好的下一集追加在第 2 项（下标 1）。
-      "playlist-pos" -> {
-        val next = queuedNext
-        if (next != null && value == 1L) main.post { if (queuedNext === next) enterQueuedNext(next) }
-      }
-      "width", "video-params/w" -> {
-        width = value.toInt()
-        emitSize()
-      }
-      "height", "video-params/h" -> {
-        height = value.toInt()
-        emitSize()
+    val sink = eventSink ?: return
+    main.post {
+      try {
+        sink.success(payload)
+      } catch (t: Throwable) {
+        Log.w(TAG, "emit", t)
       }
     }
   }
-
-  override fun eventProperty(property: String, value: Boolean) {
-    when (property) {
-      "pause" -> {
-        paused = value
-        playing = !value
-      }
-      "eof-reached" -> if (value) markEnded() else eof = false
-      "paused-for-cache", "seeking" -> buffering = value
-    }
-  }
-
-  override fun eventProperty(property: String, value: String) {
-    if (property == "current-vo") {
-      directActive = value == "mediacodec_embed"
-      main.post { applyVideoFrame() }
-    }
-  }
-
-  override fun eventProperty(property: String, value: Double) {
-    when (property) {
-      "time-pos", "playback-time" -> positionSec = value
-      "duration" -> durationSec = value
-      "video-params/aspect" -> {
-        videoAspect = value
-        main.post { applyVideoFrame() }
-      }
-    }
-  }
-
-  override fun event(eventId: Int) {
-    when (eventId) {
-      MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED, MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
-        buffering = false
-        // 属性观察可能晚于 restart；主动读一次，避免 Dart 侧一直 width=0 盖黑。
-        try {
-          width = MPVLib.getPropertyInt("width") ?: width
-          height = MPVLib.getPropertyInt("height") ?: height
-          if (width <= 0) width = MPVLib.getPropertyInt("video-params/w") ?: width
-          if (height <= 0) height = MPVLib.getPropertyInt("video-params/h") ?: height
-        } catch (_: Throwable) {
-        }
-        val seekTo = retrySeekSec
-        if (seekTo >= 0.5) {
-          retrySeekSec = -1.0
-          try {
-            MPVLib.command(arrayOf("seek", seekTo.toString(), "absolute"))
-          } catch (t: Throwable) {
-            Log.w(TAG, "retry seek failed", t)
-          }
-        } else {
-          retrySeekSec = -1.0
-        }
-        emitSize()
-        emit(mapOf("event" to "ready", "width" to width, "height" to height))
-      }
-      MPVLib.MpvEvent.MPV_EVENT_SHUTDOWN -> {
-        created.set(false)
-      }
-    }
-  }
-
-  /** 单集循环时 mpv 自己从头再播，不会停在片尾，也就不报 completed。 */
-  private fun loopFile(): String = if (repeatOne) "inf" else "no"
-
-  private fun applyRepeatOne() {
-    if (created.get()) MPVLib.setPropertyString("loop-file", loopFile())
-  }
-
-  /**
-   * 播到片尾，每次加载只报一次 completed。
-   * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；有排队项时在这里 playlist-next 并解除 pause。
-   * 仅图片轨且未出画、几乎没播过：seek 末帧的假 EOF，报 error 而不是 completed（页面可改开已下发的透传 url）。
-   */
-  private fun markEnded() {
-    if (eof) return
-    if (isUnplayableImageEof()) {
-      eof = true
-      playing = false
-      queuedNext = null
-      pendingSeamlessId = null
-      Log.w(TAG, "image-only eof suppressed url=$loadedUrl played=$maxPlayedSec")
-      emit(mapOf("event" to "error", "message" to "无法解码该片源画面"))
-      return
-    }
-    val next = queuedNext
-    if (next != null) {
-      main.post {
-        if (queuedNext !== next) return@post
-        if (!skipToQueued(next)) {
-          eof = true
-          playing = false
-          queuedNext = null
-          pendingSeamlessId = null
-          emit(mapOf("event" to "completed"))
-        }
-      }
-      return
-    }
-    if (pendingSeamlessId != null) return
-    eof = true
-    playing = false
-    emit(mapOf("event" to "completed"))
-  }
-
-  /**
-   * keep-open 在解不出画面的 png/mjpeg「视频」上会立刻 seek 到末帧并 eof-reached。
-   * 有音轨且真正播过则放行；仅图片轨、无尺寸、开播数秒内几乎未前进 → 假片尾。
-   */
-  private fun isUnplayableImageEof(): Boolean {
-    if (width > 0 && height > 0) return false
-    val elapsed = SystemClock.elapsedRealtime() - loadWallMs
-    if (elapsed > 8_000L || maxPlayedSec >= 1.0) return false
-    var hasAudio = false
-    var hasVideo = false
-    var allVideoImage = true
-    val count = try {
-      MPVLib.getPropertyInt("track-list/count") ?: 0
-    } catch (_: Throwable) {
-      0
-    }
-    for (i in 0 until count) {
-      val type = try {
-        MPVLib.getPropertyString("track-list/$i/type")
-      } catch (_: Throwable) {
-        null
-      } ?: continue
-      when (type) {
-        "audio" -> hasAudio = true
-        "video" -> {
-          hasVideo = true
-          val codec = try {
-            MPVLib.getPropertyString("track-list/$i/codec")
-          } catch (_: Throwable) {
-            null
-          }
-          val image = try {
-            MPVLib.getPropertyBoolean("track-list/$i/image") ?: false
-          } catch (_: Throwable) {
-            false
-          }
-          val albumart = try {
-            MPVLib.getPropertyBoolean("track-list/$i/albumart") ?: false
-          } catch (_: Throwable) {
-            false
-          }
-          if (!image && !albumart && !KotvMpvCodecs.imageCodec(codec)) {
-            allVideoImage = false
-          }
-        }
-      }
-    }
-    if (hasAudio) return false
-    return hasVideo && allVideoImage
-  }
-
-  override fun endFile(reason: Int, error: Int, errorText: String?) {
-    when (reason) {
-      // 有排队或正在无缝切入：不算播完（keep-open 下由 eof-reached / skipToQueued 切集；旧文件 end-file 晚到也忽略）。
-      MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_EOF -> {
-        if (queuedNext != null || pendingSeamlessId != null) return
-        markEnded()
-      }
-      MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
-        val msg = errorText?.takeIf { it.isNotBlank() } ?: "MPV error $error"
-        emit(mapOf("event" to "error", "message" to msg))
-      }
-      else -> {}
-    }
-  }
-
-  private fun emitSize() {
-    if (width > 0 && height > 0) {
-      emit(mapOf("event" to "size", "width" to width, "height" to height))
-    }
-  }
-
-  private fun withOpacity(raw: String, opacityPct: Double?): String {
-    if (opacityPct == null) return raw
-    return applySubtitleOpacity(raw, opacityPct)
-  }
-
-  private data class QueuedNext(
-    val id: String,
-    val url: String,
-    val headers: Map<String, String>,
-    val startAtMs: Long = 0L,
-  )
 
   companion object {
-    /** UI/引擎托管：mpv.conf 写入这些键会被跳过。 */
-    private val MANAGED_CONF_OPTIONS = setOf(
-      "vo", "wid", "android-surface-size", "gpu-api", "gpu-context", "hwdec",
-      "audio-spdif", "android-dolby-vision-output", "demuxer-dovi-profile7",
-      "cache", "cache-on-disk", "demuxer-cache-dir", "cache-secs",
-      "demuxer-max-bytes", "demuxer-max-back-bytes", "cache-pause", "cache-pause-initial",
-      "tls-verify", "tls-ca-file", "slang",
-      "brightness", "contrast", "saturation", "gamma", "hue",
-    )
+    private val MANAGED_CONF_OPTIONS =
+      setOf(
+        "vo",
+        "wid",
+        "android-surface-size",
+        "gpu-api",
+        "gpu-context",
+        "hwdec",
+        "audio-spdif",
+        "android-dolby-vision-output",
+        "demuxer-dovi-profile7",
+        "cache",
+        "cache-on-disk",
+        "demuxer-cache-dir",
+        "cache-secs",
+        "demuxer-max-bytes",
+        "demuxer-max-back-bytes",
+        "cache-pause",
+        "cache-pause-initial",
+        "tls-verify",
+        "tls-ca-file",
+        "slang",
+        "brightness",
+        "contrast",
+        "saturation",
+        "gamma",
+        "hue",
+      )
     private const val TAG = "KotvMpv"
-    // 仅作 open 前的初值；之后由 props 里的 demuxer-lavf-o 覆盖。
-    // 不设 protocol_whitelist：写了就是拒绝名单外协议（RTSP/RTMP/RTP）。
-    private const val LAVF_DEMUXER_O =
-      "seg_max_retry=5,strict=experimental," +
-        "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0," +
-        "probesize=8000000,analyzeduration=8000000"
     const val VIEW_TYPE = "kotv_mpv/surface"
   }
 }
@@ -2143,14 +1588,13 @@ internal class KotvMpvSurfaceFactory(
       override fun dispose() {
         Handler(Looper.getMainLooper()).post {
           plugin.detachSurfaceHost(host)
-          host.release()
         }
       }
     }
   }
 }
 
-/** SurfaceView / TextureView 宿主（PlayerView.setRender）。 */
+/** SurfaceView / TextureView 宿主。 */
 internal class KotvMpvSurfaceHost(context: Context) :
   FrameLayout(context),
   SurfaceHolder.Callback,
@@ -2163,37 +1607,36 @@ internal class KotvMpvSurfaceHost(context: Context) :
   private var textureSurface: Surface? = null
   private var useTexture = false
   var onSurface: ((Boolean) -> Unit)? = null
-  /** 缓冲区宽高变化；android-surface-size 由插件统一写。 */
   var onSurfaceSize: ((Int, Int) -> Unit)? = null
-  /** 最近一次回调的缓冲区宽高（"WxH"）；未知时为 null。 */
   var bufferSize: String? = null
     private set
-  /** OSD Surface 可用、失效或尺寸变化时回调；插件据此挂/卸 android-osd-wid 并更新尺寸。 */
   var onOsdSurface: (() -> Unit)? = null
-  /** OSD 缓冲区宽高（"WxH"）；未知时为 null。 */
   var osdSize: String? = null
     private set
+  var osdReady = false
+    private set
+  var osdSurfaceView: SurfaceView? = null
+    private set
   private var osdWanted = false
-  private var osdView: SurfaceView? = null
-  private var osdReady = false
-  private val osdCallback = object : SurfaceHolder.Callback {
-    override fun surfaceCreated(holder: SurfaceHolder) {
-      osdReady = true
-      onOsdSurface?.invoke()
-    }
+  private val osdCallback =
+    object : SurfaceHolder.Callback {
+      override fun surfaceCreated(holder: SurfaceHolder) {
+        osdReady = true
+        onOsdSurface?.invoke()
+      }
 
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-      if (width <= 0 || height <= 0) return
-      osdSize = "${width}x$height"
-      onOsdSurface?.invoke()
-    }
+      override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        osdSize = "${width}x$height"
+        onOsdSurface?.invoke()
+      }
 
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
-      osdReady = false
-      osdSize = null
-      onOsdSurface?.invoke()
+      override fun surfaceDestroyed(holder: SurfaceHolder) {
+        osdReady = false
+        osdSize = null
+        onOsdSurface?.invoke()
+      }
     }
-  }
 
   init {
     setBackgroundColor(Color.BLACK)
@@ -2216,10 +1659,6 @@ internal class KotvMpvSurfaceHost(context: Context) :
   private var frameAspect = 0.0
   private var frameMode = "default"
 
-  /**
-   * 直出时按画面比例摆放视频 SurfaceView（aspect ≤ 0 铺满）。
-   * fill 拉满；zoom 等比放大到铺满（超出部分在宿主外）；其余等比完整显示。
-   */
   fun setVideoFrame(aspect: Double, mode: String) {
     if (aspect == frameAspect && mode == frameMode) return
     frameAspect = aspect
@@ -2227,22 +1666,19 @@ internal class KotvMpvSurfaceHost(context: Context) :
     layoutVideoFrame()
   }
 
-  /**
-   * OSD 层与视频层同框：SurfaceView 会把整块区域从窗口挖空，
-   * OSD 若比视频大，黑边处就透出窗口下层的旧画面。
-   */
   private fun layoutVideoFrame() {
-    if (surfaceView == null) return
+    if (surfaceView == null && textureView == null) return
     val w = width
     val h = height
-    val (fw, fh) = if (frameAspect <= 0.0 || frameMode == "fill" || w <= 0 || h <= 0) {
-      LayoutParams.MATCH_PARENT to LayoutParams.MATCH_PARENT
-    } else {
-      val cover = frameMode == "zoom"
-      val byWidth = (frameAspect >= w.toDouble() / h) != cover
-      if (byWidth) w to (w / frameAspect).roundToInt() else (h * frameAspect).roundToInt() to h
-    }
-    for (v in listOfNotNull(surfaceView, osdView)) {
+    val (fw, fh) =
+      if (frameAspect <= 0.0 || frameMode == "fill" || w <= 0 || h <= 0) {
+        LayoutParams.MATCH_PARENT to LayoutParams.MATCH_PARENT
+      } else {
+        val cover = frameMode == "zoom"
+        val byWidth = (frameAspect >= w.toDouble() / h) != cover
+        if (byWidth) w to (w / frameAspect).roundToInt() else (h * frameAspect).roundToInt() to h
+      }
+    for (v in listOfNotNull(surfaceView, textureView, osdSurfaceView)) {
       val cur = v.layoutParams
       if (cur != null && cur.width == fw && cur.height == fh) continue
       v.layoutParams = LayoutParams(fw, fh, Gravity.CENTER)
@@ -2254,13 +1690,6 @@ internal class KotvMpvSurfaceHost(context: Context) :
     post { layoutVideoFrame() }
   }
 
-  fun currentOsdSurface(): Surface? {
-    if (!osdReady) return null
-    val s = osdView?.holder?.surface
-    return if (s != null && s.isValid) s else null
-  }
-
-  /** 直出时在视频上方叠一层透明 SurfaceView 画字幕；Texture 方式不直出，不建。 */
   fun setOsdLayer(enabled: Boolean) {
     osdWanted = enabled
     syncOsdView()
@@ -2268,36 +1697,36 @@ internal class KotvMpvSurfaceHost(context: Context) :
 
   private fun syncOsdView() {
     val want = osdWanted && surfaceView != null
-    if (want == (osdView != null)) return
+    if (want == (osdSurfaceView != null)) return
     if (!want) {
-      // 先让插件卸掉 android-osd-wid，再拆 View，mpv 不会拿着已销毁的 Surface。
       osdReady = false
       onOsdSurface?.invoke()
       removeOsdView()
       return
     }
-    val v = SurfaceView(context).apply {
-      layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-      isFocusable = false
-      isFocusableInTouchMode = false
-      setZOrderMediaOverlay(true)
-      holder.setFormat(PixelFormat.TRANSLUCENT)
-      holder.addCallback(osdCallback)
-    }
-    osdView = v
+    val v =
+      SurfaceView(context).apply {
+        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        isFocusable = false
+        isFocusableInTouchMode = false
+        setZOrderMediaOverlay(true)
+        holder.setFormat(PixelFormat.TRANSLUCENT)
+        holder.addCallback(osdCallback)
+      }
+    osdSurfaceView = v
     addView(v)
     layoutVideoFrame()
     stripPlatformViewFocus()
   }
 
   private fun removeOsdView() {
-    val v = osdView ?: return
+    val v = osdSurfaceView ?: return
     try {
       v.holder.removeCallback(osdCallback)
     } catch (_: Throwable) {
     }
     removeView(v)
-    osdView = null
+    osdSurfaceView = null
     osdReady = false
     osdSize = null
   }
@@ -2319,11 +1748,12 @@ internal class KotvMpvSurfaceHost(context: Context) :
     useTexture = texture
     val lp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
     if (texture) {
-      val tv = TextureView(context).apply {
-        layoutParams = lp
-        isFocusable = false
-        isFocusableInTouchMode = false
-      }
+      val tv =
+        TextureView(context).apply {
+          layoutParams = lp
+          isFocusable = false
+          isFocusableInTouchMode = false
+        }
       textureView = tv
       tv.surfaceTextureListener = this
       addView(tv)
@@ -2331,15 +1761,14 @@ internal class KotvMpvSurfaceHost(context: Context) :
         bindTextureSurface(tv.surfaceTexture, tv.width, tv.height)
       }
     } else {
-      val sv = SurfaceView(context).apply {
-        layoutParams = lp
-        isFocusable = false
-        isFocusableInTouchMode = false
-        // 与 Exo 一致：MediaOverlay 才能压过 Flutter 叠层，否则 Hybrid 下常见有声黑屏。
-        // 滚动重影靠详情 Positioned 跟槽；勿再靠关 overlay「藏」画面。
-        setZOrderMediaOverlay(true)
-        holder.addCallback(this@KotvMpvSurfaceHost)
-      }
+      val sv =
+        SurfaceView(context).apply {
+          layoutParams = lp
+          isFocusable = false
+          isFocusableInTouchMode = false
+          setZOrderMediaOverlay(true)
+          holder.addCallback(this@KotvMpvSurfaceHost)
+        }
       surfaceView = sv
       addView(sv)
       layoutVideoFrame()
@@ -2348,7 +1777,6 @@ internal class KotvMpvSurfaceHost(context: Context) :
     stripPlatformViewFocus()
   }
 
-  /** 出画前去掉 Surface，只留黑底宿主。 */
   fun clearVideoLayer() {
     if (surfaceView == null && textureView == null) return
     onSurface?.invoke(false)
@@ -2406,7 +1834,6 @@ internal class KotvMpvSurfaceHost(context: Context) :
   }
 
   override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-    // 只更新尺寸；勿再 onSurface(true)：全屏缩放会反复触发，每次都会重播。
     applySurfaceSize(width, height)
   }
 

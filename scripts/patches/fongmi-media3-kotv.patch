@@ -1,5 +1,5 @@
 diff --git a/build-logic/src/main/kotlin/androidx/media3/buildlogic/aarTypeWorkaround.kt b/build-logic/src/main/kotlin/androidx/media3/buildlogic/aarTypeWorkaround.kt
-index c5c5c13..dd1be01 100644
+index c5c5c13..92bcc72 100644
 --- a/build-logic/src/main/kotlin/androidx/media3/buildlogic/aarTypeWorkaround.kt
 +++ b/build-logic/src/main/kotlin/androidx/media3/buildlogic/aarTypeWorkaround.kt
 @@ -31,6 +31,7 @@ fun addMissingAarTypeToXml(xml: XmlProvider) {
@@ -82,6 +82,66 @@ index 9e7561a..53eeedf 100644
    androidTestImplementation(libs.androidx.test.runner)
    androidTestImplementation(libs.okhttp.mockwebserver)
    androidTestImplementation(libs.okhttp.urlconnection)
+diff --git a/libraries/decoder_ffmpeg/build.gradle.kts b/libraries/decoder_ffmpeg/build.gradle.kts
+index c7825ea..31cb3fc 100644
+--- a/libraries/decoder_ffmpeg/build.gradle.kts
++++ b/libraries/decoder_ffmpeg/build.gradle.kts
+@@ -13,7 +13,10 @@
+ // limitations under the License.
+ import java.util.Properties
+ 
+-plugins { id("media3.android-library") }
++plugins {
++  id("media3.android-library")
++  id("media3.publish")
++}
+ 
+ val nativeDependencies =
+   Properties().apply {
+@@ -26,7 +29,8 @@ val nativeDependencies =
+ 
+ android {
+   namespace = "androidx.media3.decoder.ffmpeg"
+-  ndkVersion = nativeDependencies.getProperty("android.ndk.version")
++  // KOTV: pin a complete local NDK (upstream props may point at a broken install).
++  ndkVersion = "29.0.14206865"
+ 
+   defaultConfig { ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") } }
+ 
+@@ -48,9 +52,7 @@ dependencies {
+   // TODO(b/203752526): Remove this dependency.
+   implementation(project(":lib-exoplayer"))
+   implementation(libs.androidx.annotation)
+-  testImplementation(project(":test-utils"))
+   testImplementation(libs.robolectric)
+-  androidTestImplementation(project(":test-utils"))
+   androidTestImplementation(libs.androidx.test.runner)
+   androidTestImplementation(libs.androidx.test.ext.junit)
+   androidTestImplementation(libs.truth)
+diff --git a/libraries/effect/build.gradle.kts b/libraries/effect/build.gradle.kts
+index 5700a2b..a575d36 100644
+--- a/libraries/effect/build.gradle.kts
++++ b/libraries/effect/build.gradle.kts
+@@ -32,19 +32,13 @@ dependencies {
+   api(project(":lib-common"))
+   implementation(project(":lib-datasource"))
+   implementation(libs.kotlinx.coroutines.guava)
+-  testImplementation(project(":test-utils-robolectric"))
+-  testImplementation(project(":test-utils"))
+-  testImplementation(project(":test-data"))
+   testImplementation(libs.robolectric)
+   testImplementation(libs.truth)
+   testImplementation(libs.kotlinx.coroutines.test)
+   testImplementation(libs.androidx.runner)
+-  androidTestImplementation(project(":lib-exoplayer"))
+-  androidTestImplementation(project(":lib-effect-ndk"))
+   androidTestImplementation(libs.kotlinx.coroutines.android)
+   androidTestImplementation(libs.test.parameter.injector)
+   androidTestImplementation(libs.junit)
+   androidTestImplementation(libs.androidx.test.runner)
+   androidTestImplementation(libs.truth)
+-  androidTestImplementation(project(":test-utils"))
+ }
 diff --git a/libraries/exoplayer/build.gradle.kts b/libraries/exoplayer/build.gradle.kts
 index 82d224d..ec9fc37 100644
 --- a/libraries/exoplayer/build.gradle.kts
@@ -160,42 +220,21 @@ index 4e6b59e..28e4d98 100644
    testImplementation(libs.robolectric)
  }
 diff --git a/libraries/ui_danmaku/build.gradle.kts b/libraries/ui_danmaku/build.gradle.kts
-index 1111111..2222222 100644
+index c5f06b7..ddb72ba 100644
 --- a/libraries/ui_danmaku/build.gradle.kts
 +++ b/libraries/ui_danmaku/build.gradle.kts
-@@ -34,4 +34,2 @@ dependencies {
+@@ -32,6 +32,4 @@ dependencies {
+   testImplementation(libs.okhttp.mockwebserver)
+   testImplementation(libs.junit)
    testImplementation(libs.robolectric)
 -  testImplementation(project(":test-utils"))
 -  testImplementation(project(":test-utils-robolectric"))
- }
-diff --git a/libraries/effect/build.gradle.kts b/libraries/effect/build.gradle.kts
-index aaaaaaa..bbbbbbb 100644
---- a/libraries/effect/build.gradle.kts
-+++ b/libraries/effect/build.gradle.kts
-@@ -32,18 +32,12 @@ dependencies {
-   implementation(project(":lib-datasource"))
-   implementation(libs.kotlinx.coroutines.guava)
--  testImplementation(project(":test-utils-robolectric"))
--  testImplementation(project(":test-utils"))
--  testImplementation(project(":test-data"))
-   testImplementation(libs.robolectric)
-   testImplementation(libs.truth)
-   testImplementation(libs.kotlinx.coroutines.test)
-   testImplementation(libs.androidx.runner)
--  androidTestImplementation(project(":lib-exoplayer"))
--  androidTestImplementation(project(":lib-effect-ndk"))
-   androidTestImplementation(libs.kotlinx.coroutines.android)
-   androidTestImplementation(libs.test.parameter.injector)
-   androidTestImplementation(libs.junit)
-   androidTestImplementation(libs.androidx.test.runner)
-   androidTestImplementation(libs.truth)
--  androidTestImplementation(project(":test-utils"))
  }
 diff --git a/settings.gradle.kts b/settings.gradle.kts
-index fc62b6a..f951b30 100644
+index fc62b6a..bbe4678 100644
 --- a/settings.gradle.kts
 +++ b/settings.gradle.kts
-@@ -27,7 +27,31 @@ plugins { id("gradlebuild.media3-settings-logic") }
+@@ -27,7 +27,33 @@ plugins { id("gradlebuild.media3-settings-logic") }
  
  rootProject.name = "androidx.media3"
  

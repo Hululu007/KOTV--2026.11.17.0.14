@@ -48,23 +48,22 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun preloadLibcxx() {
-    // jniLibs 已同步 webhtv libc++（与 libmpv/libplayer 配套）。必须走 Java
-    // System.loadLibrary（ClassLoader namespace）。kotv_dl 的 dlopen 会绕过 namespace，
-    // API25 上 libc++ 内部 _Znwm@plt GOT 不重定位 → setOptionString SIGSEGV(0x1423c0)。
+    // Media3 mpvplayer AAR 自带与 libmpv 配套的 libc++。须走 System.loadLibrary
+    //（ClassLoader namespace）；勿用 kotv_dl dlopen，否则 API25 上易 SIGSEGV。
     try {
       System.loadLibrary("c++_shared")
-      android.util.Log.i(TAG, "preload libc++_shared via System.loadLibrary(jniLibs)")
+      android.util.Log.i(TAG, "preload libc++_shared via System.loadLibrary")
     } catch (t: Throwable) {
       android.util.Log.w(TAG, "preload libc++_shared failed", t)
     }
   }
 
   private fun preloadAppLibvulkan() {
-    // API25：自编 libmpv（jniLibs/assets）依赖 Vulkan 1.1 符号；须在首次
-    // System.loadLibrary("mpv") / ensureLoaded 前 FORCE_LOAD stub（与设置「MPV Vulkan」无关）。
+    // API25：Media3 libmpv 依赖 Vulkan 1.1 符号；须在首次 System.loadLibrary("mpv")
+    // 前 FORCE_LOAD stub（与设置「MPV Vulkan」无关）。
     try {
-      if (`is`.xyz.mpv.MPVLib.isDeviceVulkanCapable(this)) {
-        `is`.xyz.mpv.MPVLib.removeAppVulkanStubIfPresent(this)
+      if (com.bobo.kotv.KotvMpvNativeBootstrap.isDeviceVulkanCapable(this)) {
+        com.bobo.kotv.KotvMpvNativeBootstrap.removeAppVulkanStubIfPresent(this)
         android.util.Log.i(TAG, "skip libvulkan stub; use system Vulkan (device ≥1.2)")
         return
       }
@@ -72,10 +71,10 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
       android.util.Log.w(TAG, "Vulkan capability probe failed", t)
     }
     try {
-      if (`is`.xyz.mpv.MPVLib.preloadVulkanStubEarly(this)) {
-        android.util.Log.i(TAG, "libvulkan stub preloaded for bundled libmpv")
+      if (com.bobo.kotv.KotvMpvNativeBootstrap.preloadVulkanStubEarly(this)) {
+        android.util.Log.i(TAG, "libvulkan stub preloaded for Media3 libmpv")
       } else {
-        android.util.Log.i(TAG, "device lacks Vulkan 1.2; stub deferred to MPV ensureLoaded")
+        android.util.Log.i(TAG, "device lacks Vulkan 1.2; stub not preloaded")
       }
     } catch (t: Throwable) {
       android.util.Log.w(TAG, "early libvulkan stub preload failed", t)

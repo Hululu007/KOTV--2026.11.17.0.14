@@ -107,8 +107,10 @@ android {
             // stub .so is already small; AGP stripReleaseDebugSymbols corrupts it
             keepDebugSymbols.add("**/libvulkan.so")
             keepDebugSymbols.add("**/libkotv_dl.so")
-            // fvp/mdk 也会带 libc++_shared；优先用我们 overlay 的 NDK 副本（libmpv from_chars）。
+            // Media3 mpvplayer / decoder-ffmpeg / fvp 都可能带 libc++_shared；取一份即可。
             pickFirsts += "**/libc++_shared.so"
+            pickFirsts += "**/libmpv.so"
+            pickFirsts += "**/libplayer.so"
             // fvp 与 ass-kt 都带 libass.so；Exo ASS 用 peerless2012，取其一即可。
             pickFirsts += "**/libass.so"
             useLegacyPackaging = true
@@ -290,12 +292,12 @@ tasks.register("prepareKotvEngineSo") {
     }
 }
 
-// 页内原生 MPV：套件进 jniLibs，assets/mpv-libs 只留 Vulkan stub。
+// Media3 MpvPlayer：libmpv 来自 media3-mpvplayer AAR；这里只准备 Vulkan stub + kotv_dl。
 tasks.register("prepareKotvMpvNative", Exec) {
     workingDir = repoRoot
     commandLine "bash", "scripts/prepare-android-mpv-native.sh"
     doFirst {
-        println "[android] preparing bundled MPV + Vulkan natives …"
+        println "[android] preparing Vulkan stub + kotv_dl for Media3 MpvPlayer …"
     }
 }
 

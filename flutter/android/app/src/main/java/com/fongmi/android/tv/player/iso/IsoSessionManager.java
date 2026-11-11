@@ -3,11 +3,11 @@ package com.fongmi.android.tv.player.iso;
 import java.nio.ByteBuffer;
 
 /**
- * Stub for webhtv libplayer {@code register_iso_protocol} JNI.
+ * Stub for Media3 libplayer {@code register_iso_protocol} JNI.
  *
- * MPVLib.create 会链到这些 native 符号；KOTV <b>不</b>走这套自定义 iso://。
- * 真正的 DVD/Blu-ray/ISO 播放由自编译 libmpv（dvdnav + libbluray）完成：
- * Dart 侧把路径改写成 {@code dvd://}/{@code bd://} 并设 dvd-device / bluray-device。
+ * Media3 {@code libplayer.so} 可能链到这些 native 符号；KOTV <b>不</b>走这套自定义 iso://。
+ * DVD/Blu-ray/ISO 由 libmpv（dvdnav + libbluray）完成：Dart 把路径改写成
+ * {@code dvd://}/{@code bd://} 并设 dvd-device / bluray-device。
  */
 public final class IsoSessionManager {
     private IsoSessionManager() {}

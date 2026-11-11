@@ -203,38 +203,18 @@ class NativeMpvPlayback extends KotvPlayback {
     List<Map<String, dynamic>> subs = const [],
     Duration startAt = Duration.zero,
   }) async {
-    final h = kotvNormalizePlayHeaders(headers, url: url);
-    try {
-      final ok = await _ch.invokeMethod<bool>('queueNext', {
-        'id': id,
-        'url': url,
-        'headers': h,
-        if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
-      });
-      _queued = ok == true ? (id: id, url: url, headers: h) : null;
-    } catch (_) {
-      _queued = null;
-    }
-    return _queued != null;
+    // Media3 MpvPlayer 路径不提供无缝 queueNext；返回 false 由上层走普通换集。
+    _queued = null;
+    return false;
   }
 
   @override
   Future<void> clearNext() async {
     _queued = null;
-    try {
-      await _ch.invokeMethod('clearNext');
-    } catch (_) {}
   }
 
   @override
-  Future<bool> skipToNext() async {
-    if (_queued == null) return false;
-    try {
-      return await _ch.invokeMethod<bool>('skipToNext') == true;
-    } catch (_) {
-      return false;
-    }
-  }
+  Future<bool> skipToNext() async => false;
 
   void _enterQueued(String id) {
     final q = _queued;
@@ -834,15 +814,23 @@ class NativeMpvPlayback extends KotvPlayback {
       changed = true;
     }
     if (!changed) return;
-    final props = _opts.fxPreviewProperties(
-      videoOriginal: _previewVideoOriginal,
-      audioOriginal: _previewAudioOriginal,
-    );
-    for (final e in props.entries) {
-      try {
-        await _ch.invokeMethod('setProperty', {'key': e.key, 'value': e.value});
-      } catch (_) {}
-    }
+    try {
+      final videoOn = _opts.videoEq.enabled && !_previewVideoOriginal;
+      final audioAf = _previewAudioOriginal || _opts.audioPassThrough
+          ? ''
+          : _opts.equalizerChannelArgs()['audioAf'] as String? ?? '';
+      await _ch.invokeMethod('setEqualizer', {
+        'eqBrightness': videoOn ? _opts.videoEq.brightness : 0,
+        'eqContrast': videoOn ? _opts.videoEq.contrast : 0,
+        'eqSaturation': videoOn ? _opts.videoEq.saturation : 0,
+        'eqGamma': videoOn ? _opts.videoEq.gamma : 0,
+        'eqHue': videoOn ? _opts.videoEq.hue : 0,
+        'eqSharpness': videoOn ? _opts.videoEq.sharpness : 0,
+        'audioAf': audioAf,
+        'videoVf': videoOn ? _opts.videoEq.mpvVf() : '',
+        'subtitleFontScale': _opts.subtitleFontScale.clamp(0.5, 2.0),
+      });
+    } catch (_) {}
   }
 
   @override
@@ -972,9 +960,10 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   Future<List<KotvTrack>> discTitles() async {
     try {
+      // MediaEdition.index 为 0-based。
       final n = await _ch.invokeMethod<int>('discTitleCount') ?? 0;
       if (n <= 0) return const [];
-      return [for (var i = 1; i <= n; i++) KotvTrack(id: '$i', label: '标题 $i')];
+      return [for (var i = 0; i < n; i++) KotvTrack(id: '$i', label: '标题 ${i + 1}')];
     } catch (_) {
       return const [];
     }
@@ -1007,9 +996,7 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   Future<void> openDiscMenu() async {
-    try {
-      await _ch.invokeMethod('openDiscMenu');
-    } catch (_) {}
+    // Media3 MpvPlayer 无 discnav menu 映射。
   }
 
   @override
