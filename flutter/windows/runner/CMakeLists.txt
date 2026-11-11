@@ -46,6 +46,13 @@ target_compile_definitions(${BINARY_NAME} PRIVATE
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "iphlpapi.lib")
+# 外部播放器：关联枚举 + HICON→PNG（WIC，Win7+）。
+target_link_libraries(${BINARY_NAME} PRIVATE
+  "shell32.lib"
+  "ole32.lib"
+  "gdi32.lib"
+  "windowscodecs.lib"
+)
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

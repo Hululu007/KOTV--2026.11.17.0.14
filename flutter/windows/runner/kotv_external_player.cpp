@@ -5,24 +5,16 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shobjidl.h>
+#include <wincodec.h>
 
 #include <algorithm>
+#include <cstring>
 #include <cwchar>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace {
-
-std::wstring Utf16FromUtf8(const std::string& utf8) {
-  if (utf8.empty()) return {};
-  const int n = ::MultiByteToWideChar(CP_UTF8, 0, utf8.data(),
-                                      static_cast<int>(utf8.size()), nullptr, 0);
-  if (n <= 0) return {};
-  std::wstring out(static_cast<size_t>(n), L'\0');
-  ::MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()),
-                        out.data(), n);
-  return out;
-}
 
 std::wstring ToLower(std::wstring s) {
   for (wchar_t& c : s) {
@@ -65,7 +57,163 @@ bool IsVideoHandlerExe(const std::wstring& exe) {
          !IsSelfExecutable(exe);
 }
 
-// visit(exe, label) 返回 false 时停止枚举。
+// HICON 画到 side×side 的 32bpp BGRA，再经 WIC 编成 PNG（与 macOS/Linux 列表契约一致）。
+std::vector<uint8_t> HiconToPng(HICON icon, int side) {
+  if (icon == nullptr || side <= 0) return {};
+
+  BITMAPINFO bmi = {};
+  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bmi.bmiHeader.biWidth = side;
+  bmi.bmiHeader.biHeight = -side;  // top-down
+  bmi.bmiHeader.biPlanes = 1;
+  bmi.bmiHeader.biBitCount = 32;
+  bmi.bmiHeader.biCompression = BI_RGB;
+
+  void* bits = nullptr;
+  HDC screen = ::GetDC(nullptr);
+  if (screen == nullptr) return {};
+  HDC mem = ::CreateCompatibleDC(screen);
+  HBITMAP dib =
+      ::CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+  if (mem == nullptr || dib == nullptr || bits == nullptr) {
+    if (dib != nullptr) ::DeleteObject(dib);
+    if (mem != nullptr) ::DeleteDC(mem);
+    ::ReleaseDC(nullptr, screen);
+    return {};
+  }
+
+  HGDIOBJ old = ::SelectObject(mem, dib);
+  const size_t nbytes = static_cast<size_t>(side) * static_cast<size_t>(side) * 4;
+  std::memset(bits, 0, nbytes);
+  ::DrawIconEx(mem, 0, 0, icon, side, side, 0, nullptr, DI_NORMAL);
+  ::SelectObject(mem, old);
+  ::DeleteDC(mem);
+  ::ReleaseDC(nullptr, screen);
+
+  std::vector<uint8_t> png;
+  IWICImagingFactory* factory = nullptr;
+  HRESULT hr = ::CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                                  CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory));
+  if (FAILED(hr) || factory == nullptr) {
+    ::DeleteObject(dib);
+    return {};
+  }
+
+  IWICBitmap* bitmap = nullptr;
+  const UINT stride = static_cast<UINT>(side * 4);
+  hr = factory->CreateBitmapFromMemory(
+      static_cast<UINT>(side), static_cast<UINT>(side),
+      GUID_WICPixelFormat32bppBGRA, stride, static_cast<UINT>(nbytes),
+      static_cast<BYTE*>(bits), &bitmap);
+  ::DeleteObject(dib);
+  if (FAILED(hr) || bitmap == nullptr) {
+    if (factory != nullptr) factory->Release();
+    return {};
+  }
+
+  IStream* stream = nullptr;
+  hr = ::CreateStreamOnHGlobal(nullptr, TRUE, &stream);
+  if (FAILED(hr) || stream == nullptr) {
+    bitmap->Release();
+    factory->Release();
+    return {};
+  }
+
+  IWICBitmapEncoder* encoder = nullptr;
+  hr = factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder);
+  if (SUCCEEDED(hr) && encoder != nullptr) {
+    hr = encoder->Initialize(stream, WICBitmapEncoderNoCache);
+    IWICBitmapFrameEncode* frame = nullptr;
+    if (SUCCEEDED(hr)) {
+      hr = encoder->CreateNewFrame(&frame, nullptr);
+    }
+    if (SUCCEEDED(hr) && frame != nullptr) {
+      hr = frame->Initialize(nullptr);
+      if (SUCCEEDED(hr)) {
+        hr = frame->SetSize(static_cast<UINT>(side), static_cast<UINT>(side));
+      }
+      WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+      if (SUCCEEDED(hr)) {
+        hr = frame->SetPixelFormat(&format);
+      }
+      if (SUCCEEDED(hr)) {
+        hr = frame->WriteSource(bitmap, nullptr);
+      }
+      if (SUCCEEDED(hr)) {
+        hr = frame->Commit();
+      }
+      if (SUCCEEDED(hr)) {
+        hr = encoder->Commit();
+      }
+      frame->Release();
+    }
+    encoder->Release();
+  }
+
+  if (SUCCEEDED(hr)) {
+    STATSTG stat = {};
+    if (SUCCEEDED(stream->Stat(&stat, STATFLAG_NONAME)) &&
+        stat.cbSize.QuadPart > 0 && stat.cbSize.QuadPart < 4 * 1024 * 1024) {
+      const ULONG size = static_cast<ULONG>(stat.cbSize.QuadPart);
+      LARGE_INTEGER zero = {};
+      stream->Seek(zero, STREAM_SEEK_SET, nullptr);
+      png.resize(size);
+      ULONG read = 0;
+      if (FAILED(stream->Read(png.data(), size, &read)) || read != size) {
+        png.clear();
+      }
+    }
+  }
+
+  stream->Release();
+  bitmap->Release();
+  factory->Release();
+  return png;
+}
+
+std::vector<uint8_t> IconPngFromPath(const std::wstring& path, int index,
+                                     int side) {
+  if (path.empty() || side <= 0) return {};
+  HICON large = nullptr;
+  HICON small = nullptr;
+  // SHDefExtractIcon：Win7+；按目标边长抽大图标。
+  const HRESULT hr = ::SHDefExtractIconW(path.c_str(), index, 0, &large, &small,
+                                         static_cast<UINT>(side));
+  HICON use = nullptr;
+  if (SUCCEEDED(hr) || hr == S_FALSE) {
+    use = large != nullptr ? large : small;
+  }
+  if (use == nullptr) {
+    // 回退：经典 ExtractIconEx（索引 0）。
+    if (index == 0) {
+      ::ExtractIconExW(path.c_str(), 0, &large, &small, 1);
+      use = large != nullptr ? large : small;
+    }
+  }
+  std::vector<uint8_t> png;
+  if (use != nullptr) {
+    png = HiconToPng(use, side);
+  }
+  if (large != nullptr) ::DestroyIcon(large);
+  if (small != nullptr && small != large) ::DestroyIcon(small);
+  return png;
+}
+
+std::vector<uint8_t> AssocHandlerIconPng(IAssocHandler* handler,
+                                         const std::wstring& exe, int side) {
+  if (handler != nullptr) {
+    wchar_t loc[MAX_PATH] = {};
+    int index = 0;
+    if (SUCCEEDED(handler->GetIconLocation(loc, MAX_PATH, &index)) &&
+        loc[0] != L'\0') {
+      std::vector<uint8_t> png = IconPngFromPath(loc, index, side);
+      if (!png.empty()) return png;
+    }
+  }
+  return IconPngFromPath(exe, 0, side);
+}
+
+// visit(exe, label, handler) 返回 false 时停止枚举。
 template <typename Visit>
 void ForEachVideoHandler(Visit&& visit) {
   std::set<std::wstring> seen;
@@ -96,7 +244,7 @@ void ForEachVideoHandler(Visit&& visit) {
             const size_t slash = exe.find_last_of(L"\\/");
             label = slash == std::wstring::npos ? exe : exe.substr(slash + 1);
           }
-          if (!visit(exe, label)) stop = true;
+          if (!visit(exe, label, handler)) stop = true;
         }
       }
       handler->Release();
@@ -111,35 +259,45 @@ void ForEachVideoHandler(Visit&& visit) {
 
 bool KotvHasExternalVideoApp() {
   bool found = false;
-  ForEachVideoHandler([&](const std::wstring&, const std::wstring&) {
-    found = true;
-    return false;
-  });
+  ForEachVideoHandler(
+      [&](const std::wstring&, const std::wstring&, IAssocHandler*) {
+        found = true;
+        return false;
+      });
   return found;
 }
 
 flutter::EncodableList KotvListExternalVideoApps() {
   flutter::EncodableList out;
-  ForEachVideoHandler([&](const std::wstring& exe, const std::wstring& label) {
+  ForEachVideoHandler([&](const std::wstring& exe, const std::wstring& label,
+                          IAssocHandler* handler) {
     flutter::EncodableMap row;
     row[flutter::EncodableValue("id")] =
         flutter::EncodableValue(Utf8FromUtf16(exe.c_str()));
     row[flutter::EncodableValue("name")] =
         flutter::EncodableValue(Utf8FromUtf16(label.c_str()));
+    std::vector<uint8_t> png = AssocHandlerIconPng(handler, exe, 64);
+    if (!png.empty()) {
+      row[flutter::EncodableValue("icon")] =
+          flutter::EncodableValue(std::move(png));
+    }
     out.push_back(flutter::EncodableValue(row));
     return true;
   });
   std::sort(out.begin(), out.end(),
-            [](const flutter::EncodableValue& a, const flutter::EncodableValue& b) {
+            [](const flutter::EncodableValue& a,
+               const flutter::EncodableValue& b) {
               const auto* ma = std::get_if<flutter::EncodableMap>(&a);
               const auto* mb = std::get_if<flutter::EncodableMap>(&b);
               if (ma == nullptr || mb == nullptr) return false;
               const auto ia = ma->find(flutter::EncodableValue("name"));
               const auto ib = mb->find(flutter::EncodableValue("name"));
               const std::string* sa =
-                  ia == ma->end() ? nullptr : std::get_if<std::string>(&ia->second);
+                  ia == ma->end() ? nullptr
+                                  : std::get_if<std::string>(&ia->second);
               const std::string* sb =
-                  ib == mb->end() ? nullptr : std::get_if<std::string>(&ib->second);
+                  ib == mb->end() ? nullptr
+                                  : std::get_if<std::string>(&ib->second);
               return (sa == nullptr ? "" : *sa) < (sb == nullptr ? "" : *sb);
             });
   return out;

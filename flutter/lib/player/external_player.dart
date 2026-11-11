@@ -73,7 +73,7 @@ Future<List<(String, String)>> kotvInstalledPlayerOptions({
 
 /// 打开外部播放器：
 /// - 安卓：系统 Intent 选择器（video/*），地址即当前播放地址（含代理）
-/// - 桌面：宿主列出本机视频应用 → 网格点选 → 把同一播放地址交给该应用
+/// - 桌面：宿主列出本机视频应用（含可选 64px PNG `icon`）→ 网格点选 → 原址交给该应用
 /// 取消选择时 [KotvExternalPlayResult.opened] 为假；外部播不了也不再改写地址。
 Future<KotvExternalPlayResult> kotvLaunchExternalPlayer({
   required String player,

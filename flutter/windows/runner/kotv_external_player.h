@@ -8,7 +8,7 @@
 // 是否已有至少一个可用的本机视频应用（找到即停，不造完整列表）。
 bool KotvHasExternalVideoApp();
 
-// 枚举本机可处理常见视频扩展名的应用（排除浏览器），供 Flutter 网格选择。
+// 枚举本机可处理常见视频扩展名的应用（排除浏览器），带 64px PNG 图标（失败则无 icon 字段）。
 flutter::EncodableList KotvListExternalVideoApps();
 
 // 用选定可执行文件打开播放地址（当前播放地址原样传入）。
