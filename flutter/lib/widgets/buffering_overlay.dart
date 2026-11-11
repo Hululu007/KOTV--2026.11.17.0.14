@@ -8,9 +8,7 @@ import '../theme/layout_scale.dart';
 
 /// 缓冲中在**播放器 Stack 内**居中显示转圈 + 实时网速（必须叠在视频区域，不能挂全局 Overlay）。
 ///
-/// 全后端统一用本组件 Flutter 浮层（含 Exo Surface/Texture）。
-/// 原生 `setBufferingUi` / host bufferingPanel 已废弃。
-/// 浮层用 [KotvTraffic] 测速。
+/// 全后端统一用本组件 Flutter 浮层；测速走 [KotvTraffic]。
 class KotvBufferingOverlay extends StatefulWidget {
   const KotvBufferingOverlay({
     super.key,

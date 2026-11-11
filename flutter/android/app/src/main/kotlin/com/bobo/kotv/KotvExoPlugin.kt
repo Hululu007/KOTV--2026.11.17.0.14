@@ -694,10 +694,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           result.success(true)
         }
       }
-      // 已废弃：缓冲浮层改走 Flutter KotvBufferingOverlay；通道恒成功、无操作。
-      "setBufferingUi" -> result.success(true)
       "setRate" -> {
-        val r = (call.argument<Number>("rate")?.toFloat() ?: 1f).coerceIn(0.25f, 4f)
+        val r = KotvPlayerNormalize.clampPlayRate((call.argument<Number>("rate") ?: 1).toDouble()).toFloat()
         main.post {
           player?.setPlaybackSpeed(r)
           result.success(true)
@@ -1170,6 +1168,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val p = player ?: return
     queuedNext = null
     currentUrl = next.url
+    currentHeaders = next.headers
     currentMime = next.mime
     currentSubs = next.subs
     formatRetried = false
@@ -2619,16 +2618,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /** 沿用传入的头。没有 User-Agent 时不补，避免盖掉上游登记或设置里的播放 UA。 */
-  private fun normalizeHeaders(raw: Map<String, String>): Map<String, String> {
-    val out = linkedMapOf<String, String>()
-    for ((k0, v0) in raw) {
-      val k = k0.trim()
-      val v = v0.trim()
-      if (k.isEmpty() || v.isEmpty()) continue
-      out[k] = v
-    }
-    return out
-  }
+  private fun normalizeHeaders(raw: Map<String, String>): Map<String, String> =
+    KotvPlayerNormalize.normalizeHeaders(raw)
 
   companion object {
     private const val TAG = "KotvExo"
@@ -2758,9 +2749,6 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
   private var textureListener: TextureView.SurfaceTextureListener? = null
   private var onReady: (() -> Unit)? = null
   private var useTexture = false
-  private val bufferingPanel: android.widget.LinearLayout
-  private val bufferingProgress: android.widget.ProgressBar
-  private val bufferingText: android.widget.TextView
 
   init {
     setBackgroundColor(android.graphics.Color.BLACK)
@@ -2769,51 +2757,6 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
     isFocusableInTouchMode = false
     descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-    val density = resources.displayMetrics.density
-    fun dp(v: Int): Int = (v * density + 0.5f).toInt()
-    bufferingProgress = android.widget.ProgressBar(context).apply {
-      isIndeterminate = true
-      isFocusable = false
-      indeterminateDrawable?.setColorFilter(
-        android.graphics.Color.parseColor("#E53955"),
-        android.graphics.PorterDuff.Mode.SRC_IN,
-      )
-      layoutParams = android.widget.LinearLayout.LayoutParams(dp(28), dp(28)).apply {
-        gravity = android.view.Gravity.CENTER_HORIZONTAL
-      }
-    }
-    bufferingText = android.widget.TextView(context).apply {
-      setTextColor(android.graphics.Color.WHITE)
-      textSize = 15f
-      typeface = android.graphics.Typeface.DEFAULT_BOLD
-      gravity = android.view.Gravity.CENTER
-      setPadding(0, dp(10), 0, 0)
-      isFocusable = false
-      maxLines = 2
-    }
-    bufferingPanel = android.widget.LinearLayout(context).apply {
-      orientation = android.widget.LinearLayout.VERTICAL
-      gravity = android.view.Gravity.CENTER
-      setPadding(dp(18), dp(14), dp(18), dp(14))
-      isFocusable = false
-      setBackgroundColor(android.graphics.Color.parseColor("#FF111111"))
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-        background = android.graphics.drawable.GradientDrawable().apply {
-          setColor(android.graphics.Color.parseColor("#FF111111"))
-          cornerRadius = 20 * density
-        }
-      }
-      addView(bufferingProgress)
-      addView(bufferingText)
-      visibility = View.GONE
-      elevation = 8f
-    }
-    addView(
-      bufferingPanel,
-      LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-        gravity = android.view.Gravity.CENTER
-      },
-    )
   }
 
   override fun onAttachedToWindow() {
@@ -2822,28 +2765,18 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
     stripPlatformViewFocus()
   }
 
-  /** @deprecated 缓冲浮层已改 Flutter；恒 no-op。 */
-  fun setBufferingUi(show: Boolean, text: String) {
-    bufferingPanel.visibility = View.GONE
-  }
-
   /** 去掉 SurfaceView/TextureView，只留黑底（出画前滑动无独立 Surface 图层）。 */
   fun clearVideoLayer() {
     unbind()
     listOfNotNull(surfaceView, textureView).forEach { removeView(it) }
     surfaceView = null
     textureView = null
-    bufferingPanel.bringToFront()
   }
 
-  /**
-   * Flutter Texture 出画时：宿主透明、无视频层，仅承载 [KotvSubtitleOverlay]。
-   * 原生 bufferingPanel 已废弃（缓冲走 Flutter [KotvBufferingOverlay]），保持隐藏。
-   */
+  /** Flutter Texture 出画时：宿主透明、无视频层，仅承载 [KotvSubtitleOverlay]。 */
   fun prepareSubtitleOnly() {
     setBackgroundColor(android.graphics.Color.TRANSPARENT)
     clearVideoLayer()
-    bufferingPanel.visibility = View.GONE
   }
 
   fun setRender(texture: Boolean, onReady: () -> Unit) {
@@ -2857,7 +2790,6 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
       return
     }
     unbind()
-    // 保留 bufferingPanel；只换视频面，避免缓冲 UI 被拆掉。
     listOfNotNull(surfaceView, textureView).forEach { removeView(it) }
     surfaceView = null
     textureView = null
@@ -2912,7 +2844,6 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
       sv.holder.addCallback(cb)
       addView(sv, 0)
     }
-    bufferingPanel.bringToFront()
   }
 
   fun unbind() {

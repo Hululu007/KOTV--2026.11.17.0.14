@@ -49,10 +49,6 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 起播或播放中卡顿：给「缓冲中」浮层和中央播停键。
   bool get stalling => buffering;
   /// 是否改由原生画缓冲浮层。当前一律 false：统一走 Flutter [KotvBufferingOverlay]。
-  /// 原生 `setBufferingUi` / host bufferingPanel 已废弃，勿再扩。
-  bool get preferNativeBufferingOverlay => false;
-  /// 驱动原生缓冲浮层（仅 [preferNativeBufferingOverlay] 为 true 时有意义；已废弃）。
-  Future<void> setNativeBufferingOverlay({required bool visible, required String text}) async {}
   /// 估算下载速度（字节/秒）；0 表示未知。
   int get networkSpeedBps => 0;
   double get volume; // 0–100

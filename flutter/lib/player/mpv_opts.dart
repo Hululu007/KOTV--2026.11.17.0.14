@@ -381,32 +381,6 @@ class KotvMpvOpts {
     } catch (_) {}
   }
 
-  /// 交给原生通道的属性表（P1/P2 open / setOpts）。
-  ///
-  /// [live]=true：仍写同一份字节上限，并关掉 cache-pause。不写 cache-secs。
-  Map<String, String> propertyMap({bool live = false}) {
-    final out = <String, String>{
-      'hwdec': hwdecValue(),
-      'demuxer-lavf-o': kotvDemuxerLavfO,
-      'ytdl': 'no',
-      'playlist-exts': kotvPlaylistExts,
-      'image-exts': kotvImageExts,
-    };
-    if (live) {
-      out['cache-pause'] = 'no';
-    }
-    out.addAll(KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes()));
-    // Android 原生另有 diskCache 写 cache-on-disk + demuxer-cache-dir；
-    // 桌面 media_kit 在 [applyAfterAttach] 写 cache-on-disk 与定点 demuxer-cache-dir。
-    for (final e in parseConfLines(conf)) {
-      out[e.$1] = e.$2;
-    }
-    out.addAll(videoEq.mpvProps());
-    out['sub-scale'] = kotvClampSubtitleFontScale(subtitleFontScale).toStringAsFixed(2);
-    out['audio-delay'] = (audioOffsetMs / 1000.0).toStringAsFixed(3);
-    return out;
-  }
-
   /// 按住看原画 / 试听原音要写的属性。不含 hwdec。
   /// 音频直通时不写 af，避免盖掉当前直通。
   Map<String, String> fxPreviewProperties({

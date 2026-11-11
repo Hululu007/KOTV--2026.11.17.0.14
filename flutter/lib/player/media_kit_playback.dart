@@ -11,6 +11,7 @@ import 'kotv_playback.dart';
 import 'mpv_opts.dart';
 import 'play_format.dart';
 import 'play_headers.dart';
+import 'player_normalize.dart';
 import 'silent_video_guard.dart';
 import 'video_eq.dart';
 
@@ -139,6 +140,8 @@ class MediaKitPlayback extends KotvPlayback {
   bool _buffering = false;
   bool _repeatOne = false;
   bool _live;
+  /// 当前会话挂了 ClearKey（demuxer-lavf-o）；无缝排队不复用该会话。
+  bool _drmSession = false;
   int _speedBps = 0;
   late Future<void> _optsReady;
   /// 换源时本地尺寸清零；未 [_acceptSize] 前不采信 libmpv 残留宽高。
@@ -346,7 +349,8 @@ class MediaKitPlayback extends KotvPlayback {
     Duration startAt = Duration.zero,
   }) async {
     final h = kotvNormalizePlayHeaders(headers, url: url);
-    if (_url.isEmpty || _live || !mapEquals(h, _headers)) {
+    // ClearKey 写在播放器全局 lavf；列表项无法带独立密钥。外挂字幕亦无 Media 字段可挂。
+    if (_url.isEmpty || _live || _drmSession || !mapEquals(h, _headers)) {
       return false;
     }
     await clearNext();
@@ -545,6 +549,7 @@ class MediaKitPlayback extends KotvPlayback {
     if (drm != null && drm.isNotEmpty && clearKeyHex == null) {
       throw StateError('MPV 不支持该 DRM，请用内置 ExoPlayer');
     }
+    _drmSession = clearKeyHex != null;
     await _optsReady;
     await _opts.applyAfterAttach(player, live: live);
     if (_extraOpenProps.isNotEmpty) {
@@ -617,6 +622,7 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> _stopUnload({required String reason}) async {
     _url = '';
     _queued = null;
+    _drmSession = false;
     _playlistDuration = null;
     _completedGate = null;
     _clearVideoSize();
@@ -652,7 +658,7 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> setVolume(double v) => player.setVolume(v.clamp(0, 100));
 
   @override
-  Future<void> setRate(double r) => player.setRate(r);
+  Future<void> setRate(double r) => player.setRate(kotvClampPlayRate(r));
 
   @override
   Future<void> setRepeatOne(bool on) async {

@@ -34,6 +34,7 @@ import '../player/mpv_opts.dart';
 import '../player/playback_settings.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
+import '../player/player_normalize.dart';
 import '../player/subtitle_style_util.dart';
 import '../player/playback_failover.dart';
 import '../player/tv_remote_keys.dart';
@@ -352,7 +353,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   StreamSubscription? _bufferingSub;
   KotvPlayback? _wiredNotifyTarget;
   VoidCallback? _playbackNotify;
-  int? _boundMpvTextureId;
   int _lastVideoW = 0;
   int _lastVideoH = 0;
   bool _openingSeekDone = false;
@@ -378,7 +378,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   int _nextPreloadSerial = 0;
   /// 本集是否已发起「预加载下一集」（离片尾 [_nextEpisodeQueueLeadMs] 时发起一次）。
   bool _nextPreloadRequested = false;
-  /// 已排进 Exo 播放列表的下一集；播到它时由 [_onQueuedEpisodeStarted] 记账。
+  /// 已排进当前播放器播放列表的下一集；播到它时由 [_onQueuedEpisodeStarted] 记账。
   ({String key, int idx, String playUrl, Map<String, String> headers, Map<String, dynamic> data})? _queuedNext;
   /// 无缝进入下一集后、真正开播前出错：退回普通换集（带自动切换播放器）。
   bool _queuedEpisodeUnconfirmed = false;
@@ -1156,17 +1156,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       }
       // 仅 Android 原生 MPV：出尺寸后须 rebuild 才能按比例定 PlatformView。
       // 桌面 media_kit 的 Video 若在 open 中途因宽高 setState 整树重建，
-      // 易丢 libmpv render context → 有声黑屏（此前只因 textureId 才 rebuild）。
+      // 易丢 libmpv render context → 有声黑屏。
       if (sizeChanged && p is NativeMpvPlayback) {
         setState(() {});
         return;
-      }
-      if (p is NativeMpvPlayback) {
-        final tid = p.textureId;
-        if (tid != null && tid != _boundMpvTextureId) {
-          _boundMpvTextureId = tid;
-          setState(() {});
-        }
       }
     };
     _wiredNotifyTarget = p;
@@ -1895,7 +1888,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 离片尾（扣掉片尾跳过）还有这么久时解析下一集并排进 Exo，Exo 在本集播完前缓冲好它。
+  /// 离片尾（扣掉片尾跳过）还有这么久时解析下一集并排进当前播放器，本集播完前缓冲好它。
   /// 不在开播时就解析：带时效的地址等到播完可能已经过期。
   static const _nextEpisodeQueueLeadMs = 180000;
 
@@ -2256,7 +2249,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _reopenAtMs = 0;
     _playbackLive = false;
     _sessionStartedAt = null;
-    _boundMpvTextureId = null;
     _lastVideoW = 0;
     _lastVideoH = 0;
     _openingSeekDone = false;
@@ -2411,7 +2403,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _renderMode = kotvNormalizePlayerRender('${playSettings['playerRender'] ?? _renderMode}');
         final speedPref = double.tryParse('${playSettings['playerSpeed'] ?? ''}');
         if (speedPref != null && speedPref > 0) {
-          _prefSpeed = speedPref.clamp(0.1, 5.0);
+          _prefSpeed = kotvClampPlayRate(speedPref);
         }
         final volPref = _normalizePlayerVolumePref(playSettings['playerVolume']);
         if (volPref != null) {
@@ -3641,7 +3633,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (k == 'playerSpeed') {
       final s = double.tryParse(v);
       if (s != null && s > 0) {
-        setState(() => _prefSpeed = s.clamp(0.1, 5.0));
+        setState(() => _prefSpeed = kotvClampPlayRate(s));
         unawaited(_playback.setRate(_prefSpeed!));
       }
     }

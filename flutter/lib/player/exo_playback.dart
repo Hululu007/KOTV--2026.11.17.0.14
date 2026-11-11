@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -178,9 +179,6 @@ class ExoPlayback extends KotvPlayback {
     }
     return true;
   }
-
-  /// 原位全屏不再 bump PlatformView。
-  void bumpSurfaceView() {}
 
   @override
   /// 浮层网速：跟 Exo 真实缓冲态（含拖动后补缓存）；[buffering] 仍收紧以免误切播放器。
@@ -690,6 +688,7 @@ class ExoPlayback extends KotvPlayback {
     _textureId = null;
     _useFlutterTexture = false;
     _surfaceLayerEnabled = false;
+    _queued = null;
     await _sub?.cancel();
     _sub = null;
     notifyListeners();
@@ -1222,6 +1221,9 @@ class ExoPlayback extends KotvPlayback {
     Duration startAt = Duration.zero,
   }) async {
     final h = kotvNormalizePlayHeaders(headers, url: url);
+    if (_url.isEmpty || _live || (_drm != null && _drm!.isNotEmpty) || !mapEquals(h, _headers)) {
+      return false;
+    }
     try {
       final ok = await _ch.invokeMethod<bool>('queueNext', {
         'id': id,

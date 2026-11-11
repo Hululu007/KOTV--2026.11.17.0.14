@@ -12,6 +12,7 @@ import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
+import '../player/player_normalize.dart';
 import '../player/tv_remote_keys.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
@@ -1297,7 +1298,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   }
 
   Future<void> _showSpeedSheet() async {
-    var rate = widget.player.rate.clamp(0.1, 5.0);
+    var rate = kotvClampPlayRate(widget.player.rate);
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,

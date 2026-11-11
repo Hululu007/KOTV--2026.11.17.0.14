@@ -378,7 +378,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
       "setRate" -> {
-        rate = (call.argument<Number>("rate") ?: 1).toDouble().coerceIn(0.25, 4.0)
+        rate = KotvPlayerNormalize.clampPlayRate((call.argument<Number>("rate") ?: 1).toDouble())
         main.post {
           try {
             player?.playbackParameters = PlaybackParameters(rate.toFloat())
@@ -728,7 +728,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     queuedNext = null
     currentSubs = emptyList()
     currentUrl = url
-    currentHeaders = headers
+    currentHeaders = KotvPlayerNormalize.normalizeHeaders(headers)
     ensurePlayer()
     val p = player ?: error("mpv player missing")
     applyTrackSelectionPrefs()
@@ -759,7 +759,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     main.post(tick)
   }
 
-  /** 点播、headers 与当前集相同才排队（与 Exo 守卫同形）。 */
+  /** 点播、headers 与当前集相同才排队（无 DRM 会话；Exo 另有 currentDrm 守卫）。 */
   private fun queueNext(next: KotvQueuedNext): Boolean {
     val p = player ?: return false
     if (next.id.isEmpty() || next.url.isEmpty() || p.mediaItemCount == 0) return false
@@ -790,14 +790,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /** 已播到排好的下一集：它成为当前集，删掉播完的上一项，通知 Dart 换集。 */
-  private fun enterQueuedNext(next: KotvQueuedNext, item: MediaItem) {
+  private fun enterQueuedNext(next: KotvQueuedNext) {
     val p = player ?: return
     queuedNext = null
     currentUrl = next.url
     currentHeaders = next.headers
     currentSubs = next.subs
-    videoWidth = 0
-    videoHeight = 0
+    // 无缝换集：勿清成 0x0（同分辨率时 size 事件可能不重发）。
     if (p.currentMediaItemIndex > 0) p.removeMediaItems(0, p.currentMediaItemIndex)
     emit(mapOf("event" to "transition", "id" to next.id))
   }
@@ -1004,7 +1003,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           ) {
             return
           }
-          enterQueuedNext(next, mediaItem)
+          enterQueuedNext(next)
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -1595,10 +1594,16 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return ((amount / 1.5) * 100.0).coerceIn(0.0, 100.0)
   }
 
-  private fun stringMapArg(call: MethodCall, key: String): Map<String, String> =
-    (call.argument<Map<*, *>>(key) ?: emptyMap<Any, Any>()).entries.associate {
-      "${it.key}" to "${it.value}"
-    }
+  private fun stringMapArg(call: MethodCall, key: String): Map<String, String> {
+    val raw = call.argument<Map<*, *>>(key) ?: return emptyMap()
+    val mapped =
+      raw.entries.mapNotNull { e ->
+        val k = e.key?.toString()?.trim().orEmpty()
+        val v = e.value?.toString()?.trim().orEmpty()
+        if (k.isEmpty() || v.isEmpty()) null else k to v
+      }.toMap()
+    return KotvPlayerNormalize.normalizeHeaders(mapped)
+  }
 
   private fun resolveDecodeMode(raw: String?): @C.DecodeMode Int =
     when (KotvPlayerNormalize.decodeModeLabel(raw.orEmpty())) {

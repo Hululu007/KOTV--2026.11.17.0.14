@@ -10,6 +10,7 @@ import 'kotv_playback.dart';
 import 'video_player_toggle.dart';
 import 'play_format.dart';
 import 'play_headers.dart';
+import 'player_normalize.dart';
 import 'silent_video_guard.dart';
 
 /// 非 Web：用 [VideoPlayerController]（桌面/移动若选 html 时的兜底）。
@@ -291,7 +292,7 @@ class HtmlPlayback extends KotvPlayback {
 
   @override
   Future<void> setRate(double r) async {
-    _rate = r.clamp(0.25, 4.0);
+    _rate = kotvClampPlayRate(r);
     await _c?.setPlaybackSpeed(_rate);
     notifyListeners();
   }

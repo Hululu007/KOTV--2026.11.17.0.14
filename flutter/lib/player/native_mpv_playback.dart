@@ -12,6 +12,7 @@ import 'mpv_opts.dart';
 import 'mpv_surface.dart';
 import 'play_format.dart';
 import 'play_headers.dart';
+import 'player_normalize.dart';
 import 'position_coalesce.dart';
 import 'silent_video_guard.dart';
 
@@ -66,7 +67,6 @@ class NativeMpvPlayback extends KotvPlayback {
   String _url = '';
   Map<String, String> _headers = const {};
   String? _lastError;
-  int? _textureId;
   String _renderMode = 'surface';
   /// 点播挂 Surface / 停播卸下；未点播不建，避免详情滑动重影。
   bool _surfaceLayerEnabled = false;
@@ -84,21 +84,14 @@ class NativeMpvPlayback extends KotvPlayback {
   /// 已排进播放列表的下一集；播到它时由 transition 事件切成当前集。
   ({String id, String url, Map<String, String> headers, String? format, List<Map<String, dynamic>> subs})? _queued;
 
-  /// 仅随 Texture/错误/就绪变化递增；供详情页 ValueListenableBuilder 重建画面（勿绑 position）。
+  /// 仅随错误/就绪变化递增；供详情页 ValueListenableBuilder 重建画面（勿绑 position）。
   final ValueNotifier<int> surfaceRev = ValueNotifier(0);
-
-  /// 原位全屏由页面 GlobalKey reparent 同一 PlatformView/Texture，不再 bump 代际。
-  int _surfaceGeneration = 0;
-  void bumpSurfaceView() {}
 
   void _bumpSurface() {
     surfaceRev.value++;
   }
 
   bool get isReady => _ready;
-
-  /// Android Texture 模式（Surface 模式无 textureId）。
-  int? get textureId => _textureId;
 
   KotvMpvOpts get opts => _opts;
 
@@ -286,13 +279,13 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   /// Android：Hybrid Composition PlatformView（对应 setRender）。
-  /// 比例由 [setVideoScale] 写 mpv keepaspect/panscan/video-aspect-override；此处铺满槽位。
+  /// 画幅由原生 [setAspect] 按宿主 View 布局缩放；此处铺满槽位。
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     if (!kotvIsAndroid()) {
       return const ColoredBox(color: Colors.black);
     }
     return Stack(
-      key: ValueKey('kotv_mpv_surface_$_surfaceGeneration'),
+      key: const ValueKey('kotv_mpv_surface'),
       fit: StackFit.expand,
       children: [
         const ColoredBox(color: Colors.black),
@@ -344,15 +337,6 @@ class NativeMpvPlayback extends KotvPlayback {
         'live': live,
         'repeatOne': _repeatOne,
       });
-      if (res is Map) {
-        final tid = res['textureId'];
-        if (tid is int) _textureId = tid;
-        if (tid is num) _textureId = tid.toInt();
-        if (_textureId == null && tid != null) {
-          final parsed = int.tryParse('$tid');
-          if (parsed != null) _textureId = parsed;
-        }
-      }
       await _sub?.cancel();
       _sub = _ev.receiveBroadcastStream().listen(_onEvent, onError: (e) {
         _lastError = '$e';
@@ -470,7 +454,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _duration = Duration.zero;
     notifyListeners();
 
-    // Media3 MpvPlayer 桥接不消费 props/demuxer-lavf-o；DRM（含 ClearKey）请用 Exo。
+    // Media3 桥接无 props 通道；碟机等额外项折进 conf。DRM（含 ClearKey）请用 Exo。
     if (drm != null && drm.isNotEmpty) {
       _lastError = 'MPV 不支持该 DRM，请用内置 ExoPlayer';
       _buffering = false;
@@ -629,7 +613,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _buffering = false;
     _ready = false;
     _url = '';
-    _textureId = null;
+    _queued = null;
     await _sub?.cancel();
     _sub = null;
     notifyListeners();
@@ -653,9 +637,9 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   Future<void> setRate(double r) async {
-    _rate = r;
+    _rate = kotvClampPlayRate(r);
     try {
-      await _ch.invokeMethod('setRate', {'rate': r});
+      await _ch.invokeMethod('setRate', {'rate': _rate});
     } catch (_) {}
     notifyListeners();
   }
@@ -679,7 +663,7 @@ class NativeMpvPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  /// 原生只排点播、请求头与当前集相同的下一集（与 Exo 守卫同形）。
+  /// 原生只排点播、请求头与当前集相同的下一集（DRM 已在 [open] 拒绝，无当前 DRM 会话）。
   @override
   Future<bool> queueNext({
     required String id,
@@ -741,9 +725,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffered = Duration.zero;
-    _ready = false;
-    _w = 0;
-    _h = 0;
+    // 无缝换集：勿清成 0x0（同分辨率时 size 事件可能不重发）。
     _audioTracks = const [];
     _videoTracks = const [];
     _subtitleTracks = const [];

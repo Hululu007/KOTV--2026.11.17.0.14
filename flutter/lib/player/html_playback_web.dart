@@ -8,6 +8,7 @@ import 'package:web/web.dart' as web;
 import 'kotv_playback.dart';
 import 'play_format.dart';
 import 'play_headers.dart';
+import 'player_normalize.dart';
 import 'silent_video_guard.dart';
 import 'web_pip.dart';
 
@@ -431,7 +432,7 @@ class HtmlPlayback extends KotvPlayback {
 
   @override
   Future<void> setRate(double r) async {
-    _rate = r.clamp(0.25, 4.0);
+    _rate = kotvClampPlayRate(r);
     _video.playbackRate = _rate;
     notifyListeners();
   }
