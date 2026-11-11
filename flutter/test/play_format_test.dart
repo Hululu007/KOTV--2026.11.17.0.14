@@ -3,7 +3,7 @@ import 'package:kotv/player/kotv_playback.dart';
 import 'package:kotv/player/play_format.dart';
 
 void main() {
-  test('m3u8 path and query use lavf hls', () {
+  test('m3u8 path and query are HLS', () {
     expect(kotvIsHls('https://cdn/a.f300.m3u8', null), isTrue);
     expect(kotvIsHls('https://cdn/a.f300.m3u8/', null), isTrue);
     expect(kotvIsHls('https://cdn/play.php', null), isFalse);

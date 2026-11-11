@@ -282,7 +282,8 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 		})
 	}
 
-	// 网盘 CDN：一律单线程；并行 Range/切片易被掐流。
+	// 展开后的 HTTP/HLS 一律单连接拉取（并行 Range/切片易被掐流）。
+	// 经爬虫 /proxy 代拉时仍可由 jar so/go 多线程泵流，与此处无关。
 	threads = 1
 	if isHLSURL(playURL, format) {
 		t.Kind = KindHLS
