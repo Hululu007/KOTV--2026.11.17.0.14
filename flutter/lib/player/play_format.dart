@@ -58,3 +58,60 @@ String? kotvPlayMime(String url, String? format) {
   if (f.isNotEmpty) return f;
   return null;
 }
+
+final _extinfRe = RegExp(r'^#EXTINF\s*:\s*([0-9.]+)', caseSensitive: false);
+final _streamInfRe = RegExp(r'^#EXT-X-STREAM-INF\b', caseSensitive: false);
+
+/// 点播媒体单：全部 `#EXTINF` 秒数之和（毫秒）。无 `#EXT-X-ENDLIST` 或非节目单 → null。
+/// 主清单（含 `#EXT-X-STREAM-INF`）不加总，由调用方跟子 URI 后再解析。
+int? kotvHlsVodDurationMs(String body) {
+  final text = body.trimLeft();
+  if (!text.startsWith('#EXTM3U')) return null;
+  final lines = text.split('\n');
+  var hasEnd = false;
+  var hasStreamInf = false;
+  var sumSec = 0.0;
+  var anyInf = false;
+  for (final raw in lines) {
+    final line = raw.trim();
+    if (line.isEmpty) continue;
+    final upper = line.toUpperCase();
+    if (upper.startsWith('#EXT-X-ENDLIST')) {
+      hasEnd = true;
+      continue;
+    }
+    if (_streamInfRe.hasMatch(line)) {
+      hasStreamInf = true;
+      continue;
+    }
+    final m = _extinfRe.firstMatch(line);
+    if (m != null) {
+      anyInf = true;
+      sumSec += double.tryParse(m.group(1)!) ?? 0;
+    }
+  }
+  if (!hasEnd || hasStreamInf || !anyInf) return null;
+  if (sumSec <= 0) return null;
+  return (sumSec * 1000).round();
+}
+
+/// 主清单时返回第一条子媒体 URI（相对路径保持原样，由调用方拼绝对地址）。
+String? kotvHlsFirstVariantUri(String body) {
+  final text = body.trimLeft();
+  if (!text.startsWith('#EXTM3U')) return null;
+  final lines = text.split('\n');
+  var expectUri = false;
+  for (final raw in lines) {
+    final line = raw.trim();
+    if (line.isEmpty) continue;
+    if (_streamInfRe.hasMatch(line)) {
+      expectUri = true;
+      continue;
+    }
+    if (expectUri && !line.startsWith('#')) {
+      return line;
+    }
+    if (!line.startsWith('#')) expectUri = false;
+  }
+  return null;
+}

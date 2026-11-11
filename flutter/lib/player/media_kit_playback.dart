@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show mapEquals;
+import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -9,6 +10,7 @@ import 'drm_opts.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 import 'mpv_opts.dart';
+import 'play_format.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 import 'video_eq.dart';
@@ -147,9 +149,52 @@ class MediaKitPlayback extends KotvPlayback {
   /// 无缝切入后 player.state.completed 可能仍为 true；用闸门对外报未完成，直到真正 EOF。
   bool? _completedGate;
   Map<String, String> _extraOpenProps = const {};
+  /// 点播 HLS：节目单 EXTINF 加总；覆盖 lavf 在 DISCONTINUITY 下偏短的 demux 时长。
+  Duration? _playlistDuration;
 
   void setExtraOpenProps(Map<String, String> props) {
     _extraOpenProps = Map<String, String>.from(props);
+  }
+
+  Future<void> _refreshPlaylistDuration({
+    required String url,
+    required Map<String, String> headers,
+    required bool live,
+    required String? format,
+  }) async {
+    _playlistDuration = null;
+    if (live || !kotvIsHls(url, format)) return;
+    try {
+      final ms = await _fetchHlsVodDurationMs(url, headers);
+      if (ms == null || ms <= 0) return;
+      if (_url != url) return;
+      _playlistDuration = Duration(milliseconds: ms);
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<int?> _fetchHlsVodDurationMs(
+    String url,
+    Map<String, String> headers,
+  ) async {
+    Future<String?> getBody(String u) async {
+      final res = await http
+          .get(Uri.parse(u), headers: headers.isEmpty ? null : headers)
+          .timeout(const Duration(seconds: 12));
+      if (res.statusCode < 200 || res.statusCode >= 300) return null;
+      return res.body;
+    }
+
+    var body = await getBody(url);
+    if (body == null) return null;
+    final direct = kotvHlsVodDurationMs(body);
+    if (direct != null) return direct;
+    final variant = kotvHlsFirstVariantUri(body);
+    if (variant == null || variant.isEmpty) return null;
+    final child = Uri.parse(url).resolve(variant).toString();
+    body = await getBody(child);
+    if (body == null) return null;
+    return kotvHlsVodDurationMs(body);
   }
 
   void _clearVideoSize() {
@@ -234,7 +279,14 @@ class MediaKitPlayback extends KotvPlayback {
   Duration get position => player.state.position;
 
   @override
-  Duration get duration => player.state.duration;
+  Duration get duration {
+    final playlist = _playlistDuration;
+    if (playlist != null && playlist > Duration.zero) {
+      final demux = player.state.duration;
+      return playlist >= demux ? playlist : demux;
+    }
+    return player.state.duration;
+  }
 
   @override
   Duration get buffered => player.state.buffer;
@@ -507,10 +559,17 @@ class MediaKitPlayback extends KotvPlayback {
     _url = url;
     _live = live;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
+    _playlistDuration = null;
     // 换源清尺寸（与 Exo / 原生 MPV 一致）；避免 libmpv 残留宽高误判就绪。
     _clearVideoSize();
     _completedGate = null;
     notifyListeners();
+    unawaited(_refreshPlaylistDuration(
+      url: url,
+      headers: _headers,
+      live: live,
+      format: format,
+    ));
     final clearKeyHex = kotvIsLocalClearKey(drm) ? kotvClearKeyHex(drm) : null;
     if (drm != null && drm.isNotEmpty && clearKeyHex == null) {
       throw StateError('MPV 不支持该 DRM，请用内置 ExoPlayer');
@@ -587,6 +646,7 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> _stopUnload({required String reason}) async {
     _url = '';
     _queued = null;
+    _playlistDuration = null;
     _completedGate = null;
     _clearVideoSize();
     _speedBps = 0;

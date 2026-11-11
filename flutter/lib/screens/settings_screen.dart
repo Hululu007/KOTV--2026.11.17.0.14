@@ -1011,7 +1011,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
-                'Exo Surface/Texture 均走原生调色（隧道/HDR 下不可用）；锐度/阴影在 Exo 为近似实现，MPV/FVP 更完整。播控内可按住预览原画。',
+                'Exo Surface/Texture 均走原生调色（隧道/HDR 下不可用）；锐度/阴影在 Exo 为近似实现，MPV 更完整。播控内可按住预览原画。',
                 style: TextStyle(
                     color: KotvPalette.of(context).muted, fontSize: 12),
               ),
@@ -2598,7 +2598,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             onTap: () async {
                               final v = await pickChoice(
                                 context,
-                                title: '渲染方式（Exo / 原生 MPV / FVP）',
+                                title: '渲染方式（Exo / MPV）',
                                 current: g('playerRender', 'surface'),
                                 options: const [
                                   ('Surface（推荐，HDR）', 'surface'),
@@ -2613,7 +2613,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                     msg: 'Texture 已关隧道');
                               } else {
                                 setState(() => _status =
-                                    '仅 Android Exo / 原生 MPV / FVP 生效，已保存');
+                                    '仅 Android Exo / MPV 生效，已保存');
                               }
                             },
                           ),

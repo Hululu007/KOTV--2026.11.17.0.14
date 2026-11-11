@@ -233,6 +233,7 @@ dependencies {
     implementation "androidx.media3:media3-database:$media3"
     // Surface/Texture 共用：帧着色器调色（setVideoEffects）
     implementation "androidx.media3:media3-effect:$media3"
+    implementation "androidx.media3:media3-mpvplayer:$media3"
     implementation "io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1"
     implementation "com.squareup.okhttp3:okhttp-android:5.5.0"
     // CatVodSpider dex jar 内 JS 依赖 QuickJS JNI，须在 App CL load

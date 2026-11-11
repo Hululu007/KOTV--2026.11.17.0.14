@@ -1,0 +1,43 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:kotv/player/play_format.dart';
+
+void main() {
+  test('vod sum EXTINF ignores DISCONTINUITY', () {
+    const body = '''
+#EXTM3U
+#EXTINF:10.0,
+a.ts
+#EXT-X-DISCONTINUITY
+#EXTINF:5.5,
+b.ts
+#EXT-X-DISCONTINUITY
+#EXTINF:4.5,
+c.ts
+#EXT-X-ENDLIST
+''';
+    expect(kotvHlsVodDurationMs(body), 20000);
+  });
+
+  test('live without ENDLIST returns null', () {
+    const body = '''
+#EXTM3U
+#EXTINF:6.0,
+a.ts
+#EXTINF:6.0,
+b.ts
+''';
+    expect(kotvHlsVodDurationMs(body), isNull);
+  });
+
+  test('master playlist returns null and first variant uri', () {
+    const body = '''
+#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=800000
+media.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=400000
+low.m3u8
+''';
+    expect(kotvHlsVodDurationMs(body), isNull);
+    expect(kotvHlsFirstVariantUri(body), 'media.m3u8');
+  });
+}

@@ -19,18 +19,21 @@ PATCH="$ROOT/scripts/patches/fongmi-media3-kotv.patch"
 exo_aar="$DEST/androidx/media3/media3-exoplayer/$VER/media3-exoplayer-$VER.aar"
 common_aar="$DEST/androidx/media3/media3-common/$VER/media3-common-$VER.aar"
 ui_aar="$DEST/androidx/media3/media3-ui/$VER/media3-ui-$VER.aar"
+mpv_aar="$DEST/androidx/media3/media3-mpvplayer/$VER/media3-mpvplayer-$VER.aar"
 
 media3_has_tv_apis() {
-  [[ -f "$exo_aar" && -f "$common_aar" && -f "$ui_aar" ]] || return 1
+  [[ -f "$exo_aar" && -f "$common_aar" && -f "$ui_aar" && -f "$mpv_aar" ]] || return 1
   local tmp rc=1
   tmp="$(mktemp -d)"
   set +e
   unzip -q -o "$exo_aar" classes.jar -d "$tmp/exo" \
     && unzip -q -o "$common_aar" classes.jar -d "$tmp/common" \
     && unzip -q -o "$ui_aar" classes.jar -d "$tmp/ui" \
+    && unzip -q -o "$mpv_aar" classes.jar -d "$tmp/mpv" \
     && jar tf "$tmp/exo/classes.jar" | grep -q DecodeTrackSelector \
     && jar tf "$tmp/common/classes.jar" | grep -q DolbyVisionOutputPolicy \
-    && jar tf "$tmp/ui/classes.jar" | grep -q SubtitleView
+    && jar tf "$tmp/ui/classes.jar" | grep -q SubtitleView \
+    && jar tf "$tmp/mpv/classes.jar" | grep -q 'androidx/media3/mpvplayer/MpvPlayer'
   rc=$?
   set -e
   rm -rf "$tmp"
@@ -38,7 +41,7 @@ media3_has_tv_apis() {
 }
 
 if [[ "${KOTV_FORCE_FONGMI_MEDIA3:-0}" != "1" ]] && media3_has_tv_apis; then
-  echo "ok FongMi Media3 $VER already has DecodeTrackSelector + DolbyVisionOutputPolicy + SubtitleView"
+  echo "ok FongMi Media3 $VER already has TV APIs + media3-mpvplayer"
   exit 0
 fi
 
@@ -91,6 +94,7 @@ echo "==> publish FongMi Media3 $VER → $DEST"
   :lib-datasource:publishReleasePublicationToMavenRepository \
   :lib-datasource-okhttp:publishReleasePublicationToMavenRepository \
   :lib-decoder:publishReleasePublicationToMavenRepository \
+  :lib-decoder-ffmpeg:publishReleasePublicationToMavenRepository \
   :lib-effect:publishReleasePublicationToMavenRepository \
   :lib-extractor:publishReleasePublicationToMavenRepository \
   :lib-exoplayer:publishReleasePublicationToMavenRepository \
@@ -98,12 +102,13 @@ echo "==> publish FongMi Media3 $VER → $DEST"
   :lib-exoplayer-dash:publishReleasePublicationToMavenRepository \
   :lib-ui-danmaku:publishReleasePublicationToMavenRepository \
   :lib-ui:publishReleasePublicationToMavenRepository \
+  :lib-mpvplayer:publishReleasePublicationToMavenRepository \
   -PmavenRepo="$DEST" \
   -x test -x lint \
   --no-daemon
 
 media3_has_tv_apis || {
-  echo "ERROR: published Media3 missing DecodeTrackSelector / DolbyVisionOutputPolicy / SubtitleView" >&2
+  echo "ERROR: published Media3 missing TV APIs or media3-mpvplayer" >&2
   exit 1
 }
-echo "==> ok: DecodeTrackSelector + DolbyVisionOutputPolicy + SubtitleView present"
+echo "==> ok: DecodeTrackSelector + DolbyVisionOutputPolicy + SubtitleView + MpvPlayer present"
