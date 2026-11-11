@@ -90,6 +90,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var currentUrl = ""
   private var currentHeaders: Map<String, String> = emptyMap()
   private var pendingStartAtMs = 0L
+  /** 排在播放列表里的下一集；播到它时 [onMediaItemTransition] 把它切成当前集。 */
+  private var queuedNext: KotvQueuedNext? = null
+  private var currentSubs: List<Map<String, Any?>> = emptyList()
 
   private var eqBrightness = 0
   private var eqContrast = 0
@@ -307,6 +310,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "stop" -> {
         main.post {
           try {
+            queuedNext = null
+            currentSubs = emptyList()
             player?.stop()
             player?.clearMediaItems()
             playing = false
@@ -317,6 +322,35 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             result.success(null)
           } catch (e: Throwable) {
             result.error("STOP_FAILED", e.message, null)
+          }
+        }
+      }
+      "queueNext" -> {
+        val next =
+          KotvQueuedNext(
+            id = call.argument<String>("id")?.trim().orEmpty(),
+            url = call.argument<String>("url")?.trim().orEmpty(),
+            headers = stringMapArg(call, "headers"),
+            mime = call.argument<String>("mime")?.trim()?.ifEmpty { null },
+            subs = call.argument<List<Map<String, Any?>>>("subs") ?: emptyList(),
+            startAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L } ?: 0L,
+          )
+        main.post { result.success(queueNext(next)) }
+      }
+      "clearNext" -> {
+        main.post {
+          clearQueuedNext()
+          result.success(true)
+        }
+      }
+      "skipToNext" -> {
+        main.post {
+          val p = player
+          if (p != null && queuedNext != null && p.hasNextMediaItem()) {
+            p.seekToNextMediaItem()
+            result.success(true)
+          } else {
+            result.success(false)
           }
         }
       }
@@ -691,6 +725,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun openInternal(url: String, headers: Map<String, String>, startPositionMs: Long) {
+    queuedNext = null
+    currentSubs = emptyList()
     currentUrl = url
     currentHeaders = headers
     ensurePlayer()
@@ -704,7 +740,14 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     p.playbackParameters = PlaybackParameters(rate.toFloat())
     bindPlayerSurface()
     syncOsdSurface()
-    val mediaItem = buildMediaItem(url, headers)
+    val mediaItem =
+      buildMediaItem(
+        url = url,
+        headers = headers,
+        mediaId = url,
+        startPositionMs = if (startPositionMs > 0L) startPositionMs else C.TIME_UNSET,
+      )
+    // 起播定位：优先 ClippingConfiguration；兼容旧路径再传 startPositionMs。
     if (startPositionMs > 0L) {
       p.setMediaItem(mediaItem, startPositionMs)
     } else {
@@ -714,6 +757,49 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     p.play()
     main.removeCallbacks(tick)
     main.post(tick)
+  }
+
+  /** 点播、headers 与当前集相同才排队（与 Exo 守卫同形）。 */
+  private fun queueNext(next: KotvQueuedNext): Boolean {
+    val p = player ?: return false
+    if (next.id.isEmpty() || next.url.isEmpty() || p.mediaItemCount == 0) return false
+    if (livePlayback || next.headers != currentHeaders) {
+      clearQueuedNext()
+      return false
+    }
+    clearQueuedNext()
+    p.addMediaItem(
+      buildMediaItem(
+        url = next.url,
+        headers = next.headers,
+        mediaId = next.id,
+        mime = next.mime,
+        subs = next.subs,
+        startPositionMs = if (next.startAtMs > 0L) next.startAtMs else C.TIME_UNSET,
+      ),
+    )
+    queuedNext = next
+    return true
+  }
+
+  private fun clearQueuedNext() {
+    queuedNext = null
+    val p = player ?: return
+    val after = p.currentMediaItemIndex + 1
+    if (after < p.mediaItemCount) p.removeMediaItems(after, p.mediaItemCount)
+  }
+
+  /** 已播到排好的下一集：它成为当前集，删掉播完的上一项，通知 Dart 换集。 */
+  private fun enterQueuedNext(next: KotvQueuedNext, item: MediaItem) {
+    val p = player ?: return
+    queuedNext = null
+    currentUrl = next.url
+    currentHeaders = next.headers
+    currentSubs = next.subs
+    videoWidth = 0
+    videoHeight = 0
+    if (p.currentMediaItemIndex > 0) p.removeMediaItems(0, p.currentMediaItemIndex)
+    emit(mapOf("event" to "transition", "id" to next.id))
   }
 
   private fun ensurePlayer(forceRebuild: Boolean = false) {
@@ -825,9 +911,18 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  private fun buildMediaItem(url: String, headers: Map<String, String>): MediaItem {
+  private fun buildMediaItem(
+    url: String,
+    headers: Map<String, String>,
+    mediaId: String = url,
+    mime: String? = null,
+    subs: List<Map<String, Any?>> = emptyList(),
+    startPositionMs: Long = C.TIME_UNSET,
+  ): MediaItem {
     val uri = playUri(url)
-    val b = MediaItem.Builder().setUri(uri).setMediaId(url)
+    val b = MediaItem.Builder().setUri(uri).setMediaId(mediaId.ifEmpty { url })
+    val trimmedMime = mime?.trim().orEmpty()
+    if (trimmedMime.isNotEmpty()) b.setMimeType(trimmedMime)
     if (headers.isNotEmpty()) {
       val extras = Bundle()
       headers.forEach { (k, v) -> extras.putString(k, v) }
@@ -839,7 +934,39 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       )
       b.setCustomCacheKey(cacheKeyFor(url, headers))
     }
+    val subConfigs = buildSubtitleConfigs(subs)
+    if (subConfigs.isNotEmpty()) {
+      b.setSubtitleConfigurations(subConfigs)
+    }
+    // 无缝排队的片头：写进 ClippingConfiguration，切入时从该点起播。
+    if (startPositionMs != C.TIME_UNSET && startPositionMs > 0L) {
+      b.setClippingConfiguration(
+        MediaItem.ClippingConfiguration.Builder()
+          .setStartPositionMs(startPositionMs)
+          .build(),
+      )
+    }
     return b.build()
+  }
+
+  private fun buildSubtitleConfigs(raw: List<Map<String, Any?>>): List<MediaItem.SubtitleConfiguration> {
+    if (raw.isEmpty()) return emptyList()
+    val out = ArrayList<MediaItem.SubtitleConfiguration>()
+    for (m in raw) {
+      val u = m["url"]?.toString()?.trim().orEmpty()
+      if (u.isEmpty()) continue
+      val label = m["name"]?.toString()?.trim().orEmpty()
+      val lang = m["lang"]?.toString()?.trim().orEmpty()
+      val mime =
+        m["mime"]?.toString()?.trim()?.ifEmpty { null }
+          ?: m["format"]?.toString()?.trim()?.ifEmpty { null }
+      val builder = MediaItem.SubtitleConfiguration.Builder(playUri(u))
+      if (label.isNotEmpty()) builder.setLabel(label)
+      if (lang.isNotEmpty()) builder.setLanguage(lang)
+      if (!mime.isNullOrEmpty()) builder.setMimeType(mime)
+      out.add(builder.build())
+    }
+    return out
   }
 
   private fun playUri(url: String): Uri {
@@ -867,6 +994,17 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       object : Player.Listener {
         override fun onTracksChanged(tracks: Tracks) {
           emit(mapOf("event" to "tracks"))
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+          val next = queuedNext ?: return
+          if (mediaItem?.mediaId != next.id) return
+          if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
+            reason != Player.MEDIA_ITEM_TRANSITION_REASON_SEEK
+          ) {
+            return
+          }
+          enterQueuedNext(next, mediaItem)
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -1387,6 +1525,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun releasePlayer() {
+    queuedNext = null
+    currentSubs = emptyList()
     main.removeCallbacks(tick)
     releasePlayerInstance()
     currentUrl = ""

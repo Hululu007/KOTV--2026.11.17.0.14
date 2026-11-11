@@ -135,7 +135,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** 外挂字幕配置（url/name/lang/mime）。 */
   private var currentSubs: List<Map<String, Any?>> = emptyList()
   /** 排在播放列表里的下一集；播到它时 [onMediaItemTransition] 把它切成当前集。 */
-  private var queuedNext: QueuedNext? = null
+  private var queuedNext: KotvQueuedNext? = null
   /** 优先 AAC。 */
   private var preferAac = false
   /** 跳过静音段。 */
@@ -543,7 +543,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "queueNext" -> {
         val next =
-          QueuedNext(
+          KotvQueuedNext(
             id = call.argument<String>("id")?.trim().orEmpty(),
             url = call.argument<String>("url")?.trim().orEmpty(),
             headers = normalizeHeaders(headerArg(call)),
@@ -694,15 +694,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           result.success(true)
         }
       }
-      // 已废弃：缓冲浮层改走 Flutter KotvBufferingOverlay；保留通道勿再扩。
-      "setBufferingUi" -> {
-        val show = call.argument<Boolean>("show") == true
-        val text = call.argument<String>("text") ?: "缓冲中"
-        main.post {
-          surfaceHost?.setBufferingUi(show, text)
-          result.success(true)
-        }
-      }
+      // 已废弃：缓冲浮层改走 Flutter KotvBufferingOverlay；通道恒成功、无操作。
+      "setBufferingUi" -> result.success(true)
       "setRate" -> {
         val r = (call.argument<Number>("rate")?.toFloat() ?: 1f).coerceIn(0.25f, 4f)
         main.post {
@@ -1142,7 +1135,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
    * 把下一集排在当前集后面：Exo 播到当前集末尾前就开始缓冲它，播完直接接上。
    * 只排点播、无 DRM、请求头与当前集相同的（数据源的请求头是整个播放器共用的）。
    */
-  private fun queueNext(next: QueuedNext): Boolean {
+  private fun queueNext(next: KotvQueuedNext): Boolean {
     val p = player ?: return false
     if (next.id.isEmpty() || next.url.isEmpty() || p.mediaItemCount == 0) return false
     if (livePlayback || buildDrmConfig(currentDrm) != null || next.headers != currentHeaders) {
@@ -1173,7 +1166,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /** 已播到排好的下一集：它成为当前集，删掉播完的上一项，通知 Dart 换集。 */
-  private fun enterQueuedNext(next: QueuedNext, item: MediaItem) {
+  private fun enterQueuedNext(next: KotvQueuedNext, item: MediaItem) {
     val p = player ?: return
     queuedNext = null
     currentUrl = next.url
@@ -2321,7 +2314,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun releasePlayerInstance() {
     main.removeCallbacks(tick)
-    surfaceHost?.setBufferingUi(false, "")
     diskPreload.stop()
     queuedNext = null
     releaseAudioEffects()
@@ -2638,15 +2630,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return out
   }
 
-  private data class QueuedNext(
-    val id: String,
-    val url: String,
-    val headers: Map<String, String>,
-    val mime: String?,
-    val subs: List<Map<String, Any?>>,
-    val startAtMs: Long = 0L,
-  )
-
   companion object {
     private const val TAG = "KotvExo"
     const val VIEW_TYPE = "kotv_exo/surface"
@@ -2839,13 +2822,9 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
     stripPlatformViewFocus()
   }
 
-  /** @deprecated 缓冲浮层已改 Flutter；保留实现勿再扩。 */
+  /** @deprecated 缓冲浮层已改 Flutter；恒 no-op。 */
   fun setBufferingUi(show: Boolean, text: String) {
-    bufferingText.text = text.ifBlank { "缓冲中" }
-    bufferingPanel.visibility = if (show) View.VISIBLE else View.GONE
-    if (show) {
-      bufferingPanel.bringToFront()
-    }
+    bufferingPanel.visibility = View.GONE
   }
 
   /** 去掉 SurfaceView/TextureView，只留黑底（出画前滑动无独立 Surface 图层）。 */

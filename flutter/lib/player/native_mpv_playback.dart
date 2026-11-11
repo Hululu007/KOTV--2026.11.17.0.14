@@ -1,15 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'drm_opts.dart';
 import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'mpv_opts.dart';
 import 'mpv_surface.dart';
+import 'play_format.dart';
 import 'play_headers.dart';
 import 'position_coalesce.dart';
 import 'silent_video_guard.dart';
@@ -79,6 +80,9 @@ class NativeMpvPlayback extends KotvPlayback {
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
   final _endedCtrl = StreamController<bool>.broadcast();
+  final _queuedStartCtrl = StreamController<String>.broadcast();
+  /// 已排进播放列表的下一集；播到它时由 transition 事件切成当前集。
+  ({String id, String url, Map<String, String> headers, String? format, List<Map<String, dynamic>> subs})? _queued;
 
   /// 仅随 Texture/错误/就绪变化递增；供详情页 ValueListenableBuilder 重建画面（勿绑 position）。
   final ValueNotifier<int> surfaceRev = ValueNotifier(0);
@@ -423,6 +427,9 @@ class NativeMpvPlayback extends KotvPlayback {
         if (_w > 0 && _h > 0) _buffering = false;
         notifyListeners();
         break;
+      case 'transition':
+        _enterQueued('${m['id'] ?? ''}');
+        break;
       case 'completed':
         if (_completed) break;
         _completed = true;
@@ -451,6 +458,7 @@ class NativeMpvPlayback extends KotvPlayback {
   }) async {
     _url = url;
     _live = live;
+    _queued = null;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _completed = false;
     _ready = false;
@@ -462,13 +470,12 @@ class NativeMpvPlayback extends KotvPlayback {
     _duration = Duration.zero;
     notifyListeners();
 
+    // Media3 MpvPlayer 桥接不消费 props/demuxer-lavf-o；DRM（含 ClearKey）请用 Exo。
     if (drm != null && drm.isNotEmpty) {
-      if (!kotvIsLocalClearKey(drm)) {
-        _lastError = 'MPV 不支持该 DRM，请用内置 ExoPlayer';
-        _buffering = false;
-        notifyListeners();
-        throw StateError(_lastError!);
-      }
+      _lastError = 'MPV 不支持该 DRM，请用内置 ExoPlayer';
+      _buffering = false;
+      notifyListeners();
+      throw StateError(_lastError!);
     }
 
     await _ensureNative(live: live);
@@ -482,13 +489,14 @@ class NativeMpvPlayback extends KotvPlayback {
     await _syncSurfaceLayer();
     try {
       await KotvBufferBudget.warm(force: true);
-      final props = <String, String>{
-        ..._opts.propertyMap(live: live),
-        ..._extraOpenProps,
-      };
-      final ck = kotvClearKeyHex(drm);
-      if (ck != null) {
-        props['demuxer-lavf-o'] = kotvLavfOWithClearKey(ck);
+      // dvd-device / bluray-device 等：经 conf 片段尝试写入（非 props 透传）。
+      final confExtra = StringBuffer(_opts.conf);
+      for (final e in _extraOpenProps.entries) {
+        if (e.key.isEmpty) continue;
+        if (confExtra.isNotEmpty && !confExtra.toString().endsWith('\n')) {
+          confExtra.writeln();
+        }
+        confExtra.writeln('${e.key}=${e.value}');
       }
       await _ch.invokeMethod('open', {
         'url': url,
@@ -497,14 +505,13 @@ class NativeMpvPlayback extends KotvPlayback {
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
-        'conf': _opts.conf,
+        'conf': confExtra.toString(),
         'tlsVerify': _opts.tlsVerify,
         'audioPassThrough': _opts.audioPassThrough,
         'diskCache': _opts.diskCache && !live,
         'dolbyVisionPolicy': _opts.dolbyVisionPolicy,
         'preferredTextLangs': _opts.preferredTextLangs,
         'render': _renderMode,
-        'props': props,
         if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
         ..._opts.equalizerChannelArgs(),
       });
@@ -579,6 +586,7 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   Future<void> _unloadKeepingContext() async {
+    _queued = null;
     try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
@@ -667,9 +675,86 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       await _ch.invokeMethod('setDecode', {
         'decode': _opts.hwdecValue(),
-        'props': _opts.propertyMap(live: _live),
       });
     } catch (_) {}
+  }
+
+  /// 原生只排点播、请求头与当前集相同的下一集（与 Exo 守卫同形）。
+  @override
+  Future<bool> queueNext({
+    required String id,
+    required String url,
+    Map<String, String>? headers,
+    String? format,
+    List<Map<String, dynamic>> subs = const [],
+    Duration startAt = Duration.zero,
+  }) async {
+    final h = kotvNormalizePlayHeaders(headers, url: url);
+    if (_url.isEmpty || _live || !mapEquals(h, _headers)) {
+      return false;
+    }
+    try {
+      final ok = await _ch.invokeMethod<bool>('queueNext', {
+        'id': id,
+        'url': url,
+        'headers': h,
+        'mime': kotvPlayMime(url, format),
+        'subs': subs,
+        if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
+      });
+      _queued = ok == true ? (id: id, url: url, headers: h, format: format, subs: subs) : null;
+    } catch (_) {
+      _queued = null;
+    }
+    return _queued != null;
+  }
+
+  @override
+  Future<void> clearNext() async {
+    _queued = null;
+    try {
+      await _ch.invokeMethod('clearNext');
+    } catch (_) {}
+  }
+
+  @override
+  Future<bool> skipToNext() async {
+    if (_queued == null) return false;
+    try {
+      return await _ch.invokeMethod<bool>('skipToNext') == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Stream<String> get queuedStartStream => _queuedStartCtrl.stream;
+
+  void _enterQueued(String id) {
+    final q = _queued;
+    if (q == null || q.id != id) return;
+    _queued = null;
+    _url = q.url;
+    _headers = q.headers;
+    _completed = false;
+    _lastError = null;
+    _position = Duration.zero;
+    _duration = Duration.zero;
+    _buffered = Duration.zero;
+    _ready = false;
+    _w = 0;
+    _h = 0;
+    _audioTracks = const [];
+    _videoTracks = const [];
+    _subtitleTracks = const [];
+    _currentAudioId = null;
+    _currentVideoId = null;
+    _currentSubtitleId = null;
+    _currentSecondarySubtitleId = null;
+    if (!_posCtrl.isClosed) _posCtrl.add(Duration.zero);
+    if (!_queuedStartCtrl.isClosed) _queuedStartCtrl.add(id);
+    notifyListeners();
+    unawaited(_refreshTracks());
   }
 
   @override
@@ -727,7 +812,6 @@ class NativeMpvPlayback extends KotvPlayback {
         'diskCache': opts.diskCache && !_live,
         'dolbyVisionPolicy': opts.dolbyVisionPolicy,
         'preferredTextLangs': opts.preferredTextLangs,
-        'props': opts.propertyMap(live: _live),
         ...opts.equalizerChannelArgs(),
       });
     } catch (_) {}
@@ -971,6 +1055,7 @@ class NativeMpvPlayback extends KotvPlayback {
     unawaited(_posCtrl.close());
     unawaited(_bufCtrl.close());
     unawaited(_endedCtrl.close());
+    unawaited(_queuedStartCtrl.close());
     super.dispose();
   }
 }

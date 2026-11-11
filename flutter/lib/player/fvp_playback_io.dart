@@ -616,18 +616,16 @@ class FvpPlayback extends KotvPlayback {
     required String? format,
   }) async {
     _playlistDuration = null;
-    try {
-      final ms = await kotvFetchHlsVodDurationMs(
-        url: url,
-        headers: headers,
-        live: live,
-        format: format,
-      );
-      if (ms == null || ms <= 0) return;
-      if (_lastUrl != url) return;
-      _playlistDuration = Duration(milliseconds: ms);
-      notifyListeners();
-    } catch (_) {}
+    final d = await kotvRefreshHlsPlaylistDuration(
+      url: url,
+      headers: headers,
+      live: live,
+      format: format,
+      stillCurrent: () => _lastUrl == url,
+    );
+    if (d == null) return;
+    _playlistDuration = d;
+    notifyListeners();
   }
 
   @override
@@ -824,8 +822,8 @@ class FvpPlayback extends KotvPlayback {
   /// mdk [setBufferRange]：`minMs==0` 尽快解码；`minMs>0` 时队列空了要攒到 min 才继续出包。
   /// 默认 min=1000，欠载时大约每秒才放出一帧（ADB MediaCodec timediff≈1000ms）。
   /// 点播固定 min=0；max 用内存预算÷码率。码率未知时先用 60s，码率出来再抬 max。
-  /// 直播：短队列（桌面 8s、安卓 4s）；码率已知时再取 min(这段时长, 预算÷码率)。
-  /// 桌面 drop 追沿，安卓不 drop（GOP≈1s 时 drop 会只剩关键帧）。
+  /// 直播：短队列（桌面 8s、非桌面含 iOS 4s）；码率已知时再取 min(这段时长, 预算÷码率)。
+  /// 桌面 drop 追沿，非桌面不 drop（GOP≈1s 时 drop 会只剩关键帧）。
   /// （属性 `buffer` 与本 API 等价；开播路径只调 setBufferRange。）
   void _applyBufferRange(VideoPlayerController c) {
     if (!identical(_c, c)) return;

@@ -186,13 +186,6 @@ class ExoPlayback extends KotvPlayback {
   /// 浮层网速：跟 Exo 真实缓冲态（含拖动后补缓存）；[buffering] 仍收紧以免误切播放器。
   bool get stalling => _buffering;
   @override
-  /// 定案：缓冲/解析一律 Flutter [KotvBufferingOverlay]；原生 panel 废弃勿扩。
-  bool get preferNativeBufferingOverlay => false;
-  @override
-  Future<void> setNativeBufferingOverlay({required bool visible, required String text}) async {
-    // 死路径：preferNativeBufferingOverlay 恒 false，保留空实现以免旧调用炸。
-  }
-  @override
   int get networkSpeedBps => _speedBps;
   @override
   double get volume => _volume;

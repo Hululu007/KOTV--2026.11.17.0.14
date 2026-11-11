@@ -80,4 +80,27 @@ low.m3u8
       isNull,
     );
   });
+
+  test('refresh helper skips live and stale current', () async {
+    expect(
+      await kotvRefreshHlsPlaylistDuration(
+        url: 'https://example.com/a.m3u8',
+        headers: const {},
+        live: true,
+        format: null,
+        stillCurrent: () => true,
+      ),
+      isNull,
+    );
+    expect(
+      await kotvRefreshHlsPlaylistDuration(
+        url: 'https://example.com/a.mp4',
+        headers: const {},
+        live: false,
+        format: null,
+        stillCurrent: () => false,
+      ),
+      isNull,
+    );
+  });
 }

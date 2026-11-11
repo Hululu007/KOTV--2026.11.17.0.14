@@ -33,8 +33,6 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
   int _speedBps = 0;
   bool _visible = false;
   bool _trafficArmed = false;
-  bool? _lastNativeVisible;
-  String? _lastNativeText;
 
   @override
   void initState() {
@@ -62,10 +60,6 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
     if (_trafficArmed) {
       KotvTraffic.reset();
       _trafficArmed = false;
-    }
-    if (widget.player.preferNativeBufferingOverlay) {
-      _lastNativeVisible = null;
-      unawaited(widget.player.setNativeBufferingOverlay(visible: false, text: ''));
     }
     super.dispose();
   }
@@ -119,14 +113,6 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
     }
   }
 
-  void _syncNative(bool visible, String label) {
-    if (!widget.player.preferNativeBufferingOverlay) return;
-    if (_lastNativeVisible == visible && _lastNativeText == label) return;
-    _lastNativeVisible = visible;
-    _lastNativeText = label;
-    unawaited(widget.player.setNativeBufferingOverlay(visible: visible, text: label));
-  }
-
   @override
   Widget build(BuildContext context) {
     final speed = kotvFormatSpeed(_speedBps, showZero: true);
@@ -134,11 +120,6 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
     final label = (forced != null && forced.isNotEmpty)
         ? forced
         : '缓冲中  $speed';
-    // 原生缓冲浮层已废弃；preferNative=true 时才走死路径。
-    if (widget.player.preferNativeBufferingOverlay) {
-      _syncNative(_visible, label);
-      return const SizedBox.shrink();
-    }
     if (!_visible) return const SizedBox.shrink();
     return IgnorePointer(
       child: Center(

@@ -97,7 +97,7 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// 把下一集排进播放器自己的播放列表，本集播完无缝接上；播到它时 [queuedStartStream] 发出 [id]。
   /// [startAt]>0：切入该集时的起播定位（片头跳过），与 [open] 的 startAt 同语义，须写进列表项本身，勿等切入后再 seek。
-  /// Exo、桌面/iOS media_kit MPV 支持；Android 原生 MPV / FVP / 网页返回 false，换集仍走 [open]。
+  /// Exo、全部 MPV（Android Media3 + 桌面/iOS media_kit）支持；FVP / 网页返回 false，换集仍走 [open]。
   Future<bool> queueNext({
     required String id,
     required String url,
@@ -132,7 +132,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   bool get supportsDirectOutput => false;
   bool get directOutput => true;
 
-  /// Android Exo / 原生 MPV / FVP：Surface / Texture；其它后端忽略。
+  /// Android Exo / 原生 MPV：Surface / Texture；其它后端忽略。
   Future<void> setRenderMode(String mode) async {}
 
   /// 当前后端是否真的能切 Surface / Texture（播放菜单按实际后端显示入口）。
@@ -229,8 +229,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   ///
   /// **页面契约**：soft pause → `await release()` → 再清 `_playUrl` 卸宿主 →
   /// `dispose()` 包装类。`release()` 内须先停声并拆掉原生绑定。
-  /// FVP Android Surface：引擎内先 `c.dispose()`（delete 前清 native surface 映射），
-  /// 再摘 PlatformView。Texture / Exo / MPV：release 内或插件侧清面后即可删 player。
+  /// Texture / Exo / MPV / FVP：release 内或插件侧清面后即可删 player。
   /// 默认等同 [stop]；原生引擎应覆盖为 stop 后销毁实例。
   Future<void> release() => stop();
 
