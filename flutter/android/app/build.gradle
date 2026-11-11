@@ -107,12 +107,21 @@ android {
             // stub .so is already small; AGP stripReleaseDebugSymbols corrupts it
             keepDebugSymbols.add("**/libvulkan.so")
             keepDebugSymbols.add("**/libkotv_dl.so")
-            // Media3 mpvplayer / decoder-ffmpeg / fvp 都可能带 libc++_shared；取一份即可。
+            // Media3 mpvplayer / nextlib / fvp 都可能带 libc++_shared；取一份即可。
             pickFirsts += "**/libc++_shared.so"
             pickFirsts += "**/libmpv.so"
             pickFirsts += "**/libplayer.so"
             // fvp 与 ass-kt 都带 libass.so；Exo ASS 用 peerless2012，取其一即可。
             pickFirsts += "**/libass.so"
+            // nextlib-media3ext（Exo 软解/AV3A）与 media3-decoder-ffmpeg（mpvplayer 传递依赖）
+            // 会各带一份 libav*；Exo 软解走 nextlib，故下方 exclude decoder-ffmpeg，这里再 pickFirst 兜底。
+            pickFirsts += "**/libavcodec.so"
+            pickFirsts += "**/libavutil.so"
+            pickFirsts += "**/libavformat.so"
+            pickFirsts += "**/libavfilter.so"
+            pickFirsts += "**/libavdevice.so"
+            pickFirsts += "**/libswresample.so"
+            pickFirsts += "**/libswscale.so"
             useLegacyPackaging = true
             excludes += "**/.gitkeep"
             for (abi in kotvAllAbis) {
@@ -235,7 +244,10 @@ dependencies {
     implementation "androidx.media3:media3-database:$media3"
     // Surface/Texture 共用：帧着色器调色（setVideoEffects）
     implementation "androidx.media3:media3-effect:$media3"
-    implementation "androidx.media3:media3-mpvplayer:$media3"
+    // Exo 软解/AV3A 用 nextlib；mpvplayer 自带 libmpv，不需要再并入 media3-decoder-ffmpeg 的 libav*。
+    implementation("androidx.media3:media3-mpvplayer:$media3") {
+        exclude group: "androidx.media3", module: "media3-decoder-ffmpeg"
+    }
     implementation "io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1"
     implementation "com.squareup.okhttp3:okhttp-android:5.5.0"
     // CatVodSpider dex jar 内 JS 依赖 QuickJS JNI，须在 App CL load

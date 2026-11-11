@@ -174,28 +174,29 @@ std::vector<uint8_t> HiconToPng(HICON icon, int side) {
 std::vector<uint8_t> IconPngFromPath(const std::wstring& path, int index,
                                      int side) {
   if (path.empty() || side <= 0) return {};
-  HICON large = nullptr;
-  HICON small = nullptr;
+  // 勿用标识符 small/large：windows.h / rpcndr.h 可能把 small 宏成 char，MSVC 会在 `!=` 处炸。
+  HICON large_icon = nullptr;
+  HICON small_icon = nullptr;
   // SHDefExtractIcon：Win7+；按目标边长抽大图标。
-  const HRESULT hr = ::SHDefExtractIconW(path.c_str(), index, 0, &large, &small,
-                                         static_cast<UINT>(side));
+  const HRESULT hr = ::SHDefExtractIconW(path.c_str(), index, 0, &large_icon,
+                                         &small_icon, static_cast<UINT>(side));
   HICON use = nullptr;
   if (SUCCEEDED(hr) || hr == S_FALSE) {
-    use = large != nullptr ? large : small;
+    use = large_icon != nullptr ? large_icon : small_icon;
   }
   if (use == nullptr) {
     // 回退：经典 ExtractIconEx（索引 0）。
     if (index == 0) {
-      ::ExtractIconExW(path.c_str(), 0, &large, &small, 1);
-      use = large != nullptr ? large : small;
+      ::ExtractIconExW(path.c_str(), 0, &large_icon, &small_icon, 1);
+      use = large_icon != nullptr ? large_icon : small_icon;
     }
   }
   std::vector<uint8_t> png;
   if (use != nullptr) {
     png = HiconToPng(use, side);
   }
-  if (large != nullptr) ::DestroyIcon(large);
-  if (small != nullptr && small != large) ::DestroyIcon(small);
+  if (large_icon != nullptr) ::DestroyIcon(large_icon);
+  if (small_icon != nullptr && small_icon != large_icon) ::DestroyIcon(small_icon);
   return png;
 }
 

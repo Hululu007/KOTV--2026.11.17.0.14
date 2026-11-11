@@ -34,12 +34,15 @@ if [[ -f "$THEME" ]]; then
   perl -i -pe 's/PredictiveBackPageTransitionsBuilder\(\)/ZoomPageTransitionsBuilder()/g' "$THEME"
 fi
 
-# video_player 2.9.2 无 viewType / VideoViewType。主工程留给安卓 Surface/Texture，这里删掉才能编过。
+# video_player 2.9.2 无 viewType / VideoViewType。主工程 FVP 固定 Texture；Win7 线删掉命名参数与类型引用才能编过。
 PLAYBACK="$ROOT/flutter/lib/player/fvp_playback_io.dart"
 if [[ -f "$PLAYBACK" ]]; then
+  # 任意形态：注释行后的 viewType、单独 viewType: VideoViewType.xxx,、以及 _viewType getter。
   perl -i -0pe 's/\n[[:space:]]*\/\/[^\n]*(?:playerRender|viewType|Surface|Texture)[^\n]*\n[[:space:]]*viewType:[^\n]+,//s' "$PLAYBACK"
-  # 参数删了还不够：getter 仍引用 VideoViewType，2.9.2 编译不过。
+  perl -i -0pe 's/\n[[:space:]]*viewType:\s*VideoViewType\.[A-Za-z0-9_]+,//g' "$PLAYBACK"
   perl -i -0pe 's/\n[[:space:]]*VideoViewType get _viewType \{[\s\S]*?\n[[:space:]]*\}\n/\n/s' "$PLAYBACK"
+  # 兜底：残余含 VideoViewType 的整行去掉（2.9.2 无此类型）。
+  perl -i -ne 'print unless /VideoViewType/' "$PLAYBACK"
   if grep -q 'VideoViewType' "$PLAYBACK"; then
     echo "ERROR: $PLAYBACK still references VideoViewType after Win7 adapt" >&2
     exit 1
