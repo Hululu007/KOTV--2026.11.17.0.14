@@ -9,10 +9,8 @@ import (
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
-	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/playproxy"
-	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/thunder"
 )
 
@@ -53,36 +51,30 @@ func IsEphemeralPlayURL(u string) bool {
 		strings.Contains(u, "/proxy/bt/")
 }
 
-// PreparePlaybackURL 将媒体地址转成当前会话可播的地址。
+// PreparePlaybackURL 将媒体地址转成当前会话可播的地址（不正文嗅探）。
 func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	play, _, _ := a.PreparePlayback(raw, headers)
 	return play
 }
 
-// PreparePlayback 点播。去广告打开且地址含 m3u8 时走透传并过滤节目单。
-// 其余地址原样返回，请求头交给播放器。远端非引擎回环仍由 PublicizeURL 代拉。
+// PreparePlayback 点播地址准备：按 URL 强信号 + 去广告设置决定是否透传；不发嗅探请求。
+// 完整「嗅探写 format + 透传」请用 planPlayback（APIPlay）。
 func (a *App) PreparePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
-	return a.preparePlayback(raw, headers, true, false)
+	_, isHls := decidePlayFormat(raw, "", headers, false)
+	return a.preparePlayback(raw, headers, true, isHls)
 }
 
-// PreparePlaybackHLS 点播；isHls 为真且地址无 m3u8 字样时仍登记透传（正文嗅探出的伪装节目单）。
-func (a *App) PreparePlaybackHLS(raw string, headers map[string]string, isHls bool) (string, string, map[string]string) {
-	force := isHls && !strings.Contains(strings.ToLower(raw), "m3u8")
-	return a.preparePlayback(raw, headers, true, force)
-}
-
-// PrepareLivePlayback 直播开播、回看。不走去广告，也不因请求头改走透传。
-// 请求头随播放地址交给播放器。远端非引擎回环仍由 PublicizeURL 代拉。
+// PrepareLivePlayback 直播开播、回看。不走去广告，也不因 HLS 改走透传。
 func (a *App) PrepareLivePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
 	return a.preparePlayback(raw, headers, false, false)
 }
 
-// PreparePlaybackListed 直播列表批量用。与开播同一规则，不拉流。
+// PreparePlaybackListed 直播列表批量用。与开播同一规则，不拉流、不嗅探。
 func (a *App) PreparePlaybackListed(raw string, headers map[string]string) (string, string, map[string]string) {
 	return a.PrepareLivePlayback(raw, headers)
 }
 
-func (a *App) preparePlayback(raw string, headers map[string]string, vod, forceHlsProxy bool) (string, string, map[string]string) {
+func (a *App) preparePlayback(raw string, headers map[string]string, vod, isHls bool) (string, string, map[string]string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || IsEphemeralPlayURL(raw) {
 		return raw, "", headers
@@ -101,32 +93,13 @@ func (a *App) preparePlayback(raw string, headers map[string]string, vod, forceH
 		if localproxy.IsSpiderProxyURL(raw) {
 			return playproxy.PublicizeURL(raw, headers), "", headers
 		}
-		if vod && vodAdFilter(raw) {
-			raw = playproxy.RegisterAlways(raw, headers, true)
-		} else if vod && forceHlsProxy {
-			raw = playproxy.RegisterAlways(raw, headers, settings.IsAdFilterEnabled())
+		if vod {
+			if reg, filter := shouldRegisterVodHls(raw, isHls); reg {
+				raw = playproxy.RegisterAlways(raw, headers, filter)
+			}
 		}
 	}
 	return playproxy.PublicizeURL(raw, headers), "", headers
-}
-
-func vodAdFilter(raw string) bool {
-	return settings.IsAdFilterEnabled() && strings.Contains(strings.ToLower(raw), "m3u8")
-}
-
-// proxyHlsFormat 透传丢掉扩展名时补 HLS mime。format 已是 HLS、或登记前强信号/嗅探已标 HLS 时保持/补上。
-// 直播原地址和未走透传的不改（除非 format 本身已是 HLS）。
-func proxyHlsFormat(before, after, format string) string {
-	if model.FormatIsHls(format) {
-		return model.FormatHLS
-	}
-	if !strings.Contains(after, "/proxy/play?") {
-		return format
-	}
-	if model.URLIsHls(before) || model.FormatIsHls(format) {
-		return model.FormatHLS
-	}
-	return format
 }
 
 // exposeLocalFile 远端前端播放时，把本机文件改成 /file/ 地址。本机请求保持原路径。content: 不改。

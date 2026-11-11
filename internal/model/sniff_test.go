@@ -31,10 +31,13 @@ func TestClassifyPlayPrefix(t *testing.T) {
 
 func TestFormatIsHlsDash(t *testing.T) {
 	if !FormatIsHls("application/x-mpegURL") || !FormatIsHls("APPLICATION/VND.APPLE.MPEGURL") {
-		t.Fatal("hls")
+		t.Fatal("hls mime")
 	}
-	if FormatIsHls("video/mp4") || FormatIsHls("hls") {
-		t.Fatal("not hls literal")
+	if !FormatIsHls("hls") || !FormatIsHls("m3u8") {
+		t.Fatal("hls literal")
+	}
+	if FormatIsHls("video/mp4") {
+		t.Fatal("not hls")
 	}
 	if !FormatIsDash("application/dash+xml") || !FormatIsDash("mpd") {
 		t.Fatal("dash")

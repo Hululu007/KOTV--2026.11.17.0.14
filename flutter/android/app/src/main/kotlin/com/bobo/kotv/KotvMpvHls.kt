@@ -3,16 +3,12 @@ package com.bobo.kotv
 import android.net.Uri
 
 /**
- * 安卓原生 MPV：HLS 强信号地址 / 网络址 / lavf 打开失败提示 / 图片轨编码名。
- * 引擎 play 回包会正文嗅探写准 format；本处 URL 规则只作强信号快路径与失败再开。
- * 与 Dart `mpv_hls_timeline.dart`、Go `model.URLIsHls` 同一套语义；原生层不能调 Dart，故留副本。
+ * 安卓原生 MPV：HLS URL 强信号 / 网络址 / lavf 打开失败提示 / 图片轨编码名。
+ * URL 规则见 Go `model.URLIsHls`；引擎会正文嗅探写准 format，本处只作快路径与失败再开。
  */
 internal object KotvMpvHls {
 
-  /**
-   * 地址是否像 HLS（仅强信号）。引擎 `/proxy/play?id=` 无 m3u8 字样时不算。
-   * 扩展名与路径段只看 path；任意 .php 不算，伪装节目单靠引擎嗅探或打开失败再开。
-   */
+  /** 地址是否像 HLS（仅强信号）。引擎 `/proxy/play?id=` 无 m3u8 字样时不算。 */
   fun urlLooksLikeHls(url: String): Boolean {
     val raw = url.trim()
     if (raw.isEmpty()) return false
@@ -21,17 +17,15 @@ internal object KotvMpvHls {
     if (scheme == "rtsp" || scheme == "rtspt") return false
     if (scheme == "data") {
       val body = if (raw.length > 5) raw.substring(5) else ""
-      return !body.startsWith("application/dash+xml")
+      val mime = body.substringBefore(',').lowercase().trim()
+      return mime.contains("mpegurl") || mime.contains("m3u8")
     }
     val lower = raw.lowercase()
     if (lower.contains("=m3u8")) return true
     if (lower.contains("=mpd")) return false
     for (seg in uri.pathSegments) {
       if (seg.isEmpty()) continue
-      val s = seg.lowercase()
-      if (s == "m3u8" || s.contains("m3u8")) return true
-      val dot = s.lastIndexOf('.')
-      if (dot >= 0 && dot < s.length - 1 && s.substring(dot + 1) == "m3u8") return true
+      if (seg.lowercase().contains("m3u8")) return true
     }
     return false
   }

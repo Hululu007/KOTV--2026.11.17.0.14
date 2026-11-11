@@ -616,7 +616,6 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 	mediaURL := playURL
 	directURL := ""
 	sourceTitle := ""
-	beforeProxy := ""
 	magnet := thunder.Match(playURL)
 	// PreparePlayback 前判定：网盘类 /proxy 起播后应入下载列表（展开 CDN 后 URL 不再含 /proxy?）。
 	cloudPlay := localproxy.IsSpiderProxyURL(localproxy.ConvertScheme(playURL))
@@ -649,10 +648,8 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		playURL = exposeLocalFile(playURL)
 		mediaURL = playURL
 	} else if !thunder.IsLocalStream(playURL) {
-		beforeProxy = playURL
-		var isHls bool
-		playFormat, isHls = resolvePlayFormat(beforeProxy, playFormat, headers)
-		playURL, directURL, headers = a.PreparePlaybackHLS(playURL, headers, isHls)
+		plan := a.planPlayback(playURL, playFormat, headers, playModeVod)
+		playURL, directURL, headers, playFormat = plan.Play, plan.Direct, plan.Headers, plan.Format
 		mediaURL = playURL
 	}
 	isMagnetPlay := magnet || thunder.IsLocalStream(playURL)
@@ -660,9 +657,6 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 	if runtime.GOOS != "android" {
 		playURL = smbproxy.Rewrite(playURL)
 		mediaURL = smbproxy.Rewrite(mediaURL)
-	}
-	if beforeProxy != "" {
-		playFormat = proxyHlsFormat(beforeProxy, playURL, playFormat)
 	}
 
 	// 片名：专用源标题 > 详情缓存名；勿默认 vodID（很多站 id 是详情页 URL，会盖掉 UI 片名）。
@@ -1805,10 +1799,8 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		sourceTitle = strings.TrimSpace(info.Name)
 		sourceArtwork = strings.TrimSpace(info.Artwork)
 	}
-	var directURL string
-	beforeProxy := playURL
-	playFormat, _ := resolvePlayFormat(beforeProxy, ch.Format, headers)
-	playURL, directURL, headers = a.PrepareLivePlayback(playURL, headers)
+	plan := a.planPlayback(playURL, ch.Format, headers, playModeLive)
+	playURL, directURL, headers, playFormat := plan.Play, plan.Direct, plan.Headers, plan.Format
 	if runtime.GOOS != "android" {
 		prepared, derr := model.PrepareForDesktop(ch.Drm)
 		if derr != nil {
@@ -1832,7 +1824,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		"line":     ch.URLIndex,
 		"lines":    len(ch.URLs),
 		"lineName": ch.LineLabel(),
-		"format":   proxyHlsFormat(beforeProxy, playURL, playFormat),
+		"format":   playFormat,
 		"drm":      ch.Drm,
 		"subs":     subsPublicDTO(liveSubs),
 		"error":    errString(err),
@@ -1910,9 +1902,8 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
-	beforeProxy := url
-	playFormat, _ := resolvePlayFormat(beforeProxy, ch.Format, headers)
-	playURL, directURL, headers := a.PrepareLivePlayback(url, headers)
+	plan := a.planPlayback(url, ch.Format, headers, playModeLive)
+	playURL, directURL, headers, playFormat := plan.Play, plan.Direct, plan.Headers, plan.Format
 	var playDrm *model.Drm
 	if runtime.GOOS != "android" {
 		prepared, derr := model.PrepareForDesktop(ch.Drm)
@@ -1932,7 +1923,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 		"name":    list[prog].Title,
 		"group":   g.Name,
 		"channel": ch.Name,
-		"format":  proxyHlsFormat(beforeProxy, playURL, playFormat),
+		"format":  playFormat,
 		"drm":     playDrm,
 	}, nil
 }

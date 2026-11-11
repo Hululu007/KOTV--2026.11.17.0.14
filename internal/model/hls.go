@@ -2,14 +2,15 @@ package model
 
 import (
 	"net/url"
-	"path"
 	"strings"
 )
 
-// URLIsHls 地址是否像 HLS（仅强信号快路径）。
-// 引擎侧优先站源 format / 正文嗅探写准 format；本函数只作无网络时的预判。
-// 与 Dart kotvMpvUrlIsHls、Kotlin KotvMpvHls.urlLooksLikeHls 同一套。
-// 扩展名与路径段只看 path（查询里的 id=2.m3u8 不算）；任意 .php 不算。
+// URLIsHls 无网络时的强信号快路径（path / =m3u8），不是正文探测。
+// 规范（Dart kotvMpvUrlIsHls、Kotlin KotvMpvHls.urlLooksLikeHls 须同此）：
+//  1. 只认 path 段名含 m3u8；查询值 id=2.m3u8 不算。
+//  2. 整串大小写不敏感匹配 =m3u8；=mpd 则否。
+//  3. 任意 .php 不算；伪装节目单靠引擎正文嗅探或播放失败再开。
+//  4. rtsp/rtspt 否；data: 仅 mime 含 mpegurl/m3u8 才是。
 func URLIsHls(raw string) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -17,38 +18,42 @@ func URLIsHls(raw string) bool {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return strings.Contains(raw, "=m3u8")
+		return strings.Contains(strings.ToLower(raw), "=m3u8")
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme == "rtsp" || scheme == "rtspt" {
 		return false
 	}
 	if scheme == "data" {
-		body := ""
-		if len(raw) > 5 {
-			body = raw[5:]
-		}
-		return !strings.HasPrefix(body, "application/dash+xml")
+		return dataURLLooksHls(raw)
 	}
-	// file=m3u8 / type=m3u8；id=2.m3u8 不含子串 =m3u8，不会误中。
-	if strings.Contains(raw, "=m3u8") {
+	lower := strings.ToLower(raw)
+	if strings.Contains(lower, "=m3u8") {
 		return true
 	}
-	if strings.Contains(raw, "=mpd") {
+	if strings.Contains(lower, "=mpd") {
 		return false
 	}
 	for _, seg := range strings.Split(u.Path, "/") {
 		if seg == "" {
 			continue
 		}
-		lower := strings.ToLower(seg)
-		if lower == "m3u8" || strings.Contains(lower, "m3u8") {
-			return true
-		}
-		if strings.ToLower(path.Ext(seg)) == ".m3u8" {
+		if strings.Contains(strings.ToLower(seg), "m3u8") {
 			return true
 		}
 	}
 	return false
 }
 
+func dataURLLooksHls(raw string) bool {
+	body := raw
+	if len(body) > 5 {
+		body = body[5:]
+	}
+	mime := body
+	if i := strings.IndexByte(body, ','); i >= 0 {
+		mime = body[:i]
+	}
+	mime = strings.ToLower(strings.TrimSpace(mime))
+	return strings.Contains(mime, "mpegurl") || strings.Contains(mime, "m3u8")
+}

@@ -360,7 +360,7 @@ func TestPrepareLivePlaybackHeadersUseProxy(t *testing.T) {
 	}
 }
 
-func TestProxyHlsFormat(t *testing.T) {
+func TestPreparePlaybackHlsProxy(t *testing.T) {
 	withAdFilter(t, true)
 	a := &App{}
 
@@ -369,40 +369,30 @@ func TestProxyHlsFormat(t *testing.T) {
 	if !strings.Contains(play, "/proxy/play?id=") {
 		t.Fatalf("play=%q", play)
 	}
-	if got := proxyHlsFormat(raw, play, ""); got != "application/x-mpegURL" {
-		t.Fatalf("format=%q", got)
-	}
-	if got := proxyHlsFormat(raw, play, "application/x-mpegURL"); got != "application/x-mpegURL" {
-		t.Fatalf("kept format=%q", got)
-	}
-	if got := proxyHlsFormat(raw, play, "video/mp4"); got != "application/x-mpegURL" {
-		t.Fatalf("url wins format=%q", got)
-	}
 
 	phpPlain := "https://cdn.example/play.php"
 	playPHPPlain, _, _ := a.PreparePlayback(phpPlain, nil)
-	if got := proxyHlsFormat(phpPlain, playPHPPlain, ""); got != "" {
-		t.Fatalf("plain php format=%q play=%q", got, playPHPPlain)
+	if strings.Contains(playPHPPlain, "/proxy/play?") {
+		t.Fatalf("plain php proxied %q", playPHPPlain)
 	}
+
 	php := "https://cdn.example/play.php?x=m3u8"
 	playPHP, _, _ := a.PreparePlayback(php, nil)
-	if got := proxyHlsFormat(php, playPHP, ""); got != "application/x-mpegURL" {
-		t.Fatalf("php=m3u8 format=%q play=%q", got, playPHP)
+	if !strings.Contains(playPHP, "/proxy/play?id=") {
+		t.Fatalf("php=m3u8 play=%q", playPHP)
 	}
 
 	query := "https://cdn.example/v?file=m3u8"
 	playQuery, _, _ := a.PreparePlayback(query, nil)
-	if got := proxyHlsFormat(query, playQuery, ""); got != "application/x-mpegURL" {
-		t.Fatalf("query format=%q play=%q", got, playQuery)
+	if !strings.Contains(playQuery, "/proxy/play?id=") {
+		t.Fatalf("query play=%q", playQuery)
 	}
 
+	// 查询值里的 .m3u8 不是 URL 强信号，去广告开也不应误透传。
 	flv := "https://cdn.example/fengshows?id=2.m3u8"
 	playFlv, _, _ := a.PreparePlayback(flv, nil)
-	if !strings.Contains(playFlv, "/proxy/play?id=") {
-		t.Fatalf("flv query still proxies, play=%q", playFlv)
-	}
-	if got := proxyHlsFormat(flv, playFlv, ""); got != "" {
-		t.Fatalf("flv query format=%q", got)
+	if strings.Contains(playFlv, "/proxy/play?") {
+		t.Fatalf("flv query must not proxy, play=%q", playFlv)
 	}
 
 	mp4 := "https://cdn.example/a.mp4"
@@ -410,16 +400,9 @@ func TestProxyHlsFormat(t *testing.T) {
 	if strings.Contains(playMP4, "/proxy/play?") {
 		t.Fatalf("mp4 proxied %q", playMP4)
 	}
-	if got := proxyHlsFormat(mp4, playMP4, ""); got != "" {
-		t.Fatalf("mp4 format=%q", got)
-	}
 
 	live, _, _ := a.PrepareLivePlayback(raw, nil)
-	if got := proxyHlsFormat(raw, live, "video/mp2t"); got != "video/mp2t" {
-		t.Fatalf("live format=%q", got)
-	}
-	spider := "http://127.0.0.1:9978/proxy?url=https%3A%2F%2Fcdn%2Fa.m3u8"
-	if got := proxyHlsFormat(spider, spider, ""); got != "" {
-		t.Fatalf("spider format=%q", got)
+	if strings.Contains(live, "/proxy/play?") {
+		t.Fatalf("live proxied %q", live)
 	}
 }

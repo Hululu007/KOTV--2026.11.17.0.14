@@ -1,45 +1,54 @@
-/// 地址是否像 HLS（仅强信号快路径）。
-/// 引擎 play 回包会正文嗅探写准 format；此处只补本地/未嗅探场景。
-/// 规则与 `KotvMpvHls.kt` / `model.URLIsHls` 同一套；原生/Go 不能调 Dart，故各留副本。
-/// 扩展名与路径段只看 path（查询里的 id=2.m3u8 不算）；任意 .php 不算，伪装节目单靠引擎嗅探或打开失败再开。
+/// URL 强信号快路径。规范见 Go `model.URLIsHls`；原生/Go 不能调 Dart，故各留副本。
+/// 引擎 play 会正文嗅探写准 format；此处只补本地/失败再开。
 bool kotvMpvUrlIsHls(String url) {
   final raw = url.trim();
   if (raw.isEmpty) return false;
   final uri = Uri.tryParse(raw);
-  if (uri == null) return raw.contains('=m3u8');
+  if (uri == null) return raw.toLowerCase().contains('=m3u8');
   final scheme = uri.scheme.toLowerCase();
   if (scheme == 'rtsp' || scheme == 'rtspt') return false;
   if (scheme == 'data') {
     final body = raw.length > 5 ? raw.substring(5) : '';
-    return !body.startsWith('application/dash+xml');
+    final mime = body.split(',').first.toLowerCase().trim();
+    return mime.contains('mpegurl') || mime.contains('m3u8');
   }
-  // file=m3u8 / type=m3u8；id=2.m3u8 不含子串 =m3u8，不会误中。
-  if (raw.contains('=m3u8')) return true;
-  if (raw.contains('=mpd')) return false;
+  final lower = raw.toLowerCase();
+  if (lower.contains('=m3u8')) return true;
+  if (lower.contains('=mpd')) return false;
   for (final seg in uri.pathSegments) {
     if (seg.isEmpty) continue;
-    final lower = seg.toLowerCase();
-    if (lower == 'm3u8' || lower.contains('m3u8')) return true;
-    final dot = lower.lastIndexOf('.');
-    if (dot >= 0 && dot < lower.length - 1 && lower.substring(dot + 1) == 'm3u8') {
-      return true;
-    }
+    if (seg.toLowerCase().contains('m3u8')) return true;
   }
   return false;
 }
 
-/// 这一次打开是 HLS：URL 强信号，或引擎嗅探/站源给出的 `application/x-mpegURL`。
+/// format 是否表示 HLS（与 Go `model.FormatIsHls` 同语义）。
+bool kotvFormatIsHls(String? format) {
+  switch (format?.trim().toLowerCase() ?? '') {
+    case 'application/x-mpegurl':
+    case 'application/vnd.apple.mpegurl':
+    case 'audio/mpegurl':
+    case 'audio/x-mpegurl':
+    case 'hls':
+    case 'm3u8':
+      return true;
+    default:
+      return false;
+  }
+}
+
+/// 这一次打开是 HLS：URL 强信号，或引擎/站源给出的 HLS format。
 /// 地址命中后，别的 mime 不能把它改回去。
 bool kotvIsHls(String url, String? format) {
   if (kotvMpvUrlIsHls(url)) return true;
-  return (format?.trim().toLowerCase() ?? '') == 'application/x-mpegurl';
+  return kotvFormatIsHls(format);
 }
 
 /// Exo 在 mime 非空时不看地址。只有空 mime 才按地址补成 HLS。
 String? kotvPlayMime(String url, String? format) {
   final f = format?.trim() ?? '';
   if (f.isNotEmpty) {
-    if (f.toLowerCase() == 'application/x-mpegurl') return 'application/x-mpegURL';
+    if (kotvFormatIsHls(f)) return 'application/x-mpegURL';
     return f;
   }
   if (kotvMpvUrlIsHls(url)) return 'application/x-mpegURL';

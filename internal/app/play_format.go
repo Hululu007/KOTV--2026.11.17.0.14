@@ -1,0 +1,151 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/bobo/KOTV/internal/model"
+	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/util"
+)
+
+const playSniffBytes = 512
+const playSniffTimeout = 3 * time.Second
+
+// playMode 控制是否正文嗅探、是否点播透传。
+type playMode int
+
+const (
+	playModeVod playMode = iota // 点播：可嗅探；HLS 按需登记 /proxy/play
+	playModeLive                // 直播开播/回看：只信 format/URL，不嗅探、不因 HLS 透传
+)
+
+// playPlan 一次开播的地址与 format 决策结果。
+type playPlan struct {
+	Play, Direct string
+	Headers      map[string]string
+	Format       string
+}
+
+// sniffPlayFormatFn 单测可替换，避免真实网络。
+var sniffPlayFormatFn = sniffPlayFormatHTTP
+
+// planPlayback 唯一入口：判定 format（站源 → URL 强信号 → 可选正文嗅探）并准备可播地址。
+func (a *App) planPlayback(raw, format string, headers map[string]string, mode playMode) playPlan {
+	raw = strings.TrimSpace(raw)
+	format = strings.TrimSpace(format)
+	allowSniff := mode == playModeVod
+	outFmt, isHls := decidePlayFormat(raw, format, headers, allowSniff)
+	vod := mode == playModeVod
+	play, direct, hdrs := a.preparePlayback(raw, headers, vod, isHls)
+	return playPlan{Play: play, Direct: direct, Headers: hdrs, Format: outFmt}
+}
+
+// decidePlayFormat 合并站源 mime、URL 强信号与可选正文嗅探。
+// 站源已给出非空非 HLS/DASH 的 mime 时信任之，不再嗅探。
+func decidePlayFormat(raw, format string, headers map[string]string, allowSniff bool) (out string, isHls bool) {
+	raw = strings.TrimSpace(raw)
+	format = strings.TrimSpace(format)
+	if model.FormatIsDash(format) {
+		return model.FormatDASH, false
+	}
+	if model.FormatIsHls(format) {
+		return model.FormatHLS, true
+	}
+	if format != "" {
+		return format, false
+	}
+	if model.URLIsHls(raw) {
+		return model.FormatHLS, true
+	}
+	if !allowSniff {
+		return "", false
+	}
+	sniffed := sniffPlayFormatFn(raw, headers)
+	if model.FormatIsHls(sniffed) {
+		return model.FormatHLS, true
+	}
+	if sniffed != "" {
+		return sniffed, false
+	}
+	return "", false
+}
+
+func sniffPlayFormatHTTP(raw string, headers map[string]string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), playSniffTimeout)
+	defer cancel()
+	return sniffPlayFormat(ctx, raw, headers)
+}
+
+func sniffPlayFormat(ctx context.Context, raw string, headers map[string]string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+	default:
+		return ""
+	}
+	head, ct, err := fetchPlayPrefix(ctx, raw, headers, true)
+	if err != nil || len(head) == 0 {
+		head, ct, err = fetchPlayPrefix(ctx, raw, headers, false)
+		if err != nil {
+			return ""
+		}
+	}
+	return model.ClassifyPlayPrefix(head, ct)
+}
+
+func fetchPlayPrefix(ctx context.Context, raw string, headers map[string]string, withRange bool) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	util.ApplyHeaders(req, headers)
+	if withRange {
+		req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", playSniffBytes-1))
+	}
+	client := &http.Client{
+		Timeout:   playSniffTimeout,
+		Transport: util.GetClient().Transport,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, "", fmt.Errorf("play sniff http %d", resp.StatusCode)
+	}
+	buf, err := io.ReadAll(io.LimitReader(resp.Body, playSniffBytes))
+	if err != nil && len(buf) == 0 {
+		return nil, "", err
+	}
+	return buf, resp.Header.Get("Content-Type"), nil
+}
+
+// shouldRegisterVodHls 点播 HLS 是否登记透传：去广告开则过滤节目单；关则仅伪装地址仍透传。
+func shouldRegisterVodHls(raw string, isHls bool) (register, filter bool) {
+	if !isHls {
+		return false, false
+	}
+	adOn := settings.IsAdFilterEnabled()
+	if adOn {
+		return true, true
+	}
+	// 强信号 .m3u8 在去广告关闭时保持直连；嗅探出的伪装节目单仍走透传。
+	if model.URLIsHls(raw) {
+		return false, false
+	}
+	return true, false
+}

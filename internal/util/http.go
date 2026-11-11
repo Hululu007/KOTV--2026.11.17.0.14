@@ -127,13 +127,18 @@ func HTTPGetParamsBytes(rawURL string, headers map[string]string, params map[str
 // OkHttpUA 请求未带 User-Agent 时写入的缺省串。
 const OkHttpUA = "okhttp/5.5.0"
 
-func applyHeaders(req *http.Request, headers map[string]string) {
+// ApplyHeaders 写入请求头；未带 User-Agent 时用 OkHttpUA。
+func ApplyHeaders(req *http.Request, headers map[string]string) {
 	if headers == nil || headers["User-Agent"] == "" {
 		req.Header.Set("User-Agent", OkHttpUA)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
+}
+
+func applyHeaders(req *http.Request, headers map[string]string) {
+	ApplyHeaders(req, headers)
 }
 
 // VodNet hooks：spider 注册，给 CMS insecure / 其它入口注入配置 headers·hosts。

@@ -7,6 +7,7 @@ func TestURLIsHls(t *testing.T) {
 		"https://cdn/a.f300.m3u8",
 		"https://cdn/a.f300.m3u8/",
 		"https://cdn/play.php?x=m3u8",
+		"https://cdn/play.php?X=M3U8",
 		"https://cdn/m3u8",
 		"https://cdn/v?file=m3u8",
 		"data:application/vnd.apple.mpegurl,abc",
@@ -21,6 +22,7 @@ func TestURLIsHls(t *testing.T) {
 		"rtsp://cdn/a.m3u8",
 		"https://cdn/live.m3u8?type=mpd",
 		"data:application/dash+xml,abc",
+		"data:video/mp4,abc",
 	}
 	for _, raw := range yes {
 		if !URLIsHls(raw) {

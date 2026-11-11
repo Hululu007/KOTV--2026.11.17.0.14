@@ -2,6 +2,7 @@ package model
 
 import (
 	"bytes"
+	"mime"
 	"strings"
 )
 
@@ -12,11 +13,12 @@ const (
 	FormatDASH = "application/dash+xml"
 )
 
-// FormatIsHls 站源/嗅探/回包里的 format 是否表示 HLS。
+// FormatIsHls 站源/嗅探/回包里的 format 是否表示 HLS（含直播行里的 hls/m3u8 字面量）。
 func FormatIsHls(format string) bool {
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "application/x-mpegurl", "application/vnd.apple.mpegurl",
-		"audio/mpegurl", "audio/x-mpegurl":
+		"audio/mpegurl", "audio/x-mpegurl",
+		"hls", "m3u8":
 		return true
 	default:
 		return false
@@ -25,8 +27,12 @@ func FormatIsHls(format string) bool {
 
 // FormatIsDash 站源/嗅探/回包里的 format 是否表示 DASH。
 func FormatIsDash(format string) bool {
-	f := strings.ToLower(strings.TrimSpace(format))
-	return f == FormatDASH || f == "application/dash+xml" || f == "dash" || f == "mpd"
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case FormatDASH, "dash", "mpd":
+		return true
+	default:
+		return false
+	}
 }
 
 // ClassifyPlayPrefix 根据正文前缀与可选 Content-Type 判定播放容器 mime。
@@ -41,8 +47,7 @@ func ClassifyPlayPrefix(head []byte, contentType string) string {
 	if lookLikeDash(lower, ct) {
 		return FormatDASH
 	}
-	// CT 声称 HLS，且正文不像明确的其它容器时采信。
-	if contentTypeLooksHls(ct) && !looksLikeNonManifest(trimmed) {
+	if FormatIsHls(ct) && !looksLikeNonManifest(trimmed) {
 		return FormatHLS
 	}
 	return ""
@@ -54,21 +59,17 @@ func trimPlayPrefix(head []byte) []byte {
 }
 
 func mimeTypeOnly(contentType string) string {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
+	ct := strings.TrimSpace(contentType)
+	if ct == "" {
+		return ""
+	}
+	if mt, _, err := mime.ParseMediaType(ct); err == nil {
+		return strings.ToLower(mt)
+	}
 	if i := strings.IndexByte(ct, ';'); i >= 0 {
-		ct = strings.TrimSpace(ct[:i])
+		ct = ct[:i]
 	}
-	return ct
-}
-
-func contentTypeLooksHls(ct string) bool {
-	switch ct {
-	case "application/x-mpegurl", "application/vnd.apple.mpegurl",
-		"audio/mpegurl", "audio/x-mpegurl":
-		return true
-	default:
-		return false
-	}
+	return strings.ToLower(strings.TrimSpace(ct))
 }
 
 func lookLikeDash(lower []byte, ct string) bool {

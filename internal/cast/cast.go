@@ -341,7 +341,7 @@ func friendlyChromecastErr(err error) error {
 
 func contentTypeForURL(u string) string {
 	if model.URLIsHls(u) {
-		return "application/x-mpegURL"
+		return model.FormatHLS
 	}
 	low := strings.ToLower(u)
 	switch {
