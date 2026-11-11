@@ -81,3 +81,24 @@ bool kotvMpvNetworkUrl(String url) {
       scheme == 'rtspt' ||
       scheme == 'proxy';
 }
+
+/// 短 EOF 是否值得强制 lavf HLS 再开一次（桌面 media_kit / 安卓原生 MPV 共用规则）。
+///
+/// 已强制 HLS、已再开过、直播、非网络、时长或进度超过 30s → 否。
+/// 允许：URL 强信号，或开播时 format 为空（伪装源依赖 lavf，易误判成短片）。
+/// 站源已声明非空且非 HLS 的 format → 否（避免短 progressive 误重试）。
+bool kotvAllowHlsShortEofRetry({
+  required bool hlsForced,
+  required bool alreadyRetried,
+  required bool live,
+  required String url,
+  String? format,
+  required double durationSec,
+  required double positionSec,
+}) {
+  if (hlsForced || alreadyRetried || live) return false;
+  if (!kotvMpvNetworkUrl(url)) return false;
+  if (durationSec > 30 || positionSec > 30) return false;
+  if (kotvUrlIsHls(url)) return true;
+  return (format ?? '').trim().isEmpty;
+}

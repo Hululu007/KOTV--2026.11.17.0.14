@@ -62,6 +62,37 @@ void main() {
     expect(kotvMpvHlsOpenFailed('vd', 'could not open codec'), isFalse);
   });
 
+  test('short eof hls retry gate', () {
+    bool allow({
+      bool forced = false,
+      bool retried = false,
+      bool live = false,
+      String url = 'https://cdn/play.php',
+      String? format,
+      double durationSec = 2,
+      double positionSec = 1,
+    }) =>
+        kotvAllowHlsShortEofRetry(
+          hlsForced: forced,
+          alreadyRetried: retried,
+          live: live,
+          url: url,
+          format: format,
+          durationSec: durationSec,
+          positionSec: positionSec,
+        );
+
+    expect(allow(), isTrue); // 空 format 伪装源
+    expect(allow(url: 'https://cdn/a.m3u8', format: 'video/mp4'), isTrue); // URL 强信号
+    expect(allow(format: 'video/mp4'), isFalse); // 已声明 progressive
+    expect(allow(forced: true), isFalse);
+    expect(allow(retried: true), isFalse);
+    expect(allow(live: true), isFalse);
+    expect(allow(url: 'file:///tmp/a.mp4'), isFalse);
+    expect(allow(durationSec: 31), isFalse);
+    expect(allow(positionSec: 31), isFalse);
+  });
+
   test('image media codecs are not real video tracks', () {
     expect(kotvIsImageMediaCodec('png'), isTrue);
     expect(kotvIsImageMediaCodec('mjpeg'), isTrue);

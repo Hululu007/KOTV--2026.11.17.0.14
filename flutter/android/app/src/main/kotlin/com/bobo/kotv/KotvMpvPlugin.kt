@@ -107,6 +107,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var pendingStartAtMs = 0L
   private var loadedUrl: String = ""
   private var loadedHeaders: Map<String, String> = emptyMap()
+  /** 本集开播 format（短 EOF 规则用；空=未声明）。 */
+  private var loadedFormat: String = ""
   /** 排在 mpv 播放列表第 2 项的下一集；播到它时由 playlist-pos 切成当前集。mpv 事件线程也会读。 */
   @Volatile private var queuedNext: QueuedNext? = null
   /** 正在 playlist-next 切入排队项；挡住旧文件 end-file 误报 completed。 */
@@ -328,6 +330,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
         pendingStartAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L } ?: 0L
         val forceHls = call.argument<Boolean>("forceHls") == true
+        val openFormat = call.argument<String>("format")?.trim().orEmpty()
         val props = stringMapArg(call, "props")
         main.post {
           try {
@@ -353,6 +356,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             loadWallMs = SystemClock.elapsedRealtime()
             ioHlsRetried = false
             forceLavfHls = forceHls
+            loadedFormat = openFormat
             // 作废上一集还没落地的失败重试。
             loadGen.incrementAndGet()
             retrySeekSec = -1.0
@@ -408,6 +412,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             url = call.argument<String>("url")?.trim().orEmpty(),
             headers = stringMapArg(call, "headers"),
             forceHls = call.argument<Boolean>("forceHls") == true,
+            format = call.argument<String>("format")?.trim().orEmpty(),
             startAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L } ?: 0L,
           )
         main.post { result.success(queueNext(next)) }
@@ -442,6 +447,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             positionSec = 0.0
             durationSec = 0.0
             loadedUrl = ""
+            loadedFormat = ""
             queuedNext = null
             pendingSeamlessId = null
             result.success(null)
@@ -1810,6 +1816,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     loadGen.incrementAndGet()
     loadedUrl = next.url
     loadedHeaders = next.headers
+    loadedFormat = next.format
     forceLavfHls = next.forceHls
     ioHlsRetried = false
     eof = false
@@ -2011,12 +2018,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /**
    * 播到片尾，每次加载只报一次 completed。
    * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；有排队项时在这里 playlist-next 并解除 pause。
-   * URL 强信号却未 forceHls、且几秒就 EOF：按 lavf hls 重开一次（引擎 format 已写准时通常不走这里）。
+   * 未 forceHls 且短 EOF：按 [KotvMpvHls.allowShortEofRetry] 强制 lavf hls 再开一次。
    * 仅图片轨且未出画、几乎没播过：seek 末帧的假 EOF，报 error 而不是 completed。
    */
   private fun markEnded() {
     if (eof) return
-    if (tryReloadAsHls(reason = "short-eof", seekSec = -1.0, requireUrlLooksLikeHls = true)) return
+    if (tryReloadAsHls(reason = "short-eof", seekSec = -1.0, shortEof = true)) return
     if (isUnplayableImageEof()) {
       eof = true
       playing = false
@@ -2099,25 +2106,25 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   /**
    * 未 forceHls 时强制 lavf hls 再开一次。短 EOF 与 LOADING_FAILED 共用。
-   * [requireUrlLooksLikeHls]：短 EOF 只认 [KotvMpvHls.urlLooksLikeHls]（勿把所有 /proxy/play 当节目单）。
+   * [shortEof]：规则见 [KotvMpvHls.allowShortEofRetry] / Dart `kotvAllowHlsShortEofRetry`。
    * 错误路径还可凭 [errorText] 命中 [KotvMpvHls.openFailedHint]。
    */
   private fun tryReloadAsHls(
     reason: String,
     seekSec: Double,
-    requireUrlLooksLikeHls: Boolean,
+    shortEof: Boolean,
     error: Int = 0,
     errorText: String? = null,
   ): Boolean {
     if (forceLavfHls || ioHlsRetried || livePlayback || repeatOne) return false
     val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
-    if (url.isBlank() || !KotvMpvHls.networkPlayUrl(url)) return false
-    val urlHls = KotvMpvHls.urlLooksLikeHls(url)
-    if (requireUrlLooksLikeHls) {
-      if (!urlHls) return false
-      if (durationSec > 30.0 || positionSec > 30.0) return false
+    if (url.isBlank()) return false
+    if (shortEof) {
+      if (!KotvMpvHls.allowShortEofRetry(url, loadedFormat, durationSec, positionSec)) return false
     } else {
       if (error != MPVLib.MpvError.MPV_ERROR_LOADING_FAILED) return false
+      if (!KotvMpvHls.networkPlayUrl(url)) return false
+      val urlHls = KotvMpvHls.urlLooksLikeHls(url)
       if (!urlHls && !KotvMpvHls.openFailedHint(errorText)) return false
     }
     ioHlsRetried = true
@@ -2151,7 +2158,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         if (tryReloadAsHls(
             reason = "loading-failed",
             seekSec = positionSec.coerceAtLeast(0.0),
-            requireUrlLooksLikeHls = false,
+            shortEof = false,
             error = error,
             errorText = errorText,
           )
@@ -2181,6 +2188,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val url: String,
     val headers: Map<String, String>,
     val forceHls: Boolean,
+    val format: String = "",
     val startAtMs: Long = 0L,
   )
 

@@ -49,11 +49,22 @@ internal object KotvMpvHls {
   /** 静止图/封面类编码名（与 Dart kotvIsImageMediaCodec 同一套）。 */
   fun imageCodec(codec: String?): Boolean {
     val raw = codec?.trim()?.lowercase().orEmpty()
-    if (raw.isEmpty) return false
+    if (raw.isEmpty()) return false
     val base = raw.split('.', ' ', '/').firstOrNull { it.isNotEmpty() } ?: raw
     return when (base) {
       "png", "mjpeg", "mjpg", "jpeg", "jpg", "webp", "bmp", "gif", "tiff", "tif", "ppm", "pgm" -> true
       else -> raw.contains("png") || raw.startsWith("mjpeg") || raw.startsWith("mjpg")
     }
+  }
+
+  /**
+   * 短 EOF 是否值得强制 lavf HLS 再开（规则见 Dart `kotvAllowHlsShortEofRetry`）。
+   * 调用方须已排除 forceHls / 已再开 / 直播。
+   */
+  fun allowShortEofRetry(url: String, format: String?, durationSec: Double, positionSec: Double): Boolean {
+    if (!networkPlayUrl(url)) return false
+    if (durationSec > 30.0 || positionSec > 30.0) return false
+    if (urlLooksLikeHls(url)) return true
+    return format.isNullOrBlank()
   }
 }

@@ -211,6 +211,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'url': url,
         'headers': h,
         'forceHls': kotvIsHls(url, format),
+        'format': format?.trim() ?? '',
         if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
       });
       _queued = ok == true ? (id: id, url: url, headers: h) : null;
@@ -584,6 +585,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'url': url,
         'headers': _headers,
         'forceHls': kotvIsHls(url, format),
+        'format': format?.trim() ?? '',
         'live': live,
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,
