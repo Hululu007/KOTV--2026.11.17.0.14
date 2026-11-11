@@ -41,7 +41,8 @@ func IsLocalMediaURL(u string) bool {
 	return false
 }
 
-// IsEphemeralPlayURL 是否为进程内临时代理地址（不应写入历史或跨会话复用）。
+// IsEphemeralPlayURL 是否为引擎登记的临时代理 HTTP 地址（id 会过期，勿写入历史/跨会话复用）。
+// 播放器只认 URL，不能改成引擎内函数回调；登记表在引擎内存，对外仍是可打开的 HTTP。
 func IsEphemeralPlayURL(u string) bool {
 	u = strings.ToLower(strings.TrimSpace(u))
 	return strings.Contains(u, "/proxy/play?") ||

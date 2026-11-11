@@ -18,7 +18,7 @@ func downloadHTTP(ctx context.Context, raw string, headers map[string]string, de
 	if err == nil {
 		return n, total, nil
 	}
-	// 网盘 CDN 并行 Range / 长连接常中途掐流；清残片后强制单线程再试一次。
+	// 并行 Range / 长连接若中途 unexpected EOF，清残片后改单连接再试一次。
 	if !isUnexpectedEOF(err) {
 		return n, total, err
 	}

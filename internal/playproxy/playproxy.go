@@ -26,7 +26,9 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 )
 
-// 将带自定义 Header 的远端媒体转成本地可播地址，供 VLC/MPV 无 header 能力时使用。
+// 将带自定义 Header 的远端媒体登记为本地 /proxy/play?id= HTTP 地址。
+// 播放器（内置/外部/投屏）与 HLS 分片改写都只认 URL，不能改成引擎内函数回调；
+// 同时用于去广告过滤、无 Header 能力的外置播放器、远端 PublicBase 可达地址。
 
 type entry struct {
 	URL       string

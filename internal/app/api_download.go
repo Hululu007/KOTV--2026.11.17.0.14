@@ -62,8 +62,8 @@ func (a *App) ResolveDownload(siteKey, vodID, flag, epURL string, epIndex int) (
 	if strings.TrimSpace(playURL) == "" {
 		return "", nil, "", fmt.Errorf("未解析到可下载地址")
 	}
-	// 下载始终展开网盘类 /proxy（含本机）：把 CDN 与 Cookie 从查询串取出，避免裸 HTTP
-	// 客户端把鉴权头打到 127.0.0.1/proxy 或对代理做多线程 Range 导致失败。
+	// 下载始终展开网盘类 /proxy（含本机）：取出 CDN 与 Cookie，由 downloadHTTP 按设置线程数直拉。
+	// 下载器不能依赖本机 /proxy→jar 流式泵（那是播放路径）。
 	if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(playURL, headers); ok {
 		playURL = media
 		headers = hdrs

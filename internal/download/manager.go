@@ -282,9 +282,8 @@ func (m *Manager) execute(ctx context.Context, t *Task) error {
 		})
 	}
 
-	// 展开后的 HTTP/HLS 一律单连接拉取（并行 Range/切片易被掐流）。
-	// 经爬虫 /proxy 代拉时仍可由 jar so/go 多线程泵流，与此处无关。
-	threads = 1
+	// threads 来自设置 downloadThreads（HTTP Range / HLS 切片并行）。
+	// 本机播放走 /proxy→jar 时的 so/go 多线程泵流不经此处。
 	if isHLSURL(playURL, format) {
 		t.Kind = KindHLS
 		dest := t.destPath("mp4")

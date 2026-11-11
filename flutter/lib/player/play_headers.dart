@@ -58,7 +58,8 @@ bool kotvIsLocalProxyUrl(String url) {
   return u.contains('127.0.0.1:') && u.contains('/proxy');
 }
 
-/// 进程内临时代理地址（勿写入历史/频道缓存）。与 Go `IsEphemeralPlayURL` 同口径。
+/// 引擎登记的临时代理 HTTP 地址（id 会过期，勿写入历史/频道缓存）。
+/// 与 Go `IsEphemeralPlayURL` 同口径；播放器只认 URL，不是引擎内函数回调。
 bool kotvIsEphemeralPlayUrl(String url) {
   final u = url.toLowerCase().trim();
   return u.contains('/proxy/play?') ||
