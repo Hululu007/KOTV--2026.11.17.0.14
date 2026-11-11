@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kotv/player/kotv_playback.dart';
 import 'package:kotv/player/play_format.dart';
+import 'package:kotv/player/play_headers.dart';
 
 void main() {
   test('m3u8 path and query use lavf hls', () {
@@ -62,86 +63,44 @@ void main() {
     expect(kotvMpvHlsOpenFailed('vd', 'could not open codec'), isFalse);
   });
 
-  test('short eof hls retry gate', () {
-    bool allow({
-      bool forced = false,
-      bool retried = false,
-      bool live = false,
-      String url = 'https://cdn/play.php',
-      String? format,
-      double durationSec = 2,
-      double positionSec = 1,
-    }) =>
-        kotvAllowHlsShortEofRetry(
-          hlsForced: forced,
-          alreadyRetried: retried,
-          live: live,
-          url: url,
-          format: format,
-          durationSec: durationSec,
-          positionSec: positionSec,
-        );
-
-    expect(allow(), isTrue); // 空 format 伪装源
-    expect(allow(url: 'https://cdn/a.m3u8', format: 'video/mp4'), isTrue); // URL 强信号
-    expect(allow(format: 'video/mp4'), isFalse); // 已声明 progressive
-    expect(allow(forced: true), isFalse);
-    expect(allow(retried: true), isFalse);
-    expect(allow(live: true), isFalse);
-    expect(allow(url: 'file:///tmp/a.mp4'), isFalse);
-    expect(allow(durationSec: 31), isFalse);
-    expect(allow(positionSec: 31), isFalse);
-  });
-
-  test('forced hls undo gate', () {
+  test('relay after open failure gate', () {
     expect(
-      kotvAllowHlsForceUndoOnShortEof(
-        hlsForced: true,
-        alreadyUndone: false,
-        live: false,
-        url: 'https://cdn/play.php',
-        durationSec: 2,
-        positionSec: 1,
+      kotvShouldRelayAfterOpenFailure(
+        playerVal: 'innie#mpv',
+        openUrl: 'https://cdn/a.m3u8',
+        alreadyRelayed: false,
       ),
       isTrue,
     );
     expect(
-      kotvAllowHlsForceUndoOnShortEof(
-        hlsForced: true,
-        alreadyUndone: false,
-        live: false,
-        url: 'https://cdn/a.m3u8',
-        durationSec: 20,
-        positionSec: 19,
-      ),
-      isFalse, // 已正常播过，不撤
-    );
-    expect(
-      kotvAllowHlsForceUndoOnShortEof(
-        hlsForced: false,
-        alreadyUndone: false,
-        live: false,
-        url: 'https://cdn/play.php',
-        durationSec: 2,
-        positionSec: 1,
+      kotvShouldRelayAfterOpenFailure(
+        playerVal: 'innie#exo',
+        openUrl: 'https://cdn/a.m3u8',
+        alreadyRelayed: false,
       ),
       isFalse,
     );
     expect(
-      kotvAllowHlsForceUndoOnError(
-        hlsForced: true,
-        alreadyUndone: false,
-        live: false,
-        url: 'https://cdn/a.m3u8',
+      kotvShouldRelayAfterOpenFailure(
+        playerVal: 'innie#fvp',
+        openUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+        alreadyRelayed: false,
       ),
-      isTrue,
+      isFalse,
     );
     expect(
-      kotvAllowHlsForceUndoOnError(
-        hlsForced: true,
-        alreadyUndone: true,
-        live: false,
-        url: 'https://cdn/a.m3u8',
+      kotvShouldRelayAfterOpenFailure(
+        playerVal: 'innie#html',
+        openUrl: 'https://cdn/a.m3u8',
+        alreadyRelayed: true,
+      ),
+      isFalse,
+    );
+    expect(
+      kotvShouldRelayAfterOpenFailure(
+        playerVal: 'outie#vlc',
+        openUrl: 'https://cdn/a.m3u8',
+        alreadyRelayed: false,
       ),
       isFalse,
     );

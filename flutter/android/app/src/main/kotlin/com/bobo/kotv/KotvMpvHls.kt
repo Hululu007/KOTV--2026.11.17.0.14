@@ -4,7 +4,7 @@ import android.net.Uri
 
 /**
  * 安卓原生 MPV 侧：URL 强信号、网络址、lavf 打开失败、图片轨编码名。
- * URL 规则见 Go `model.URLIsHls` / Dart `play_format.dart`；format→forceHls 由 Dart `kotvIsHls` 传入。
+ * URL 规则见 Go `model.URLIsHls` / Dart `play_format.dart`。
  */
 internal object KotvMpvHls {
 
@@ -55,37 +55,5 @@ internal object KotvMpvHls {
       "png", "mjpeg", "mjpg", "jpeg", "jpg", "webp", "bmp", "gif", "tiff", "tif", "ppm", "pgm" -> true
       else -> raw.contains("png") || raw.startsWith("mjpeg") || raw.startsWith("mjpg")
     }
-  }
-
-  /**
-   * 短 EOF 是否值得强制 lavf HLS 再开（规则见 Dart `kotvAllowHlsShortEofRetry`）。
-   * 调用方须已排除 forceHls / 已向 HLS 再开 / 直播。
-   */
-  fun allowShortEofRetry(url: String, format: String?, durationSec: Double, positionSec: Double): Boolean {
-    if (!networkPlayUrl(url)) return false
-    if (durationSec > 30.0 || positionSec > 30.0) return false
-    if (urlLooksLikeHls(url)) return true
-    return format.isNullOrBlank()
-  }
-
-  /** 已强制却几乎没播就 EOF：撤强制（规则见 Dart `kotvAllowHlsForceUndoOnShortEof`）。 */
-  fun allowForceUndoOnShortEof(
-    forceHls: Boolean,
-    alreadyUndone: Boolean,
-    live: Boolean,
-    url: String,
-    durationSec: Double,
-    positionSec: Double,
-  ): Boolean {
-    if (!forceHls || alreadyUndone || live) return false
-    if (!networkPlayUrl(url)) return false
-    if (positionSec > 5.0 || durationSec > 30.0) return false
-    return true
-  }
-
-  /** 已强制且加载失败：撤强制（规则见 Dart `kotvAllowHlsForceUndoOnError`）。 */
-  fun allowForceUndoOnError(forceHls: Boolean, alreadyUndone: Boolean, live: Boolean, url: String): Boolean {
-    if (!forceHls || alreadyUndone || live) return false
-    return networkPlayUrl(url)
   }
 }

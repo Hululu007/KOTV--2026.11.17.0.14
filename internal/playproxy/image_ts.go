@@ -6,24 +6,16 @@ import (
 	"strings"
 )
 
-// 部分 HLS 分片 Content-Type 标成 image/*，正文却是「图片头 + MPEG-TS」。
-// 常见：PNG（IEND 后接 TS）、JPEG（SOI…EOI 后接 TS）。剥前缀再标 video/MP2T，
-// 避免 lavf 认成静帧图轨并立刻 EOF。
-
-var (
-	pngSignature = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
-	// IEND 类型四字节 + 空 IEND 块标准 CRC。
-	pngIEND     = []byte{0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82}
-	jpegSOI     = []byte{0xFF, 0xD8}
-	jpegEOI     = []byte{0xFF, 0xD9}
-)
+// 部分 HLS 分片 Content-Type 标成 image/* 或带任意前缀，正文实际是「前缀 + MPEG-TS」。
+// 在扫描窗内找连续 TS sync(0x47 @ 188)，offset>0 时剥前缀并标 video/MP2T，
+// 避免 lavf 认成静帧图轨并立刻 EOF。不认某种图片壳、不定点偏移。
 
 const (
-	tsPacketBytes    = 188
+	tsPacketBytes      = 188
 	imagePrefixScanMax = 64 << 10
 )
 
-func shouldProbeImageWrap(contentType string) bool {
+func shouldProbePrefixedTS(contentType string) bool {
 	mime := strings.TrimSpace(strings.ToLower(contentType))
 	if i := strings.IndexByte(mime, ';'); i >= 0 {
 		mime = strings.TrimSpace(mime[:i])
@@ -31,30 +23,13 @@ func shouldProbeImageWrap(contentType string) bool {
 	if strings.HasPrefix(mime, "image/") {
 		return true
 	}
-	// CDN 偶发标成 octet-stream，仍按魔数探测。
+	// CDN 偶发标成 octet-stream / 空类型，仍按正文探测。
 	return mime == "application/octet-stream" || mime == ""
 }
 
-func startsWithPNGSignature(data []byte) bool {
-	if len(data) < len(pngSignature) {
-		return false
-	}
-	return bytes.Equal(data[:len(pngSignature)], pngSignature)
-}
-
-func startsWithJPEGSignature(data []byte) bool {
-	return len(data) >= 2 && data[0] == jpegSOI[0] && data[1] == jpegSOI[1]
-}
-
-func indexOfBytes(data, needle []byte) int {
-	if len(needle) == 0 || len(data) < len(needle) {
-		return -1
-	}
-	return bytes.Index(data, needle)
-}
-
-// tsSyncAfter 从 start 起找连续 TS sync(0x47 @ 188 字节间隔)；需至少两包可见。
-func tsSyncAfter(data []byte, start int) int {
+// tsSyncAt 从 start 起找连续 TS sync(0x47 @ 188 字节间隔)；需至少两包可见，
+// 若第三包也在窗内则一并校验。
+func tsSyncAt(data []byte, start int) int {
 	for offset := start; offset+tsPacketBytes < len(data); offset++ {
 		if data[offset] != 0x47 || data[offset+tsPacketBytes] != 0x47 {
 			continue
@@ -67,34 +42,16 @@ func tsSyncAfter(data []byte, start int) int {
 	return -1
 }
 
-// findImageWrappedTransportStreamOffset PNG/JPEG 头后挂 TS 时返回 TS 起点，否则 -1。
-func findImageWrappedTransportStreamOffset(data []byte) int {
-	if off := findPngWrappedTransportStreamOffset(data); off >= 0 {
-		return off
-	}
-	return findJpegWrappedTransportStreamOffset(data)
-}
-
-func findPngWrappedTransportStreamOffset(data []byte) int {
-	if !startsWithPNGSignature(data) {
+// findPrefixedTransportStreamOffset 任意前缀后挂 TS 时返回 TS 起点；已是干净 TS 或找不到为 -1。
+func findPrefixedTransportStreamOffset(data []byte) int {
+	if len(data) == 0 {
 		return -1
 	}
-	iend := indexOfBytes(data, pngIEND)
-	if iend < 0 {
+	off := tsSyncAt(data, 0)
+	if off <= 0 {
 		return -1
 	}
-	return tsSyncAfter(data, iend+len(pngIEND))
-}
-
-func findJpegWrappedTransportStreamOffset(data []byte) int {
-	if !startsWithJPEGSignature(data) {
-		return -1
-	}
-	eoi := indexOfBytes(data, jpegEOI)
-	if eoi < 0 {
-		return -1
-	}
-	return tsSyncAfter(data, eoi+len(jpegEOI))
+	return off
 }
 
 func strippedContentLength(contentLength int64, strippedPrefixBytes int) int64 {
@@ -104,22 +61,35 @@ func strippedContentLength(contentLength int64, strippedPrefixBytes int) int64 {
 	return contentLength - int64(strippedPrefixBytes)
 }
 
-// maybeStripImageWrappedTS 在 image/*（及 octet-stream）响应上探测图片头包 TS；
-// 命中则剥前缀并建议新 Content-Type / Content-Length。未命中仍返回完整可读 body。
-func maybeStripImageWrappedTS(contentType string, contentLength int64, body io.Reader) (out io.Reader, newCT string, newCL int64, stripped bool) {
-	if body == nil || !shouldProbeImageWrap(contentType) {
+// maybeStripPrefixedTS 在 image/*（及 octet-stream/空 CT）或「首字节非 TS sync」的响应上
+// 探测任意前缀包 TS；命中则剥前缀并建议新 Content-Type / Content-Length。
+// 未命中仍返回完整可读 body。
+func maybeStripPrefixedTS(contentType string, contentLength int64, body io.Reader) (out io.Reader, newCT string, newCL int64, stripped bool) {
+	if body == nil {
 		return body, "", -1, false
 	}
+	probe := shouldProbePrefixedTS(contentType)
 	buf := make([]byte, imagePrefixScanMax)
 	n, err := io.ReadFull(body, buf)
 	if n == 0 && err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 		return body, "", -1, false
 	}
 	prefix := buf[:n]
-	off := findImageWrappedTransportStreamOffset(prefix)
+	// 非 image/octet 时：仅当开头已不是 TS sync 才继续找（避免误伤干净 TS/MP4）。
+	if !probe {
+		if len(prefix) == 0 || prefix[0] == 0x47 {
+			return io.MultiReader(bytes.NewReader(prefix), body), "", -1, false
+		}
+	}
+	off := findPrefixedTransportStreamOffset(prefix)
 	if off < 0 {
 		return io.MultiReader(bytes.NewReader(prefix), body), "", -1, false
 	}
 	rest := prefix[off:]
 	return io.MultiReader(bytes.NewReader(rest), body), "video/MP2T", strippedContentLength(contentLength, off), true
+}
+
+// maybeStripImageWrappedTS 兼容旧名，语义同 [maybeStripPrefixedTS]。
+func maybeStripImageWrappedTS(contentType string, contentLength int64, body io.Reader) (out io.Reader, newCT string, newCL int64, stripped bool) {
+	return maybeStripPrefixedTS(contentType, contentLength, body)
 }

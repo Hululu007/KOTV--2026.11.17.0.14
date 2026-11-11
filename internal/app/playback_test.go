@@ -281,8 +281,8 @@ func TestPreparePlaybackAdFilterUsesRoute(t *testing.T) {
 	if !strings.Contains(play, "/proxy/play?id=") {
 		t.Fatalf("play=%q", play)
 	}
-	if direct != "" {
-		t.Fatalf("direct=%q want empty while ad filter is on", direct)
+	if direct != raw {
+		t.Fatalf("direct=%q want %q", direct, raw)
 	}
 	if !playproxy.RegisteredFilter(play) {
 		t.Fatal("vod ad registration must filter")
@@ -296,8 +296,42 @@ func TestPreparePlaybackAdFilterUsesRoute(t *testing.T) {
 	if !strings.HasPrefix(remote, "http://192.168.1.8:9978/proxy/play?id=") {
 		t.Fatalf("remote=%q", remote)
 	}
-	if remoteDirect != "" {
-		t.Fatalf("remote direct=%q", remoteDirect)
+	if remoteDirect != raw {
+		t.Fatalf("remote direct=%q want %q", remoteDirect, raw)
+	}
+}
+
+func TestRelayPlaybackAlwaysRegisters(t *testing.T) {
+	withAdFilter(t, false)
+	a := &App{}
+	raw := "https://cdn.example/a.m3u8"
+	play, direct, headers := a.RelayPlayback(raw, map[string]string{"Cookie": "qk=1"}, true)
+	if !strings.Contains(play, "/proxy/play?id=") {
+		t.Fatalf("play=%q", play)
+	}
+	if direct != raw {
+		t.Fatalf("direct=%q want %q", direct, raw)
+	}
+	if playproxy.RegisteredFilter(play) {
+		t.Fatal("ad off: relay must not filter")
+	}
+	if headers["Cookie"] != "qk=1" {
+		t.Fatalf("headers=%v", headers)
+	}
+	withAdFilter(t, true)
+	play2, _, _ := a.RelayPlayback(raw, nil, true)
+	if !playproxy.RegisteredFilter(play2) {
+		t.Fatal("ad on: relay must filter")
+	}
+	livePlay, liveDirect, _ := a.RelayPlayback(raw, nil, false)
+	if !strings.Contains(livePlay, "/proxy/play?id=") {
+		t.Fatalf("live play=%q", livePlay)
+	}
+	if liveDirect != raw {
+		t.Fatalf("live direct=%q", liveDirect)
+	}
+	if playproxy.RegisteredFilter(livePlay) {
+		t.Fatal("live relay must not filter")
 	}
 }
 

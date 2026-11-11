@@ -8,7 +8,6 @@ import 'drm_opts.dart';
 import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
-import 'play_format.dart';
 import 'mpv_opts.dart';
 import 'mpv_surface.dart';
 import 'play_headers.dart';
@@ -210,8 +209,6 @@ class NativeMpvPlayback extends KotvPlayback {
         'id': id,
         'url': url,
         'headers': h,
-        'forceHls': kotvIsHls(url, format),
-        'format': format?.trim() ?? '',
         if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
       });
       _queued = ok == true ? (id: id, url: url, headers: h) : null;
@@ -584,8 +581,6 @@ class NativeMpvPlayback extends KotvPlayback {
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,
-        'forceHls': kotvIsHls(url, format),
-        'format': format?.trim() ?? '',
         'live': live,
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,

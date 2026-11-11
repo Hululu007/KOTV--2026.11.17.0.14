@@ -3,16 +3,30 @@ import 'package:kotv/player/kotv_platform.dart';
 import 'package:kotv/player/play_headers.dart';
 
 void main() {
-  test('header-capable player opens the site url', () {
+  test('exo preferDirect opens the site url', () {
     final got = kotvResolvePlayOpenTarget(
       playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
       directUrl: 'https://cdn.example/live.m3u8',
       headers: const {'Cookie': 'a=b'},
       magnet: false,
       sendHeaders: true,
+      preferDirect: true,
     );
     expect(got.url, 'https://cdn.example/live.m3u8');
     expect(got.headers?['Cookie'], 'a=b');
+  });
+
+  test('non-exo keeps the engine url even with direct', () {
+    final got = kotvResolvePlayOpenTarget(
+      playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+      directUrl: 'https://cdn.example/live.m3u8',
+      headers: const {'Cookie': 'a=b'},
+      magnet: false,
+      sendHeaders: true,
+      preferDirect: false,
+    );
+    expect(got.url, contains('/proxy/play'));
+    expect(got.headers, isNull);
   });
 
   test('other players keep the engine url', () {
@@ -33,29 +47,29 @@ void main() {
       headers: const {'Cookie': 'a=b'},
       magnet: false,
       sendHeaders: true,
+      preferDirect: true,
     );
     expect(got.url, contains('/proxy/play'));
     expect(got.headers, isNull);
   });
 
-  test('hls.js html player opens the site url', () {
+  test('relay gate', () {
     expect(
-      kotvPlaybackSendsHeaders(
-        playerVal: 'innie#html',
-        mediaUrl: 'https://cdn.example/live.m3u8',
-        hlsJsSupported: true,
+      kotvShouldRelayAfterOpenFailure(
+        playerVal: 'innie#mpv',
+        openUrl: 'https://cdn.example/a.m3u8',
+        alreadyRelayed: false,
       ),
       isTrue,
     );
-    final got = kotvResolvePlayOpenTarget(
-      playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
-      directUrl: 'https://cdn.example/live.m3u8',
-      headers: const {'Cookie': 'a=b'},
-      magnet: false,
-      sendHeaders: true,
+    expect(
+      kotvShouldRelayAfterOpenFailure(
+        playerVal: 'innie#exo',
+        openUrl: 'https://cdn.example/a.m3u8',
+        alreadyRelayed: false,
+      ),
+      isFalse,
     );
-    expect(got.url, 'https://cdn.example/live.m3u8');
-    expect(got.headers?['Cookie'], 'a=b');
   });
 
   test('fvp exo mpv always; web hls.js only on playlists', () {
@@ -144,7 +158,7 @@ void main() {
         format: 'm3u8',
         hlsJsSupported: true,
       ),
-      isFalse,
+      isTrue,
     );
   });
 

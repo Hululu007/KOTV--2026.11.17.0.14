@@ -19,26 +19,22 @@ String _kotvFvpClearKey = '';
 /// 安卓是否走 Surface（`playerRender`）：Surface→image=0 + platformView + tunnel；
 /// Texture→普通 AMediaCodec、tunnel 关。此处 tunnel 仅绑定时写 `directSurface`。
 bool _kotvFvpAndroidSurface = true;
-bool _kotvFvpHlsInput = false;
 
 /// [decodeMode] 决定 prepare 用的解码器。
 /// [syncClearKey] 为 true 时用 [clearKeyHex] 覆盖已记住的密钥（空串表示这次没有密钥）。
 /// [androidSurface] 为 null 时沿用上次。
-/// [hlsInput] 为 null 时沿用上次。为真时这一次 create 在 prepare 前写 `avformat.input=hls`。
 void kotvEnsureFvpRegistered({
   String decodeMode = 'auto',
   String? clearKeyHex,
   bool syncClearKey = false,
   bool? androidSurface,
-  bool? hlsInput,
 }) {
   if (kIsWeb) return;
   if (syncClearKey) _kotvFvpClearKey = (clearKeyHex ?? '').trim();
   if (androidSurface != null) _kotvFvpAndroidSurface = androidSurface;
-  if (hlsInput != null) _kotvFvpHlsInput = hlsInput;
   final surface = !kotvIsAndroid() || _kotvFvpAndroidSurface;
   final sig =
-      '${kotvFvpVideoDecoders(decodeMode, androidSurface: surface).join('\u0001')}|$_kotvFvpClearKey|$_kotvFvpAndroidSurface|$_kotvFvpHlsInput';
+      '${kotvFvpVideoDecoders(decodeMode, androidSurface: surface).join('\u0001')}|$_kotvFvpClearKey|$_kotvFvpAndroidSurface';
   if (_kotvFvpRegistered && _kotvFvpSig == sig) return;
   _kotvFvpRegistered = true;
   _kotvFvpSig = sig;
@@ -46,7 +42,6 @@ void kotvEnsureFvpRegistered({
     decodeMode: decodeMode,
     clearKeyHex: _kotvFvpClearKey,
     androidSurface: _kotvFvpAndroidSurface,
-    hlsInput: _kotvFvpHlsInput,
   );
 }
 
@@ -81,12 +76,11 @@ void kotvUseSystemVideoPlayer() {
 ///    盖掉 create 里的 0。Win7 不写（会卡住平台线程；解码列表见 [kotvFvpVideoDecoders]）。
 ///
 /// 302 跟跳交给 mdk 默认 IO（勿在 Dart 里预跳，CDN 签名会过期）。
-/// 默认不设 `avformat.input`，假后缀仍按内容探测。这一次打开被判为 HLS 时才写 hls。
+/// 不设 `avformat.input`，假后缀仍按内容探测。
 void kotvRegisterFvp({
   String decodeMode = 'auto',
   String? clearKeyHex,
   bool androidSurface = true,
-  bool hlsInput = false,
 }) {
   if (kIsWeb) return;
   const platforms = ['windows', 'macos', 'linux', 'android', 'ios'];
@@ -108,9 +102,6 @@ void kotvRegisterFvp({
   final key = (clearKeyHex ?? '').trim();
   if (key.isNotEmpty) {
     playerOpts['demux.lavf.o'] = kotvLavfOWithClearKey(key);
-  }
-  if (hlsInput) {
-    playerOpts['avformat.input'] = 'hls';
   }
   final windows = kotvIsWindows();
   // MFT 的 shader_resource 仅 win8+；全局写 1 会作用到所有解码器。

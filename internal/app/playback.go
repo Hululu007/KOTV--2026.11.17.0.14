@@ -11,6 +11,7 @@ import (
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/playproxy"
+	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/thunder"
 )
 
@@ -95,11 +96,45 @@ func (a *App) preparePlayback(raw string, headers map[string]string, vod, isHls 
 		}
 		if vod {
 			if reg, filter := shouldRegisterVodHls(raw, isHls); reg {
-				raw = playproxy.RegisterAlways(raw, headers, filter)
+				return registerPlayback(raw, headers, filter)
 			}
 		}
 	}
 	return playproxy.PublicizeURL(raw, headers), "", headers
+}
+
+// RelayPlayback 强制登记 /proxy/play（filter 仅点播且去广告开时为真），供非 Exo 直连不可播后一次性再开。
+// Direct 始终回填原始公网地址。
+func (a *App) RelayPlayback(raw string, headers map[string]string, vod bool) (string, string, map[string]string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || IsEphemeralPlayURL(raw) {
+		return raw, "", headers
+	}
+	if IsLocalMediaURL(raw) {
+		return exposeLocalFile(raw), "", headers
+	}
+	raw = localproxy.ConvertScheme(raw)
+	if playproxy.ShouldExpandSpiderMediaProxy() {
+		if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(raw, headers); ok {
+			raw = media
+			headers = hdrs
+		}
+	}
+	if thunder.Match(raw) {
+		return playproxy.PublicizeURL(raw, headers), "", headers
+	}
+	if localproxy.IsSpiderProxyURL(raw) {
+		return playproxy.PublicizeURL(raw, headers), "", headers
+	}
+	filter := vod && settings.IsAdFilterEnabled()
+	return registerPlayback(raw, headers, filter)
+}
+
+// registerPlayback 登记透传；Direct 为登记前的公网原址。
+func registerPlayback(raw string, headers map[string]string, filter bool) (string, string, map[string]string) {
+	direct := playproxy.PublicizeURL(raw, headers)
+	play := playproxy.RegisterAlways(raw, headers, filter)
+	return playproxy.PublicizeURL(play, headers), direct, headers
 }
 
 // exposeLocalFile 远端前端播放时，把本机文件改成 /file/ 地址。本机请求保持原路径。content: 不改。

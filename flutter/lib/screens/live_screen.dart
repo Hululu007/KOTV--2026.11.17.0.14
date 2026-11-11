@@ -339,6 +339,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _mkPlayer = null;
     _playUrl = '';
     _playDirect = '';
+    _liveRelayTried = false;
     if (mounted) {
       setState(() {});
       await WidgetsBinding.instance.endOfFrame;
@@ -418,6 +419,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   String _playUrl = '';
   /// 引擎下发的可直开 CDN（空则只能开 [_playUrl]）。
   String _playDirect = '';
+  /// 本台是否已因不可播做过一次透传再开。
+  bool _liveRelayTried = false;
   /// 遥控即时弹幕（直播页无弹幕设置 UI，仅接收展示）。
   final ValueNotifier<List<DanmakuItem>> _danmakuItems = ValueNotifier(const []);
   /// [_releaseAllBackends] 已跑完则 dispose 不再二次硬拆。
@@ -1638,6 +1641,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           mediaUrl: mediaHint,
           format: format,
         ),
+        preferDirect: failover.playerVal.trim() == 'innie#exo',
       );
       final openUrl = resolved.url;
       final openHeaders = resolved.headers;
@@ -1646,6 +1650,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final needRemount = !sameBackend;
       setState(() {
         // 记住引擎 url/direct，换播放器时按能力重新分流。
+        if (url != _playUrl) _liveRelayTried = false;
         _playUrl = url;
         _playDirect = directUrl;
         _playHeaders = headers;
@@ -1764,6 +1769,50 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await _onLiveNotReady(serial);
     } on KotvSilentVideoException {
       if (stale()) return;
+      final openHint = directUrl.trim().isNotEmpty ? directUrl : url;
+      if (kotvShouldRelayAfterOpenFailure(
+        playerVal: failover.playerVal,
+        openUrl: openHint,
+        alreadyRelayed: _liveRelayTried,
+      )) {
+        try {
+          final relayed = await ref.read(apiProvider).playRelay(
+                url: openHint,
+                headers: headers,
+                vod: false,
+              );
+          final base = ref.read(apiProvider).baseUrl;
+          final nextPlay = kotvRewriteEngineLocalUrl('${relayed['url'] ?? ''}', base);
+          if (nextPlay.isNotEmpty && nextPlay != url) {
+            _liveRelayTried = true;
+            final nextDirect = kotvRewriteEngineLocalUrl(
+              '${relayed['direct'] ?? directUrl}',
+              base,
+            );
+            Map<String, String>? nextHeaders = headers;
+            final rh = relayed['headers'];
+            if (rh is Map && rh.isNotEmpty) {
+              nextHeaders = {
+                for (final e in rh.entries) '${e.key}': '${e.value}',
+              };
+            }
+            try {
+              await _openLiveUrl(
+                nextPlay,
+                serial: serial,
+                directUrl: nextDirect,
+                headers: nextHeaders,
+                drm: drm,
+                format: format,
+                live: live,
+                startAt: startAt,
+                externalSubs: externalSubs,
+              );
+            } catch (_) {}
+            return;
+          }
+        } catch (_) {}
+      }
       final retry = await _recoverAfterSilentVideo(
         pb: pb,
         failover: failover,

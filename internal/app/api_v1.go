@@ -548,6 +548,17 @@ func (a *App) APISearch(keyword string, siteKeys []string, exact bool, exclude [
 	return map[string]any{"ok": true, "keyword": keyword, "collects": out, "list": flat}, nil
 }
 
+// APIPlayRelay 强制登记透传（非 Exo 直连不可播后一次性再开）。vod=false 时不过滤广告。
+func (a *App) APIPlayRelay(rawURL string, headers map[string]string, vod bool) map[string]any {
+	play, direct, hdrs := a.RelayPlayback(rawURL, headers, vod)
+	out := map[string]any{
+		"url":     play,
+		"direct":  direct,
+		"headers": hdrs,
+	}
+	return out
+}
+
 func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qualIdx int) (map[string]any, error) {
 	_, sites, _ := a.scope()
 	site := a.resolvePlaySite(siteKey)

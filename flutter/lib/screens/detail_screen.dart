@@ -2090,6 +2090,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       headers: kotvNormalizePlayHeaders(rawHeaders, url: mediaHint),
       magnet: magnet,
       sendHeaders: kotvPlaybackSendsHeaders(playerVal: playerVal, mediaUrl: mediaHint, format: format),
+      preferDirect: playerVal.trim() == 'innie#exo',
     );
   }
 
@@ -2335,9 +2336,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         data = await fetchPlay();
       }
       if (serial != _playAtSerial || !mounted) return;
-      final playUrl = kotvRewriteEngineLocalUrl(
+      final apiBase = ref.read(apiProvider).baseUrl;
+      var playUrl = kotvRewriteEngineLocalUrl(
         '${data['url'] ?? ''}',
-        ref.read(apiProvider).baseUrl,
+        apiBase,
       );
       if (playUrl.isEmpty) {
         // 空地址留在详情；Config 弹窗依赖 pause 仍保留的 Activity，勿出栈。
@@ -2365,13 +2367,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       }
       final mediaUrl = kotvRewriteEngineLocalUrl(
         '${data['media'] ?? ''}',
-        ref.read(apiProvider).baseUrl,
+        apiBase,
       );
-      final directUrl = kotvRewriteEngineLocalUrl(
+      var directUrl = kotvRewriteEngineLocalUrl(
         '${data['direct'] ?? ''}',
-        ref.read(apiProvider).baseUrl,
+        apiBase,
       );
-      final rawHeaders = _playHeadersOf(data);
+      var rawHeaders = _playHeadersOf(data);
       _playHeaders = rawHeaders;
       final magnet = data['magnet'] == true || playUrl.contains('/proxy/bt/');
       _magnetPlay = magnet;
@@ -2485,6 +2487,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       );
       Object? lastOpenError;
       var opened = false;
+      var relayTried = false;
       final subMaps = _playSubsOf(data);
       final format = _playFormatOf(data);
       for (var attempt = 0; attempt < 8; attempt++) {
@@ -2609,6 +2612,49 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             return;
           }
           lastOpenError = e;
+          // 非 Exo：直连不可播时一次性改走引擎透传再开（同引擎，先于播放器 failover）。
+          final relaySrc = () {
+            final d = directUrl.trim();
+            if (d.isNotEmpty) return d;
+            final m = mediaUrl.trim();
+            if (m.isNotEmpty) return m;
+            return playUrl;
+          }();
+          if (kotvShouldRelayAfterOpenFailure(
+            playerVal: failover.playerVal,
+            openUrl: openUrl,
+            alreadyRelayed: relayTried,
+          )) {
+            try {
+              final relayed = await ref.read(apiProvider).playRelay(
+                    url: relaySrc,
+                    headers: rawHeaders.isEmpty ? null : rawHeaders,
+                    vod: true,
+                  );
+              final nextPlay = kotvRewriteEngineLocalUrl(
+                '${relayed['url'] ?? ''}',
+                apiBase,
+              );
+              if (nextPlay.isNotEmpty && nextPlay != openUrl) {
+                relayTried = true;
+                playUrl = nextPlay;
+                directUrl = kotvRewriteEngineLocalUrl(
+                  '${relayed['direct'] ?? directUrl}',
+                  apiBase,
+                );
+                final rh = relayed['headers'];
+                if (rh is Map && rh.isNotEmpty) {
+                  rawHeaders = {
+                    for (final e in rh.entries) '${e.key}': '${e.value}',
+                  };
+                }
+                if (mounted) {
+                  setState(() => _status = '$_enginePrefix 改走透传重试…');
+                }
+                continue;
+              }
+            } catch (_) {}
+          }
           final retry = await _recoverAfterSilentVideo(
             pb: pb,
             failover: failover,

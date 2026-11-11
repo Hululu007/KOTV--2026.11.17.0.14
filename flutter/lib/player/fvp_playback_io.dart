@@ -12,7 +12,6 @@ import 'drm_opts.dart';
 import 'fvp_register.dart';
 import 'kotv_playback.dart';
 import 'video_player_toggle.dart';
-import 'play_format.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
 import 'playback_settings.dart';
@@ -66,9 +65,6 @@ class FvpPlayback extends KotvPlayback {
   Map<String, dynamic>? _lastDrm;
   bool _lastLive = false;
   String? _lastFormat;
-  /// initialize 失败：未强制时试 HLS；已强制时撤强制。各只一次。
-  bool _fvpHlsTowardOnce = false;
-  bool _fvpHlsUndoOnce = false;
   String _videoScale = 'default';
   /// 仅尺寸/比例/错误变化时递增，供 buildView 重建（勿绑 position/buffering）。
   final ValueNotifier<int> _viewGen = ValueNotifier<int>(0);
@@ -313,19 +309,14 @@ class FvpPlayback extends KotvPlayback {
     _lastDrm = drm == null ? null : Map<String, dynamic>.from(drm);
     _lastLive = live;
     _lastFormat = format;
-    final asHlsToward = _fvpHlsTowardOnce;
-    final asHlsUndo = _fvpHlsUndoOnce;
-    // 撤强制优先于 URL/format 预判，避免误强制后无法回退。
-    final wantHls = asHlsUndo ? false : (asHlsToward || kotvIsHls(url, format));
     _hookFvpDecoderLog();
     _fvpLastVideoDecoder = null;
-    // 预判/再开写 avformat.input=hls；否则靠大 probesize 内容探测。
+    // 不预锁 avformat.input；靠大 probesize 内容探测。
     kotvEnsureFvpRegistered(
       decodeMode: _decodeMode,
       clearKeyHex: clearKeyHex,
       syncClearKey: true,
       androidSurface: _androidSurface,
-      hlsInput: wantHls,
     );
     _opening = true;
     _live = live;
@@ -440,42 +431,6 @@ class FvpPlayback extends KotvPlayback {
       await c.initialize();
       if (c.value.hasError) {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
-        // 未强制：打开失败文案像未识别 m3u8 → 试 HLS。
-        if (!wantHls && !asHlsToward && !asHlsUndo && kotvHlsOpenFailedHint(_lastError)) {
-          _fvpHlsTowardOnce = true;
-          try {
-            await open(
-              url,
-              headers: headers,
-              drm: drm,
-              live: live,
-              format: format,
-              startAt: startAt,
-              waitReady: waitReady,
-            );
-            return;
-          } finally {
-            _fvpHlsTowardOnce = false;
-          }
-        }
-        // 已强制 HLS 仍 initialize 失败 → 撤强制再开一次。
-        if (wantHls && !asHlsUndo) {
-          _fvpHlsUndoOnce = true;
-          try {
-            await open(
-              url,
-              headers: headers,
-              drm: drm,
-              live: live,
-              format: format,
-              startAt: startAt,
-              waitReady: waitReady,
-            );
-            return;
-          } finally {
-            _fvpHlsUndoOnce = false;
-          }
-        }
         throw StateError(_lastError!);
       }
       // 单一路径钉死 min=0（勿省略 max：Dart 默认 max=-1 会把 max/drop 打回 mdk 默认）。

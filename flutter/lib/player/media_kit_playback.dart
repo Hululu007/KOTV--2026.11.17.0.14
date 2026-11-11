@@ -8,7 +8,6 @@ import 'buffer_budget.dart';
 import 'drm_opts.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
-import 'play_format.dart';
 import 'mpv_opts.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
@@ -87,7 +86,6 @@ class MediaKitPlayback extends KotvPlayback {
       // 无缝切入时可能先推 null/0；勿盖掉仍有效的尺寸（含换集分辨率变化前的过渡）。
       if (next <= 0) return;
       _w = next;
-      _hlsRetryAllowed = false;
       notifyListeners();
     }));
     _subs.add(player.stream.height.listen((h) {
@@ -109,32 +107,12 @@ class MediaKitPlayback extends KotvPlayback {
       // 以当前项 URI 识别已接到下一集（勿写死下标 1）。
       if (_playlistUriAt(pl, pl.index) == q.media.uri) _enterQueued(q);
     }));
-    _subs.add(player.stream.log.listen((log) {
-      if (log.level != 'error') return;
-      if (!_hlsRetryAllowed || _hlsTowardRetried || _hlsMedia == null) return;
-      if (!kotvMpvNetworkUrl(_url)) return;
-      if (!kotvMpvHlsOpenFailed(log.prefix, log.text)) return;
-      _hlsTowardRetried = true;
-      unawaited(_reopenLavfHls(force: true));
-    }));
     // 网速浮层走 KotvTraffic；勿轮询 demuxer-cache-state（换集/换台重建 demuxer 时易卡音）。
     _optsReady = _prepareOpts();
   }
 
   int _openSerial = 0;
-  bool _hlsRetryAllowed = false;
-  /// 本集是否已「未强制 → 强制 HLS」再开过（日志 / 短 EOF）。
-  bool _hlsTowardRetried = false;
-  /// 本集是否已「强制 HLS → 清强制」再开过（误强制回退）。
-  bool _hlsUndoRetried = false;
-  int _hlsGen = 0;
-  Future<void>? _hlsJob;
-  Media? _hlsMedia;
-  String? _hlsClearKey;
-  /// 本集是否强制按 HLS 解析（demuxer-lavf-format 是整个播放器共用的）。
-  bool _hlsForced = false;
-  /// 本集开播时的 format（短 EOF 再开用；空串表示未声明）。
-  String? _openFormat;
+  int _openGen = 0;
   /// 已排进播放列表的下一集；播到它时由 playlist 下标切成当前集。
   ({String id, String url, Media media})? _queued;
   final _queuedStartCtrl = StreamController<String>.broadcast();
@@ -203,14 +181,13 @@ class MediaKitPlayback extends KotvPlayback {
     await player.play();
   }
 
-  /// 指定 hls 会重开当前解复用，所以先卸掉上一集再写。
-  Future<void> _applyHlsLavf(bool on, String? clearKey) async {
+  /// 写 lavf 探测选项（含 ClearKey）；不预锁 demuxer-lavf-format。
+  Future<void> _applyLavfO(String? clearKey) async {
     try {
       await player.stop();
     } catch (_) {}
-    final base = kotvLavfOWithClearKey(clearKey);
-    await _mpvSet('demuxer-lavf-o', on ? '$base,http_persistent=0' : base);
-    await _mpvSet('demuxer-lavf-format', on ? 'hls' : '');
+    await _mpvSet('demuxer-lavf-o', kotvLavfOWithClearKey(clearKey));
+    await _mpvSet('demuxer-lavf-format', '');
   }
 
   Future<void> _prepareOpts() async {
@@ -294,15 +271,14 @@ class MediaKitPlayback extends KotvPlayback {
 
   /// media_kit 固定 `keep-open=yes`：EOF 只置 completed，播放列表不前进。
   /// 有排队项时拦截 completed，改走 [_skipToQueued]；无排队项才向外报片尾。
-  /// 短 EOF：未强制则试 HLS；已强制且几乎没播则撤强制（误强制回退）。
   Future<void> _onPlayerCompleted(bool done) async {
     if (!done) {
       _completedGate = false;
       if (!_completedCtrl.isClosed) _completedCtrl.add(false);
       return;
     }
-    if (await _tryAdjustHlsOnShortEof()) return;
     // 仅图片轨、无音、无出画：keep-open 会 seek 到末帧并 completed，勿当正常片尾连播。
+    // 起播守卫仍会因无尺寸抛 SilentVideo，由页面一次性 Relay 透传。
     if (_isUnplayableImageEof()) {
       _queued = null;
       _completedGate = false;
@@ -316,61 +292,6 @@ class MediaKitPlayback extends KotvPlayback {
     _queued = null;
     _completedGate = true;
     if (!_completedCtrl.isClosed) _completedCtrl.add(true);
-  }
-
-  /// 短 EOF 双向调整：未强制 → HLS；已强制且几乎没播 → 清强制。
-  Future<bool> _tryAdjustHlsOnShortEof() async {
-    if (_hlsMedia == null) return false;
-    final durSec = duration.inMilliseconds / 1000.0;
-    final posSec = position.inMilliseconds / 1000.0;
-    if (kotvAllowHlsShortEofRetry(
-      hlsForced: _hlsForced,
-      alreadyRetried: _hlsTowardRetried,
-      live: _live,
-      url: _url,
-      format: _openFormat,
-      durationSec: durSec,
-      positionSec: posSec,
-    )) {
-      _hlsTowardRetried = true;
-      return _reopenLavfHls(force: true);
-    }
-    if (kotvAllowHlsForceUndoOnShortEof(
-      hlsForced: _hlsForced,
-      alreadyUndone: _hlsUndoRetried,
-      live: _live,
-      url: _url,
-      durationSec: durSec,
-      positionSec: posSec,
-    )) {
-      _hlsUndoRetried = true;
-      return _reopenLavfHls(force: false);
-    }
-    return false;
-  }
-
-  /// 按 [force] 写 lavf HLS 并重开当前 [_hlsMedia]；成功拦截片尾返回 true。
-  Future<bool> _reopenLavfHls({required bool force}) async {
-    final media = _hlsMedia;
-    if (media == null) return false;
-    final gen = _hlsGen;
-    final key = _hlsClearKey;
-    final pending = _hlsJob;
-    if (pending != null) {
-      try {
-        await pending;
-      } catch (_) {}
-    }
-    if (gen != _hlsGen || _url.isEmpty) return true;
-    await _applyHlsLavf(force, key);
-    _hlsForced = force;
-    if (gen != _hlsGen || _url.isEmpty) return true;
-    await _applyMpvHeaderProps();
-    if (gen != _hlsGen || _url.isEmpty) return true;
-    _completedGate = false;
-    if (!_completedCtrl.isClosed) _completedCtrl.add(false);
-    await _openThenUnpause(media);
-    return true;
   }
 
   /// PNG/MJPEG 等当「视频」却解不出尺寸、又无音轨：瞬时 EOF，不是播完。
@@ -389,8 +310,8 @@ class MediaKitPlayback extends KotvPlayback {
     );
   }
 
-  /// 只排请求头与 HLS 强制解析都和本集相同的：UA、Referer、demuxer-lavf-format
-  /// 是整个播放器共用的属性；其余请求头按媒体写（加载该项时写 http-header-fields）。
+  /// 只排请求头和本集相同的：UA、Referer 是整个播放器共用的属性；
+  /// 其余请求头按媒体写（加载该项时写 http-header-fields）。
   /// [startAt] 写入 Media.start，切入时由 libmpv 定位（片头），勿等 transition 后再 seek。
   @override
   Future<bool> queueNext({
@@ -402,7 +323,7 @@ class MediaKitPlayback extends KotvPlayback {
     Duration startAt = Duration.zero,
   }) async {
     final h = kotvNormalizePlayHeaders(headers, url: url);
-    if (_url.isEmpty || _live || !mapEquals(h, _headers) || kotvIsHls(url, format) != _hlsForced) {
+    if (_url.isEmpty || _live || !mapEquals(h, _headers)) {
       return false;
     }
     await clearNext();
@@ -482,11 +403,7 @@ class MediaKitPlayback extends KotvPlayback {
     if (_queued == null || _queued!.id != q.id) return;
     _queued = null;
     _url = q.url;
-    _hlsGen++;
-    _hlsTowardRetried = false;
-    _hlsUndoRetried = false;
-    _hlsRetryAllowed = !_hlsForced;
-    _hlsMedia = q.media;
+    _openGen++;
     _openSerial++;
     // 无缝换集：勿清成 0x0。同分辨率时 width/height 流可能不重发，清掉会一直显示 0x0。
     _acceptSize = true;
@@ -617,28 +534,16 @@ class MediaKitPlayback extends KotvPlayback {
       httpHeaders: split.fields.isEmpty ? null : split.fields,
       start: startAt > Duration.zero ? startAt : null,
     );
-    // format 优先来自引擎 planPlayback；URL 强信号为快路径。
-    // 未强制：日志/短 EOF 试 HLS；已强制却几乎没播就 EOF：撤强制再开。
-    final forceHls = kotvIsHls(url, format);
     _queued = null;
-    _openFormat = format;
-    _hlsForced = forceHls;
-    _hlsGen++;
-    _hlsTowardRetried = false;
-    _hlsUndoRetried = false;
-    _hlsRetryAllowed = false;
-    _hlsClearKey = clearKeyHex;
-    _hlsMedia = media;
-    final gen = _hlsGen;
+    _openGen++;
+    final gen = _openGen;
     final job = () async {
-      await _applyHlsLavf(forceHls, clearKeyHex);
-      if (gen != _hlsGen || _url.isEmpty) return;
+      await _applyLavfO(clearKeyHex);
+      if (gen != _openGen || _url.isEmpty) return;
       await _applyMpvHeaderProps();
-      if (gen != _hlsGen || _url.isEmpty) return;
-      _hlsRetryAllowed = !forceHls;
+      if (gen != _openGen || _url.isEmpty) return;
       await _openThenUnpause(media);
     }();
-    _hlsJob = job;
     await job;
     // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
     _acceptSize = true;

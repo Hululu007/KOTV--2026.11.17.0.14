@@ -87,6 +87,9 @@ func TestPlanPlaybackVod(t *testing.T) {
 	if !strings.Contains(plan.Play, "/proxy/play?id=") {
 		t.Fatalf("disguised hls should proxy, play=%q", plan.Play)
 	}
+	if plan.Direct != "https://cdn.example/disguise.php" {
+		t.Fatalf("direct=%q", plan.Direct)
+	}
 
 	sniffPlayFormatFn = func(string, map[string]string) string { return "" }
 	plain := a.planPlayback("https://cdn.example/disguise.php", "", nil, playModeVod)
