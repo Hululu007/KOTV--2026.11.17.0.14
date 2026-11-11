@@ -339,6 +339,29 @@ func TestHandleLeavesCDNPlaylistBytes(t *testing.T) {
 	}
 }
 
+func TestHandleRewritesAbsoluteCDNSegmentsWithoutHeaders(t *testing.T) {
+	// 无登记头时也要把 CDN 绝对分片改写进透传（图片头包 TS 才能剥）。
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:1,\nhttps://cdn.example/seg.png\n"))
+	}))
+	defer srv.Close()
+
+	proxyURL := playproxy.RegisterAlways(srv.URL+"/v.m3u8", nil, false)
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	rr := httptest.NewRecorder()
+	playproxy.Handle(rr, req)
+	body, _ := io.ReadAll(rr.Result().Body)
+	text := string(body)
+	if strings.Contains(text, "https://cdn.example/seg.png") {
+		t.Fatalf("cdn segment left absolute: %q", text)
+	}
+	if !strings.Contains(text, "/proxy/play?") || !strings.Contains(text, "u=") {
+		t.Fatalf("expected proxied child, got %q", text)
+	}
+}
+
 func TestHandleRewritesPlaylistWithoutM3U8InURL(t *testing.T) {
 	withAdFilter(t, false)
 	defer hostclient.Bind(hostclient.Request{ClientID: "playlist-rewrite", PublicBase: "http://192.168.1.8:9978"})()

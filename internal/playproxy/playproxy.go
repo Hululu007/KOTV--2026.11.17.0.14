@@ -500,7 +500,8 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, playI
 	if e.Filter {
 		body = m3u8.FilterPlaylist(body, final, e.Headers)
 	}
-	body = rewritePlaylist(body, final, playID, hasHeaders(e.Headers))
+	// 分片一律改写进同一透传：无登记头时也要代理，才能剥图片头包 TS（.png/.jpg 假后缀）。
+	body = rewritePlaylist(body, final, playID, true)
 	writePlaylist(w, resp, []byte(body))
 }
 
@@ -517,7 +518,7 @@ func hasHeaders(headers map[string]string) bool {
 var playlistURIRe = regexp.MustCompile(`(?i)\bURI="([^"]+)"`)
 
 // rewritePlaylist 把节目单里的地址补成绝对地址。
-// 需要带上登记的请求头，或切片本身在回环上时，改写成同一条透传。
+// inject 为真时改写成同一条 /proxy/play（带 u=），以便注入登记头并剥图片头包 TS。
 func rewritePlaylist(content, base, id string, inject bool) string {
 	if !strings.HasPrefix(strings.TrimSpace(content), "#EXTM3U") {
 		return content
@@ -616,7 +617,7 @@ func writePassthrough(w http.ResponseWriter, resp *http.Response, body io.Reader
 	copyResponseHeaders(w, resp.Header)
 	// 带 Content-Range 的部分响应不剥前缀（偏移会错）。
 	if w.Header().Get("Content-Range") == "" {
-		out, newCT, newCL, ok := maybeStripPngWrappedTS(w.Header().Get("Content-Type"), resp.ContentLength, body)
+		out, newCT, newCL, ok := maybeStripImageWrappedTS(w.Header().Get("Content-Type"), resp.ContentLength, body)
 		body = out
 		if ok {
 			if newCT != "" {
