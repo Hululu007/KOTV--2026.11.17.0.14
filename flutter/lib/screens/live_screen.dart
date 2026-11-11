@@ -537,6 +537,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _mkPlayer = null;
       _playUrl = '';
       _playDirect = '';
+      _liveRelayTried = false;
       unawaited(() async {
         await kotvHardReleasePlayers(backends, waitFirst: fvp);
         await kotvDisposeMpvPlayer(mkPlayer);
