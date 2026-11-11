@@ -2011,7 +2011,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /**
    * 播到片尾，每次加载只报一次 completed。
    * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；有排队项时在这里 playlist-next 并解除 pause。
-   * 强信号地址却未 forceHls、且几秒就 EOF：按 lavf hls 重开一次。
+   * URL 强信号却未 forceHls、且几秒就 EOF：按 lavf hls 重开一次（引擎 format 已写准时通常不走这里）。
    * 仅图片轨且未出画、几乎没播过：seek 末帧的假 EOF，报 error 而不是 completed。
    */
   private fun markEnded() {
