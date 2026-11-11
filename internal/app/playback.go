@@ -41,15 +41,9 @@ func IsLocalMediaURL(u string) bool {
 	return false
 }
 
-// IsEphemeralPlayURL 是否为引擎登记的临时代理 HTTP 地址（id 会过期，勿写入历史/跨会话复用）。
-// 播放器只认 URL，不能改成引擎内函数回调；登记表在引擎内存，对外仍是可打开的 HTTP。
+// IsEphemeralPlayURL 是否为引擎临时代理 HTTP（口径见 playproxy.IsEphemeralURL）。
 func IsEphemeralPlayURL(u string) bool {
-	u = strings.ToLower(strings.TrimSpace(u))
-	return strings.Contains(u, "/proxy/play?") ||
-		strings.Contains(u, "/proxy/cached_m3u8") ||
-		strings.Contains(u, "/proxy/rolling_m3u8") ||
-		strings.Contains(u, "/proxy/hls/") ||
-		strings.Contains(u, "/proxy/bt/")
+	return playproxy.IsEphemeralURL(u)
 }
 
 // PreparePlaybackURL 将媒体地址转成当前会话可播的地址（不正文嗅探）。
@@ -103,11 +97,11 @@ func (a *App) preparePlayback(raw string, headers map[string]string, vod, isHls 
 	return playproxy.PublicizeURL(raw, headers), "", headers
 }
 
-// registerPlayback 登记透传；Direct 为登记前的公网原址（远端经 Publicize）。
+// registerPlayback 登记透传；Direct 为未代拉原址（仅主机公开化），代拉只进 play。
 func registerPlayback(raw string, headers map[string]string, filter bool) (string, string, map[string]string) {
-	direct := playproxy.PublicizeURL(raw, headers)
-	play := playproxy.RegisterAlways(raw, headers, filter)
-	return playproxy.PublicizeURL(play, headers), direct, headers
+	direct := playproxy.PublicizeHost(raw)
+	play := playproxy.Register(raw, headers, filter)
+	return playproxy.PublicizeHost(play), direct, headers
 }
 
 // exposeLocalFile 远端前端播放时，把本机文件改成 /file/ 地址。本机请求保持原路径。content: 不改。

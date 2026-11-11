@@ -40,7 +40,8 @@ func ConvertScheme(value string) string {
 	}
 }
 
-// IsSpiderProxyURL 是否为爬虫本地代理（/proxy?...），不含 /proxy/play、cached_m3u8、bt。
+// IsSpiderProxyURL 是否为爬虫本地代理（/proxy?...）。
+// 排除引擎临时代理路径（与 playproxy.IsEphemeralURL 同口径，另含无查询的 /proxy/play）。
 func IsSpiderProxyURL(raw string) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -49,6 +50,8 @@ func IsSpiderProxyURL(raw string) bool {
 	low := strings.ToLower(raw)
 	if strings.Contains(low, "/proxy/play") ||
 		strings.Contains(low, "/proxy/cached_m3u8") ||
+		strings.Contains(low, "/proxy/rolling_m3u8") ||
+		strings.Contains(low, "/proxy/hls/") ||
 		strings.Contains(low, "/proxy/bt/") {
 		return false
 	}

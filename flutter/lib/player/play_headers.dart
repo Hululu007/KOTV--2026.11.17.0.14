@@ -43,23 +43,7 @@ String kotvEffectivePlayUa() {
   return kotvDefaultPlayUA;
 }
 
-bool kotvIsLocalProxyUrl(String url) {
-  final u = url.toLowerCase();
-  if (u.contains('/proxy/play') || u.contains('/proxy/bt/')) {
-    return true;
-  }
-  // spider 本地代理：改写到局域网 IP 后仍是 /proxy?...，不能再带 CDN 头。
-  try {
-    final uri = Uri.parse(url);
-    var path = kotvStripMediaKey(uri.path);
-    if (path.endsWith('/') && path.length > 1) path = path.substring(0, path.length - 1);
-    if (path == '/proxy') return true;
-  } catch (_) {}
-  return u.contains('127.0.0.1:') && u.contains('/proxy');
-}
-
-/// 引擎登记的临时代理 HTTP 地址（id 会过期，勿写入历史/频道缓存）。
-/// 与 Go `IsEphemeralPlayURL` 同口径；播放器只认 URL，不是引擎内函数回调。
+/// 引擎临时代理 HTTP（id 会过期）。口径同 Go [playproxy.IsEphemeralURL]。
 bool kotvIsEphemeralPlayUrl(String url) {
   final u = url.toLowerCase().trim();
   return u.contains('/proxy/play?') ||
@@ -67,6 +51,22 @@ bool kotvIsEphemeralPlayUrl(String url) {
       u.contains('/proxy/rolling_m3u8') ||
       u.contains('/proxy/hls/') ||
       u.contains('/proxy/bt/');
+}
+
+/// 本地/引擎代理地址：临时代理、爬虫 `/proxy`，不能再带 CDN 头。
+bool kotvIsLocalProxyUrl(String url) {
+  if (kotvIsEphemeralPlayUrl(url)) return true;
+  final u = url.toLowerCase();
+  if (u.contains('/proxy/play')) return true;
+  try {
+    final uri = Uri.parse(url);
+    var path = kotvStripMediaKey(uri.path);
+    if (path.endsWith('/') && path.length > 1) {
+      path = path.substring(0, path.length - 1);
+    }
+    if (path == '/proxy') return true;
+  } catch (_) {}
+  return u.contains('127.0.0.1:') && u.contains('/proxy');
 }
 
 /// 这次打开能否把请求头交给播放器。为真且直链可连时，打开站点地址。

@@ -51,8 +51,21 @@ func RxBytes() uint64 { return rxBytes.Load() }
 // SetPortFunc 注入本地服务端口读取函数。
 func SetPortFunc(fn func() int) { portFn = fn }
 
-// RegisterAlways 登记 /proxy/play。filter 为真时，这条透传才过滤节目单。
-func RegisterAlways(rawURL string, headers map[string]string, filter bool) string {
+// IsEphemeralURL 引擎临时代理 HTTP（登记 id / 会话态会过期，勿写入历史）。
+func IsEphemeralURL(u string) bool {
+	u = strings.ToLower(strings.TrimSpace(u))
+	if u == "" {
+		return false
+	}
+	return strings.Contains(u, "/proxy/play?") ||
+		strings.Contains(u, "/proxy/cached_m3u8") ||
+		strings.Contains(u, "/proxy/rolling_m3u8") ||
+		strings.Contains(u, "/proxy/hls/") ||
+		strings.Contains(u, "/proxy/bt/")
+}
+
+// Register 登记 /proxy/play。filter 为真时，这条透传才过滤节目单。
+func Register(rawURL string, headers map[string]string, filter bool) string {
 	if strings.TrimSpace(rawURL) == "" {
 		return ""
 	}
@@ -80,7 +93,7 @@ func register(rawURL string, headers map[string]string, filter bool) string {
 	if rawURL == "" {
 		return ""
 	}
-	if strings.Contains(rawURL, "/proxy/play?") || strings.Contains(rawURL, "/proxy/cached_m3u8") || strings.Contains(rawURL, "/proxy/rolling_m3u8") {
+	if IsEphemeralURL(rawURL) {
 		return rawURL
 	}
 	id := newID()
@@ -156,9 +169,14 @@ func LocalHTTPBase() string {
 	return localproxy.LocalBaseURL()
 }
 
+// PublicizeHost 只把本引擎媒体地址的主机改成 PublicBase，不代拉登记。
+// CDN 原址、非引擎路径原样返回。本机请求（PublicBase 为空）原样返回。
+func PublicizeHost(raw string) string {
+	return rewritePublicHost(strings.TrimSpace(raw))
+}
+
 // PublicizeURL 把地址改成当前请求的客户端打得开的形式。
-// 回环且端口不是本引擎时，由本机代拉后给出已有的 /proxy/play。
-// 本引擎路径上的回环或内网主机换成前端填写的连接根。其它地址保持不变。
+// 回环且端口不是本引擎时，由本机代拉后给出 /proxy/play，再改主机。
 // 本机请求（PublicBase 为空）原样返回。headers 可选，只在代拉时附上。
 func PublicizeURL(raw string, headers ...map[string]string) string {
 	raw = strings.TrimSpace(raw)
@@ -172,7 +190,7 @@ func PublicizeURL(raw string, headers ...map[string]string) string {
 		}
 		raw = register(raw, hdr, false)
 	}
-	return rewritePublicHost(raw)
+	return PublicizeHost(raw)
 }
 
 func rewritePublicHost(raw string) string {
@@ -502,8 +520,9 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, playI
 	if e.Filter {
 		body = m3u8.FilterPlaylist(body, final, e.Headers)
 	}
-	// 分片一律改写进同一透传：无登记头时也要代理，才能剥图片头包 TS（.png/.jpg 假后缀）。
-	body = rewritePlaylist(body, final, playID, true)
+	// 有登记头或去广告时，子资源改写进同一 /proxy/play 以便带头发往；否则只补绝对地址。
+	inject := hasHeaders(e.Headers) || e.Filter
+	body = rewritePlaylist(body, final, playID, inject)
 	writePlaylist(w, resp, []byte(body))
 }
 
@@ -520,7 +539,7 @@ func hasHeaders(headers map[string]string) bool {
 var playlistURIRe = regexp.MustCompile(`(?i)\bURI="([^"]+)"`)
 
 // rewritePlaylist 把节目单里的地址补成绝对地址。
-// inject 为真时改写成同一条 /proxy/play（带 u=），以便注入登记头并剥图片头包 TS。
+// inject 为真时改写成同一条 /proxy/play（带 u=），以便注入登记头或走去广告过滤路径。
 func rewritePlaylist(content, base, id string, inject bool) string {
 	if !strings.HasPrefix(strings.TrimSpace(content), "#EXTM3U") {
 		return content
@@ -617,20 +636,6 @@ func writePlaylist(w http.ResponseWriter, resp *http.Response, body []byte) {
 
 func writePassthrough(w http.ResponseWriter, resp *http.Response, body io.Reader) {
 	copyResponseHeaders(w, resp.Header)
-	// 带 Content-Range 的部分响应不剥前缀（偏移会错）。
-	if w.Header().Get("Content-Range") == "" {
-		out, newCT, newCL, ok := maybeStripImageWrappedTS(w.Header().Get("Content-Type"), resp.ContentLength, body)
-		body = out
-		if ok {
-			if newCT != "" {
-				w.Header().Set("Content-Type", newCT)
-			}
-			w.Header().Del("Content-Length")
-			if newCL >= 0 {
-				w.Header().Set("Content-Length", strconv.FormatInt(newCL, 10))
-			}
-		}
-	}
 	w.WriteHeader(resp.StatusCode)
 	dst := io.Writer(w)
 	if f, ok := w.(http.Flusher); ok {
@@ -639,8 +644,8 @@ func writePassthrough(w http.ResponseWriter, resp *http.Response, body io.Reader
 	_, _ = io.Copy(countingWriter{w: dst}, body)
 }
 
-// copyResponseHeaders 原样转发响应头。去掉逐跳头，不补 Accept-Ranges。
-func copyResponseHeaders(w http.ResponseWriter, h http.Header) {
+// hopByHopHeaderNames 逐跳头（含 Connection 列出的扩展名）。
+func hopByHopHeaderNames(h http.Header) map[string]struct{} {
 	hop := map[string]struct{}{
 		"connection":          {},
 		"keep-alive":          {},
@@ -658,6 +663,12 @@ func copyResponseHeaders(w http.ResponseWriter, h http.Header) {
 			}
 		}
 	}
+	return hop
+}
+
+// copyResponseHeaders 原样转发响应头。去掉逐跳头，不补 Accept-Ranges。
+func copyResponseHeaders(w http.ResponseWriter, h http.Header) {
+	hop := hopByHopHeaderNames(h)
 	for k, vals := range h {
 		if _, skip := hop[strings.ToLower(k)]; skip {
 			continue
@@ -1009,21 +1020,7 @@ func copyChunked(dst io.Writer, br *bufio.Reader) error {
 }
 
 func filterSpliceHeaders(h http.Header) http.Header {
-	hop := map[string]struct{}{
-		"keep-alive":          {},
-		"proxy-authenticate":  {},
-		"proxy-authorization": {},
-		"te":                  {},
-		"trailer":             {},
-		"upgrade":             {},
-	}
-	for _, c := range h.Values("Connection") {
-		for _, token := range strings.Split(c, ",") {
-			if t := strings.ToLower(strings.TrimSpace(token)); t != "" {
-				hop[t] = struct{}{}
-			}
-		}
-	}
+	hop := hopByHopHeaderNames(h)
 	out := make(http.Header, len(h))
 	for k, vals := range h {
 		if _, skip := hop[strings.ToLower(k)]; skip {

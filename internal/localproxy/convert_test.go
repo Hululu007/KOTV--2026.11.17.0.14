@@ -23,6 +23,9 @@ func TestIsSpiderProxyURL(t *testing.T) {
 		{"http://192.168.1.8:9978/proxy?do=uc&type=video", true},
 		{"http://127.0.0.1:9978/proxy/play?id=1", false},
 		{"http://127.0.0.1:9978/proxy/cached_m3u8?id=1", false},
+		{"http://127.0.0.1:9978/proxy/rolling_m3u8?id=1", false},
+		{"http://127.0.0.1:9978/proxy/hls/x", false},
+		{"http://127.0.0.1:9978/proxy/bt/x", false},
 		{"https://cdn.example/a.mkv", false},
 	}
 	for _, c := range cases {

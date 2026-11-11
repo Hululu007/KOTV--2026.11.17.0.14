@@ -67,6 +67,14 @@ void main() {
       isTrue,
     );
     expect(
+      kotvShouldPreferPlayDirect(playerVal: 'innie#fvp', adFilterOn: false),
+      isTrue,
+    );
+    expect(
+      kotvShouldPreferPlayDirect(playerVal: 'innie#fvp', adFilterOn: true),
+      isFalse,
+    );
+    expect(
       kotvShouldSwitchToProxyAfterOpenFailure(
         playerVal: 'innie#mpv',
         openUrl: 'https://cdn.example/a.m3u8',
@@ -144,7 +152,12 @@ void main() {
   test('ephemeral play urls match engine proxy paths', () {
     expect(kotvIsEphemeralPlayUrl('http://127.0.0.1:9978/proxy/play?id=1'), isTrue);
     expect(kotvIsEphemeralPlayUrl('http://127.0.0.1:9978/proxy/bt/x'), isTrue);
+    expect(kotvIsEphemeralPlayUrl('http://127.0.0.1:9978/proxy/hls/x'), isTrue);
+    expect(kotvIsEphemeralPlayUrl('http://127.0.0.1:9978/proxy/rolling_m3u8?id=1'), isTrue);
     expect(kotvIsEphemeralPlayUrl('https://cdn.example/a.m3u8'), isFalse);
+    expect(kotvIsLocalProxyUrl('http://127.0.0.1:9978/proxy/cached_m3u8?id=1'), isTrue);
+    expect(kotvIsLocalProxyUrl('http://192.168.1.8:9978/proxy?do=quark'), isTrue);
+    expect(kotvIsLocalProxyUrl('https://cdn.example/a.m3u8'), isFalse);
   });
 
   test('fvp exo mpv always; web hls.js only on playlists', () {
