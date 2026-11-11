@@ -321,31 +321,5 @@ tasks.named("preBuild") {
 afterEvaluate {
     android.defaultConfig.targetSdk = kotvTargetSdk
     println "[android] pinned targetSdk=${android.defaultConfig.targetSdk} (KOTV_TARGET_SDK=${System.getenv("KOTV_TARGET_SDK") ?: "28"})"
-    // fvp/mdk 的 libc++ 往往更旧；合并后再盖一层 jniLibs 里的 webhtv 配套 libc++（含 from_chars）。
-    // 勿用 NDK28（缺符号）/NDK29（无法 exec 外部二进制）覆盖。
-    android.applicationVariants.configureEach { variant ->
-        def mergeName = "merge${variant.name.capitalize()}NativeLibs"
-        tasks.matching { it.name == mergeName }.configureEach { task ->
-            task.doLast {
-                kotvAbiFilters.each { abi ->
-                    def src = file("src/main/jniLibs/${abi}/libc++_shared.so")
-                    if (!src.exists() || src.length() == 0L) return
-                    def matches = fileTree("${project.buildDir}/intermediates").matching {
-                        include "**/lib/${abi}/libc++_shared.so"
-                    }
-                    if (matches.isEmpty()) {
-                        def dest = file("${project.buildDir}/intermediates/merged_native_libs/${variant.dirName}/merge${variant.name.capitalize()}NativeLibs/out/lib/${abi}/libc++_shared.so")
-                        dest.parentFile.mkdirs()
-                        ant.copy(file: src, tofile: dest, overwrite: true)
-                        println "[android] overlay webhtv libc++_shared.so → ${dest}"
-                    } else {
-                        matches.each { dest ->
-                            ant.copy(file: src, tofile: dest, overwrite: true)
-                            println "[android] overlay webhtv libc++_shared.so → ${dest}"
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // libc++ 由 Media3 mpvplayer / nextlib / fvp 经 pickFirst 合并；不再从 jniLibs 覆盖。
 }

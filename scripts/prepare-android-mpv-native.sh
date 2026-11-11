@@ -73,10 +73,13 @@ verify_abi() {
     echo "ERROR: jniLibs/$abi/libvulkan.so must not exist" >&2
     missing=1
   fi
-  if [[ -s "$jni/libmpv.so" || -s "$jni/libplayer.so" ]]; then
-    echo "ERROR: legacy libmpv/libplayer still in jniLibs/$abi (use Media3 AAR)" >&2
-    missing=1
-  fi
+  local legacy
+  for legacy in "${KOTV_ANDROID_MPV_LEGACY_JNI[@]}"; do
+    if [[ -s "$jni/$legacy" ]]; then
+      echo "ERROR: legacy $jni/$legacy still present (use Media3 AAR)" >&2
+      missing=1
+    fi
+  done
   if [[ "$missing" != 0 ]]; then
     exit 1
   fi
