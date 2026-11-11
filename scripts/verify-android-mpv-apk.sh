@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 校验 APK：MPV 套件只在 lib/<abi>/；Vulkan stub 只在 assets/mpv-libs（按包内实际 ABI）。
+# 校验 APK：Media3 mpvplayer 提供 libmpv/libplayer；Vulkan stub 仅在 assets；kotv_dl 在 lib/。
 set -euo pipefail
 APK="${1:-}"
 if [[ -z "$APK" || ! -f "$APK" ]]; then
@@ -24,7 +24,6 @@ while IFS= read -r abi; do
     "assets/mpv-libs/${abi}/libvulkan.so"
     "lib/${abi}/libmpv.so"
     "lib/${abi}/libplayer.so"
-    "lib/${abi}/libmvcodec.so"
     "lib/${abi}/libkotv_dl.so"
     "lib/${abi}/libc++_shared.so"
   )
@@ -77,15 +76,20 @@ while IFS= read -r abi; do
     echo "ERROR: APK must not contain $bad (stub steals system Vulkan)" >&2
     exit 1
   fi
-  # 套件不得再出现在 assets（与 lib/ 重复）。
+  # 旧自研套件 / 与 lib/ 重复的 assets 条目不得再出现。
   for dup in libmpv.so libplayer.so libmvcodec.so libc++_shared.so libkotv_dl.so; do
     p="assets/mpv-libs/${abi}/${dup}"
     if grep -qxF "$p" <<<"$listing"; then
-      echo "ERROR: APK must not contain $p (duplicate of lib/${abi}/)" >&2
+      echo "ERROR: APK must not contain $p (duplicate of lib/${abi}/ or legacy)" >&2
       exit 1
     fi
   done
+  # Media3 AAR 不单独带 libmvcodec；遗留 jni 名不得再进包。
+  if grep -qxF "lib/${abi}/libmvcodec.so" <<<"$listing"; then
+    echo "ERROR: APK must not contain lib/${abi}/libmvcodec.so (legacy; Media3 libmpv embeds codecs)" >&2
+    exit 1
+  fi
 done <<<"$abis"
 
-echo "ok: APK MPV suite in lib/ only; Vulkan stub in assets only (abis: $(echo "$abis" | tr '\n' ' '))"
+echo "ok: APK Media3 MPV (libmpv/libplayer) in lib/; Vulkan stub in assets only (abis: $(echo "$abis" | tr '\n' ' '))"
 unzip -l "$APK" | awk '/mpv-libs|libvulkan|libkotv_dl|libmpv\.so|libplayer\.so/ {print $1, $4}' | head -30

@@ -4,8 +4,14 @@
 
 #include <windows.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <shobjidl.h>
 #include <wincodec.h>
+
+// rpcndr.h（经 shlobj）可能 #define small char，勿再用标识符 small。
+#ifdef small
+#undef small
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -203,12 +209,16 @@ std::vector<uint8_t> IconPngFromPath(const std::wstring& path, int index,
 std::vector<uint8_t> AssocHandlerIconPng(IAssocHandler* handler,
                                          const std::wstring& exe, int side) {
   if (handler != nullptr) {
-    wchar_t loc[MAX_PATH] = {};
+    // IAssocHandler::GetIconLocation 是 Outptr 两参（CoTaskMemFree），不是缓冲区三参。
+    LPWSTR loc = nullptr;
     int index = 0;
-    if (SUCCEEDED(handler->GetIconLocation(loc, MAX_PATH, &index)) &&
+    if (SUCCEEDED(handler->GetIconLocation(&loc, &index)) && loc != nullptr &&
         loc[0] != L'\0') {
       std::vector<uint8_t> png = IconPngFromPath(loc, index, side);
+      ::CoTaskMemFree(loc);
       if (!png.empty()) return png;
+    } else if (loc != nullptr) {
+      ::CoTaskMemFree(loc);
     }
   }
   return IconPngFromPath(exe, 0, side);
