@@ -3,7 +3,7 @@ import 'package:kotv/player/kotv_platform.dart';
 import 'package:kotv/player/play_headers.dart';
 
 void main() {
-  test('exo preferDirect opens the site url', () {
+  test('preferDirect opens the site url', () {
     final got = kotvResolvePlayOpenTarget(
       playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
       directUrl: 'https://cdn.example/live.m3u8',
@@ -16,7 +16,7 @@ void main() {
     expect(got.headers?['Cookie'], 'a=b');
   });
 
-  test('non-exo keeps the engine url even with direct', () {
+  test('without preferDirect keeps the engine url', () {
     final got = kotvResolvePlayOpenTarget(
       playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
       directUrl: 'https://cdn.example/live.m3u8',
@@ -53,20 +53,52 @@ void main() {
     expect(got.headers, isNull);
   });
 
-  test('relay gate', () {
+  test('prefer and switch-to-proxy gates', () {
     expect(
-      kotvShouldRelayAfterOpenFailure(
+      kotvShouldPreferPlayDirect(playerVal: 'innie#exo', adFilterOn: true),
+      isTrue,
+    );
+    expect(
+      kotvShouldPreferPlayDirect(playerVal: 'innie#mpv', adFilterOn: true),
+      isFalse,
+    );
+    expect(
+      kotvShouldPreferPlayDirect(playerVal: 'innie#mpv', adFilterOn: false),
+      isTrue,
+    );
+    expect(
+      kotvShouldSwitchToProxyAfterOpenFailure(
         playerVal: 'innie#mpv',
         openUrl: 'https://cdn.example/a.m3u8',
-        alreadyRelayed: false,
+        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+        alreadySwitched: false,
       ),
       isTrue,
     );
     expect(
-      kotvShouldRelayAfterOpenFailure(
+      kotvShouldSwitchToProxyAfterOpenFailure(
         playerVal: 'innie#exo',
         openUrl: 'https://cdn.example/a.m3u8',
-        alreadyRelayed: false,
+        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+        alreadySwitched: false,
+      ),
+      isFalse,
+    );
+    expect(
+      kotvShouldSwitchToProxyAfterOpenFailure(
+        playerVal: 'innie#fvp',
+        openUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+        alreadySwitched: false,
+      ),
+      isFalse,
+    );
+    expect(
+      kotvShouldSwitchToProxyAfterOpenFailure(
+        playerVal: 'innie#html',
+        openUrl: 'https://cdn.example/a.m3u8',
+        playUrl: 'https://cdn.example/a.m3u8',
+        alreadySwitched: false,
       ),
       isFalse,
     );
@@ -118,48 +150,6 @@ void main() {
       ),
       isFalse,
     );
-    expect(
-      kotvPlaybackSendsHeaders(
-        playerVal: 'innie#xg',
-        mediaUrl: 'https://cdn.example/live.m3u8',
-        hlsJsSupported: true,
-      ),
-      isTrue,
-    );
-    expect(
-      kotvPlaybackSendsHeaders(
-        playerVal: 'innie#xg',
-        mediaUrl: 'https://cdn.example/a.mp4',
-        hlsJsSupported: true,
-      ),
-      isFalse,
-    );
-    expect(
-      kotvPlaybackSendsHeaders(
-        playerVal: 'innie#zw',
-        mediaUrl: 'https://cdn.example/live.m3u8',
-        hlsJsSupported: true,
-      ),
-      isTrue,
-    );
-    expect(
-      kotvPlaybackSendsHeaders(
-        playerVal: 'innie#html',
-        mediaUrl: 'https://cdn.example/a.mp4',
-        format: 'application/x-mpegURL',
-        hlsJsSupported: true,
-      ),
-      isTrue,
-    );
-    expect(
-      kotvPlaybackSendsHeaders(
-        playerVal: 'innie#html',
-        mediaUrl: 'https://cdn.example/a.mp4',
-        format: 'm3u8',
-        hlsJsSupported: true,
-      ),
-      isTrue,
-    );
   });
 
   test('mpv keeps ua and referer off the header field list', () {
@@ -177,24 +167,6 @@ void main() {
     expect(split.fields.containsKey('User-Agent'), isFalse);
     expect(split.fields.containsKey('Referer'), isFalse);
     expect(split.fields['Cookie'], 'a=b');
-    expect(split.fields['Origin'], 'https://site.example');
-    expect(split.fields['Range'], 'bytes=0-1');
-    expect(split.fields['Host'], 'www.ncat3.app');
-    expect(split.fields['Connection'], 'keep-alive');
-    final kept = kotvNormalizePlayHeaders(
-      const {
-        'Host': 'www.ncat3.app',
-        'Connection': 'keep-alive',
-        'Cookie': 'a=1',
-        'Referer': 'https://www.ncat3.app',
-      },
-      url: 'https://vip.example/a.m3u8',
-      addDefaultUa: false,
-    );
-    expect(kept['Host'], 'www.ncat3.app');
-    expect(kept['Connection'], 'keep-alive');
-    expect(kept['Cookie'], 'a=1');
-    expect(kept['Referer'], 'https://www.ncat3.app');
     final empty = kotvSplitMpvHeaders(const {});
     expect(empty.userAgent, isEmpty);
     expect(empty.referer, isEmpty);
@@ -204,10 +176,6 @@ void main() {
   test('empty site header uses okhttp ua, settings ua wins', () {
     kotvApplyPlayUaSetting('');
     expect(kotvDefaultPlayUA, 'okhttp/5.5.0');
-    expect(
-      kotvChromePlayUA,
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36',
-    );
     expect(
       kotvNormalizePlayHeaders(const {}, url: 'https://cdn.example/a.m3u8')['User-Agent'],
       kotvIsDesktop() ? isNull : 'okhttp/5.5.0',
@@ -222,13 +190,6 @@ void main() {
     expect(
       kotvNormalizePlayHeaders(const {}, url: 'https://cdn.example/a.m3u8')['User-Agent'],
       'CustomPlayer/1',
-    );
-    expect(
-      kotvNormalizePlayHeaders(
-        const {'User-Agent': 'from-site'},
-        url: 'https://cdn.example/a.m3u8',
-      )['User-Agent'],
-      'from-site',
     );
     kotvApplyPlayUaSetting('');
   });

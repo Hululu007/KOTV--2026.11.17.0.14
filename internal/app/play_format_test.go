@@ -144,8 +144,8 @@ func TestShouldRegisterVodHls(t *testing.T) {
 
 	withAdFilter(t, false)
 	reg, filter = shouldRegisterVodHls("https://cdn/a.m3u8", true)
-	if reg {
-		t.Fatalf("ad off strong should direct")
+	if !reg || filter {
+		t.Fatalf("ad off strong: reg=%v filter=%v", reg, filter)
 	}
 	reg, filter = shouldRegisterVodHls("https://cdn/a.php", true)
 	if !reg || filter {

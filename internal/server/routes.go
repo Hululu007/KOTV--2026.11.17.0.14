@@ -58,7 +58,6 @@ func (s *Server) routes() []route {
 		{"/api/v1/detail/expand", needUser, s.handleAPIv1DetailExpand},
 		{"/api/v1/bt/progress", needUser, s.handleAPIv1BtProgress},
 		{"/api/v1/search", needUser, s.handleAPIv1Search},
-		{"/api/v1/play/relay", needUser, s.handleAPIv1PlayRelay},
 		{"/api/v1/play", needUser, s.handleAPIv1Play},
 		{"/api/v1/danmaku", needUser, s.handleAPIv1Danmaku},
 		{"/api/v1/sites", needUser, s.handleAPIv1Sites},

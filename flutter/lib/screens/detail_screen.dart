@@ -2078,19 +2078,24 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     required Map<String, String> rawHeaders,
     required bool magnet,
     String? format,
+    bool adFilterOn = true,
+    bool forceProxy = false,
   }) {
     final localMedia = mediaUrl.startsWith('file:') ||
         mediaUrl.startsWith('content:') ||
         (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
     if (!magnet && localMedia) return (url: mediaUrl, headers: null);
-    final mediaHint = directUrl.trim().isNotEmpty ? directUrl : playUrl;
+    final preferDirect = !forceProxy &&
+        kotvShouldPreferPlayDirect(playerVal: playerVal, adFilterOn: adFilterOn);
+    final mediaHint =
+        preferDirect && directUrl.trim().isNotEmpty ? directUrl : playUrl;
     return kotvResolvePlayOpenTarget(
       playUrl: playUrl,
       directUrl: directUrl,
       headers: kotvNormalizePlayHeaders(rawHeaders, url: mediaHint),
       magnet: magnet,
       sendHeaders: kotvPlaybackSendsHeaders(playerVal: playerVal, mediaUrl: mediaHint, format: format),
-      preferDirect: playerVal.trim() == 'innie#exo',
+      preferDirect: preferDirect,
     );
   }
 
@@ -2487,7 +2492,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       );
       Object? lastOpenError;
       var opened = false;
-      var relayTried = false;
+      var proxySwitched = false;
+      final adFilterOn = kotvSettingsMapFlag(playSettings, 'adFilter', def: true);
       final subMaps = _playSubsOf(data);
       final format = _playFormatOf(data);
       for (var attempt = 0; attempt < 8; attempt++) {
@@ -2523,6 +2529,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           rawHeaders: rawHeaders,
           magnet: magnet,
           format: format,
+          adFilterOn: adFilterOn,
+          forceProxy: proxySwitched,
         );
         var openUrl = target.url;
         final openHeaders = target.headers;
@@ -2612,48 +2620,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             return;
           }
           lastOpenError = e;
-          // 非 Exo：直连不可播时一次性改走引擎透传再开（同引擎，先于播放器 failover）。
-          final relaySrc = () {
-            final d = directUrl.trim();
-            if (d.isNotEmpty) return d;
-            final m = mediaUrl.trim();
-            if (m.isNotEmpty) return m;
-            return playUrl;
-          }();
-          if (kotvShouldRelayAfterOpenFailure(
+          // 非 Exo：直连不可播时改开本集已下发的透传 url（不二次请求）。
+          if (kotvShouldSwitchToProxyAfterOpenFailure(
             playerVal: failover.playerVal,
             openUrl: openUrl,
-            alreadyRelayed: relayTried,
+            playUrl: playUrl,
+            alreadySwitched: proxySwitched,
           )) {
-            try {
-              final relayed = await ref.read(apiProvider).playRelay(
-                    url: relaySrc,
-                    headers: rawHeaders.isEmpty ? null : rawHeaders,
-                    vod: true,
-                  );
-              final nextPlay = kotvRewriteEngineLocalUrl(
-                '${relayed['url'] ?? ''}',
-                apiBase,
-              );
-              if (nextPlay.isNotEmpty && nextPlay != openUrl) {
-                relayTried = true;
-                playUrl = nextPlay;
-                directUrl = kotvRewriteEngineLocalUrl(
-                  '${relayed['direct'] ?? directUrl}',
-                  apiBase,
-                );
-                final rh = relayed['headers'];
-                if (rh is Map && rh.isNotEmpty) {
-                  rawHeaders = {
-                    for (final e in rh.entries) '${e.key}': '${e.value}',
-                  };
-                }
-                if (mounted) {
-                  setState(() => _status = '$_enginePrefix 改走透传重试…');
-                }
-                continue;
-              }
-            } catch (_) {}
+            proxySwitched = true;
+            if (mounted) {
+              setState(() => _status = '$_enginePrefix 改走透传重试…');
+            }
+            continue;
           }
           final retry = await _recoverAfterSilentVideo(
             pb: pb,

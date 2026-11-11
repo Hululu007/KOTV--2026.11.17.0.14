@@ -259,17 +259,20 @@ func TestPreparePlaybackDirectSkipsLoopback(t *testing.T) {
 	}
 }
 
-// 点播无请求头、不去广告时 url 就是原地址。
-func TestPreparePlaybackLivePlainURL(t *testing.T) {
+// 点播 HLS 去广告关：预登记透传，Direct 为原址（首开直连用）。
+func TestPreparePlaybackAdOffPreregisters(t *testing.T) {
 	withAdFilter(t, false)
 	a := &App{}
 	raw := "https://cdn.example/live.m3u8"
 	play, direct, _ := a.PreparePlayback(raw, nil)
-	if play != raw {
-		t.Fatalf("play=%q want %q", play, raw)
+	if !strings.Contains(play, "/proxy/play?id=") {
+		t.Fatalf("play=%q", play)
 	}
-	if direct != "" {
-		t.Fatalf("direct=%q want empty", direct)
+	if direct != raw {
+		t.Fatalf("direct=%q want %q", direct, raw)
+	}
+	if playproxy.RegisteredFilter(play) {
+		t.Fatal("ad off must not filter")
 	}
 }
 
@@ -301,37 +304,17 @@ func TestPreparePlaybackAdFilterUsesRoute(t *testing.T) {
 	}
 }
 
-func TestRelayPlaybackAlwaysRegisters(t *testing.T) {
+func TestPreparePlaybackRemotePublicBase(t *testing.T) {
 	withAdFilter(t, false)
+	defer hostclient.Bind(hostclient.Request{ClientID: "pub", PublicBase: "http://192.168.1.8:9978"})()
 	a := &App{}
 	raw := "https://cdn.example/a.m3u8"
-	play, direct, headers := a.RelayPlayback(raw, map[string]string{"Cookie": "qk=1"}, true)
-	if !strings.Contains(play, "/proxy/play?id=") {
+	play, direct, _ := a.PreparePlayback(raw, nil)
+	if !strings.HasPrefix(play, "http://192.168.1.8:9978/proxy/play?id=") {
 		t.Fatalf("play=%q", play)
 	}
 	if direct != raw {
 		t.Fatalf("direct=%q want %q", direct, raw)
-	}
-	if playproxy.RegisteredFilter(play) {
-		t.Fatal("ad off: relay must not filter")
-	}
-	if headers["Cookie"] != "qk=1" {
-		t.Fatalf("headers=%v", headers)
-	}
-	withAdFilter(t, true)
-	play2, _, _ := a.RelayPlayback(raw, nil, true)
-	if !playproxy.RegisteredFilter(play2) {
-		t.Fatal("ad on: relay must filter")
-	}
-	livePlay, liveDirect, _ := a.RelayPlayback(raw, nil, false)
-	if !strings.Contains(livePlay, "/proxy/play?id=") {
-		t.Fatalf("live play=%q", livePlay)
-	}
-	if liveDirect != raw {
-		t.Fatalf("live direct=%q", liveDirect)
-	}
-	if playproxy.RegisteredFilter(livePlay) {
-		t.Fatal("live relay must not filter")
 	}
 }
 

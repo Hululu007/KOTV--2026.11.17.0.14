@@ -7,7 +7,6 @@ void main() {
   test('m3u8 path and query use lavf hls', () {
     expect(kotvIsHls('https://cdn/a.f300.m3u8', null), isTrue);
     expect(kotvIsHls('https://cdn/a.f300.m3u8/', null), isTrue);
-    // 任意 .php 不预强制；伪装靠引擎嗅探或打开失败再开。
     expect(kotvIsHls('https://cdn/play.php', null), isFalse);
     expect(kotvIsHls('https://cdn/play.php/', null), isFalse);
     expect(kotvIsHls('https://cdn/play.php?x=m3u8', null), isTrue);
@@ -15,7 +14,6 @@ void main() {
     expect(kotvIsHls('https://cdn/m3u8', null), isTrue);
     expect(kotvIsHls('https://cdn/m3u8/', null), isTrue);
     expect(kotvIsHls('https://cdn/v?file=m3u8', null), isTrue);
-    // 查询参数值里的 .m3u8 不算路径扩展名。
     expect(kotvIsHls('https://cdn/fengshows?id=2.m3u8', null), isFalse);
     expect(kotvIsHls('http://111.1.1.1:9090/nby/m3u8/getM3u8?name=x&url=NBY-1.m3u8', null), isTrue);
     expect(kotvIsHls('https://cdn/api/getM3u8?id=1', null), isTrue);
@@ -31,7 +29,6 @@ void main() {
   test('play mime matches hls decision for all players', () {
     expect(kotvIsHls('https://cdn/a.mp4', 'application/x-mpegURL'), isTrue);
     expect(kotvIsHls('https://cdn/a.m3u8', 'video/mp4'), isTrue);
-    // Exo 与 MPV 一致：URL 强信号覆盖错标 progressive。
     expect(kotvPlayMime('https://cdn/a.m3u8', 'video/mp4'), 'application/x-mpegURL');
     expect(kotvPlayMime('https://cdn/a.m3u8', null), 'application/x-mpegURL');
     expect(kotvPlayMime('https://cdn/a.mp4', 'application/x-mpegURL'), 'application/x-mpegURL');
@@ -63,44 +60,40 @@ void main() {
     expect(kotvMpvHlsOpenFailed('vd', 'could not open codec'), isFalse);
   });
 
-  test('relay after open failure gate', () {
+  test('switch to existing proxy after open failure', () {
     expect(
-      kotvShouldRelayAfterOpenFailure(
+      kotvShouldSwitchToProxyAfterOpenFailure(
         playerVal: 'innie#mpv',
         openUrl: 'https://cdn/a.m3u8',
-        alreadyRelayed: false,
+        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+        alreadySwitched: false,
       ),
       isTrue,
     );
     expect(
-      kotvShouldRelayAfterOpenFailure(
+      kotvShouldSwitchToProxyAfterOpenFailure(
         playerVal: 'innie#exo',
         openUrl: 'https://cdn/a.m3u8',
-        alreadyRelayed: false,
+        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+        alreadySwitched: false,
       ),
       isFalse,
     );
     expect(
-      kotvShouldRelayAfterOpenFailure(
+      kotvShouldSwitchToProxyAfterOpenFailure(
         playerVal: 'innie#fvp',
         openUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
-        alreadyRelayed: false,
+        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+        alreadySwitched: false,
       ),
       isFalse,
     );
     expect(
-      kotvShouldRelayAfterOpenFailure(
-        playerVal: 'innie#html',
-        openUrl: 'https://cdn/a.m3u8',
-        alreadyRelayed: true,
-      ),
-      isFalse,
-    );
-    expect(
-      kotvShouldRelayAfterOpenFailure(
+      kotvShouldSwitchToProxyAfterOpenFailure(
         playerVal: 'outie#vlc',
         openUrl: 'https://cdn/a.m3u8',
-        alreadyRelayed: false,
+        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+        alreadySwitched: false,
       ),
       isFalse,
     );

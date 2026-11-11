@@ -427,18 +427,6 @@ class KotvApi {
         'qual': qual,
       });
 
-  /// 强制登记 /proxy/play（非 Exo 直连不可播后一次性再开）。
-  Future<Map<String, dynamic>> playRelay({
-    required String url,
-    Map<String, String>? headers,
-    bool vod = true,
-  }) =>
-      _post('/api/v1/play/relay', {
-        'url': url,
-        if (headers != null && headers.isNotEmpty) 'headers': headers,
-        'vod': vod,
-      });
-
   /// 引擎拉取并解析一个弹幕源（视频页、弹幕地址或引擎本机弹幕文件）→ `{items:[...]}`。
   /// [duration] 片长：视频页按 60 秒分段拉取时用来定段数，未知传 0。
   Future<Map<String, dynamic>> danmakuLoad(String url, {Duration duration = Duration.zero}) =>

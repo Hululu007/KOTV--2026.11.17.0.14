@@ -99,25 +99,37 @@ bool kotvCanOpenDirect(String url) {
   return true;
 }
 
-/// 非 Exo 直连不可播时，是否值得一次性改走引擎透传再开。
+/// 是否优先打开 Direct（CDN 原址）。
 ///
-/// Exo 不走这条（靠 Direct + 播放器内 sync/广告）。已是本地透传、已 Relay 过、外置播放器 → 否。
-bool kotvShouldRelayAfterOpenFailure({
+/// Exo 始终优先（播放器内广告/sync）；其它内置播放器仅在去广告关闭时优先。
+bool kotvShouldPreferPlayDirect({
+  required String playerVal,
+  required bool adFilterOn,
+}) {
+  final p = playerVal.trim();
+  if (!p.startsWith('innie#')) return false;
+  if (p == 'innie#exo') return true;
+  return !adFilterOn;
+}
+
+/// 直连不可播时，是否改开引擎已下发的透传 [playUrl]（不再打 API）。
+///
+/// Exo 不走；已在透传、已切过、[playUrl] 不是 `/proxy/play` → 否。
+bool kotvShouldSwitchToProxyAfterOpenFailure({
   required String playerVal,
   required String openUrl,
-  required bool alreadyRelayed,
+  required String playUrl,
+  required bool alreadySwitched,
 }) {
-  if (alreadyRelayed) return false;
+  if (alreadySwitched) return false;
   final p = playerVal.trim();
   if (p == 'innie#exo' || !p.startsWith('innie#')) return false;
   if (kotvIsLocalProxyUrl(openUrl)) return false;
-  final u = openUrl.trim();
-  if (u.isEmpty) return false;
-  return kotvMpvNetworkUrl(u) || u.contains('://');
+  return kotvIsLocalProxyUrl(playUrl);
 }
 
 /// 选定最终 open 地址。
-/// [preferDirect]（仅 Exo）且 [sendHeaders]、[directUrl] 可直连时，打开站点地址。
+/// [preferDirect] 且 [sendHeaders]、[directUrl] 可直连时，打开站点地址。
 /// 其它情况打开引擎返回的播放地址。
 ({String url, Map<String, String>? headers}) kotvResolvePlayOpenTarget({
   required String playUrl,

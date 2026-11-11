@@ -134,18 +134,11 @@ func fetchPlayPrefix(ctx context.Context, raw string, headers map[string]string,
 	return buf, resp.Header.Get("Content-Type"), nil
 }
 
-// shouldRegisterVodHls 点播 HLS 是否登记透传：去广告开则过滤节目单；关则仅伪装地址仍透传。
-func shouldRegisterVodHls(raw string, isHls bool) (register, filter bool) {
+// shouldRegisterVodHls 点播 HLS 预登记透传（首开仍可走 Direct；失败再切 url）。
+// filter 仅随去广告开关；登记本身不拉流。
+func shouldRegisterVodHls(_ string, isHls bool) (register, filter bool) {
 	if !isHls {
 		return false, false
 	}
-	adOn := settings.IsAdFilterEnabled()
-	if adOn {
-		return true, true
-	}
-	// 强信号 .m3u8 在去广告关闭时保持直连；嗅探出的伪装节目单仍走透传。
-	if model.URLIsHls(raw) {
-		return false, false
-	}
-	return true, false
+	return true, settings.IsAdFilterEnabled()
 }

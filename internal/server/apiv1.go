@@ -30,7 +30,6 @@ type ContentAPI interface {
 	APIBtProgress() map[string]any
 	APISearch(keyword string, siteKeys []string, exact bool, exclude []model.VodKey) (map[string]any, error)
 	APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qualIdx int) (map[string]any, error)
-	APIPlayRelay(rawURL string, headers map[string]string, vod bool) map[string]any
 	APIDanmakuLoad(ctx context.Context, src string, durationMs int64) (map[string]any, error)
 	APIDanmakuSearch(ctx context.Context, name, episode string) (map[string]any, error)
 	APIDanmakuAuto(ctx context.Context, siteKey, name, episode string, spiderSources []model.DanmakuItem) map[string]any
@@ -608,37 +607,6 @@ func (s *Server) handleAPIv1Play(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-// handleAPIv1PlayRelay POST {url, headers?, vod?} → 强制 /proxy/play，供非 Exo 直连失败再开。
-func (s *Server) handleAPIv1PlayRelay(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	api := s.content()
-	if rejectNoContent(w, api) {
-		return
-	}
-	var body struct {
-		URL     string            `json:"url"`
-		Headers map[string]string `json:"headers"`
-		Vod     *bool             `json:"vod"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "bad json")
-		return
-	}
-	raw := strings.TrimSpace(body.URL)
-	if raw == "" {
-		writeAPIError(w, http.StatusBadRequest, "missing url")
-		return
-	}
-	vod := true
-	if body.Vod != nil {
-		vod = *body.Vod
-	}
-	writeJSON(w, http.StatusOK, api.APIPlayRelay(raw, body.Headers, vod))
 }
 
 // handleAPIv1Danmaku 弹幕：GET ?action=load&url=&duration=(毫秒) 拉取解析；POST action=search 手动搜索；
