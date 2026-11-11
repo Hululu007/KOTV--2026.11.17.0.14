@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kotv/player/kotv_playback.dart';
-import 'package:kotv/player/mpv_hls_timeline.dart';
+import 'package:kotv/player/play_format.dart';
 
 void main() {
   test('m3u8 path and query use lavf hls', () {
@@ -27,10 +27,11 @@ void main() {
     expect(kotvIsHls('data:application/vnd.apple.mpegurl,abc', null), isTrue);
   });
 
-  test('hls format mime variants', () {
+  test('play mime matches hls decision for all players', () {
     expect(kotvIsHls('https://cdn/a.mp4', 'application/x-mpegURL'), isTrue);
     expect(kotvIsHls('https://cdn/a.m3u8', 'video/mp4'), isTrue);
-    expect(kotvPlayMime('https://cdn/a.m3u8', 'video/mp4'), 'video/mp4');
+    // Exo 与 MPV 一致：URL 强信号覆盖错标 progressive。
+    expect(kotvPlayMime('https://cdn/a.m3u8', 'video/mp4'), 'application/x-mpegURL');
     expect(kotvPlayMime('https://cdn/a.m3u8', null), 'application/x-mpegURL');
     expect(kotvPlayMime('https://cdn/a.mp4', 'application/x-mpegURL'), 'application/x-mpegURL');
     expect(kotvIsHls('https://cdn/a.mp4', 'application/vnd.apple.mpegurl'), isTrue);
@@ -40,6 +41,7 @@ void main() {
     expect(kotvIsHls('https://cdn/a.mp4', 'video/mp4'), isFalse);
     expect(kotvPlayMime('https://cdn/a.mp4', 'video/mp4'), 'video/mp4');
     expect(kotvPlayMime('https://cdn/a.mp4', null), isNull);
+    expect(kotvPlayMime('https://cdn/play.php', null), isNull);
   });
 
   test('open failure text', () {

@@ -47,7 +47,7 @@ func (a *App) planPlayback(raw, format string, headers map[string]string, mode p
 }
 
 // decidePlayFormat 合并站源 mime、URL 强信号与可选正文嗅探。
-// 站源已给出非空非 HLS/DASH 的 mime 时信任之，不再嗅探。
+// 顺序：DASH 声明 → HLS 声明 → URL 强信号（可纠正错标 progressive）→ 其它非空 format 信任 → 点播嗅探。
 func decidePlayFormat(raw, format string, headers map[string]string, allowSniff bool) (out string, isHls bool) {
 	raw = strings.TrimSpace(raw)
 	format = strings.TrimSpace(format)
@@ -57,11 +57,11 @@ func decidePlayFormat(raw, format string, headers map[string]string, allowSniff 
 	if model.FormatIsHls(format) {
 		return model.FormatHLS, true
 	}
-	if format != "" {
-		return format, false
-	}
 	if model.URLIsHls(raw) {
 		return model.FormatHLS, true
+	}
+	if format != "" {
+		return format, false
 	}
 	if !allowSniff {
 		return "", false

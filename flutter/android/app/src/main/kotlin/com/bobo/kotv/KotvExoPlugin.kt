@@ -77,7 +77,8 @@ import java.util.concurrent.atomic.AtomicLong
  * - hard：视频只用硬件 MediaCodec、不挂 FFmpeg 视频；没有可用硬解就出不了画，由页面改 auto 重试
  * - soft：按 softAudioPrefer / softVideoPrefer 决定 nextlib FFmpeg 音/视轨是否优先
  *
- * Media3 须用 scripts/build-fongmi-media3.sh 产出的完整 AAR（覆盖 webhtv 残缺包）。
+ * Media3 须用 scripts/build-fongmi-media3.sh 产出的完整 AAR（覆盖残缺包）。
+ * mime：引擎 planPlayback 写准 format；空 mime 由 Media3 自嗅；错容器/清单见 mimeForError 再开。
  */
 @OptIn(UnstableApi::class)
 class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
@@ -2741,6 +2742,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     }
 
+    /** 错 mime 再开：容器/IO → 试 HLS；清单错 → 空串清 mime 让 Media3 自嗅。 */
     fun mimeForError(errorCode: Int): String? {
       return when (errorCode) {
         PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
@@ -2749,7 +2751,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         -> MimeTypes.APPLICATION_M3U8
         PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
         PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
-        -> "application/octet-stream" // Media3 无 APPLICATION_OCTET_STREAM 常量；清 mime 提示让其嗅探
+        -> ""
         else -> null
       }
     }

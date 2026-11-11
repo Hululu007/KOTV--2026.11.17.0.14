@@ -66,6 +66,8 @@ class FvpPlayback extends KotvPlayback {
   Map<String, dynamic>? _lastDrm;
   bool _lastLive = false;
   String? _lastFormat;
+  /// 未预判 HLS 时，initialize 失败再以 avformat.input=hls 重开一次。
+  bool _fvpHlsRetryOnce = false;
   String _videoScale = 'default';
   /// 仅尺寸/比例/错误变化时递增，供 buildView 重建（勿绑 position/buffering）。
   final ValueNotifier<int> _viewGen = ValueNotifier<int>(0);
@@ -310,14 +312,17 @@ class FvpPlayback extends KotvPlayback {
     _lastDrm = drm == null ? null : Map<String, dynamic>.from(drm);
     _lastLive = live;
     _lastFormat = format;
+    final asHlsRetry = _fvpHlsRetryOnce;
+    final wantHls = asHlsRetry || kotvIsHls(url, format);
     _hookFvpDecoderLog();
     _fvpLastVideoDecoder = null;
+    // FVP 无 lavf 失败再开：预判 HLS 时写 avformat.input=hls；否则靠大 probesize 内容探测。
     kotvEnsureFvpRegistered(
       decodeMode: _decodeMode,
       clearKeyHex: clearKeyHex,
       syncClearKey: true,
       androidSurface: _androidSurface,
-      hlsInput: kotvIsHls(url, format),
+      hlsInput: wantHls,
     );
     _opening = true;
     _live = live;
@@ -432,6 +437,24 @@ class FvpPlayback extends KotvPlayback {
       await c.initialize();
       if (c.value.hasError) {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
+        // 未强制 HLS 时再开一次（对标 media_kit 日志重试 / 原生 MPV tryReloadAsHls）。
+        if (!wantHls && !asHlsRetry) {
+          _fvpHlsRetryOnce = true;
+          try {
+            await open(
+              url,
+              headers: headers,
+              drm: drm,
+              live: live,
+              format: format,
+              startAt: startAt,
+              waitReady: waitReady,
+            );
+            return;
+          } finally {
+            _fvpHlsRetryOnce = false;
+          }
+        }
         throw StateError(_lastError!);
       }
       // 单一路径钉死 min=0（勿省略 max：Dart 默认 max=-1 会把 max/drop 打回 mdk 默认）。

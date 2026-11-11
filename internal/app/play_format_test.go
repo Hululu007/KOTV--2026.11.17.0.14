@@ -33,6 +33,10 @@ func TestDecidePlayFormat(t *testing.T) {
 	if got != "video/mp4" || hls {
 		t.Fatalf("trust progressive got=%q hls=%v", got, hls)
 	}
+	got, hls = decidePlayFormat("https://cdn/a.m3u8", "video/mp4", nil, true)
+	if got != model.FormatHLS || !hls {
+		t.Fatalf("url strong overrides progressive got=%q hls=%v", got, hls)
+	}
 	got, hls = decidePlayFormat("https://cdn/a.php", "hls", nil, false)
 	if got != model.FormatHLS || !hls {
 		t.Fatalf("literal hls got=%q hls=%v", got, hls)

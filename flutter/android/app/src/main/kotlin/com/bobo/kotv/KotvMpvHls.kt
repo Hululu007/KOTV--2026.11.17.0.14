@@ -3,12 +3,12 @@ package com.bobo.kotv
 import android.net.Uri
 
 /**
- * 安卓原生 MPV：HLS URL 强信号 / 网络址 / lavf 打开失败提示 / 图片轨编码名。
- * URL 规则见 Go `model.URLIsHls`；引擎会正文嗅探写准 format，本处只作快路径与失败再开。
+ * 安卓原生 MPV 侧辅助：URL 强信号、网络址、lavf 打开失败、图片轨编码名。
+ * URL 规则见 Go `model.URLIsHls`；format→forceHls 在 Dart [kotvIsHls]。
  */
 internal object KotvMpvHls {
 
-  /** 地址是否像 HLS（仅强信号）。引擎 `/proxy/play?id=` 无 m3u8 字样时不算。 */
+  /** 地址是否像 HLS（仅强信号）。`/proxy/play?id=` 无 m3u8 字样时不算。 */
   fun urlLooksLikeHls(url: String): Boolean {
     val raw = url.trim()
     if (raw.isEmpty()) return false
@@ -30,10 +30,7 @@ internal object KotvMpvHls {
     return false
   }
 
-  /**
-   * end-file 错误文案是否像「主文件 lavf 打开失败 / 未识别 m3u8」。
-   * 无 log prefix，无法排除 vd/ad 解码器报错（桌面 media_kit 侧有 prefix）。
-   */
+  /** end-file 是否像主文件 lavf 打开失败（无 log prefix，无法排除 vd/ad）。 */
   fun openFailedHint(errorText: String?): Boolean {
     val t = errorText?.lowercase().orEmpty()
     return t.contains("avformat_open_input() failed") || t.contains("not detecting m3u8/hls")

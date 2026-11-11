@@ -570,6 +570,7 @@ class MediaKitPlayback extends KotvPlayback {
       httpHeaders: split.fields.isEmpty ? null : split.fields,
       start: startAt > Duration.zero ? startAt : null,
     );
+    // format 优先来自引擎 planPlayback；URL 强信号为快路径；未强制时靠日志再开。
     final forceHls = kotvIsHls(url, format);
     _queued = null;
     _hlsForced = forceHls;
