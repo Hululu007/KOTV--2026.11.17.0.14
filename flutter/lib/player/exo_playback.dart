@@ -7,7 +7,7 @@ import 'buffer_budget.dart';
 import 'exo_surface.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
-import 'mpv_hls_timeline.dart';
+import 'play_format.dart';
 import 'play_headers.dart';
 import 'playback_settings.dart';
 import 'position_coalesce.dart';

@@ -12,7 +12,7 @@ import 'drm_opts.dart';
 import 'fvp_register.dart';
 import 'kotv_playback.dart';
 import 'video_player_toggle.dart';
-import 'mpv_hls_timeline.dart';
+import 'play_format.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
 import 'playback_settings.dart';
@@ -437,8 +437,8 @@ class FvpPlayback extends KotvPlayback {
       await c.initialize();
       if (c.value.hasError) {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
-        // 未强制 HLS 时再开一次（对标 media_kit 日志重试 / 原生 MPV tryReloadAsHls）。
-        if (!wantHls && !asHlsRetry) {
+        // 仅 lavf 打开/未识别 m3u8 类失败时再以 hls input 重开（同 media_kit / 原生 MPV）。
+        if (!wantHls && !asHlsRetry && kotvHlsOpenFailedHint(_lastError)) {
           _fvpHlsRetryOnce = true;
           try {
             await open(

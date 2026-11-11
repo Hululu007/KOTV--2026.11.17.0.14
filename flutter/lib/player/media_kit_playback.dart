@@ -8,7 +8,7 @@ import 'buffer_budget.dart';
 import 'drm_opts.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
-import 'mpv_hls_timeline.dart';
+import 'play_format.dart';
 import 'mpv_opts.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
@@ -127,6 +127,7 @@ class MediaKitPlayback extends KotvPlayback {
         }
         if (gen != _hlsGen || _url.isEmpty) return;
         await _applyHlsLavf(true, key);
+        _hlsForced = true;
         if (gen != _hlsGen || _url.isEmpty) return;
         await _applyMpvHeaderProps();
         if (gen != _hlsGen || _url.isEmpty) return;

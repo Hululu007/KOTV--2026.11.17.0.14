@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
 import 'kotv_playback.dart';
-import 'mpv_hls_timeline.dart';
+import 'play_format.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 import 'web_pip.dart';

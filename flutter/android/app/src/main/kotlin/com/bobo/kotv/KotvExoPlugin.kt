@@ -1446,7 +1446,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             val retryMime = mimeForError(error.errorCode)
             if (retryMime != null && retryMime != currentMime) {
               formatRetried = true
-              currentMime = retryMime
+              // 空串表示清 mime，交给 Media3 自嗅（勿写成 octet-stream 再锁死）。
+              currentMime = retryMime.ifEmpty { null }
               try {
                 val cur = player ?: return
                 val pos = cur.currentPosition.coerceAtLeast(0L)

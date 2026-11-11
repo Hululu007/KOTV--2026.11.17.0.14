@@ -8,7 +8,7 @@ import 'drm_opts.dart';
 import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
-import 'mpv_hls_timeline.dart';
+import 'play_format.dart';
 import 'mpv_opts.dart';
 import 'mpv_surface.dart';
 import 'play_headers.dart';

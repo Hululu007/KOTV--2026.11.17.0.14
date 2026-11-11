@@ -11,7 +11,7 @@ library;
 import '../api/kotv_engine_url.dart';
 import 'hls_js_support.dart';
 import 'kotv_platform.dart';
-import 'mpv_hls_timeline.dart';
+import 'play_format.dart';
 
 /// 输入 `o` 时填入的串。Android 尚未取到系统 UA 时也用它。
 const kotvOkHttpPlayUA = 'okhttp/5.5.0';

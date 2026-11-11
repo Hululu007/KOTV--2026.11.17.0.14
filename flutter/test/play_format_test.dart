@@ -45,6 +45,8 @@ void main() {
   });
 
   test('open failure text', () {
+    expect(kotvHlsOpenFailedHint('avformat_open_input() failed'), isTrue);
+    expect(kotvHlsOpenFailedHint('surface not ready'), isFalse);
     expect(kotvMpvHlsOpenFailed('lavf', 'avformat_open_input() failed'), isTrue);
     expect(
       kotvMpvHlsOpenFailed(

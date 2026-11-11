@@ -8,7 +8,7 @@ import 'fvp_register.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 import 'video_player_toggle.dart';
-import 'mpv_hls_timeline.dart';
+import 'play_format.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 

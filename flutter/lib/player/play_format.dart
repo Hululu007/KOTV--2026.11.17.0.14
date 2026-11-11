@@ -26,9 +26,6 @@ bool kotvUrlIsHls(String url) {
   return false;
 }
 
-/// 旧名，等同 [kotvUrlIsHls]。
-bool kotvMpvUrlIsHls(String url) => kotvUrlIsHls(url);
-
 /// format 是否表示 HLS（与 Go `FormatIsHls` 同语义）。
 bool kotvFormatIsHls(String? format) {
   switch (format?.trim().toLowerCase() ?? '') {
@@ -54,7 +51,7 @@ bool kotvIsHls(String url, String? format) {
 ///
 /// - HLS（URL 强信号或 format）：锁 `application/x-mpegURL`（proxy 改写后无扩展名时必需）。
 /// - 其它非空 format：原样交给 Media3。
-/// - 空 format 且非 HLS：返回 null，由 Media3 自嗅（勿臆测锁 mime）。
+/// - 空 format 且非 HLS：返回 null，由 Media3 自嗅。
 String? kotvPlayMime(String url, String? format) {
   if (kotvIsHls(url, format)) return 'application/x-mpegURL';
   final f = format?.trim() ?? '';
@@ -62,14 +59,17 @@ String? kotvPlayMime(String url, String? format) {
   return null;
 }
 
-/// media_kit：主文件 lavf 打开失败 / 未识别 m3u8 → 应强制 demuxer-lavf-format=hls 再开。
+/// 错误文案是否像「主文件打开失败 / 未识别 m3u8」（无 prefix 时用，如 FVP）。
+bool kotvHlsOpenFailedHint(String? text) {
+  final t = (text ?? '').toLowerCase();
+  return t.contains('avformat_open_input() failed') || t.contains('not detecting m3u8/hls');
+}
+
+/// media_kit：带 log prefix；vd/ad 解码器报错不算。
 bool kotvMpvHlsOpenFailed(String prefix, String text) {
   final p = prefix.toLowerCase();
   if (p == 'vd' || p == 'ad') return false;
-  final t = text.toLowerCase();
-  if (t.contains('avformat_open_input() failed')) return true;
-  if (t.contains('not detecting m3u8/hls')) return true;
-  return false;
+  return kotvHlsOpenFailedHint(text);
 }
 
 bool kotvMpvNetworkUrl(String url) {
