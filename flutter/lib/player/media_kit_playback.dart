@@ -278,7 +278,7 @@ class MediaKitPlayback extends KotvPlayback {
       return;
     }
     // 仅图片轨、无音、无出画：keep-open 会 seek 到末帧并 completed，勿当正常片尾连播。
-    // 起播守卫仍会因无尺寸抛 SilentVideo，由页面一次性 Relay 透传。
+    // 起播守卫仍会因无尺寸抛 SilentVideo，由页面改开本集已下发的透传 url。
     if (_isUnplayableImageEof()) {
       _queued = null;
       _completedGate = false;

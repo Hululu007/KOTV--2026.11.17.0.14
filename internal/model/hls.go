@@ -6,10 +6,10 @@ import (
 )
 
 // URLIsHls 无网络时的强信号快路径（path / =m3u8），不是正文探测。
-// 客户端副本：Dart kotvUrlIsHls、Kotlin KotvMpvHls.urlLooksLikeHls。
+// 客户端副本：Dart kotvUrlIsHls。
 //  1. 只认 path 段名含 m3u8；查询值 id=2.m3u8 不算。
 //  2. 整串大小写不敏感匹配 =m3u8；=mpd 则否。
-//  3. 任意 .php 不算；伪装节目单靠引擎正文嗅探或播放失败再开。
+//  3. 任意 .php 不算；伪装节目单靠引擎正文嗅探（点播 HLS 预登记透传，失败可改开 url）。
 //  4. rtsp/rtspt 否；data: 仅 mime 含 mpegurl/m3u8 才是。
 func URLIsHls(raw string) bool {
 	raw = strings.TrimSpace(raw)

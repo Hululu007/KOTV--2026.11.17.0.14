@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kotv/player/kotv_playback.dart';
 import 'package:kotv/player/play_format.dart';
-import 'package:kotv/player/play_headers.dart';
 
 void main() {
   test('m3u8 path and query use lavf hls', () {
@@ -40,63 +39,6 @@ void main() {
     expect(kotvPlayMime('https://cdn/a.mp4', 'video/mp4'), 'video/mp4');
     expect(kotvPlayMime('https://cdn/a.mp4', null), isNull);
     expect(kotvPlayMime('https://cdn/play.php', null), isNull);
-  });
-
-  test('open failure text', () {
-    expect(kotvHlsOpenFailedHint('avformat_open_input() failed'), isTrue);
-    expect(kotvHlsOpenFailedHint('surface not ready'), isFalse);
-    expect(kotvMpvHlsOpenFailed('lavf', 'avformat_open_input() failed'), isTrue);
-    expect(
-      kotvMpvHlsOpenFailed(
-        'ffmpeg',
-        'Not detecting m3u8/hls with non standard extension and non standard mime type',
-      ),
-      isTrue,
-    );
-    expect(kotvMpvHlsOpenFailed('cplayer', 'Failed to recognize file format.'), isFalse);
-    expect(kotvMpvNetworkUrl('https://cdn/a.mp4'), isTrue);
-    expect(kotvMpvNetworkUrl('file:///tmp/a.mp4'), isFalse);
-    expect(kotvMpvHlsOpenFailed('lavf', 'could not open codec'), isFalse);
-    expect(kotvMpvHlsOpenFailed('vd', 'could not open codec'), isFalse);
-  });
-
-  test('switch to existing proxy after open failure', () {
-    expect(
-      kotvShouldSwitchToProxyAfterOpenFailure(
-        playerVal: 'innie#mpv',
-        openUrl: 'https://cdn/a.m3u8',
-        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
-        alreadySwitched: false,
-      ),
-      isTrue,
-    );
-    expect(
-      kotvShouldSwitchToProxyAfterOpenFailure(
-        playerVal: 'innie#exo',
-        openUrl: 'https://cdn/a.m3u8',
-        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
-        alreadySwitched: false,
-      ),
-      isFalse,
-    );
-    expect(
-      kotvShouldSwitchToProxyAfterOpenFailure(
-        playerVal: 'innie#fvp',
-        openUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
-        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
-        alreadySwitched: false,
-      ),
-      isFalse,
-    );
-    expect(
-      kotvShouldSwitchToProxyAfterOpenFailure(
-        playerVal: 'outie#vlc',
-        openUrl: 'https://cdn/a.m3u8',
-        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
-        alreadySwitched: false,
-      ),
-      isFalse,
-    );
   });
 
   test('image media codecs are not real video tracks', () {

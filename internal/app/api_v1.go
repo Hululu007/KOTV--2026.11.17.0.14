@@ -690,7 +690,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 	subsDTO := subsPublicDTO(playSubs)
 	exposedURL := playproxy.PublicizeURL(playURL, headers)
 	exposedMedia := mediaURL
-	if mediaURL == playURL || playproxy.NeedsLocalRelay(mediaURL) {
+	if mediaURL == playURL || playproxy.NeedsLoopbackProxy(mediaURL) {
 		exposedMedia = exposedURL
 	} else {
 		exposedMedia = playproxy.PublicizeURL(mediaURL, headers)

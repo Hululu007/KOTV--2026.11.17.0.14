@@ -48,7 +48,7 @@ func TestPublicizeURLUsesClientOriginPort(t *testing.T) {
 	}
 	got = PublicizeURL("http://127.0.0.1:5266/fishplay/go/quark/x")
 	if !strings.Contains(got, "https://tv.example.com:8443/proxy/play?id=") {
-		t.Fatalf("loopback port should be relayed on the client origin, got %q", got)
+		t.Fatalf("loopback port should be proxied on the client origin, got %q", got)
 	}
 }
 

@@ -1,7 +1,7 @@
 /// 播放容器判定（各播放器共用）。
 ///
 /// 正文探测在引擎 `planPlayback`；客户端以回包 format 为主，URL 仅强信号快路径。
-/// Dart / Kotlin 不能调 Go，URL/format 规则在此与 `KotvMpvHls` 各留一份副本。
+/// Dart 不能调 Go，URL/format 规则在此与 `model.URLIsHls` / `FormatIsHls` 各留一份副本。
 
 /// URL 强信号快路径（规范见 Go `model.URLIsHls`）。
 bool kotvUrlIsHls(String url) {
@@ -57,27 +57,4 @@ String? kotvPlayMime(String url, String? format) {
   final f = format?.trim() ?? '';
   if (f.isNotEmpty) return f;
   return null;
-}
-
-/// 错误文案是否像「主文件打开失败 / 未识别 m3u8」（无 prefix 时用，如 FVP）。
-bool kotvHlsOpenFailedHint(String? text) {
-  final t = (text ?? '').toLowerCase();
-  return t.contains('avformat_open_input() failed') || t.contains('not detecting m3u8/hls');
-}
-
-/// media_kit：带 log prefix；vd/ad 解码器报错不算。
-bool kotvMpvHlsOpenFailed(String prefix, String text) {
-  final p = prefix.toLowerCase();
-  if (p == 'vd' || p == 'ad') return false;
-  return kotvHlsOpenFailedHint(text);
-}
-
-bool kotvMpvNetworkUrl(String url) {
-  final scheme = Uri.tryParse(url.trim())?.scheme.toLowerCase() ?? '';
-  return scheme == 'http' ||
-      scheme == 'https' ||
-      scheme == 'rtmp' ||
-      scheme == 'rtsp' ||
-      scheme == 'rtspt' ||
-      scheme == 'proxy';
 }

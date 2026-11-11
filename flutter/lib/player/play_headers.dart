@@ -58,6 +58,16 @@ bool kotvIsLocalProxyUrl(String url) {
   return u.contains('127.0.0.1:') && u.contains('/proxy');
 }
 
+/// 进程内临时代理地址（勿写入历史/频道缓存）。与 Go `IsEphemeralPlayURL` 同口径。
+bool kotvIsEphemeralPlayUrl(String url) {
+  final u = url.toLowerCase().trim();
+  return u.contains('/proxy/play?') ||
+      u.contains('/proxy/cached_m3u8') ||
+      u.contains('/proxy/rolling_m3u8') ||
+      u.contains('/proxy/hls/') ||
+      u.contains('/proxy/bt/');
+}
+
 /// 这次打开能否把请求头交给播放器。为真且直链可连时，打开站点地址。
 ///
 /// - Exo、FVP、MPV：列表和分片走各自的 HTTP 栈，整份头带上。
@@ -114,7 +124,7 @@ bool kotvShouldPreferPlayDirect({
 
 /// 直连不可播时，是否改开引擎已下发的透传 [playUrl]（不再打 API）。
 ///
-/// Exo 不走；已在透传、已切过、[playUrl] 不是 `/proxy/play` → 否。
+/// Exo 不走；已在本地代理、已切过、或 [playUrl] 不是本地代理 URL → 否。
 bool kotvShouldSwitchToProxyAfterOpenFailure({
   required String playerVal,
   required String openUrl,
@@ -149,6 +159,35 @@ bool kotvShouldSwitchToProxyAfterOpenFailure({
   return (
     url: playUrl,
     headers: proxied || headers.isEmpty ? null : headers,
+  );
+}
+
+/// 详情/直播共用：按去广告与播放器能力选 Direct 或引擎 url，并规范化请求头。
+({String url, Map<String, String>? headers}) kotvResolvePreferredPlayOpen({
+  required String playerVal,
+  required String playUrl,
+  required String directUrl,
+  required Map<String, String> rawHeaders,
+  required bool magnet,
+  String? format,
+  required bool adFilterOn,
+  bool forceProxy = false,
+}) {
+  final preferDirect = !forceProxy &&
+      kotvShouldPreferPlayDirect(playerVal: playerVal, adFilterOn: adFilterOn);
+  final mediaHint =
+      preferDirect && directUrl.trim().isNotEmpty ? directUrl : playUrl;
+  return kotvResolvePlayOpenTarget(
+    playUrl: playUrl,
+    directUrl: directUrl,
+    headers: kotvNormalizePlayHeaders(rawHeaders, url: mediaHint),
+    magnet: magnet,
+    sendHeaders: kotvPlaybackSendsHeaders(
+      playerVal: playerVal,
+      mediaUrl: mediaHint,
+      format: format,
+    ),
+    preferDirect: preferDirect,
   );
 }
 

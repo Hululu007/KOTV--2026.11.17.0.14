@@ -57,8 +57,8 @@ func RegisterAlways(rawURL string, headers map[string]string, filter bool) strin
 	return register(rawURL, headers, filter)
 }
 
-// NeedsLocalRelay 回环地址是否标了非引擎端口。这种端口只在跑引擎的机器上听得到。
-func NeedsLocalRelay(rawURL string) bool {
+// NeedsLoopbackProxy 回环地址是否标了非引擎端口。这种端口只在跑引擎的机器上听得到。
+func NeedsLoopbackProxy(rawURL string) bool {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || u.Host == "" || !util.IsLoopbackHost(u.Hostname()) {
 		return false
@@ -163,7 +163,7 @@ func PublicizeURL(raw string, headers ...map[string]string) string {
 	if raw == "" {
 		return ""
 	}
-	if hostclient.PublicBase() != "" && NeedsLocalRelay(raw) {
+	if hostclient.PublicBase() != "" && NeedsLoopbackProxy(raw) {
 		var hdr map[string]string
 		if len(headers) > 0 {
 			hdr = headers[0]
@@ -727,7 +727,7 @@ func canRawSplice(raw string) bool {
 	if err != nil || u.Scheme != "http" || u.Host == "" {
 		return false
 	}
-	return NeedsLocalRelay(raw)
+	return NeedsLoopbackProxy(raw)
 }
 
 // clientSpliceUA 登记里已有 UA 时返回空，调用方改用登记值。

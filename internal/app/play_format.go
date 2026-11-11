@@ -21,7 +21,7 @@ const playSniffTimeout = 3 * time.Second
 type playMode int
 
 const (
-	playModeVod playMode = iota // 点播：HLS 按需登记 /proxy/play
+	playModeVod playMode = iota // 点播：HLS 预登记 /proxy/play
 	playModeLive                // 直播开播/回看：不因 HLS 透传
 )
 
@@ -136,7 +136,7 @@ func fetchPlayPrefix(ctx context.Context, raw string, headers map[string]string,
 
 // shouldRegisterVodHls 点播 HLS 预登记透传（首开仍可走 Direct；失败再切 url）。
 // filter 仅随去广告开关；登记本身不拉流。
-func shouldRegisterVodHls(_ string, isHls bool) (register, filter bool) {
+func shouldRegisterVodHls(isHls bool) (register, filter bool) {
 	if !isHls {
 		return false, false
 	}

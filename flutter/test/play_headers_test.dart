@@ -104,6 +104,49 @@ void main() {
     );
   });
 
+  test('preferred open uses direct only when preferDirect', () {
+    final direct = kotvResolvePreferredPlayOpen(
+      playerVal: 'innie#mpv',
+      playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+      directUrl: 'https://cdn.example/a.m3u8',
+      rawHeaders: const {'Cookie': 'a=b'},
+      magnet: false,
+      format: 'application/x-mpegURL',
+      adFilterOn: false,
+    );
+    expect(direct.url, 'https://cdn.example/a.m3u8');
+    expect(direct.headers?['Cookie'], 'a=b');
+
+    final proxied = kotvResolvePreferredPlayOpen(
+      playerVal: 'innie#mpv',
+      playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+      directUrl: 'https://cdn.example/a.m3u8',
+      rawHeaders: const {'Cookie': 'a=b'},
+      magnet: false,
+      format: 'application/x-mpegURL',
+      adFilterOn: true,
+    );
+    expect(proxied.url, contains('/proxy/play'));
+    expect(proxied.headers, isNull);
+
+    final forced = kotvResolvePreferredPlayOpen(
+      playerVal: 'innie#mpv',
+      playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+      directUrl: 'https://cdn.example/a.m3u8',
+      rawHeaders: const {'Cookie': 'a=b'},
+      magnet: false,
+      adFilterOn: false,
+      forceProxy: true,
+    );
+    expect(forced.url, contains('/proxy/play'));
+  });
+
+  test('ephemeral play urls match engine proxy paths', () {
+    expect(kotvIsEphemeralPlayUrl('http://127.0.0.1:9978/proxy/play?id=1'), isTrue);
+    expect(kotvIsEphemeralPlayUrl('http://127.0.0.1:9978/proxy/bt/x'), isTrue);
+    expect(kotvIsEphemeralPlayUrl('https://cdn.example/a.m3u8'), isFalse);
+  });
+
   test('fvp exo mpv always; web hls.js only on playlists', () {
     expect(
       kotvPlaybackSendsHeaders(

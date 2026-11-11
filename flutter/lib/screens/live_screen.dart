@@ -981,7 +981,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     List<Map<String, dynamic>>? subs,
   }) {
     // 透传 id 会过期，写回会导致同台再开失败。
-    if (_isEphemeralLivePlayUrl(url) || _isEphemeralLivePlayUrl(direct)) {
+    if (kotvIsEphemeralPlayUrl(url) || kotvIsEphemeralPlayUrl(direct)) {
       return;
     }
     final raw = ch['urls'];
@@ -1060,11 +1060,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           '${e.key}': '${e.value}',
     };
     return out.isEmpty ? null : out;
-  }
-
-  bool _isEphemeralLivePlayUrl(String url) {
-    final u = url.toLowerCase();
-    return u.contains('/proxy/play');
   }
 
   Future<void> _toggleChannelFav(int chIdx) async {
@@ -1626,22 +1621,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _playerVal = nextVal;
       _decodeMode = nextDecode;
       _renderMode = renderMode;
-      final mediaHint = directUrl.trim().isNotEmpty ? directUrl : url;
-      final hdrMap = kotvNormalizePlayHeaders(headers, url: mediaHint);
-      final resolved = kotvResolvePlayOpenTarget(
+      final resolved = kotvResolvePreferredPlayOpen(
+        playerVal: failover.playerVal,
         playUrl: url,
         directUrl: directUrl,
-        headers: hdrMap,
+        rawHeaders: headers ?? const {},
         magnet: false,
-        sendHeaders: kotvPlaybackSendsHeaders(
-          playerVal: failover.playerVal,
-          mediaUrl: mediaHint,
-          format: format,
-        ),
-        preferDirect: kotvShouldPreferPlayDirect(
-          playerVal: failover.playerVal,
-          adFilterOn: kotvSettingsMapFlag(playSettings, 'adFilter', def: true),
-        ),
+        format: format,
+        adFilterOn: kotvSettingsMapFlag(playSettings, 'adFilter', def: true),
       );
       final openUrl = resolved.url;
       final openHeaders = resolved.headers;

@@ -389,6 +389,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 详情接口 expand：磁力或 YouTube 播放列表等须异步展开。
   bool _detailExpand = false;
   bool _preloadNextEpisode = false;
+  /// 去广告开关（与开播 / 无缝排队共用，避免默认 true 与设置脱节）。
+  bool _adFilterOn = true;
   RemoteBridge? _boundRemote;
   String _routeId = '';
   String _routeSite = '';
@@ -1418,6 +1420,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
     _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
     _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode']);
+    _adFilterOn = kotvSettingsMapFlag(settings, 'adFilter', def: true);
     kotvPushPlayerSettings(
       settings,
       mpvOpts: _mpvOpts,
@@ -1947,6 +1950,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           rawHeaders: rawHeaders,
           magnet: false,
           format: format,
+          adFilterOn: _adFilterOn,
         );
         if (KotvDiscPlay.looksLike(target.url) || KotvDiscPlay.looksLike(nextEp.url)) return;
         final queued = await pb.queueNext(
@@ -2069,7 +2073,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     ];
   }
 
-  /// 交给内置播放器打开的地址与请求头：本地文件直接开；其余按播放器决定带不带请求头。
+  /// 交给内置播放器打开的地址与请求头：本地文件直接开；其余走 [kotvResolvePreferredPlayOpen]。
   ({String url, Map<String, String>? headers}) _openTargetOf({
     required String playerVal,
     required String playUrl,
@@ -2085,17 +2089,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         mediaUrl.startsWith('content:') ||
         (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
     if (!magnet && localMedia) return (url: mediaUrl, headers: null);
-    final preferDirect = !forceProxy &&
-        kotvShouldPreferPlayDirect(playerVal: playerVal, adFilterOn: adFilterOn);
-    final mediaHint =
-        preferDirect && directUrl.trim().isNotEmpty ? directUrl : playUrl;
-    return kotvResolvePlayOpenTarget(
+    return kotvResolvePreferredPlayOpen(
+      playerVal: playerVal,
       playUrl: playUrl,
       directUrl: directUrl,
-      headers: kotvNormalizePlayHeaders(rawHeaders, url: mediaHint),
+      rawHeaders: rawHeaders,
       magnet: magnet,
-      sendHeaders: kotvPlaybackSendsHeaders(playerVal: playerVal, mediaUrl: mediaHint, format: format),
-      preferDirect: preferDirect,
+      format: format,
+      adFilterOn: adFilterOn,
+      forceProxy: forceProxy,
     );
   }
 
@@ -2416,6 +2418,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           _prefVolume = volPref;
         }
         _preloadNextEpisode = kotvSettingsFlag(playSettings['preloadNextEpisode']);
+        _adFilterOn = kotvSettingsMapFlag(playSettings, 'adFilter', def: true);
         _exo?.applyPlayerOptions(playSettings);
         _fvp?.applyPlayerOptions(playSettings);
       }
@@ -2493,7 +2496,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       Object? lastOpenError;
       var opened = false;
       var proxySwitched = false;
-      final adFilterOn = kotvSettingsMapFlag(playSettings, 'adFilter', def: true);
+      final adFilterOn = _adFilterOn;
       final subMaps = _playSubsOf(data);
       final format = _playFormatOf(data);
       for (var attempt = 0; attempt < 8; attempt++) {

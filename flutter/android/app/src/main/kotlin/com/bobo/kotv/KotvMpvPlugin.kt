@@ -1994,7 +1994,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /**
    * 播到片尾，每次加载只报一次 completed。
    * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；有排队项时在这里 playlist-next 并解除 pause。
-   * 仅图片轨且未出画、几乎没播过：seek 末帧的假 EOF，报 error 而不是 completed（页面可 Relay 透传）。
+   * 仅图片轨且未出画、几乎没播过：seek 末帧的假 EOF，报 error 而不是 completed（页面可改开已下发的透传 url）。
    */
   private fun markEnded() {
     if (eof) return
@@ -2068,7 +2068,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           } catch (_: Throwable) {
             false
           }
-          if (!image && !albumart && !KotvMpvHls.imageCodec(codec)) {
+          if (!image && !albumart && !KotvMpvCodecs.imageCodec(codec)) {
             allVideoImage = false
           }
         }

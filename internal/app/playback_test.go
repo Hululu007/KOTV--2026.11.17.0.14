@@ -167,14 +167,14 @@ func TestPreparePlaybackURLRemoteExpandsQuarkProxy(t *testing.T) {
 	}
 }
 
-func TestPreparePlaybackURLRelaysOtherLoopbackPort(t *testing.T) {
-	defer hostclient.Bind(hostclient.Request{ClientID: "relay-client", PublicBase: "http://192.168.1.8:9978"})()
+func TestPreparePlaybackURLProxiesOtherLoopbackPort(t *testing.T) {
+	defer hostclient.Bind(hostclient.Request{ClientID: "loopback-proxy", PublicBase: "http://192.168.1.8:9978"})()
 
 	a := &App{}
 	raw := "http://127.0.0.1:5266/fishplay/go/quark/32t/abc"
 	got := a.PreparePlaybackURL(raw, nil)
 	if !strings.Contains(got, "http://192.168.1.8:9978/proxy/play?id=") {
-		t.Fatalf("other loopback port should be relayed, got %q", got)
+		t.Fatalf("other loopback port should be proxied, got %q", got)
 	}
 	upstream, _ := playproxy.Resolve(got)
 	if upstream != raw {
@@ -189,7 +189,7 @@ func TestPreparePlaybackURLRemoteKeepsEnginePort(t *testing.T) {
 	raw := "http://127.0.0.1:9978/file/a.jpg"
 	got := a.PreparePlaybackURL(raw, nil)
 	if strings.Contains(got, "/proxy/play?") {
-		t.Fatalf("engine port must not be relayed, got %q", got)
+		t.Fatalf("engine port must not be proxied, got %q", got)
 	}
 	if got != "http://192.168.1.8:9978/file/a.jpg" {
 		t.Fatalf("got %q", got)
@@ -218,7 +218,7 @@ func TestPreparePlaybackURLRemoteExpandsM3U8Proxy(t *testing.T) {
 		"&header=" + base64.StdEncoding.EncodeToString([]byte(hdrJSON))
 	got, _, headers := a.PreparePlayback(raw, nil)
 	if !strings.Contains(got, "http://192.168.1.8:9978/proxy/play?id=") {
-		t.Fatalf("remote loopback m3u8 should be relayed, got %q", got)
+		t.Fatalf("remote loopback m3u8 should be proxied, got %q", got)
 	}
 	upstream, stored := playproxy.Resolve(got)
 	if upstream != cdn {

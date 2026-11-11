@@ -57,7 +57,7 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	return play
 }
 
-// PreparePlayback 点播地址准备：按 URL 强信号 + 去广告设置决定是否透传；不发嗅探请求。
+// PreparePlayback 点播地址准备：HLS 预登记透传（Direct 为原址）；不发嗅探请求。
 // 完整「嗅探写 format + 透传」请用 planPlayback（APIPlay）。
 func (a *App) PreparePlayback(raw string, headers map[string]string) (string, string, map[string]string) {
 	_, isHls := decidePlayFormat(raw, "", headers, false)
@@ -94,7 +94,7 @@ func (a *App) preparePlayback(raw string, headers map[string]string, vod, isHls 
 			return playproxy.PublicizeURL(raw, headers), "", headers
 		}
 		if vod {
-			if reg, filter := shouldRegisterVodHls(raw, isHls); reg {
+			if reg, filter := shouldRegisterVodHls(isHls); reg {
 				return registerPlayback(raw, headers, filter)
 			}
 		}

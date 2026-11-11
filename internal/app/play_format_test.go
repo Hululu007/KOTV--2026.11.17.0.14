@@ -133,22 +133,18 @@ func TestPlanPlaybackLiveSniffsOpaque(t *testing.T) {
 
 func TestShouldRegisterVodHls(t *testing.T) {
 	withAdFilter(t, true)
-	reg, filter := shouldRegisterVodHls("https://cdn/a.m3u8", true)
+	reg, filter := shouldRegisterVodHls(true)
 	if !reg || !filter {
-		t.Fatalf("ad on strong: reg=%v filter=%v", reg, filter)
+		t.Fatalf("ad on hls: reg=%v filter=%v", reg, filter)
 	}
-	reg, filter = shouldRegisterVodHls("https://cdn/fengshows?id=2.m3u8", false)
+	reg, filter = shouldRegisterVodHls(false)
 	if reg {
 		t.Fatalf("non-hls must not register")
 	}
 
 	withAdFilter(t, false)
-	reg, filter = shouldRegisterVodHls("https://cdn/a.m3u8", true)
+	reg, filter = shouldRegisterVodHls(true)
 	if !reg || filter {
-		t.Fatalf("ad off strong: reg=%v filter=%v", reg, filter)
-	}
-	reg, filter = shouldRegisterVodHls("https://cdn/a.php", true)
-	if !reg || filter {
-		t.Fatalf("ad off disguise: reg=%v filter=%v", reg, filter)
+		t.Fatalf("ad off hls: reg=%v filter=%v", reg, filter)
 	}
 }
