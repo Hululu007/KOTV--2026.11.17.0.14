@@ -614,6 +614,20 @@ func writePlaylist(w http.ResponseWriter, resp *http.Response, body []byte) {
 
 func writePassthrough(w http.ResponseWriter, resp *http.Response, body io.Reader) {
 	copyResponseHeaders(w, resp.Header)
+	// 带 Content-Range 的部分响应不剥前缀（偏移会错）。
+	if w.Header().Get("Content-Range") == "" {
+		out, newCT, newCL, ok := maybeStripPngWrappedTS(w.Header().Get("Content-Type"), resp.ContentLength, body)
+		body = out
+		if ok {
+			if newCT != "" {
+				w.Header().Set("Content-Type", newCT)
+			}
+			w.Header().Del("Content-Length")
+			if newCL >= 0 {
+				w.Header().Set("Content-Length", strconv.FormatInt(newCL, 10))
+			}
+		}
+	}
 	w.WriteHeader(resp.StatusCode)
 	dst := io.Writer(w)
 	if f, ok := w.(http.Flusher); ok {

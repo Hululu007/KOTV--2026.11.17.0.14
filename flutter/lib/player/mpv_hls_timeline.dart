@@ -1,5 +1,6 @@
-/// 地址按协议、路径和查询判断是不是 HLS。
-/// 安卓原生 MPV 片尾/加载失败重开用同一套规则，见 `KotvMpvHls.kt`。
+/// 地址是否像 HLS（仅强信号，供预强制 lavf-hls）。
+/// 规则与 `KotvMpvHls.kt` / `model.URLIsHls` 同一套；原生/Go 不能调 Dart，故各留副本。
+/// 扩展名与路径段只看 path（查询里的 id=2.m3u8 不算）；任意 .php 不算，伪装节目单靠打开失败再开。
 bool kotvMpvUrlIsHls(String url) {
   final raw = url.trim();
   if (raw.isEmpty) return false;
@@ -11,17 +12,16 @@ bool kotvMpvUrlIsHls(String url) {
     final body = raw.length > 5 ? raw.substring(5) : '';
     return !body.startsWith('application/dash+xml');
   }
+  // file=m3u8 / type=m3u8；id=2.m3u8 不含子串 =m3u8，不会误中。
   if (raw.contains('=m3u8')) return true;
   if (raw.contains('=mpd')) return false;
-  // 任一路径段含 m3u8（getM3u8、/m3u8/xxx）；仅查询参数里的 id=2.m3u8 不算。
   for (final seg in uri.pathSegments) {
     if (seg.isEmpty) continue;
     final lower = seg.toLowerCase();
     if (lower == 'm3u8' || lower.contains('m3u8')) return true;
     final dot = lower.lastIndexOf('.');
-    if (dot >= 0 && dot < lower.length - 1) {
-      final ext = lower.substring(dot + 1);
-      if (ext == 'm3u8' || ext == 'php') return true;
+    if (dot >= 0 && dot < lower.length - 1 && lower.substring(dot + 1) == 'm3u8') {
+      return true;
     }
   }
   return false;

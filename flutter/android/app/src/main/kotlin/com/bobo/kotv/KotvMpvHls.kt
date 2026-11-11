@@ -3,13 +3,16 @@ package com.bobo.kotv
 import android.net.Uri
 
 /**
- * 安卓原生 MPV：HLS 地址 / 网络址 / lavf 打开失败提示。
- * 规则与 `mpv_hls_timeline.dart` 同一套；原生层不能调 Dart，故在此留副本。
- * 供片尾短 EOF、LOADING_FAILED 时决定是否强制 demuxer-lavf-format=hls 再开。
+ * 安卓原生 MPV：HLS 强信号地址 / 网络址 / lavf 打开失败提示 / 图片轨编码名。
+ * 与 Dart `mpv_hls_timeline.dart`、Go `model.URLIsHls` 同一套语义；原生层不能调 Dart，故留副本。
+ * 供短 EOF、LOADING_FAILED 时决定是否 demuxer-lavf-format=hls 再开，以及假片尾抑制。
  */
 internal object KotvMpvHls {
 
-  /** 只看地址本身；引擎 `/proxy/play?id=` 无 m3u8 字样时不算 HLS。 */
+  /**
+   * 地址是否像 HLS（仅强信号）。引擎 `/proxy/play?id=` 无 m3u8 字样时不算。
+   * 扩展名与路径段只看 path；任意 .php 不算，伪装节目单靠打开失败再开。
+   */
   fun urlLooksLikeHls(url: String): Boolean {
     val raw = url.trim()
     if (raw.isEmpty()) return false
@@ -28,10 +31,7 @@ internal object KotvMpvHls {
       val s = seg.lowercase()
       if (s == "m3u8" || s.contains("m3u8")) return true
       val dot = s.lastIndexOf('.')
-      if (dot >= 0 && dot < s.length - 1) {
-        val ext = s.substring(dot + 1)
-        if (ext == "m3u8" || ext == "php") return true
-      }
+      if (dot >= 0 && dot < s.length - 1 && s.substring(dot + 1) == "m3u8") return true
     }
     return false
   }
@@ -55,10 +55,7 @@ internal object KotvMpvHls {
       scheme == "proxy"
   }
 
-  /**
-   * 静止图/封面类编码（与 Dart [kotvIsImageMediaCodec] 同一套）。
-   * HLS 分片常标成 png/mjpeg「视频轨」，解不出尺寸时 keep-open 会 seek 到末帧并 eof。
-   */
+  /** 静止图/封面类编码名（与 Dart kotvIsImageMediaCodec 同一套）。 */
   fun imageCodec(codec: String?): Boolean {
     val raw = codec?.trim()?.lowercase().orEmpty()
     if (raw.isEmpty) return false

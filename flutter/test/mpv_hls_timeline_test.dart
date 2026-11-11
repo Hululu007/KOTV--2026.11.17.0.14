@@ -6,11 +6,14 @@ void main() {
   test('m3u8 path and query use lavf hls', () {
     expect(kotvIsHls('https://cdn/a.f300.m3u8', null), isTrue);
     expect(kotvIsHls('https://cdn/a.f300.m3u8/', null), isTrue);
-    expect(kotvIsHls('https://cdn/play.php', null), isTrue);
-    expect(kotvIsHls('https://cdn/play.php/', null), isTrue);
+    // 任意 .php 不再预强制；伪装节目单靠打开失败再开。
+    expect(kotvIsHls('https://cdn/play.php', null), isFalse);
+    expect(kotvIsHls('https://cdn/play.php/', null), isFalse);
+    expect(kotvIsHls('https://cdn/play.php?x=m3u8', null), isTrue);
     expect(kotvIsHls('https://cdn/m3u8', null), isTrue);
     expect(kotvIsHls('https://cdn/m3u8/', null), isTrue);
     expect(kotvIsHls('https://cdn/v?file=m3u8', null), isTrue);
+    // 查询参数值里的 .m3u8 不算路径扩展名（回归样例，非站点特例）。
     expect(kotvIsHls('https://cdn/fengshows?id=2.m3u8', null), isFalse);
     expect(kotvIsHls('http://111.1.1.1:9090/nby/m3u8/getM3u8?name=x&url=NBY-1.m3u8', null), isTrue);
     expect(kotvIsHls('https://cdn/api/getM3u8?id=1', null), isTrue);

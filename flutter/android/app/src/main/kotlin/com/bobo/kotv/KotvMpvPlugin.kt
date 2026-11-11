@@ -1736,6 +1736,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun appendHlsOptions(opts: MutableList<String>) {
+    opts.add("demuxer=lavf")
     opts.add("demuxer-lavf-format=hls")
     opts.add("demuxer-lavf-o-add=http_persistent=0")
   }
@@ -2010,8 +2011,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /**
    * 播到片尾，每次加载只报一次 completed。
    * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；有排队项时在这里 playlist-next 并解除 pause。
-   * 地址本身像 HLS 却未 forceHls、且几秒就 EOF、时长仍未知：按 lavf hls 重开一次，避免假片尾切下一集。
-   * 仅图片轨且未出画、几乎没播过：seek 末帧的假 EOF，报 error 而不是 completed（避免连跳）。
+   * 强信号地址却未 forceHls、且几秒就 EOF：按 lavf hls 重开一次。
+   * 仅图片轨且未出画、几乎没播过：seek 末帧的假 EOF，报 error 而不是 completed。
    */
   private fun markEnded() {
     if (eof) return

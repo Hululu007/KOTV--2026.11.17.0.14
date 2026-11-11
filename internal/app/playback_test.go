@@ -379,10 +379,15 @@ func TestProxyHlsFormat(t *testing.T) {
 		t.Fatalf("url wins format=%q", got)
 	}
 
+	phpPlain := "https://cdn.example/play.php"
+	playPHPPlain, _, _ := a.PreparePlayback(phpPlain, nil)
+	if got := proxyHlsFormat(phpPlain, playPHPPlain, ""); got != "" {
+		t.Fatalf("plain php format=%q play=%q", got, playPHPPlain)
+	}
 	php := "https://cdn.example/play.php?x=m3u8"
 	playPHP, _, _ := a.PreparePlayback(php, nil)
 	if got := proxyHlsFormat(php, playPHP, ""); got != "application/x-mpegURL" {
-		t.Fatalf("php format=%q play=%q", got, playPHP)
+		t.Fatalf("php=m3u8 format=%q play=%q", got, playPHP)
 	}
 
 	query := "https://cdn.example/v?file=m3u8"

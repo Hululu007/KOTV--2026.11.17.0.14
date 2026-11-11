@@ -6,7 +6,7 @@ func TestURLIsHls(t *testing.T) {
 	yes := []string{
 		"https://cdn/a.f300.m3u8",
 		"https://cdn/a.f300.m3u8/",
-		"https://cdn/play.php",
+		"https://cdn/play.php?x=m3u8",
 		"https://cdn/m3u8",
 		"https://cdn/v?file=m3u8",
 		"data:application/vnd.apple.mpegurl,abc",
@@ -14,6 +14,7 @@ func TestURLIsHls(t *testing.T) {
 		"https://cdn/api/getM3u8?id=1",
 	}
 	no := []string{
+		"https://cdn/play.php",
 		"https://cdn/fengshows?id=2.m3u8",
 		"https://cdn/a.mp4",
 		"https://cdn/a.m3u",
