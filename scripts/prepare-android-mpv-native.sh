@@ -3,6 +3,8 @@
 # 本脚本只准备 API25 Vulkan stub（assets）与 kotv_dl（FORCE_LOAD stub）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=android-mpv-lib-names.sh
+source "$ROOT/scripts/android-mpv-lib-names.sh"
 chmod +x "$ROOT/scripts/build-android-libvulkan-stub.sh" \
   "$ROOT/scripts/build-android-kotv-dl.sh"
 
@@ -36,8 +38,7 @@ purge_legacy_mpv_jni() {
   local jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi"
   local lib
   [[ -d "$jni" ]] || return 0
-  for lib in libmpv.so libplayer.so libmvcodec.so libmvutil.so libmwresample.so \
-    libmwscale.so libmvformat.so libmvfilter.so libmvdevice.so; do
+  for lib in "${KOTV_ANDROID_MPV_LEGACY_JNI[@]}"; do
     if [[ -s "$jni/$lib" ]]; then
       rm -f "$jni/$lib"
       echo "  removed legacy $abi/$lib (Media3 AAR provides mpv)"

@@ -46,7 +46,7 @@ const kotvImageExts = '';
 /// | gpu-next | vo=gpu-next（Surface） | ❌（Texture/libmpv） |
 /// | Vulkan | gpu-api=vulkan（设备支持时） | ❌（libmpv 渲染 API 由 media_kit 定为 OpenGL） |
 /// | 音频直通 | audio-spdif | ❌（不设 audio-spdif，音效照常写 af） |
-/// | AV3A | libmvcodec | 自带 FFmpeg+avs3a |
+/// | AV3A | Media3 libmpv（内嵌） | 自带 FFmpeg+avs3a |
 /// 桌面/iOS media_kit：下面两样在创建 VideoController 时定死（同一 Player 再建控制器拿到的仍是旧的），
 /// 变了须换一个 Player：软解用 CPU 渲染、其它用 GPU 渲染；Win7 开硬解直出用 ANGLE 的 D3D9 后端，关掉用 D3D11。
 bool kotvMediaKitNeedsNewPlayer(KotvMpvOpts from, KotvMpvOpts to) =>

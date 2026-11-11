@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# 校验：Vulkan stub 仅在 assets；kotv_dl 在 jniLibs；勿再自带 libmpv 套件（Media3 AAR）。
+# 校验：Vulkan stub 仅在 assets；kotv_dl 在 jniLibs；勿再自带旧 MPV 套件（Media3 AAR）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=android-mpv-lib-names.sh
+source "$ROOT/scripts/android-mpv-lib-names.sh"
 ASSET="$ROOT/flutter/android/app/src/main/assets/mpv-libs"
 JNI_ROOT="$ROOT/flutter/android/app/src/main/jniLibs"
 fail=0
@@ -13,6 +15,7 @@ check_abi() {
   local vulkan_asset="$asset_dir/libvulkan.so"
   local vulkan_jni="$jni/libvulkan.so"
   local dl_jni="$jni/libkotv_dl.so"
+  local dup
 
   [[ -f "$vulkan_asset" ]] || { echo "ERROR: missing $vulkan_asset (API25 stub in assets)" >&2; fail=1; return; }
   [[ -f "$dl_jni" ]] || { echo "ERROR: missing $dl_jni" >&2; fail=1; return; }
@@ -21,14 +24,13 @@ check_abi() {
     fail=1
     return
   fi
-  local dup
-  for dup in libmpv.so libplayer.so libmvcodec.so libc++_shared.so libkotv_dl.so; do
+  for dup in "${KOTV_ANDROID_MPV_ASSET_FORBIDDEN[@]}"; do
     if [[ -f "$asset_dir/$dup" ]]; then
       echo "ERROR: duplicate $asset_dir/$dup (must not live in assets)" >&2
       fail=1
     fi
   done
-  for dup in libmpv.so libplayer.so libmvcodec.so; do
+  for dup in "${KOTV_ANDROID_MPV_LEGACY_JNI[@]}"; do
     if [[ -f "$jni/$dup" ]]; then
       echo "ERROR: legacy $jni/$dup present (Media3 AAR supplies mpv natives)" >&2
       fail=1

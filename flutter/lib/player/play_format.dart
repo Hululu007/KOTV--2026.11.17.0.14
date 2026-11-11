@@ -153,8 +153,7 @@ Duration kotvPreferPlaylistDuration(Duration engine, Duration? playlist) {
   return playlist >= engine ? playlist : engine;
 }
 
-/// 拉取点播 HLS 时长并回调；[stillCurrent] 为 false 时丢弃过期结果（换源竞态）。
-/// media_kit / FVP 共用，避免两边各抄一份 refresh。
+/// 拉取点播 HLS 时长；[stillCurrent] 为 false 时丢弃过期结果（换源竞态）。
 Future<Duration?> kotvRefreshHlsPlaylistDuration({
   required String url,
   required Map<String, String> headers,
@@ -175,4 +174,27 @@ Future<Duration?> kotvRefreshHlsPlaylistDuration({
   } catch (_) {
     return null;
   }
+}
+
+/// media_kit / FVP 共用：先清空节目单时长，拉取成功且仍为当前源再写回并通知。
+Future<void> kotvApplyHlsPlaylistDurationRefresh({
+  required String url,
+  required Map<String, String> headers,
+  required bool live,
+  required String? format,
+  required bool Function() stillCurrent,
+  required void Function(Duration? value) setPlaylistDuration,
+  required void Function() onUpdated,
+}) async {
+  setPlaylistDuration(null);
+  final d = await kotvRefreshHlsPlaylistDuration(
+    url: url,
+    headers: headers,
+    live: live,
+    format: format,
+    stillCurrent: stillCurrent,
+  );
+  if (d == null) return;
+  setPlaylistDuration(d);
+  onUpdated();
 }

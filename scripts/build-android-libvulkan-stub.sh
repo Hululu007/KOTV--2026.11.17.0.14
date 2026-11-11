@@ -30,12 +30,3 @@ OUT="$ASSET_DIR/libvulkan.so"
 # 切勿再放进 jniLibs：会盖住系统 Vulkan。
 rm -f "$JNI_DIR/libvulkan.so" "$JNI_DIR/libvkcompat.so" "$ASSET_DIR/libvkcompat.so"
 echo "built $OUT (assets only; removed jniLibs stub if any)"
-# If libmpv still needs libvkcompat, retarget DT_NEEDED.
-if command -v patchelf >/dev/null; then
-  for mpv in "$JNI_DIR/libmpv.so" "$ASSET_DIR/libmpv.so"; do
-    if [[ -f "$mpv" ]] && patchelf --print-needed "$mpv" | grep -q libvkcompat.so; then
-      patchelf --replace-needed libvkcompat.so libvulkan.so "$mpv"
-      echo "patched DT_NEEDED → libvulkan.so in $mpv"
-    fi
-  done
-fi

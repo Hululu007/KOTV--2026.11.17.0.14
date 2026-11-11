@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # 校验 APK：Media3 mpvplayer 提供 libmpv/libplayer；Vulkan stub 仅在 assets；kotv_dl 在 lib/。
 set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=android-mpv-lib-names.sh
+source "$ROOT/scripts/android-mpv-lib-names.sh"
 APK="${1:-}"
 if [[ -z "$APK" || ! -f "$APK" ]]; then
   echo "usage: $0 <path-to.apk>" >&2
@@ -20,13 +23,11 @@ while IFS= read -r abi; do
     arm64-v8a|armeabi-v7a) ;;
     *) continue ;;
   esac
-  need+=(
-    "assets/mpv-libs/${abi}/libvulkan.so"
-    "lib/${abi}/libmpv.so"
-    "lib/${abi}/libplayer.so"
-    "lib/${abi}/libkotv_dl.so"
-    "lib/${abi}/libc++_shared.so"
-  )
+  need+=("assets/mpv-libs/${abi}/libvulkan.so")
+  local_so=
+  for local_so in "${KOTV_ANDROID_MPV_APK_REQUIRED[@]}"; do
+    need+=("lib/${abi}/${local_so}")
+  done
 done <<<"$abis"
 
 if [[ "${#need[@]}" -eq 0 ]]; then
@@ -76,17 +77,17 @@ while IFS= read -r abi; do
     echo "ERROR: APK must not contain $bad (stub steals system Vulkan)" >&2
     exit 1
   fi
-  # 旧自研套件 / 与 lib/ 重复的 assets 条目不得再出现。
-  for dup in libmpv.so libplayer.so libmvcodec.so libc++_shared.so libkotv_dl.so; do
+  # assets 不得再塞套件 / helpers。
+  for dup in "${KOTV_ANDROID_MPV_ASSET_FORBIDDEN[@]}"; do
     p="assets/mpv-libs/${abi}/${dup}"
     if grep -qxF "$p" <<<"$listing"; then
       echo "ERROR: APK must not contain $p (duplicate of lib/${abi}/ or legacy)" >&2
       exit 1
     fi
   done
-  # Media3 AAR 不单独带 libmvcodec；遗留 jni 名不得再进包。
+  # 旧 libmvcodec 名不得再进包（Media3 libmpv 内嵌编解码）。
   if grep -qxF "lib/${abi}/libmvcodec.so" <<<"$listing"; then
-    echo "ERROR: APK must not contain lib/${abi}/libmvcodec.so (legacy; Media3 libmpv embeds codecs)" >&2
+    echo "ERROR: APK must not contain lib/${abi}/libmvcodec.so (legacy suite)" >&2
     exit 1
   fi
 done <<<"$abis"

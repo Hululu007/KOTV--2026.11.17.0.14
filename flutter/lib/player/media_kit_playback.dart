@@ -163,19 +163,16 @@ class MediaKitPlayback extends KotvPlayback {
     required Map<String, String> headers,
     required bool live,
     required String? format,
-  }) async {
-    _playlistDuration = null;
-    final d = await kotvRefreshHlsPlaylistDuration(
-      url: url,
-      headers: headers,
-      live: live,
-      format: format,
-      stillCurrent: () => _url == url,
-    );
-    if (d == null) return;
-    _playlistDuration = d;
-    notifyListeners();
-  }
+  }) =>
+      kotvApplyHlsPlaylistDurationRefresh(
+        url: url,
+        headers: headers,
+        live: live,
+        format: format,
+        stillCurrent: () => _url == url,
+        setPlaylistDuration: (d) => _playlistDuration = d,
+        onUpdated: notifyListeners,
+      );
 
   void _clearVideoSize() {
     _acceptSize = false;
