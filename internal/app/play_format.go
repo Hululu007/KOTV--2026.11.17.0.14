@@ -17,12 +17,13 @@ import (
 const playSniffBytes = 512
 const playSniffTimeout = 3 * time.Second
 
-// playMode 控制是否正文嗅探、是否点播透传。
+// playMode 区分点播透传与直播直连；format 判定（含正文嗅探）统一走 planPlayback。
+// Media3 AAR 无 ContentTypeResolvingMediaSource；开播前正文探测收在本文件，写准 format 供各播放器。
 type playMode int
 
 const (
-	playModeVod playMode = iota // 点播：可嗅探；HLS 按需登记 /proxy/play
-	playModeLive                // 直播开播/回看：只信 format/URL，不嗅探、不因 HLS 透传
+	playModeVod playMode = iota // 点播：HLS 按需登记 /proxy/play
+	playModeLive                // 直播开播/回看：不因 HLS 透传
 )
 
 // playPlan 一次开播的地址与 format 决策结果。
@@ -35,19 +36,19 @@ type playPlan struct {
 // sniffPlayFormatFn 单测可替换，避免真实网络。
 var sniffPlayFormatFn = sniffPlayFormatHTTP
 
-// planPlayback 唯一入口：判定 format（站源 → URL 强信号 → 可选正文嗅探）并准备可播地址。
+// planPlayback 开播唯一入口：format（站源 → URL 强信号 → 正文嗅探）+ 可播地址。
+// 列表 PreparePlaybackListed 不走此处，避免海量请求。
 func (a *App) planPlayback(raw, format string, headers map[string]string, mode playMode) playPlan {
 	raw = strings.TrimSpace(raw)
 	format = strings.TrimSpace(format)
-	allowSniff := mode == playModeVod
-	outFmt, isHls := decidePlayFormat(raw, format, headers, allowSniff)
+	outFmt, isHls := decidePlayFormat(raw, format, headers, true)
 	vod := mode == playModeVod
 	play, direct, hdrs := a.preparePlayback(raw, headers, vod, isHls)
 	return playPlan{Play: play, Direct: direct, Headers: hdrs, Format: outFmt}
 }
 
-// decidePlayFormat 合并站源 mime、URL 强信号与可选正文嗅探。
-// 顺序：DASH 声明 → HLS 声明 → URL 强信号（可纠正错标 progressive）→ 其它非空 format 信任 → 点播嗅探。
+// decidePlayFormat：DASH/HLS 声明 → URL 强信号 → 其它非空 format → 可选正文嗅探。
+// allowSniff=false 仅给 PreparePlayback 等批量路径（不发网）。
 func decidePlayFormat(raw, format string, headers map[string]string, allowSniff bool) (out string, isHls bool) {
 	raw = strings.TrimSpace(raw)
 	format = strings.TrimSpace(format)

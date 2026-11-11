@@ -3,8 +3,8 @@ package com.bobo.kotv
 import android.net.Uri
 
 /**
- * 安卓原生 MPV 侧辅助：URL 强信号、网络址、lavf 打开失败、图片轨编码名。
- * URL 规则见 Go `model.URLIsHls`；format→forceHls 在 Dart [kotvIsHls]。
+ * 安卓原生 MPV 侧：URL 强信号、网络址、lavf 打开失败、图片轨编码名。
+ * URL 规则见 Go `model.URLIsHls` / Dart `play_format.dart`；format→forceHls 由 Dart `kotvIsHls` 传入。
  */
 internal object KotvMpvHls {
 

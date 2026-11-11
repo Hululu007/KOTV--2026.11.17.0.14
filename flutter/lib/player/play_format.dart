@@ -1,9 +1,9 @@
 /// 播放容器判定（各播放器共用）。
 ///
-/// 规范见 Go `model.URLIsHls` / `model.FormatIsHls`；引擎 `planPlayback` 会正文嗅探写准 format。
-/// Dart / Kotlin 不能调 Go，故各留 URL 副本；客户端以引擎 format 为主，URL 仅强信号快路径。
+/// 正文探测在引擎 `planPlayback`；客户端以回包 format 为主，URL 仅强信号快路径。
+/// Dart / Kotlin 不能调 Go，URL/format 规则在此与 `KotvMpvHls` 各留一份副本。
 
-/// URL 强信号快路径（与 Go `URLIsHls` 同语义）。
+/// URL 强信号快路径（规范见 Go `model.URLIsHls`）。
 bool kotvUrlIsHls(String url) {
   final raw = url.trim();
   if (raw.isEmpty) return false;
@@ -26,7 +26,7 @@ bool kotvUrlIsHls(String url) {
   return false;
 }
 
-/// format 是否表示 HLS（与 Go `FormatIsHls` 同语义）。
+/// format 是否表示 HLS（规范见 Go `model.FormatIsHls`）。
 bool kotvFormatIsHls(String? format) {
   switch (format?.trim().toLowerCase() ?? '') {
     case 'application/x-mpegurl':
@@ -51,7 +51,7 @@ bool kotvIsHls(String url, String? format) {
 ///
 /// - HLS（URL 强信号或 format）：锁 `application/x-mpegURL`（proxy 改写后无扩展名时必需）。
 /// - 其它非空 format：原样交给 Media3。
-/// - 空 format 且非 HLS：返回 null，由 Media3 自嗅。
+/// - 空 format 且非 HLS：返回 null（不锁 mime；Media3 仅按 URI 选源）。
 String? kotvPlayMime(String url, String? format) {
   if (kotvIsHls(url, format)) return 'application/x-mpegURL';
   final f = format?.trim() ?? '';

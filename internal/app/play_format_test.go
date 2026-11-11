@@ -97,6 +97,12 @@ func TestPlanPlaybackVod(t *testing.T) {
 
 func TestPlanPlaybackLiveNoProxy(t *testing.T) {
 	withAdFilter(t, true)
+	prev := sniffPlayFormatFn
+	t.Cleanup(func() { sniffPlayFormatFn = prev })
+	sniffPlayFormatFn = func(string, map[string]string) string {
+		t.Fatal("declared hls must not sniff")
+		return ""
+	}
 	a := &App{}
 	plan := a.planPlayback("https://cdn.example/live.m3u8", "hls", nil, playModeLive)
 	if plan.Format != model.FormatHLS {
@@ -104,6 +110,21 @@ func TestPlanPlaybackLiveNoProxy(t *testing.T) {
 	}
 	if strings.Contains(plan.Play, "/proxy/play?") {
 		t.Fatalf("live must not proxy, play=%q", plan.Play)
+	}
+}
+
+func TestPlanPlaybackLiveSniffsOpaque(t *testing.T) {
+	withAdFilter(t, true)
+	prev := sniffPlayFormatFn
+	t.Cleanup(func() { sniffPlayFormatFn = prev })
+	sniffPlayFormatFn = func(string, map[string]string) string { return model.FormatHLS }
+	a := &App{}
+	plan := a.planPlayback("https://cdn.example/live.php", "", nil, playModeLive)
+	if plan.Format != model.FormatHLS {
+		t.Fatalf("format=%q", plan.Format)
+	}
+	if strings.Contains(plan.Play, "/proxy/play?") {
+		t.Fatalf("live sniffed hls must not proxy, play=%q", plan.Play)
 	}
 }
 
