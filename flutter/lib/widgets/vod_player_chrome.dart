@@ -221,7 +221,7 @@ String fmtPlayerTime(Duration d) {
   return '$m:$s';
 }
 
-/// JS 能精确表示的最大整数。FVP 直播时长是 `double.maxFinite` 微秒，比这更大，加到 [DateTime] 上会超出范围。
+/// JS 能精确表示的最大整数。部分播放器直播时长是 `double.maxFinite` 微秒，比这更大，加到 [DateTime] 上会超出范围。
 const int jsExactIntLimit = 9007199254740991;
 
 bool unboundedMediaDuration(Duration d) => d.inMicroseconds > jsExactIntLimit;

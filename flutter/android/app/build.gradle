@@ -6,8 +6,6 @@ plugins {
     id "com.chaquo.python"
 }
 
-apply from: "../kotv_android_no_fvp.gradle"
-
 // Chaquopy 不能与 --split-per-abi 同用；分 ABI 由 package-flutter-android.sh 设 KOTV_ABI_FILTERS 各打一次。
 // Flutter 3.35+ 默认 abiFilters=armv7+arm64+x86_64，会盖住「单 ABI」意图 → APK lib/ 仍三套都在。
 def kotvAbiFilters = (System.getenv("KOTV_ABI_FILTERS") ?: "arm64-v8a,armeabi-v7a")
@@ -109,21 +107,10 @@ android {
             // stub .so is already small; AGP stripReleaseDebugSymbols corrupts it
             keepDebugSymbols.add("**/libvulkan.so")
             keepDebugSymbols.add("**/libkotv_dl.so")
-            // 多份 libc++ / libav*：ass 旧 libc++、nextlib 残缺 libav*；merge 后再用 jniLibs（prepare 抽出）覆盖。
+            // 自研 libmpv 套件与 ass/nextlib 可能各带 libc++；merge 后再盖 jniLibs 配套副本。
             pickFirsts += "**/libc++_shared.so"
-            pickFirsts += "**/libmpv.so"
-            pickFirsts += "**/libplayer.so"
             // Exo ASS（ass-kt / peerless2012 ass）。
             pickFirsts += "**/libass.so"
-            kotvAndroidFvpForbiddenSo.each { so -> excludes += "**/${so}" }
-            // decoder-ffmpeg 全套 libav*（含 libmpv 要的 filter/format/device）与 nextlib 部分 libav* 重叠时取一份。
-            pickFirsts += "**/libavcodec.so"
-            pickFirsts += "**/libavutil.so"
-            pickFirsts += "**/libavformat.so"
-            pickFirsts += "**/libavfilter.so"
-            pickFirsts += "**/libavdevice.so"
-            pickFirsts += "**/libswresample.so"
-            pickFirsts += "**/libswscale.so"
             useLegacyPackaging = true
             excludes += "**/.gitkeep"
             for (abi in kotvAllAbis) {
@@ -246,9 +233,8 @@ dependencies {
     implementation "androidx.media3:media3-database:$media3"
     // Surface/Texture 共用：帧着色器调色（setVideoEffects）
     implementation "androidx.media3:media3-effect:$media3"
-    // libmpv 动态依赖 libavfilter/avformat/avdevice 等，由 media3-decoder-ffmpeg 提供（勿 exclude）。
-    // 与 nextlib 重叠的 libav* 靠上方 pickFirst；Exo 软解/AV3A 仍用 nextlib。
-    implementation "androidx.media3:media3-mpvplayer:$media3"
+    // 安卓 MPV 走 jniLibs 自研套件（MPVLib），不依赖 media3-mpvplayer。
+    // Exo 软解/AV3A 仍用 nextlib（可带残缺 libav*，与自研 libmvcodec 命名不冲突）。
     implementation "io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1"
     implementation "com.squareup.okhttp3:okhttp-android:5.5.0"
     // CatVodSpider dex jar 内 JS 依赖 QuickJS JNI，须在 App CL load
@@ -305,12 +291,12 @@ tasks.register("prepareKotvEngineSo") {
     }
 }
 
-// Media3 MpvPlayer：prepare 抽出配套 libc++ + Vulkan stub + kotv_dl。
+// 页内原生 MPV：套件进 jniLibs，assets/mpv-libs 只留 Vulkan stub。
 tasks.register("prepareKotvMpvNative", Exec) {
     workingDir = repoRoot
     commandLine "bash", "scripts/prepare-android-mpv-native.sh"
     doFirst {
-        println "[android] preparing Vulkan stub + kotv_dl + mpvplayer libc++ …"
+        println "[android] preparing bundled MPV + Vulkan natives …"
     }
 }
 
@@ -322,36 +308,26 @@ tasks.named("preBuild") {
 afterEvaluate {
     android.defaultConfig.targetSdk = kotvTargetSdk
     println "[android] pinned targetSdk=${android.defaultConfig.targetSdk} (KOTV_TARGET_SDK=${System.getenv("KOTV_TARGET_SDK") ?: "28"})"
-    // pickFirst 会误选 ass 旧 libc++ / nextlib 残缺 libav*；merge 后再盖 prepare 写入的 jniLibs。
-    // 名表与 scripts/android-mpv-lib-names.sh 的 KOTV_ANDROID_MPV_MERGE_OVERLAY 保持一致。
-    def kotvMpvMergeOverlay = [
-        "libc++_shared.so",
-        "libavcodec.so", "libavfilter.so", "libavformat.so", "libavutil.so", "libavdevice.so",
-        "libswresample.so", "libswscale.so",
-    ]
+    // 合并后再盖 jniLibs 里与自研 libmpv 配套的 libc++（含 from_chars）。
     android.applicationVariants.configureEach { variant ->
         def mergeName = "merge${variant.name.capitalize()}NativeLibs"
         tasks.matching { it.name == mergeName }.configureEach { task ->
             task.doLast {
                 kotvAbiFilters.each { abi ->
-                    kotvMpvMergeOverlay.each { so ->
-                        def src = file("src/main/jniLibs/${abi}/${so}")
-                        if (!src.exists() || src.length() == 0L) {
-                            throw new GradleException("[android] missing jniLibs/${abi}/${so} (run prepare-android-mpv-native.sh)")
-                        }
-                        def matches = fileTree("${project.buildDir}/intermediates").matching {
-                            include "**/lib/${abi}/${so}"
-                        }
-                        if (matches.isEmpty()) {
-                            def dest = file("${project.buildDir}/intermediates/merged_native_libs/${variant.dirName}/merge${variant.name.capitalize()}NativeLibs/out/lib/${abi}/${so}")
-                            dest.parentFile.mkdirs()
+                    def src = file("src/main/jniLibs/${abi}/libc++_shared.so")
+                    if (!src.exists() || src.length() == 0L) return
+                    def matches = fileTree("${project.buildDir}/intermediates").matching {
+                        include "**/lib/${abi}/libc++_shared.so"
+                    }
+                    if (matches.isEmpty()) {
+                        def dest = file("${project.buildDir}/intermediates/merged_native_libs/${variant.dirName}/merge${variant.name.capitalize()}NativeLibs/out/lib/${abi}/libc++_shared.so")
+                        dest.parentFile.mkdirs()
+                        ant.copy(file: src, tofile: dest, overwrite: true)
+                        println "[android] overlay libc++_shared.so → ${dest}"
+                    } else {
+                        matches.each { dest ->
                             ant.copy(file: src, tofile: dest, overwrite: true)
-                            println "[android] overlay ${so} → ${dest}"
-                        } else {
-                            matches.each { dest ->
-                                ant.copy(file: src, tofile: dest, overwrite: true)
-                                println "[android] overlay ${so} → ${dest}"
-                            }
+                            println "[android] overlay libc++_shared.so → ${dest}"
                         }
                     }
                 }

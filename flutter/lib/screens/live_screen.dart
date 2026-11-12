@@ -11,7 +11,6 @@ import '../api/kotv_engine_url.dart';
 import '../desktop/mini_player_window.dart';
 import '../player/audio_stage.dart';
 import '../player/exo_playback.dart';
-import '../player/fvp_playback.dart';
 import '../player/html_playback.dart';
 import '../player/art_playback.dart';
 import '../player/xg_playback.dart';
@@ -77,7 +76,7 @@ Color _liveChannelColor(KotvPalette p, {required bool sel}) {
 class LiveScreen extends ConsumerStatefulWidget {
   const LiveScreen({super.key});
 
-  /// 切 Tab：await 停掉直播页内全部后端，避免 FVP/HTML 卸树后后台出声。
+  /// 切 Tab：await 停掉直播页内全部后端，避免 HTML 卸树后后台出声后后台出声。
   static Future<void> prepareLeave() => _LiveScreenState.prepareLeave();
 
   static bool get isImmersive => _LiveScreenState._active?._immersive == true;
@@ -122,7 +121,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   Player? _mkPlayer;
   KotvPlayback? _mk;
   ExoPlayback? _exo;
-  FvpPlayback? _fvp;
   HtmlPlayback? _html;
   ArtPlayback? _art;
   XgPlayback? _xg;
@@ -158,8 +156,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         return _xg ??= XgPlayback();
       case KotvEmbedBackend.zw:
         return _zw ??= ZwPlayback();
-      case KotvEmbedBackend.fvp:
-        return _fvp ??= FvpPlayback();
       case KotvEmbedBackend.exo:
         return _exo ??= ExoPlayback();
       case KotvEmbedBackend.mpv:
@@ -167,14 +163,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
-  /// 直播切台：FVP 只 pause，其它后端走换集停播。
   Future<void> _stopPlaybackForLiveZap() async {
-    final p = _playback;
-    if (p is FvpPlayback) {
-      await p.pauseForLiveZap();
-      return;
-    }
-    await p.stopForEpisodeSwitch();
+    await _playback.stopForEpisodeSwitch();
   }
 
   KotvPlayback _ensureMpv() {
@@ -230,7 +220,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       case KotvSilentRecoverAction.retrySameEngine:
         if (canRecreateDesktopMpv) await _releaseMpv();
         if (stale()) {
-          await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
+          await kotvStopIfUnowned(pb, [_mk, _exo, _html, _art, _xg, _zw]);
           return null;
         }
         return true;
@@ -259,20 +249,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   /// 切到其它内置后端时停掉闲置引擎。
-  /// 调用方须在改 [_playerVal] **之前**调用，以便旧 FVP/Surface 仍在树上时完成 release。
+  /// 调用方须在改 [_playerVal] **之前**调用，以便旧 Surface 仍在树上时完成 release。
   /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
   Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
     if (keep != KotvEmbedBackend.mpv) await _releaseMpv();
-    if (keep != KotvEmbedBackend.fvp) {
-      // 先 stop/dispose 再置空，避免 [_playback] 在中途 new 出第二个 FVP。
-      final fvp = _fvp;
-      await kotvSoftPausePlayers([fvp]);
-      try {
-        await fvp?.stop();
-      } catch (_) {}
-      kotvDisposePlaybackWrappers([fvp]);
-      if (identical(_fvp, fvp)) _fvp = null;
-    }
     if (keep != KotvEmbedBackend.exo) {
       final exo = _exo;
       await kotvSoftPausePlayers([exo]);
@@ -315,7 +295,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _unwireLivePlaybackErrors();
     _unwireLivePlaybackEnded();
 
-    final fvp = _fvp;
     final mk = _mk;
     final exo = _exo;
     final html = _html;
@@ -323,13 +302,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final xg = _xg;
     final zw = _zw;
     final mkPlayer = _mkPlayer;
-    final backends = <KotvPlayback?>[fvp, mk, exo, html, art, xg, zw];
+    final backends = <KotvPlayback?>[mk, exo, html, art, xg, zw];
 
     await kotvSoftPausePlayers(backends);
-    // release 完成（含 FVP Surface：dispose 内先清 native 面再删 mdk）后再清 _playUrl。
-    await kotvHardReleasePlayers(backends, waitFirst: fvp);
+    // release 完成后再清 _playUrl。
+    await kotvHardReleasePlayers(backends, waitFirst: null);
 
-    _fvp = null;
     _mk = null;
     _exo = null;
     _html = null;
@@ -515,17 +493,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _danmakuItems.dispose();
     // 正常路径已在 [_releaseAllBackends]；异常路径尽量先 release 再 dispose 包装类。
     if (!_releasedHard) {
-      final fvp = _fvp;
-      final mk = _mk;
+        final mk = _mk;
       final exo = _exo;
       final html = _html;
       final art = _art;
       final xg = _xg;
       final zw = _zw;
       final mkPlayer = _mkPlayer;
-      final backends = <KotvPlayback?>[fvp, mk, exo, html, art, xg, zw];
-      _fvp = null;
-      _mk = null;
+      final backends = <KotvPlayback?>[mk, exo, html, art, xg, zw];
+        _mk = null;
       _exo = null;
       _html = null;
       _art = null;
@@ -535,7 +511,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _playUrl = '';
       _playDirect = '';
       unawaited(() async {
-        await kotvHardReleasePlayers(backends, waitFirst: fvp);
+        await kotvHardReleasePlayers(backends, waitFirst: null);
         await kotvDisposeMpvPlayer(mkPlayer);
         kotvDisposePlaybackWrappers(backends);
       }());
@@ -807,7 +783,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         current: _playback,
         mpv: _mk,
         exo: _exo,
-        fvp: _fvp,
       );
       final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
       if (vol != null && vol > 0) {
@@ -1561,7 +1536,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
       _liveAspect = kotvAspectFromScale(_liveScale);
       _exo?.applyPlayerOptions(playSettings);
-      _fvp?.applyPlayerOptions(playSettings);
     }
     final renderMode = kotvNormalizePlayerRender(_renderMode);
     final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
@@ -1680,7 +1654,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           waitReady: false,
         );
         if (stale()) {
-          await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
+          await kotvStopIfUnowned(pb, [_mk, _exo, _html, _art, _xg, _zw]);
           return;
         }
         unawaited(pb.setVideoScale(_liveScale));
@@ -1890,7 +1864,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (_playUrl.isEmpty) {
       return const ColoredBox(color: Colors.black);
     }
-    // 勿包 ListenableBuilder：position/playing 高频 notify 会重建 Texture，PC FVP 可掉到 ~5fps。
+    // 勿包 ListenableBuilder：position/playing 高频 notify 会重建 Texture，Texture 高频重建可掉到 ~5fps。
     Widget view = kotvPlaybackView(
       playerVal: _playerVal,
       playback: _playback,
@@ -2069,7 +2043,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     });
     // 节目单在 _loadEpg 拿到新数据后再滚。
     _scheduleScrollToCurrent(epg: false);
-    // EPG 与开播解耦：勿等 open 成功（FVP/MPV 卡住时节目单也出不来）。
+    // EPG 与开播解耦：勿等 open 成功（MPV 卡住时节目单也出不来）。
     unawaited(_loadEpg());
 
     // 只停当前后端；与取地址并行。

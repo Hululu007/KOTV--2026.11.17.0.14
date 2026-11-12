@@ -1,81 +1,68 @@
 #!/usr/bin/env bash
-# Media3 MpvPlayer 辅助准备：
-# - assets：API25 Vulkan stub
-# - jniLibs：kotv_dl；从 media3-mpvplayer 抽 libc++；从 media3-decoder-ffmpeg 抽整套 libav*
-#   （pickFirst 会误选 ass 旧 libc++ / nextlib 残缺 libav* → CREATE_FAILED）
+# 页内原生 MPV 完整准备：拉取 libmpv 套件 + 编译 libvulkan stub + libkotv_dl。
+# 套件只进 jniLibs（System.loadLibrary）；assets 仅保留 libvulkan stub（老机链接用）。
+# 勿再把整套 .so 同时打进 assets 与 lib/（APK 会多约 80MB+）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# shellcheck source=android-mpv-lib-names.sh
-source "$ROOT/scripts/android-mpv-lib-names.sh"
-chmod +x "$ROOT/scripts/build-android-libvulkan-stub.sh" \
+chmod +x "$ROOT/scripts/build-android-mpv-from-source.sh" \
+  "$ROOT/scripts/build-android-libvulkan-stub.sh" \
   "$ROOT/scripts/build-android-kotv-dl.sh"
 
-MAVEN="$ROOT/flutter/android/third_party/maven-webhtv"
-MPV_AAR="$MAVEN/androidx/media3/media3-mpvplayer/${KOTV_MEDIA3_MPV_VER}/media3-mpvplayer-${KOTV_MEDIA3_MPV_VER}.aar"
-FFMPEG_AAR="$MAVEN/androidx/media3/media3-decoder-ffmpeg/${KOTV_MEDIA3_MPV_VER}/media3-decoder-ffmpeg-${KOTV_MEDIA3_MPV_VER}.aar"
+echo "==> prepare Android MPV native (source FFmpeg+mpv → jniLibs; vulkan stub → assets only)"
+"$ROOT/scripts/build-android-mpv-from-source.sh"
 
-echo "==> prepare Android MPV helpers (Vulkan stub + kotv_dl + mpvplayer libc++ + decoder-ffmpeg libav*)"
-
-for aar in "$MPV_AAR" "$FFMPEG_AAR"; do
-  if [[ ! -f "$aar" ]]; then
-    echo "ERROR: missing $aar (run scripts/fetch-android-exo-av3a.sh / build-fongmi-media3.sh)" >&2
-    exit 1
-  fi
-done
-
-extract_aar_so() {
-  local aar="$1"
-  local abi="$2"
-  local so="$3"
-  local dest="$4"
-  local entry="jni/${abi}/${so}"
-  if ! unzip -l "$aar" | awk '{print $4}' | grep -qxF "$entry"; then
-    echo "ERROR: $aar missing $entry" >&2
-    exit 1
-  fi
-  mkdir -p "$(dirname "$dest")"
-  unzip -p "$aar" "$entry" >"$dest"
-  if [[ ! -s "$dest" ]]; then
-    echo "ERROR: failed to extract $entry → $dest" >&2
-    exit 1
-  fi
-}
-
-install_mpvplayer_libcxx() {
+# webhtv 自带的 libc++ 与 libmpv 配套（含 __from_chars_floating_point）。
+# 勿用本机 NDK28 覆盖：缺该符号 → dlopen(libmpv) 失败；NDK29 也不用（无法 exec 外部二进制）。
+# 只需把 staging(assets) 里的配套 libc++ 同步进 jniLibs，避免其它依赖的旧副本抢先加载。
+sync_webhtv_libcxx_to_jni() {
   local abi="$1"
-  local dest="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libc++_shared.so"
-  extract_aar_so "$MPV_AAR" "$abi" "libc++_shared.so" "$dest"
-  if ! kotv_android_libcxx_has_from_chars "$dest"; then
-    echo "ERROR: extracted $dest lacks ${KOTV_ANDROID_LIBCXX_REQUIRED_SYM}" >&2
-    exit 1
+  local dest_asset="$ROOT/flutter/android/app/src/main/assets/mpv-libs/$abi/libc++_shared.so"
+  local dest_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libc++_shared.so"
+  mkdir -p "$(dirname "$dest_jni")"
+  # Gradle :prepareKotvMpvNative 会再跑一遍：此时 assets 已 strip，套件只在 jniLibs。
+  if [[ -s "$dest_jni" ]] && grep -a -q 'from_chars_floating' "$dest_jni" 2>/dev/null; then
+    echo "  ok $abi: libc++_shared.so already in jniLibs ($(wc -c <"$dest_jni" | tr -d ' ') bytes)"
+    return 0
   fi
-  echo "  ok $abi: jniLibs/libc++_shared.so from media3-mpvplayer ($(wc -c <"$dest" | tr -d ' ') bytes)"
-}
-
-install_decoder_ffmpeg_libav() {
-  local abi="$1"
-  local jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi"
-  local so dest
-  mkdir -p "$jni"
-  for so in "${KOTV_ANDROID_MPV_FFMPEG_JNI[@]}"; do
-    dest="$jni/$so"
-    extract_aar_so "$FFMPEG_AAR" "$abi" "$so" "$dest"
-  done
-  if ! kotv_android_libavcodec_is_complete "$jni/libavcodec.so"; then
-    echo "ERROR: $jni/libavcodec.so lacks ${KOTV_ANDROID_LIBAV_REQUIRED_SYM}" >&2
-    exit 1
+  if [[ ! -s "$dest_asset" ]]; then
+    echo "ERROR: missing $dest_asset (and jniLibs has no valid libc++; re-run source build)" >&2
+    return 1
   fi
-  echo "  ok $abi: jniLibs libav* from media3-decoder-ffmpeg ($(wc -c <"$jni/libavcodec.so" | tr -d ' ') bytes avcodec)"
+  if ! grep -a -q 'from_chars_floating' "$dest_asset" 2>/dev/null; then
+    echo "ERROR: $dest_asset missing from_chars_floating (corrupt/overwritten?). Re-fetch webhtv libc++." >&2
+    return 1
+  fi
+  cp -f "$dest_asset" "$dest_jni"
+  echo "  ok $abi: webhtv libc++_shared.so → jniLibs ($(wc -c <"$dest_asset" | tr -d ' ') bytes)"
 }
 
 for abi in arm64-v8a armeabi-v7a; do
   echo "==> native stubs: $abi"
+  sync_webhtv_libcxx_to_jni "$abi"
   "$ROOT/scripts/build-android-libvulkan-stub.sh" "$abi"
   "$ROOT/scripts/build-android-kotv-dl.sh" "$abi"
-  install_mpvplayer_libcxx "$abi"
-  install_decoder_ffmpeg_libav "$abi"
 done
 
+# FFmpeg/libmpv 进 jniLibs：统一 System.loadLibrary（含 API25 / Android 15+）。
+# 旧方案 assets 解压 + System.load(绝对路径) 在新系统易崩，且与 jniLibs 双份打包。
+sync_mpv_to_jni() {
+  local abi="$1"
+  local base="$ROOT/flutter/android/app/src/main/assets/mpv-libs/$abi"
+  local jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi"
+  mkdir -p "$jni"
+  local lib
+  for lib in libc++_shared.so libmvutil.so libmwresample.so libmwscale.so \
+    libmvcodec.so libmvformat.so libmvfilter.so libmvdevice.so \
+    libmpv.so libplayer.so; do
+    if [[ -s "$base/$lib" ]]; then
+      cp -f "$base/$lib" "$jni/$lib"
+    fi
+  done
+  # kotv_dl 由 build-android-kotv-dl 已写入 jniLibs
+  echo "  ok $abi: staging assets → jniLibs"
+}
+
+# assets 只留 Vulkan stub；其余 .so 已在 jniLibs，删掉避免 APK 重复。
 strip_assets_keep_vulkan_stub() {
   local abi="$1"
   local base="$ROOT/flutter/android/app/src/main/assets/mpv-libs/$abi"
@@ -92,74 +79,44 @@ strip_assets_keep_vulkan_stub() {
   echo "  ok $abi: assets keep libvulkan.so stub only"
 }
 
-purge_legacy_mpv_jni() {
-  local abi="$1"
-  local jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi"
-  local lib
-  [[ -d "$jni" ]] || return 0
-  for lib in "${KOTV_ANDROID_MPV_LEGACY_JNI[@]}"; do
-    if [[ -s "$jni/$lib" ]]; then
-      rm -f "$jni/$lib"
-      echo "  removed legacy $abi/$lib (Media3 AAR provides mpv)"
-    fi
-  done
-  if [[ -s "$jni/libvulkan.so" ]]; then
-    echo "WARN: removing jniLibs/$abi/libvulkan.so (must not ship stub in APK lib/)" >&2
-    rm -f "$jni/libvulkan.so"
-  fi
-}
-
-for abi in arm64-v8a armeabi-v7a; do
-  strip_assets_keep_vulkan_stub "$abi"
-  purge_legacy_mpv_jni "$abi"
-done
+sync_mpv_to_jni arm64-v8a
+sync_mpv_to_jni armeabi-v7a
+strip_assets_keep_vulkan_stub arm64-v8a
+strip_assets_keep_vulkan_stub armeabi-v7a
 
 verify_abi() {
   local abi="$1"
   local base="$ROOT/flutter/android/app/src/main/assets/mpv-libs/$abi"
   local jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi"
   local missing=0
-  local so
+  local lib
   if [[ ! -s "$base/libvulkan.so" ]]; then
     echo "ERROR: missing assets/mpv-libs/$abi/libvulkan.so (stub)" >&2
     missing=1
   fi
-  if [[ ! -s "$jni/libkotv_dl.so" ]]; then
-    echo "ERROR: missing jniLibs/$abi/libkotv_dl.so" >&2
-    missing=1
-  fi
-  if [[ ! -s "$jni/libc++_shared.so" ]]; then
-    echo "ERROR: missing jniLibs/$abi/libc++_shared.so" >&2
-    missing=1
-  elif ! kotv_android_libcxx_has_from_chars "$jni/libc++_shared.so"; then
-    echo "ERROR: jniLibs/$abi/libc++_shared.so lacks ${KOTV_ANDROID_LIBCXX_REQUIRED_SYM}" >&2
-    missing=1
-  fi
-  for so in "${KOTV_ANDROID_MPV_FFMPEG_JNI[@]}"; do
-    if [[ ! -s "$jni/$so" ]]; then
-      echo "ERROR: missing jniLibs/$abi/$so" >&2
+  # 套件不得再留在 assets（会与 lib/ 重复进 APK）。
+  for lib in libmpv.so libplayer.so libmvcodec.so libc++_shared.so libkotv_dl.so; do
+    if [[ -s "$base/$lib" ]]; then
+      echo "ERROR: assets/mpv-libs/$abi/$lib must not exist (duplicate of jniLibs)" >&2
       missing=1
     fi
   done
-  if [[ -s "$jni/libavcodec.so" ]] && ! kotv_android_libavcodec_is_complete "$jni/libavcodec.so"; then
-    echo "ERROR: jniLibs/$abi/libavcodec.so lacks ${KOTV_ANDROID_LIBAV_REQUIRED_SYM}" >&2
-    missing=1
-  fi
+  # stub 不得进 jniLibs。
   if [[ -s "$jni/libvulkan.so" ]]; then
-    echo "ERROR: jniLibs/$abi/libvulkan.so must not exist" >&2
-    missing=1
+    echo "WARN: removing jniLibs/$abi/libvulkan.so (must not ship stub in APK lib/)" >&2
+    rm -f "$jni/libvulkan.so"
   fi
-  local legacy
-  for legacy in "${KOTV_ANDROID_MPV_LEGACY_JNI[@]}"; do
-    if [[ -s "$jni/$legacy" ]]; then
-      echo "ERROR: legacy $jni/$legacy still present (use Media3 AAR)" >&2
+  for lib in libmpv.so libplayer.so libmvcodec.so libmvutil.so libmwresample.so \
+    libmwscale.so libmvformat.so libmvfilter.so libmvdevice.so libkotv_dl.so libc++_shared.so; do
+    if [[ ! -s "$jni/$lib" ]]; then
+      echo "ERROR: missing jniLibs/$abi/$lib" >&2
       missing=1
     fi
   done
   if [[ "$missing" != 0 ]]; then
     exit 1
   fi
-  echo "  ok $abi: stub + kotv_dl + mpvplayer libc++ + decoder-ffmpeg libav*; no legacy suite"
+  echo "  ok $abi: suite in jniLibs; vulkan stub in assets only"
 }
 
 verify_abi arm64-v8a

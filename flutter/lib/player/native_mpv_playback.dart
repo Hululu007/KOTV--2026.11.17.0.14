@@ -324,7 +324,7 @@ class NativeMpvPlayback extends KotvPlayback {
     // live 切换必须允许重建；否则 createdAsLive 不会更新。
     if (_nativeReady && _nativeLive == live) return;
     try {
-      final res = await _ch.invokeMethod<dynamic>('create', {
+      await _ch.invokeMethod<dynamic>('create', {
         'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
@@ -460,7 +460,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _duration = Duration.zero;
     notifyListeners();
 
-    // Media3 桥接无 props 通道；碟机等额外项折进 conf。DRM（含 ClearKey）请用 Exo。
+    // 原生 MPVLib 无 props 通道；碟机等额外项折进 conf。DRM（含 ClearKey）请用 Exo。
     if (drm != null && drm.isNotEmpty) {
       _lastError = 'MPV 不支持该 DRM，请用内置 ExoPlayer';
       _buffering = false;
@@ -488,7 +488,7 @@ class NativeMpvPlayback extends KotvPlayback {
         }
         confExtra.writeln('${e.key}=${e.value}');
       }
-      // MediaItem mime：无扩展名的 /proxy/play 须靠 mime 触发 lavf hls / extension_picky=0。
+      // 开播 mime：无扩展名的 /proxy/play 须靠 mime 触发 lavf HLS demuxer。
       final mime = kotvPlayMime(url, format);
       await _ch.invokeMethod('open', {
         'url': url,
@@ -549,7 +549,7 @@ class NativeMpvPlayback extends KotvPlayback {
       isPlaying: () => _playing,
       position: () => _position,
       duration: () => _duration,
-      // 只信原生 isCurrentMediaItemLive 升会话后的 [_live]。
+      // 只信 Dart 侧标定的 [_live]（原生无 Media3 live 升会话）。
       isLiveContent: () => _live,
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
@@ -1005,7 +1005,10 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   Future<void> openDiscMenu() async {
-    // Media3 MpvPlayer 无 discnav menu 映射。
+    // 原生 MPVLib：discnav menu 由插件 openDiscMenu 映射。
+    try {
+      await _ch.invokeMethod('openDiscMenu');
+    } catch (_) {}
   }
 
   @override

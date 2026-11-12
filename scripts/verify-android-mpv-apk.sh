@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# 校验 APK：Media3 mpvplayer 提供 libmpv/libplayer；Vulkan stub 仅在 assets；kotv_dl 在 lib/。
+# 校验 APK：MPV 套件只在 lib/<abi>/；Vulkan stub 只在 assets/mpv-libs（按包内实际 ABI）。
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# shellcheck source=android-mpv-lib-names.sh
-source "$ROOT/scripts/android-mpv-lib-names.sh"
 APK="${1:-}"
 if [[ -z "$APK" || ! -f "$APK" ]]; then
   echo "usage: $0 <path-to.apk>" >&2
@@ -23,11 +20,14 @@ while IFS= read -r abi; do
     arm64-v8a|armeabi-v7a) ;;
     *) continue ;;
   esac
-  need+=("assets/mpv-libs/${abi}/libvulkan.so")
-  local_so=
-  for local_so in "${KOTV_ANDROID_MPV_APK_REQUIRED[@]}"; do
-    need+=("lib/${abi}/${local_so}")
-  done
+  need+=(
+    "assets/mpv-libs/${abi}/libvulkan.so"
+    "lib/${abi}/libmpv.so"
+    "lib/${abi}/libplayer.so"
+    "lib/${abi}/libmvcodec.so"
+    "lib/${abi}/libkotv_dl.so"
+    "lib/${abi}/libc++_shared.so"
+  )
 done <<<"$abis"
 
 if [[ "${#need[@]}" -eq 0 ]]; then
@@ -77,49 +77,15 @@ while IFS= read -r abi; do
     echo "ERROR: APK must not contain $bad (stub steals system Vulkan)" >&2
     exit 1
   fi
-  # assets 不得再塞套件 / helpers。
-  for dup in "${KOTV_ANDROID_MPV_ASSET_FORBIDDEN[@]}"; do
+  # 套件不得再出现在 assets（与 lib/ 重复）。
+  for dup in libmpv.so libplayer.so libmvcodec.so libc++_shared.so libkotv_dl.so; do
     p="assets/mpv-libs/${abi}/${dup}"
     if grep -qxF "$p" <<<"$listing"; then
-      echo "ERROR: APK must not contain $p (duplicate of lib/${abi}/ or legacy)" >&2
-      exit 1
-    fi
-  done
-  for dup in "${KOTV_ANDROID_MPV_APK_FORBIDDEN[@]}"; do
-    p="lib/${abi}/${dup}"
-    if grep -qxF "$p" <<<"$listing"; then
-      echo "ERROR: APK must not contain $p (legacy suite)" >&2
-      exit 1
-    fi
-  done
-  for dup in "${KOTV_ANDROID_FVP_APK_FORBIDDEN[@]}"; do
-    p="lib/${abi}/${dup}"
-    if grep -qxF "$p" <<<"$listing"; then
-      echo "ERROR: APK must not contain $p (Android does not ship FVP/mdk)" >&2
+      echo "ERROR: APK must not contain $p (duplicate of lib/${abi}/)" >&2
       exit 1
     fi
   done
 done <<<"$abis"
 
-# libc++ / libavcodec 必须是配套完整版（否则 libmpv dlopen 失败）。
-while IFS= read -r abi; do
-  [[ -n "$abi" ]] || continue
-  case "$abi" in arm64-v8a|armeabi-v7a) ;; *) continue ;; esac
-  tmp="$(mktemp)"
-  unzip -p "$APK" "lib/${abi}/libc++_shared.so" >"$tmp"
-  if ! kotv_android_libcxx_has_from_chars "$tmp"; then
-    rm -f "$tmp"
-    echo "ERROR: APK lib/${abi}/libc++_shared.so lacks ${KOTV_ANDROID_LIBCXX_REQUIRED_SYM}" >&2
-    exit 1
-  fi
-  unzip -p "$APK" "lib/${abi}/libavcodec.so" >"$tmp"
-  if ! kotv_android_libavcodec_is_complete "$tmp"; then
-    rm -f "$tmp"
-    echo "ERROR: APK lib/${abi}/libavcodec.so lacks ${KOTV_ANDROID_LIBAV_REQUIRED_SYM} (mixed with nextlib?)" >&2
-    exit 1
-  fi
-  rm -f "$tmp"
-done <<<"$abis"
-
-echo "ok: APK Media3 MPV + libav* + mpvplayer libc++ in lib/; Vulkan stub in assets only (abis: $(echo "$abis" | tr '\n' ' '))"
-unzip -l "$APK" | awk '/mpv-libs|libvulkan|libkotv_dl|libmpv\.so|libplayer\.so|libc\+\+|libav|libsw/ {print $1, $4}' | head -40
+echo "ok: APK MPV suite in lib/ only; Vulkan stub in assets only (abis: $(echo "$abis" | tr '\n' ' '))"
+unzip -l "$APK" | awk '/mpv-libs|libvulkan|libkotv_dl|libmpv\.so|libplayer\.so/ {print $1, $4}' | head -30

@@ -89,10 +89,9 @@
 # 迅雷 SDK：JNI / 反射不可 shrink
 -keep class com.xunlei.downloadlib.** { *; }
 -dontwarn com.xunlei.downloadlib.**
-# Media3 MpvPlayer + Vulkan stub bootstrap（kotv_dl JNI）
--keep class androidx.media3.mpvplayer.** { *; }
--keep class com.bobo.kotv.KotvMpvNativeBootstrap { *; }
--keepclassmembers class com.bobo.kotv.KotvMpvNativeBootstrap {
+# 安卓自研 MPVLib + kotv_dl JNI（Vulkan stub）
+-keep class is.xyz.mpv.MPVLib { *; }
+-keepclassmembers class is.xyz.mpv.MPVLib {
     native <methods>;
 }
 # TVBus / 荐片 P2P：站点 jar 与播放提取器按原名链接，JNI 不可 shrink

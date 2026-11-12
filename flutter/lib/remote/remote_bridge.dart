@@ -368,8 +368,6 @@ String flutterPlayerLabel(String val) {
       return '内置 MPV';
     case 'innie#exo':
       return '内置 ExoPlayer';
-    case 'innie#fvp':
-      return '内置 FVP';
     default:
       if (v.startsWith('outie#')) return '外部播放器';
       return v;

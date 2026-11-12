@@ -202,8 +202,7 @@ Windows 运行时（Win7 尽力兼容）：
   Python = adang1345/PythonVista embed
   Chromium = x64: 109（snapshot 回退）；ARM64: Win_Arm64 最新（CFT 无 win-arm64 时）
   FFmpeg = Gyan 7.0
-  页内 MPV = 原生通道（mpv-2.dll / libmpv 与 fvp 同目录，不进 runtime/）
-  页内 FVP = Flutter fvp/libmdk（备选）
+  页内 MPV = 原生通道（mpv-2.dll / libmpv 与应用同目录，不进 runtime/）
   外置播放 = 系统打开（不捆绑外部播放器）
   CGO/QuickJS = MinGW MSVCRT win32-seh + 子系统 Win7(6.01) + static-libgcc（posix 则再静态 winpthread）
                CI 用 scripts/check-win7-deps.ps1 拒绝 UCRT / libgcc_s / libwinpthread
@@ -213,7 +212,7 @@ Windows 运行时（Win7 尽力兼容）：
   遥控页: http://127.0.0.1:9978/
   Web 包（引擎+webapp 同端口）见 scripts/package-flutter-web.sh / CI「Flutter Web」
 
-默认播放核心为「页内 MPV」（innie#mpv）；桌面可切「页内 FVP」（innie#fvp）。
+默认播放核心为「页内 MPV」（innie#mpv）。
 外置播放走系统关联打开，发行包不捆绑外部播放器。
 
 环境变量(可选):

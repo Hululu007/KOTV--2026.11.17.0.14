@@ -2,7 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' show PlatformDispatcher;
 import 'kotv_playback.dart';
 
-/// 画面调色（MPV / media_kit / FVP 全量；Exo：Surface/Texture 均走 Media3 setVideoEffects）。
+/// 画面调色（MPV / media_kit 全量；Exo：Surface/Texture 均走 Media3 setVideoEffects）。
 ///
 /// 数值：brightness/contrast/saturation/gamma/hue/temperature/shadow ∈ [-100, 100]，0 为中性；
 /// sharpness ∈ [0, 100]。隧道模式 / HDR 下 Exo 效果不可用。
@@ -212,22 +212,6 @@ class KotvVideoEq {
       parts.add(
         'lavfi=[eq=gamma_r=${1.0 + double.parse(lift)}:gamma_g=${1.0 + double.parse(lift)}:gamma_b=${1.0 + double.parse(lift)}]',
       );
-    }
-    return parts.join(',');
-  }
-
-  /// FVP / mdk：`video.avfilter=eq=...`（关闭时空串）。
-  String fvpAvfilter() {
-    if (!enabled) return '';
-    final b = (brightness.clamp(-100, 100) / 100.0).toStringAsFixed(3);
-    final c = (1.0 + contrast.clamp(-100, 100) / 100.0).clamp(0.1, 3.0).toStringAsFixed(3);
-    final s = (1.0 + saturation.clamp(-100, 100) / 100.0).clamp(0.0, 3.0).toStringAsFixed(3);
-    final g = (1.0 + gamma.clamp(-100, 100) / 100.0).clamp(0.1, 3.0).toStringAsFixed(3);
-    final parts = <String>['eq=brightness=$b:contrast=$c:saturation=$s:gamma=$g'];
-    final sh = sharpness.clamp(0, 100);
-    if (sh > 0) {
-      final amount = (sh / 100.0 * 1.5).toStringAsFixed(2);
-      parts.add('unsharp=5:5:$amount:5:5:0');
     }
     return parts.join(',');
   }
@@ -682,36 +666,6 @@ String kotvComposeMpvAf({
 
   if (inners.isEmpty) return '';
   return 'lavfi=[${inners.join(',')}]';
-}
-
-String kotvAudioEqFvpFilter(
-  KotvAudioEqPreset p, {
-  String bands = '',
-  int dialogue = 0,
-  int balance = 0,
-  String channelMode = 'auto',
-  int stability = 0,
-  int boost = 0,
-  int preamp = 0,
-  bool loudness = false,
-  int centerGain = 0,
-}) {
-  final af = kotvComposeMpvAf(
-    eq: p,
-    bands: bands,
-    dialogue: dialogue,
-    balance: balance,
-    channelMode: channelMode,
-    stability: stability,
-    boost: boost,
-    preamp: preamp,
-    loudness: loudness,
-    centerGain: centerGain,
-  );
-  if (af.startsWith('lavfi=[') && af.endsWith(']')) {
-    return af.substring(7, af.length - 1);
-  }
-  return af;
 }
 
 /// Exo 原生通道 `audioEq` 参数。

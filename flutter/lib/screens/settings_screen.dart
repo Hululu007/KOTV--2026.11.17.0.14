@@ -1604,7 +1604,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       title: '默认倍速',
       key: 'playerSpeed',
       fallback: 1.0,
-      // 各播放器（Exo / MPV / FVP / 系统播放器）都只接受 0.25–4 倍。
+      // 各播放器（Exo / MPV / 系统播放器）都只接受 0.25–4 倍。
       min: 0.25,
       max: 4.0,
       divisions: 75,
@@ -2730,7 +2730,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             msg: '开机进直播已更新',
                           )),
                         ),
-                        // 下一集排进播放器播放列表：Exo + 全部 MPV；FVP / 网页不支持无缝
+                        // 下一集排进播放器播放列表：Exo + 全部 MPV；网页不支持无缝
                         //（仍会预解析下一集地址，换集走 open）。
                         if (!kIsWeb)
                           KotvSettingsCell(

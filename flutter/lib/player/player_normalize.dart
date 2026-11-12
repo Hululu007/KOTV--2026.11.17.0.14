@@ -1,4 +1,4 @@
-// 各内置播放器共用的归一 / clamp，避免 exo / fvp / mpv / failover 各写一份。
+// 各内置播放器共用的归一 / clamp，避免 exo / mpv / failover 各写一份。
 
 /// soft / hard / auto（含 software、hw 等别名）。
 String kotvNormalizeDecodeMode(String raw) {

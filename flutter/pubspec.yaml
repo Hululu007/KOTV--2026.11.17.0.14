@@ -24,9 +24,6 @@ dependencies:
   # 主线拉最新兼容版；Win7 线由 adapt-flutter-win7-sdk.sh 尽量钉到同档新版本。
   video_player: ^2.9.2
   web: ^1.1.0
-  # 0.40.0。Win7 / Flutter 3.19 同样用 0.40.0：adapt + flutter-pub-get 在 pub-cache 里放宽 SDK 校验，不升级 Flutter。
-  fvp: 0.40.0
-  # 读 fvp 写进 Logger('fvp') 的 mdk 事件（播放信息里的实际解码）。Win7 线钉 1.2.0。
   logging: ^1.2.0
   path_provider: ^2.1.5
   path: ^1.9.0

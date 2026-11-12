@@ -42,9 +42,6 @@ source "$ROOT/scripts/kotv-flutter-asset-engines.sh"
 kotv_flutter_asset_engines_hide
 trap kotv_flutter_asset_engines_restore EXIT
 cd "$ROOT/flutter"
-# shellcheck source=kotv-fvp-deps.sh
-source "$ROOT/scripts/kotv-fvp-deps.sh"
-kotv_export_fvp_deps
 flutter config --enable-linux-desktop
 KOTV_FLUTTER_TARGET=linux "$ROOT/scripts/flutter-pub-get.sh"
 # mpv/FFmpeg 源码编可能留下 Unix Makefiles 等 CMake 变量；Flutter Linux 需要 Ninja + C 语言。

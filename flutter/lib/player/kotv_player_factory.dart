@@ -5,7 +5,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import 'art_playback.dart';
 import 'exo_playback.dart';
-import 'fvp_playback.dart';
 import 'html_playback.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
@@ -16,7 +15,7 @@ import 'subtitle_style_util.dart';
 import 'xg_playback.dart';
 import 'zw_playback.dart';
 
-/// 把播放设置推给页面持有的后端：MPV 选项、Exo/FVP 选项，再给当前后端写字幕样式与偏移。
+/// 把播放设置推给页面持有的后端：MPV 选项、Exo 选项，再给当前后端写字幕样式与偏移。
 /// 点播与直播页共用。
 void kotvPushPlayerSettings(
   Map<String, dynamic> settings, {
@@ -24,7 +23,6 @@ void kotvPushPlayerSettings(
   required KotvPlayback current,
   KotvPlayback? mpv,
   ExoPlayback? exo,
-  FvpPlayback? fvp,
 }) {
   if (mpv is NativeMpvPlayback) {
     unawaited(mpv.applyOpts(mpvOpts));
@@ -32,7 +30,6 @@ void kotvPushPlayerSettings(
     unawaited(mpv.applyOpts(mpvOpts));
   }
   exo?.applyPlayerOptions(settings);
-  fvp?.applyPlayerOptions(settings);
   // Exo 的 applyPlayerOptions 播放中已按同一份设置写过字幕样式与偏移。
   if (!identical(current, exo)) unawaited(kotvApplySubtitleSettings(current, settings));
 }
@@ -41,7 +38,7 @@ void kotvPushPlayerSettings(
 bool kotvShowDirectOutput(KotvPlayback playback, String decodeMode) =>
     playback.supportsDirectOutput && !KotvMpvOpts(decodeMode: decodeMode).soft;
 
-/// 页内画面：Android 原生 MPV PlatformView；桌面/Windows/iOS media_kit Video；FVP 各平台独立。
+/// 页内画面：Android 原生 MPV PlatformView；桌面/Windows/iOS media_kit Video。
 Widget kotvPlaybackView({
   required String playerVal,
   required KotvPlayback playback,
@@ -60,9 +57,6 @@ Widget kotvPlaybackView({
       return const ColoredBox(color: Colors.black);
     case KotvEmbedBackend.zw:
       if (playback is ZwPlayback) return playback.buildView(fit: fit);
-      return const ColoredBox(color: Colors.black);
-    case KotvEmbedBackend.fvp:
-      if (playback is FvpPlayback) return playback.buildView(fit: fit);
       return const ColoredBox(color: Colors.black);
     case KotvEmbedBackend.exo:
       if (playback is ExoPlayback) return playback.buildView(fit: fit);

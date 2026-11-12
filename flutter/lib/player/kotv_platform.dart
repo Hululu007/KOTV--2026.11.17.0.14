@@ -34,9 +34,6 @@ bool kotvIsAndroid() => !kIsWeb && Platform.isAndroid;
 bool kotvIsIOS() => !kIsWeb && Platform.isIOS;
 bool kotvIsWindows() => !kIsWeb && Platform.isWindows;
 
-/// 设为 true 时 macOS 发行包不链 FVP/mdk（仅 MPV/media_kit）；默认 false，MPV+FVP 全功能。
-const bool kotvMacosNoFvp = bool.fromEnvironment('KOTV_MACOS_NO_FVP', defaultValue: false);
-
 /// Surface=0（默认 HDR），Texture=1。
 String kotvNormalizePlayerRender(String raw) {
   switch (raw.trim().toLowerCase()) {
@@ -84,7 +81,7 @@ String kotvClampPlayerVal(String raw, {required bool live}) {
 
 bool kotvCanSwitchPlayer({required bool live}) => kotvPlayerOptions().length > 1;
 
-enum KotvEmbedBackend { mpv, fvp, exo, html, art, xg, zw }
+enum KotvEmbedBackend { mpv, exo, html, art, xg, zw }
 
 KotvEmbedBackend kotvEmbedBackend(String playerVal) {
   switch (playerVal.trim()) {
@@ -96,13 +93,11 @@ KotvEmbedBackend kotvEmbedBackend(String playerVal) {
       return KotvEmbedBackend.xg;
     case 'innie#zw':
       return KotvEmbedBackend.zw;
-    case 'innie#fvp':
-      return KotvEmbedBackend.fvp;
     case 'innie#exo':
       return KotvEmbedBackend.exo;
     case 'innie#mpv':
     default:
-      // Web 无 MPV/Exo/FVP；非法值由 clamp 纠正，此处兜底 HTML。
+      // Web 无 MPV/Exo；非法值由 clamp 纠正，此处兜底 HTML/MPV。
       if (kIsWeb) return KotvEmbedBackend.html;
       return KotvEmbedBackend.mpv;
   }
@@ -129,13 +124,10 @@ List<(String, String)> kotvPlayerOptions() {
     return [
       ('${kotvHtmlPlayerLabel()}（默认）', 'innie#html'),
       ('内置 MPV', 'innie#mpv'),
-      ('内置 FVP', 'innie#fvp'),
     ];
   }
-  return [
+  return const [
     ('内置 MPV（默认）', 'innie#mpv'),
-    // KOTV_MACOS_NO_FVP=1 打的 macOS 包不带 FVP。
-    if (!(Platform.isMacOS && kotvMacosNoFvp)) ('内置 FVP', 'innie#fvp'),
     // 一项「外部播放器」；桌面由宿主列出本机视频应用供选择。
     ('外部播放器', 'outie#view'),
   ];

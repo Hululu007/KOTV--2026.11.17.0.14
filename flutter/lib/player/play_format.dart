@@ -47,7 +47,7 @@ bool kotvIsHls(String url, String? format) {
   return kotvFormatIsHls(format);
 }
 
-/// Exo / Media3 MPV 的 MediaItem mime。
+/// Exo / 安卓原生 MPV 开播 mime。
 ///
 /// - HLS（URL 强信号或 format）：锁 `application/x-mpegURL`（proxy 改写后无扩展名时必需）。
 /// - 其它非空 format：原样交给引擎。

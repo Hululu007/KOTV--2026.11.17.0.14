@@ -670,7 +670,7 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> release() async {
-    // stop → 短排空 → dispose。不设 disposeTimeout：超时丢后台会留下解码缓冲（与 FVP 同因）。
+    // stop → 短排空 → dispose。不设 disposeTimeout：超时丢后台会留下解码缓冲（于后台 dispose）。
     await kotvTeardownPlayback(
       stop: () async {
         try {

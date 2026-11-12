@@ -478,10 +478,6 @@ EOF
     echo "==> strip Homebrew rpaths from Frameworks (mdk/fvp/libmpv)"
     kotv_macos_strip_homebrew_rpaths_tree "$FW"
     kotv_macos_verify_libmpv_self_contained "$FW/libmpv.dylib"
-    if [[ "${KOTV_MACOS_NO_FVP:-0}" == "1" ]]; then
-      rm -rf "$FW/fvp.framework" "$FW/mdk.framework" 2>/dev/null || true
-      echo "  - removed fvp/mdk.framework (MPV-only macOS)"
-    fi
     kotv_macos_adhoc_sign_app "$DEST"
     kotv_macos_verify_libmpv_dlopen "$FW/libmpv.dylib"
     strip_runtime_libmpv

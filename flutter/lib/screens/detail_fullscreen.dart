@@ -18,7 +18,7 @@ import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
 import 'shell.dart';
 
-/// 详情页全屏：MPV / FVP / Exo 共用同一套顶底控件。
+/// 详情页全屏：MPV / Exo 共用同一套顶底控件。
 class DetailFullscreenPage extends StatefulWidget {
   const DetailFullscreenPage({
     super.key,

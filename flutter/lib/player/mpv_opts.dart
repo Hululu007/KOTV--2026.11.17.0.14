@@ -41,15 +41,6 @@ Future<void> kotvApplyLavfForOpen({
   await set('demuxer-lavf-o-add', add);
 }
 
-/// FVP/mdk 侧与 [kotvDemuxerLavfO] 同源的探测窗口（avformat.*）。
-Map<String, String> kotvFvpAvformatProbeOpts() => const {
-      'avformat.probesize': '8000000',
-      'avformat.analyzeduration': '8000000',
-      'avformat.extension_picky': '0',
-      'avformat.allowed_extensions': 'ALL',
-      'avformat.allowed_segment_extensions': 'ALL',
-    };
-
 /// 空列表：不要按后缀把 URL 当播放列表 / 图片。
 /// 网关常把 FLV/TS 写成 .m3u8、把 TS 分片写成 .png；交给 lavf 按内容探测。
 const kotvPlaylistExts = '';
@@ -58,7 +49,6 @@ const kotvImageExts = '';
 /// MPV 选项：Android 走原生插件；桌面/Windows/macOS 走 media_kit + 自带 libmpv。
 ///
 /// 自带 libmpv 由 scripts 编译（Vulkan 硬解、AV3A 等）；Flutter 侧不挂 wid/Surface。
-/// FVP 为独立内置播放器，与 MPV 并列可选。
 ///
 /// ## 平台能力
 /// | 选项 | Android 原生 | 桌面 media_kit |

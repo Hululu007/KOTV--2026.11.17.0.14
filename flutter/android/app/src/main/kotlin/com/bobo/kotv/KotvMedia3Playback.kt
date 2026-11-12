@@ -8,8 +8,8 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
 /**
- * Exo / Media3 MPV 共用开播辅助：URI、字幕 mime、错 mime 再开、解码回退、MPV HLS 再开条件。
- * 缓冲字节串见 [mpvDemuxerByteProps]。
+ * Media3 Exo 开播辅助：URI、字幕 mime、错 mime 再开、IO 错码映射。
+ * 安卓自研 MPVLib 共用：[mpvDemuxerByteProps]、[nextDecodeMode]、HLS/解码重试文案判定。
  */
 internal object KotvMedia3Playback {
   fun playUri(url: String): Uri {
@@ -73,19 +73,24 @@ internal object KotvMedia3Playback {
     }
 
   /**
-   * MPV：`ERROR_CODE_IO_UNSPECIFIED` 且当前 mime 还不是 HLS 时，锁 M3U8 再开一次。
-   * （含空 mime 与错误容器 mime；已是 HLS 则不再覆盖。）
+   * 原生 MPV / Dart [kotvShouldRetryMpvHlsAfterError]：尚未按 HLS 打开且文案像 IO/打开失败时再试一次。
    */
-  fun shouldRetryMpvHlsMime(
-    error: PlaybackException,
+  fun shouldRetryMpvHlsAfterError(
+    errorText: String,
     currentMime: String?,
     alreadyRetried: Boolean,
   ): Boolean {
     if (alreadyRetried) return false
     if (isHlsMime(currentMime)) return false
-    return error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+    val t = errorText.lowercase()
+    if (t.contains("tcp:") || (t.contains("http") && t.contains("error"))) return true
+    if (t.contains("failed to open") || t.contains("error opening") || t.contains("i/o")) {
+      return true
+    }
+    return false
   }
 
+  /** Exo 解码类 PlaybackException。 */
   fun isDecodeError(error: PlaybackException): Boolean =
     when (error.errorCode) {
       PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
@@ -94,6 +99,17 @@ internal object KotvMedia3Playback {
       -> true
       else -> false
     }
+
+  /** 原生 MPV `end-file` 错误文案是否像解码/hwdec 失败。 */
+  fun isDecodeErrorText(errorText: String): Boolean {
+    val t = errorText.lowercase()
+    return t.contains("decoder") ||
+      t.contains("hwdec") ||
+      t.contains("could not open codec") ||
+      t.contains("error initializing") ||
+      t.contains("no decoder") ||
+      t.contains("codec not supported")
+  }
 
   /** soft ↔ hard；auto 先试 soft。 */
   fun nextDecodeMode(current: String): String =
@@ -107,7 +123,7 @@ internal object KotvMedia3Playback {
   fun mpvDemuxerByteProps(budgetBytes: Int): Map<String, String> {
     if (budgetBytes <= 0) return emptyMap()
     fun miB(n: Int): String {
-      var mib = (n / (1024 * 1024)).coerceAtLeast(1)
+      val mib = (n / (1024 * 1024)).coerceAtLeast(1)
       return "${mib}MiB"
     }
     return mapOf(

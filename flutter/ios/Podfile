@@ -31,11 +31,6 @@ target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
-  # 可选：本地 mdk，避免 CocoaPods 从公网索引拉不到 fvp 依赖的版本。
-  if ENV['KOTV_MDK_POD_PATH'] && !ENV['KOTV_MDK_POD_PATH'].empty?
-    pod 'mdk', :path => ENV['KOTV_MDK_POD_PATH']
-  end
-
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
   target 'RunnerTests' do
     inherit! :search_paths

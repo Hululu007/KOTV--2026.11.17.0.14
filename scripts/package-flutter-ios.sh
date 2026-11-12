@@ -126,7 +126,6 @@ kotv_ios_prepare_app() {
   )
   local -a built_names=(
     file_selector_ios
-    fvp
     media_kit_libs_ios_video
     media_kit_video
     package_info_plus
@@ -149,7 +148,7 @@ kotv_ios_prepare_app() {
     kotv_ios_copy_framework "$built" "$app/Frameworks"
   done
 
-  local -a required=(App Flutter mdk Mpv fvp)
+  local -a required=(App Flutter Mpv)
   for name in "${required[@]}"; do
     if ! kotv_ios_framework_ok "$app" "$name"; then
       echo "error: $app is missing a real $name.framework" >&2
@@ -189,14 +188,7 @@ main() {
   pod --version
 
   flutter config --no-enable-swift-package-manager || true
-  # 须先 pub get：本地 mdk.podspec 的 s.version 要从 fvp darwin podspec 的
-  # `mdk ~> X.Y` 下限写入；先拉最新 SDK 再 pub get 会把 version 写成 0.40.x，
-  # 与 fvp 仍声明的 ~> 0.39.0 冲突（CocoaPods）。
   KOTV_FLUTTER_TARGET=ios "$ROOT/scripts/flutter-pub-get.sh"
-  # shellcheck source=kotv-fvp-deps.sh
-  source "$ROOT/scripts/kotv-fvp-deps.sh"
-  kotv_ensure_mdk_apple_pod
-  export KOTV_MDK_POD_PATH
 
   cd "$ROOT/flutter"
   kotv_flutter_asset_engines_hide
@@ -222,9 +214,7 @@ main() {
   ls -lh "$out"
   kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/App.framework/App" 5000000
   kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/Flutter.framework/Flutter" 1000000
-  kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/mdk.framework/mdk" 1000000
   kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/Mpv.framework/Mpv" 500000
-  kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/fvp.framework/fvp" 50000
   kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/Avcodec.framework/Avcodec" 500000
   kotv_flutter_asset_engines_reject "$out"
   kotv_ios_reject_asset_clutter "$out"
