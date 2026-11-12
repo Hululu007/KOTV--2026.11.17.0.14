@@ -482,9 +482,12 @@ class NativeMpvPlayback extends KotvPlayback {
         }
         confExtra.writeln('${e.key}=${e.value}');
       }
+      // MediaItem mime：无扩展名的 /proxy/play 须靠 mime 触发 lavf hls / extension_picky=0。
+      final mime = kotvPlayMime(url, format);
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,
+        if (mime != null) 'mime': mime,
         'live': live,
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,

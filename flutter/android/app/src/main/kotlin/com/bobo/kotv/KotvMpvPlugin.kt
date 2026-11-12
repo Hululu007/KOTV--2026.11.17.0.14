@@ -89,6 +89,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private var currentUrl = ""
   private var currentHeaders: Map<String, String> = emptyMap()
+  private var currentMime: String? = null
+  /** 本集是否已用 APPLICATION_M3U8 做过一次格式重试。 */
+  private var retriedHlsMime = false
   private var pendingStartAtMs = 0L
   /** 排在播放列表里的下一集；播到它时 [onMediaItemTransition] 把它切成当前集。 */
   private var queuedNext: KotvQueuedNext? = null
@@ -265,6 +268,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           return
         }
         val headers = stringMapArg(call, "headers")
+        val mime = call.argument<String>("mime")?.trim()?.ifEmpty { null }
         livePlayback = call.argument<Boolean>("live") == true
         ingestPlayerArgs(call)
         ingestEqualizerArgs(call)
@@ -277,7 +281,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             surfaceHost?.let { host ->
               if (surfaceLayerEnabled) host.setRender(renderTexture) else host.clearVideoLayer()
             }
-            openInternal(url, headers, pendingStartAtMs)
+            openInternal(url, headers, pendingStartAtMs, mime)
             result.success(null)
           } catch (e: Throwable) {
             emit(mapOf("event" to "error", "message" to (e.message ?: "open failed")))
@@ -703,7 +707,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             val url = currentUrl
             if (p != null && url.isNotBlank()) {
               val pos = p.currentPosition.coerceAtLeast(0L)
-              openInternal(url, currentHeaders, pos)
+              openInternal(url, currentHeaders, pos, currentMime)
             } else {
               p?.prepare()
               p?.play()
@@ -724,11 +728,19 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  private fun openInternal(url: String, headers: Map<String, String>, startPositionMs: Long) {
+  private fun openInternal(
+    url: String,
+    headers: Map<String, String>,
+    startPositionMs: Long,
+    mime: String? = null,
+    resetHlsRetry: Boolean = true,
+  ) {
     queuedNext = null
     currentSubs = emptyList()
     currentUrl = url
     currentHeaders = KotvPlayerNormalize.normalizeHeaders(headers)
+    currentMime = mime?.trim()?.ifEmpty { null }
+    if (resetHlsRetry) retriedHlsMime = false
     ensurePlayer()
     val p = player ?: error("mpv player missing")
     applyTrackSelectionPrefs()
@@ -745,6 +757,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         url = url,
         headers = headers,
         mediaId = url,
+        mime = currentMime,
         startPositionMs = if (startPositionMs > 0L) startPositionMs else C.TIME_UNSET,
       )
     // 起播定位：优先 ClippingConfiguration；兼容旧路径再传 startPositionMs。
@@ -757,6 +770,52 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     p.play()
     main.removeCallbacks(tick)
     main.post(tick)
+  }
+
+  /** 无扩展名代理地址等场景：首次未带 HLS mime 时，解析失败再锁 APPLICATION_M3U8 重开一次。 */
+  private fun shouldRetryHlsMime(error: PlaybackException): Boolean {
+    if (retriedHlsMime) return false
+    if (isHlsMime(currentMime)) return false
+    return when (error.errorCode) {
+      PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+      PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+      PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+      PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+      PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
+      -> true
+      else -> {
+        val msg = error.message.orEmpty()
+        msg.contains("Not detecting m3u8", ignoreCase = true) ||
+          msg.contains("Failed to recognize file format", ignoreCase = true)
+      }
+    }
+  }
+
+  private fun retryOpenWithHlsMime() {
+    val url = currentUrl
+    if (url.isBlank()) return
+    retriedHlsMime = true
+    val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+    try {
+      player?.stop()
+    } catch (_: Throwable) {
+    }
+    openInternal(
+      url = url,
+      headers = currentHeaders,
+      startPositionMs = pos,
+      mime = MimeTypes.APPLICATION_M3U8,
+      resetHlsRetry = false,
+    )
+  }
+
+  private fun isHlsMime(mime: String?): Boolean {
+    val m = mime?.trim().orEmpty()
+    if (m.isEmpty()) return false
+    return m.equals(MimeTypes.APPLICATION_M3U8, ignoreCase = true) ||
+      m.equals("application/vnd.apple.mpegurl", ignoreCase = true) ||
+      m.equals("audio/mpegurl", ignoreCase = true) ||
+      m.equals("audio/x-mpegurl", ignoreCase = true)
   }
 
   /** 点播、headers 与当前集相同才排队（无 DRM 会话；Exo 另有 currentDrm 守卫）。 */
@@ -1045,6 +1104,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
 
         override fun onPlayerError(error: PlaybackException) {
+          if (shouldRetryHlsMime(error)) {
+            Log.i(TAG, "retry open with HLS mime after ${error.errorCodeName}: ${error.message}")
+            retryOpenWithHlsMime()
+            return
+          }
           emit(mapOf("event" to "error", "message" to (error.message ?: error.errorCodeName)))
         }
 
