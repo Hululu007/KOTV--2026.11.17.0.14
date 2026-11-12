@@ -205,13 +205,17 @@ Map<String, String> kotvNormalizePlayHeaders(
       var k = e.key.trim();
       var v = e.value.trim();
       if (k.isEmpty || v.isEmpty) continue;
+      // 嗅探/续传残留的 Range 会导致整段开播只拿片段。
+      if (k.toLowerCase() == 'range') continue;
       if (v.contains(r'$') && (v.contains('#') || k.toLowerCase() == 'header')) {
         for (final part in v.split('#')) {
           final i = part.indexOf(r'$');
           if (i <= 0) continue;
           final hk = _canonicalHeader(part.substring(0, i).trim());
           final hv = part.substring(i + 1).trim();
-          if (hk.isNotEmpty && hv.isNotEmpty) out[hk] = hv;
+          if (hk.isEmpty || hv.isEmpty) continue;
+          if (hk.toLowerCase() == 'range') continue;
+          out[hk] = hv;
         }
         continue;
       }
@@ -254,6 +258,8 @@ KotvMpvHeaderSplit kotvSplitMpvHeaders(Map<String, String> headers) {
       case 'referer':
       case 'referrer':
         referer = v;
+        break;
+      case 'range':
         break;
       default:
         fields[k] = v;

@@ -421,6 +421,12 @@ class NativeMpvPlayback extends KotvPlayback {
         if (!_endedCtrl.isClosed) _endedCtrl.add(true);
         notifyListeners();
         break;
+      case 'live':
+        if (m['live'] == true) {
+          _live = true;
+          notifyListeners();
+        }
+        break;
       case 'error':
         _lastError = '${m['message'] ?? 'MPV error'}';
         _playing = false;
@@ -496,6 +502,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'tlsVerify': _opts.tlsVerify,
         'audioPassThrough': _opts.audioPassThrough,
         'diskCache': _opts.diskCache && !live,
+        'bufferBytes': KotvBufferBudget.bytes(),
         'dolbyVisionPolicy': _opts.dolbyVisionPolicy,
         'preferredTextLangs': _opts.preferredTextLangs,
         'render': _renderMode,
@@ -542,7 +549,8 @@ class NativeMpvPlayback extends KotvPlayback {
       isPlaying: () => _playing,
       position: () => _position,
       duration: () => _duration,
-      isLiveContent: () => _live || (_ready && _duration <= Duration.zero && _playing),
+      // 只信原生 isCurrentMediaItemLive 升会话后的 [_live]。
+      isLiveContent: () => _live,
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,
@@ -795,6 +803,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'tlsVerify': opts.tlsVerify,
         'audioPassThrough': opts.audioPassThrough,
         'diskCache': opts.diskCache && !_live,
+        'bufferBytes': KotvBufferBudget.bytes(),
         'dolbyVisionPolicy': opts.dolbyVisionPolicy,
         'preferredTextLangs': opts.preferredTextLangs,
         ...opts.equalizerChannelArgs(),

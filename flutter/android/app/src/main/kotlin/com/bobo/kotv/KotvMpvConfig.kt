@@ -55,6 +55,7 @@ internal object KotvMpvConfig {
     conf: String,
     subtitleOptions: MpvSubtitleOptions,
     resolveDolbyVisionPolicy: (Int) -> Int,
+    bufferBytes: Int = 0,
   ): MpvPlayerConfig {
     val configDir = File(ctx.filesDir, "mpv").apply { mkdirs() }
     val cacheDir = File(ctx.cacheDir, "mpv").apply { mkdirs() }
@@ -80,7 +81,14 @@ internal object KotvMpvConfig {
     } else {
       builder.addPreInitStringOption("tls-verify", "no")
     }
-    if (!livePlayback && diskCache) {
+    // 点播/直播共用 demuxer 字节预算；直播另关 cache-pause，避免 paused-for-cache 卡几秒。
+    for ((k, v) in KotvMedia3Playback.mpvDemuxerByteProps(bufferBytes)) {
+      builder.addPreInitStringOption(k, v)
+    }
+    if (livePlayback) {
+      builder.addPreInitStringOption("cache-pause", "no")
+      builder.addPreInitStringOption("cache-on-disk", "no")
+    } else if (diskCache) {
       val dir = File(ctx.cacheDir, "mpv-cache").apply { mkdirs() }
       builder.addDiskCacheOptions(dir, 3600)
     }

@@ -347,6 +347,9 @@ class FvpPlayback extends KotvPlayback {
         if (v.isInitialized && !_opening) {
           _refreshTracksQuiet();
         }
+        if (v.isInitialized) {
+          _maybeUpgradeLiveFromContent(c);
+        }
         if (v.isInitialized && !_vodBufferSet &&
             (lastInit != v.isInitialized || lastBuffering != v.isBuffering)) {
           _applyBufferRange(c);
@@ -786,6 +789,20 @@ class FvpPlayback extends KotvPlayback {
       }
     }
     return sum;
+  }
+
+  /// 内容态升 live：引擎 `isLive()` 为真时切短队列缓冲（对标 isCurrentMediaItemLive / media-live）。
+  void _maybeUpgradeLiveFromContent(VideoPlayerController c) {
+    if (_live || !identical(_c, c)) return;
+    try {
+      if (!c.isLive()) return;
+    } catch (_) {
+      return;
+    }
+    _live = true;
+    _vodBufferSet = false;
+    _applyBufferRange(c);
+    notifyListeners();
   }
 
   /// mdk [setBufferRange]：`minMs==0` 尽快解码；`minMs>0` 时队列空了要攒到 min 才继续出包。

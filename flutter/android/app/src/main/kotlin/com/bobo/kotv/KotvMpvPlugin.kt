@@ -75,6 +75,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var tlsVerify = true
   private var audioPassThrough = true
   private var diskCache = false
+  /** 前向缓冲字节顶，由 Dart KotvBufferBudget 下发。 */
+  private var bufferBytes: Int = 0
   private var dolbyVisionPolicy = 0
   private var preferredTextLangs = ""
   private var volumePct = 80.0
@@ -799,8 +801,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 点播页打开滑窗直播：Media3 `isCurrentMediaItemLive` 为真时升 live 会话，
-   * 去掉点播磁盘缓存后按当前 mime/进度再开（与 PlayerManager.isLive 同源信号）。
+   * 点播页打开滑窗直播：`isCurrentMediaItemLive` 为真时升 live 会话，
+   * 去掉点播磁盘缓存并重钉 cache-pause 后按当前 mime/进度再开。
    */
   private fun maybeUpgradeLiveFromMedia() {
     if (livePlayback || upgradedLiveFromMedia) return
@@ -824,6 +826,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       mime = currentMime,
       resetHlsRetry = false,
     )
+    emit(mapOf("event" to "live", "live" to true))
   }
 
   /** 解码失败：在 soft/hard 间切换一次并保留 mime/进度再开。 */
@@ -946,6 +949,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       gpuNext,
       vulkanEnabled,
       dolbyVisionPolicy,
+      bufferBytes,
       conf.hashCode(),
     ).joinToString("|")
 
@@ -962,6 +966,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       conf = conf,
       subtitleOptions = buildSubtitleOptions(),
       resolveDolbyVisionPolicy = ::resolveDolbyVisionPolicy,
+      bufferBytes = bufferBytes,
     )
 
   private fun buildMediaItem(
@@ -1080,7 +1085,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             retryOpenWithHlsMime()
             return
           }
-          if (!retriedDecodeFallback && KotvMpvHls.isDecodeError(error)) {
+          if (!retriedDecodeFallback && KotvMedia3Playback.isDecodeError(error)) {
             Log.i(TAG, "retry open with decode fallback after ${error.errorCodeName}: ${error.message}")
             retryOpenWithDecodeFallback()
             return
@@ -1618,6 +1623,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     call.argument<Boolean>("diskCache")?.let { diskCache = it }
     call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
     call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
+    call.argument<Number>("bufferBytes")?.toLong()?.let { n ->
+      if (n > 0L) bufferBytes = n.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
   }
 
   private fun ingestEqualizerArgs(call: MethodCall) {

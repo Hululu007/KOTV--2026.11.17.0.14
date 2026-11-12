@@ -41,6 +41,45 @@ void main() {
     expect(kotvPlayMime('https://cdn/play.php', null), isNull);
   });
 
+  test('mpv hls retry only when format empty and error is format/io', () {
+    expect(
+      kotvShouldRetryMpvHlsAfterError(
+        url: 'https://cdn/play.php?id=1',
+        format: null,
+        alreadyRetried: false,
+        errorText: 'Failed to recognize file format',
+      ),
+      isTrue,
+    );
+    expect(
+      kotvShouldRetryMpvHlsAfterError(
+        url: 'https://cdn/play.php?id=1',
+        format: 'video/mp4',
+        alreadyRetried: false,
+        errorText: 'Failed to recognize file format',
+      ),
+      isFalse,
+    );
+    expect(
+      kotvShouldRetryMpvHlsAfterError(
+        url: 'https://cdn/a.m3u8',
+        format: null,
+        alreadyRetried: false,
+        errorText: 'unknown format',
+      ),
+      isFalse,
+    );
+    expect(
+      kotvShouldRetryMpvHlsAfterError(
+        url: 'https://cdn/play.php?id=1',
+        format: null,
+        alreadyRetried: true,
+        errorText: 'unknown format',
+      ),
+      isFalse,
+    );
+  });
+
   test('image media codecs are not real video tracks', () {
     expect(kotvIsImageMediaCodec('png'), isTrue);
     expect(kotvIsImageMediaCodec('mjpeg'), isTrue);

@@ -7,7 +7,10 @@ import java.io.File
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
-/** Exo / Media3 MPV 共用：URI、字幕 mime、错误码 → mime、解码回退。 */
+/**
+ * Exo / Media3 MPV 共用开播辅助：URI、字幕 mime、错 mime 再开、解码回退、MPV HLS 再开条件。
+ * 缓冲字节串见 [mpvDemuxerByteProps]。
+ */
 internal object KotvMedia3Playback {
   fun playUri(url: String): Uri {
     val t = url.trim()
@@ -44,9 +47,18 @@ internal object KotvMedia3Playback {
     }
   }
 
+  fun isHlsMime(mime: String?): Boolean {
+    val m = mime?.trim().orEmpty()
+    if (m.isEmpty()) return false
+    return m.equals(MimeTypes.APPLICATION_M3U8, ignoreCase = true) ||
+      m.equals("application/vnd.apple.mpegurl", ignoreCase = true) ||
+      m.equals("audio/mpegurl", ignoreCase = true) ||
+      m.equals("audio/x-mpegurl", ignoreCase = true) ||
+      m.equals("application/x-mpegURL", ignoreCase = true)
+  }
+
   /**
-   * 错 mime 再开：容器/IO → HLS；清单错 → octet-stream（progressive / 按 URI 再选源）。
-   * 与 TV `ExoUtil.getMimeType` 同表。
+   * Exo：容器/IO → HLS；清单错 → octet-stream（progressive / 按 URI 再选源）。
    */
   fun mimeForError(errorCode: Int): String? =
     when (errorCode) {
@@ -59,6 +71,28 @@ internal object KotvMedia3Playback {
       -> MimeTypes.APPLICATION_OCTET_STREAM
       else -> null
     }
+
+  /**
+   * MPV：仅当开播未带 mime（无 format 信号）时，对 IO/容器/清单解析错锁 M3U8 再开一次。
+   * 已有非空 mime 时不覆盖（避免把明确点播容器强改成 HLS）。
+   */
+  fun shouldRetryMpvHlsMime(
+    error: PlaybackException,
+    currentMime: String?,
+    alreadyRetried: Boolean,
+  ): Boolean {
+    if (alreadyRetried) return false
+    if (!currentMime.isNullOrBlank()) return false
+    return when (error.errorCode) {
+      PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+      PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+      PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+      PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+      PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
+      -> true
+      else -> false
+    }
+  }
 
   fun isDecodeError(error: PlaybackException): Boolean =
     when (error.errorCode) {
@@ -76,4 +110,20 @@ internal object KotvMedia3Playback {
       "hard" -> "soft"
       else -> "soft"
     }
+
+  /** 与 Dart [KotvBufferBudget.mpvCacheProps] 同表；[budgetBytes]≤0 时返回空。 */
+  fun mpvDemuxerByteProps(budgetBytes: Int): Map<String, String> {
+    if (budgetBytes <= 0) return emptyMap()
+    fun miB(n: Int): String {
+      var mib = (n / (1024 * 1024)).coerceAtLeast(1)
+      return "${mib}MiB"
+    }
+    return mapOf(
+      "cache" to "yes",
+      "demuxer-max-bytes" to miB(budgetBytes),
+      "demuxer-max-back-bytes" to miB(budgetBytes / 8),
+      "cache-pause-initial" to "no",
+      "framedrop" to "vo",
+    )
+  }
 }

@@ -411,6 +411,12 @@ class ExoPlayback extends KotvPlayback {
         if (!_endedCtrl.isClosed) _endedCtrl.add(true);
         notifyListeners();
         break;
+      case 'live':
+        if (m['live'] == true) {
+          _live = true;
+          notifyListeners();
+        }
+        break;
       case 'error':
         _lastError = '${m['message'] ?? 'Source error'}';
         _playing = false;

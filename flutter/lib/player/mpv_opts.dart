@@ -21,7 +21,7 @@ const kotvDemuxerLavfO =
     'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0,'
     'probesize=8000000,analyzeduration=8000000';
 
-/// Media3 MpvNetworkOptions：URI 已是 HLS 时只加 `http_persistent=0`；
+/// HLS lavf 附加：URI 已是 HLS 时只加 `http_persistent=0`；
 /// 仅靠 mime/format 认 HLS（无扩展名代理）时再加 `extension_picky=0`。
 const kotvHlsLavfOAddForUri = 'http_persistent=0';
 const kotvHlsLavfOAddForMime = 'extension_picky=0,http_persistent=0';

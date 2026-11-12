@@ -102,6 +102,9 @@ class MediaKitPlayback extends KotvPlayback {
       notifyListeners();
       unawaited(_onPlayerCompleted(done));
     }));
+    _subs.add(player.stream.error.listen((msg) {
+      unawaited(_maybeRetryHlsAfterError(msg));
+    }));
     _subs.add(player.stream.playlist.listen((pl) {
       final q = _queued;
       if (q == null) return;
@@ -136,11 +139,15 @@ class MediaKitPlayback extends KotvPlayback {
   final List<StreamSubscription> _subs = [];
   String _url = '';
   Map<String, String> _headers = const {};
+  /// 本次 open 传入的 format（空 mime 失败时可锁 HLS 再开）。
+  String? _openFormat;
+  bool _formatRetried = false;
   bool _buffering = false;
   bool _repeatOne = false;
   bool _live;
   /// 当前会话挂了 ClearKey（demuxer-lavf-o）；无缝排队不复用该会话。
   bool _drmSession = false;
+  String? _clearKeyHex;
   int _speedBps = 0;
   late Future<void> _optsReady;
   /// 换源时本地尺寸清零；未 [_acceptSize] 前不采信 libmpv 残留宽高。
@@ -203,6 +210,36 @@ class MediaKitPlayback extends KotvPlayback {
     );
   }
 
+  /// 空 format 且错误指向格式/加载失败时，锁 HLS mime 再开一次。
+  Future<void> _maybeRetryHlsAfterError(String message) async {
+    final url = _url;
+    if (url.isEmpty) return;
+    if (!kotvShouldRetryMpvHlsAfterError(
+      url: url,
+      format: _openFormat,
+      alreadyRetried: _formatRetried,
+      errorText: message,
+    )) {
+      return;
+    }
+    _formatRetried = true;
+    _openFormat = 'application/x-mpegURL';
+    final pos = position;
+    try {
+      await _applyLavfForOpen(url: url, format: _openFormat, clearKey: _clearKeyHex);
+      final split = kotvSplitMpvHeaders(_headers);
+      _mpvUserAgent = split.userAgent;
+      _mpvReferer = split.referer;
+      await _applyMpvHeaderProps();
+      final media = Media(
+        url,
+        httpHeaders: split.fields.isEmpty ? null : split.fields,
+        start: pos > Duration.zero ? pos : null,
+      );
+      await _openThenUnpause(media);
+    } catch (_) {}
+  }
+
   Future<void> _prepareOpts() async {
     try {
       final platform = player.platform;
@@ -222,7 +259,7 @@ class MediaKitPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  /// 与 Media3 MpvPlayer 相同属性：`duration/full`、`media-live`（不用 EXTINF 撑 UI）。
+  /// 观测引擎时间轴：`duration/full`、`media-live`（时长只信引擎，不灌节目单）。
   Future<void> _ensureMpvTimelineObservers() async {
     if (_observedMpvProps) return;
     final platform = player.platform;
@@ -550,6 +587,8 @@ class MediaKitPlayback extends KotvPlayback {
   }) async {
     _url = url;
     _live = live;
+    _openFormat = format;
+    _formatRetried = false;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _durationFull = Duration.zero;
     // 换源清尺寸（与 Exo / 原生 MPV 一致）；避免 libmpv 残留宽高误判就绪。
@@ -561,6 +600,7 @@ class MediaKitPlayback extends KotvPlayback {
       throw StateError('MPV 不支持该 DRM，请用内置 ExoPlayer');
     }
     _drmSession = clearKeyHex != null;
+    _clearKeyHex = clearKeyHex;
     await _optsReady;
     await _opts.applyAfterAttach(player, live: live);
     await _ensureMpvTimelineObservers();
@@ -635,6 +675,9 @@ class MediaKitPlayback extends KotvPlayback {
     _url = '';
     _queued = null;
     _drmSession = false;
+    _clearKeyHex = null;
+    _openFormat = null;
+    _formatRetried = false;
     _durationFull = Duration.zero;
     _completedGate = null;
     _clearVideoSize();

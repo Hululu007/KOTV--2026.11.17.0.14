@@ -222,11 +222,25 @@ void main() {
     expect(split.referer, 'https://site.example/');
     expect(split.fields.containsKey('User-Agent'), isFalse);
     expect(split.fields.containsKey('Referer'), isFalse);
+    expect(split.fields.containsKey('Range'), isFalse);
     expect(split.fields['Cookie'], 'a=b');
     final empty = kotvSplitMpvHeaders(const {});
     expect(empty.userAgent, isEmpty);
     expect(empty.referer, isEmpty);
     expect(empty.fields, isEmpty);
+  });
+
+  test('normalize strips Range leftover', () {
+    final got = kotvNormalizePlayHeaders(
+      const {
+        'Range': 'bytes=0-1',
+        'Cookie': 'a=b',
+      },
+      url: 'https://cdn.example/a.mp4',
+      addDefaultUa: false,
+    );
+    expect(got.containsKey('Range'), isFalse);
+    expect(got['Cookie'], 'a=b');
   });
 
   test('empty site header uses okhttp ua, settings ua wins', () {

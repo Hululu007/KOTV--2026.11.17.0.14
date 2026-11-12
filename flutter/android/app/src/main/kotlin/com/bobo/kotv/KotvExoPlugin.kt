@@ -75,7 +75,7 @@ import java.util.concurrent.atomic.AtomicLong
  * - soft：按 softAudioPrefer / softVideoPrefer 决定 nextlib FFmpeg 音/视轨是否优先
  *
  * Media3 完整 AAR 见 scripts/build-fongmi-media3.sh（覆盖残缺包）。
- * mime 靠引擎 planPlayback；空 mime 时 Media3 只按 URI 选 MediaSource；错容器/清单靠 mimeForError 再开。
+ * mime 靠引擎 planPlayback；空 mime 时只按 URI 选 MediaSource；错容器/清单靠 mimeForError 再开。
  */
 @OptIn(UnstableApi::class)
 class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
@@ -1140,6 +1140,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       startPositionMs = pos,
       resetRecovery = false,
     )
+    emit(mapOf("event" to "live", "live" to true))
   }
 
   /** 解码失败：在 soft/hard 间切换一次并保留 mime/进度再开。 */
