@@ -8,7 +8,7 @@ const (
 )
 
 // Process 只在节目单带结束标记、且能分出明确少数广告时删段。
-// 没有结束标记、分组说不清、或少数块太多时，原样返回。
+// 没有结束标记、证据不足、或少数块太多时，原样返回。
 func Process(content string) string {
 	if strings.TrimSpace(content) == "" || !strings.Contains(content, "#EXT-X-ENDLIST") {
 		return content
@@ -29,10 +29,28 @@ func splitLines(content string) []string {
 
 func findAds(lines []string) map[int]struct{} {
 	segments := segmentLines(lines)
-	if ads := findAdsByLocation(segments); len(ads) > 0 {
-		return ads
+	// 几乎每片都带 DISCONTINUITY 时，主机「少数派=广告」不可靠（多 CDN / 逐片不连续的正片常见），
+	// 只走不连续区块规则；区块也分不清则整单保留。
+	if !discontinuitySaturated(lines, len(segments)) {
+		if ads := findAdsByLocation(segments); len(ads) > 0 {
+			return ads
+		}
 	}
 	return findAdsByDiscontinuity(lines)
+}
+
+// discontinuitySaturated：不连续标记数达到切片半数及以上。
+func discontinuitySaturated(lines []string, segCount int) bool {
+	if segCount < 4 {
+		return false
+	}
+	discs := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "#EXT-X-DISCONTINUITY" {
+			discs++
+		}
+	}
+	return discs*2 >= segCount
 }
 
 func segmentLines(lines []string) []string {

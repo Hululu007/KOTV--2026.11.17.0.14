@@ -66,6 +66,29 @@ func TestEqualHostsNotCut(t *testing.T) {
 	}
 }
 
+// 逐片 DISCONTINUITY + 双主机：不能按少数主机删，否则会误伤正片前缀 CDN。
+func TestDiscSaturatedMultiHostKept(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:50\n")
+	for i := 1; i <= 4; i++ {
+		b.WriteString("#EXTINF:3.0,\n#EXT-X-DISCONTINUITY\n")
+		b.WriteString("http://cdn-a.example/play/ts/seg" + itoa(i) + "\n")
+	}
+	for i := 1; i <= 12; i++ {
+		b.WriteString("#EXTINF:3.0,\n#EXT-X-DISCONTINUITY\n")
+		b.WriteString("https://cdn-b.example/file/" + itoa(i) + "/clip.png\n")
+	}
+	b.WriteString("#EXT-X-ENDLIST\n")
+	in := b.String()
+	got := Process(in)
+	if got != in {
+		t.Fatalf("disc-saturated multi-host must stay intact\n got:\n%s", got)
+	}
+	if !strings.Contains(got, "cdn-a.example") || !strings.Contains(got, "cdn-b.example") {
+		t.Fatalf("both hosts must stay:\n%s", got)
+	}
+}
+
 func TestSameHostHashNamesKept(t *testing.T) {
 	in := "#EXTM3U\n" +
 		"#EXTINF:4.0,\nhttps://cdn.example/v/a75c0511.ts\n" +
