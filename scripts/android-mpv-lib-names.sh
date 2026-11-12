@@ -7,7 +7,7 @@
 
 KOTV_MEDIA3_MPV_VER="${KOTV_MEDIA3_MPV_VER:-1.11.0-alpha01-fongmi}"
 
-# libmpv 依赖的 libc++ 符号；ass/fvp 旧 libc++ 会缺。
+# libmpv 依赖的 libc++ 符号；ass-kt 等旧 libc++ 会缺。
 KOTV_ANDROID_LIBCXX_REQUIRED_SYM='_ZNSt6__ndk127__from_chars_floating_pointIfE'
 # libavfilter → libavcodec：混用 nextlib avcodec 时会缺。
 KOTV_ANDROID_LIBAV_REQUIRED_SYM='avpriv_elbg_free'
@@ -67,6 +67,14 @@ KOTV_ANDROID_MPV_APK_FORBIDDEN=(
   libmvformat.so
   libmvfilter.so
   libmvdevice.so
+)
+
+# 安卓不编 fvp/mdk：APK 中不得出现（与 flutter/android/kotv_android_no_fvp.gradle 一致）。
+KOTV_ANDROID_FVP_APK_FORBIDDEN=(
+  libfvp.so
+  libmdk.so
+  libffmpeg.so
+  libdav1d.so
 )
 
 # 最终 APK lib/<abi>/ 必须有。

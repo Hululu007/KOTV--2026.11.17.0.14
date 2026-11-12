@@ -92,6 +92,13 @@ while IFS= read -r abi; do
       exit 1
     fi
   done
+  for dup in "${KOTV_ANDROID_FVP_APK_FORBIDDEN[@]}"; do
+    p="lib/${abi}/${dup}"
+    if grep -qxF "$p" <<<"$listing"; then
+      echo "ERROR: APK must not contain $p (Android does not ship FVP/mdk)" >&2
+      exit 1
+    fi
+  done
 done <<<"$abis"
 
 # libc++ / libavcodec 必须是配套完整版（否则 libmpv dlopen 失败）。

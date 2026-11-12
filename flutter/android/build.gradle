@@ -20,7 +20,7 @@ subprojects { sub ->
 
 // AGP 8+：旧插件缺 namespace 时从 Manifest package 回填。
 // 与 scripts/patch-android-plugin-namespaces.sh 双保险。
-// 同时统一 NDK：避免子工程（如 fvp）回落到 AGP 默认 NDK 并触发易损坏的自动下载。
+// 同时统一 NDK：避免子工程回落到 AGP 默认 NDK 并触发易损坏的自动下载。
 subprojects { sub ->
     sub.pluginManager.withPlugin("com.android.library") {
         def androidExt = sub.extensions.findByName("android")
