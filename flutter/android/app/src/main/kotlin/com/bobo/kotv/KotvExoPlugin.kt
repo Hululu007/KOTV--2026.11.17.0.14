@@ -111,8 +111,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var formatRetried = false
   /** 本集是否已做过一次解码 soft/hard 回退。 */
   private var retriedDecodeFallback = false
-  /** 本集是否已按 isCurrentMediaItemLive 升过 live 会话。 */
+  /** 本集是否已按 isCurrentMediaItemLive 升过 live 缓冲。 */
   private var upgradedLiveFromMedia = false
+  /** 引擎判 live：只影响缓冲/磁盘缓存，不挡 queueNext。 */
+  private var engineLive = false
   /** auto | soft | hard；硬/自动优先 MediaCodec 硬解直出。 */
   private var decodeMode: String = "auto"
   /** false=SurfaceView（HDR 默认），true=Flutter Texture 兼容模式。 */
@@ -1047,6 +1049,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       formatRetried = false
       retriedDecodeFallback = false
       upgradedLiveFromMedia = false
+      engineLive = false
     }
     secondaryAutoApplied = false
     queuedNext = null
@@ -1062,9 +1065,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
     val nextDrmKey = drmKey(drm)
     val wantSecondary = secondarySubtitleMode != "off"
+    val wantLiveBuffer = livePlayback || engineLive
     val needRebuild =
       player == null ||
-        playerBuiltLive != live ||
+        playerBuiltLive != wantLiveBuffer ||
         playerBuiltDecode != decodeMode ||
         playerBuiltDrmKey != nextDrmKey ||
         playerBuiltLibass != libassEnabled ||
@@ -1076,7 +1080,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         playerBuiltSoftPrefer != (softAudioPrefer to softVideoPrefer)
 
     if (needRebuild) {
-      rebuildPlayer(live, decodeMode, nextDrmKey)
+      rebuildPlayer(wantLiveBuffer, decodeMode, nextDrmKey)
     } else {
       httpFactory
         ?.setUserAgent(null)
@@ -1114,33 +1118,34 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 点播页打开滑窗直播：`isCurrentMediaItemLive` 为真时升 live 会话，
-   * 去掉点播磁盘缓存后按当前 mime/进度再开。
+   * 点播页打开滑窗直播：`isCurrentMediaItemLive` 为真时按直播缓冲再开（去磁盘缓存），
+   * 不改开播标定的 [livePlayback]，避免点播 queueNext 被拒。
    */
   private fun maybeUpgradeLiveFromMedia() {
-    if (livePlayback || upgradedLiveFromMedia) return
+    if (livePlayback || engineLive || upgradedLiveFromMedia) return
     val p = player ?: return
     if (!p.isCurrentMediaItemLive) return
     val url = currentUrl
     if (url.isBlank()) return
     upgradedLiveFromMedia = true
-    livePlayback = true
+    engineLive = true
     val pos = p.currentPosition.coerceAtLeast(0L)
-    Log.i(TAG, "upgrade to live session from isCurrentMediaItemLive")
+    Log.i(TAG, "upgrade live buffer from isCurrentMediaItemLive")
     try {
       p.stop()
     } catch (_: Throwable) {
     }
+    // live=false 保留点播标定；engineLive 让 rebuild 走直播缓冲。
     openInternal(
       url = url,
       headers = currentHeaders,
       mime = currentMime,
       drm = currentDrm,
-      live = true,
+      live = false,
       startPositionMs = pos,
       resetRecovery = false,
     )
-    emit(mapOf("event" to "live", "live" to true))
+    emit(mapOf("event" to "live", "live" to true, "engineOnly" to true))
   }
 
   /** 解码失败：在 soft/hard 间切换一次并保留 mime/进度再开。 */

@@ -65,6 +65,8 @@ class ExoPlayback extends KotvPlayback {
   bool _videoOutputSuppressed = false;
   String _videoScale = 'default';
   bool _live = false;
+  /// 引擎 isCurrentMediaItemLive（守卫用）；不挡 queueNext。
+  bool _engineLive = false;
   String? _format;
   String? _lastError;
   bool _tunneling = false;
@@ -412,8 +414,9 @@ class ExoPlayback extends KotvPlayback {
         notifyListeners();
         break;
       case 'live':
-        if (m['live'] == true) {
-          _live = true;
+        // 引擎升 live 缓冲：只记 _engineLive，不改开播标定的 _live。
+        if (m['live'] == true && !_engineLive) {
+          _engineLive = true;
           notifyListeners();
         }
         break;
@@ -538,8 +541,8 @@ class ExoPlayback extends KotvPlayback {
       isPlaying: () => _playing,
       position: () => _position,
       duration: () => _duration,
-      // 只信原生 isCurrentMediaItemLive 升会话后的 [_live]。
-      isLiveContent: () => kotvIsLiveForGuard(markedLive: _live),
+      isLiveContent: () =>
+          kotvIsLiveForGuard(markedLive: _live, engineLive: _engineLive),
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,
