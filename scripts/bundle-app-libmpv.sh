@@ -272,7 +272,7 @@ PY
 )
 }
 
-# mdk/fvp 自带 /usr/local/lib、/opt/homebrew/lib rpath 时，会优先加载 Cellar FFmpeg，
+# Frameworks 里若残留 /usr/local/lib、/opt/homebrew/lib rpath，会优先加载 Cellar FFmpeg，
 # 与 libmpv 内嵌 FFmpeg 的同名 ObjC 类（AVFFrameReceiver）冲突 → talloc canary SIGABRT。
 kotv_macos_strip_homebrew_rpaths_tree() {
   local fw="$1"
@@ -475,7 +475,7 @@ case "$(uname -s)" in
 EOF
       echo "  + Resources/vulkan/icd.d/MoltenVK_icd.json"
     fi
-    echo "==> strip Homebrew rpaths from Frameworks (mdk/fvp/libmpv)"
+    echo "==> strip Homebrew rpaths from Frameworks (libmpv)"
     kotv_macos_strip_homebrew_rpaths_tree "$FW"
     kotv_macos_verify_libmpv_self_contained "$FW/libmpv.dylib"
     kotv_macos_adhoc_sign_app "$DEST"
