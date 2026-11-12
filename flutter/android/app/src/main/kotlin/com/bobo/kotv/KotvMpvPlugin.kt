@@ -2354,7 +2354,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           } catch (_: Throwable) {
             false
           }
-          if (!image && !albumart && !KotvMpvCodecs.imageCodec(codec)) {
+          if (!image && !albumart && !KotvAndroidPlayback.isImageMediaCodec(codec)) {
             allVideoImage = false
           }
         }

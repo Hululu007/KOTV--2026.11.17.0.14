@@ -185,6 +185,21 @@ internal object KotvAndroidPlayback {
       else -> "soft"
     }
 
+  /**
+   * 静止图/封面类「视频」编码（与 Dart [kotvIsImageMediaCodec] 同语义）。
+   * 不算可出画的实视频轨：瞬时 EOF 勿当正常片尾连播。
+   */
+  fun isImageMediaCodec(codec: String?): Boolean {
+    val raw = codec?.trim()?.lowercase().orEmpty()
+    if (raw.isEmpty()) return false
+    val base = raw.split('.', ' ', '/').firstOrNull { it.isNotEmpty() } ?: raw
+    return when (base) {
+      "png", "mjpeg", "mjpg", "jpeg", "jpg", "webp", "bmp", "gif", "tiff", "tif", "ppm", "pgm" ->
+        true
+      else -> raw.contains("png") || raw.startsWith("mjpeg") || raw.startsWith("mjpg")
+    }
+  }
+
   /** 对应 Dart [KotvBufferBudget.mpvCacheProps]；[budgetBytes]≤0 时返回空。 */
   fun mpvDemuxerByteProps(budgetBytes: Int): Map<String, String> {
     if (budgetBytes <= 0) return emptyMap()
