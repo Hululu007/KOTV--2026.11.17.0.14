@@ -1657,8 +1657,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.observeProperty("time-pos", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
     MPVLib.observeProperty("duration", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
     MPVLib.observeProperty("duration/full", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
+    // mpv 语义为 flag；桌面 media_kit 只能订 string，此处订 FLAG 即可。
     MPVLib.observeProperty("media-live", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
-    MPVLib.observeProperty("media-live", MPVLib.MpvFormat.MPV_FORMAT_STRING)
     MPVLib.observeProperty("pause", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     MPVLib.observeProperty("paused-for-cache", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     MPVLib.observeProperty("seeking", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
@@ -1770,16 +1770,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       durationFullSec = 0.0
       upgradedLiveFromMedia = livePlayback
       loadWallMs = SystemClock.elapsedRealtime()
-      // 只写在这一次 loadfile 上，播完恢复，不留在会话里。
-      val opts = ArrayList<String>(8)
-      if (startMs > 0L) opts.add("start=${startMs / 1000.0}")
-      KotvMedia3Playback.appendLavfHlsLoadOpts(url, currentMime, opts)
-      appendHeaderOptions(headers, opts)
-      if (opts.isEmpty()) {
-        MPVLib.command(arrayOf("loadfile", url, "replace"))
-      } else {
-        MPVLib.command(arrayOf("loadfile", url, "replace", "-1", encodeLoadfileOptions(opts)))
-      }
+      // lavf / headers / start 只挂在这一次 loadfile 上，播完恢复。
+      loadfile(url, "replace", buildLoadfileOpts(url, currentMime, headers, startMs))
       MPVLib.setPropertyBoolean("pause", false)
       paused = false
       playing = true
@@ -1807,20 +1799,38 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return try {
       // 只留正在播的一项，新排的总在第 2 项（下标 1）。
       MPVLib.command(arrayOf("playlist-clear"))
-      val opts = ArrayList<String>(8)
-      if (next.startAtMs > 0L) opts.add("start=${next.startAtMs / 1000.0}")
-      KotvMedia3Playback.appendLavfHlsLoadOpts(next.url, next.mime, opts)
-      appendHeaderOptions(next.headers, opts)
-      if (opts.isEmpty()) {
-        MPVLib.command(arrayOf("loadfile", next.url, "append"))
-      } else {
-        MPVLib.command(arrayOf("loadfile", next.url, "append", "-1", encodeLoadfileOptions(opts)))
-      }
+      loadfile(
+        next.url,
+        "append",
+        buildLoadfileOpts(next.url, next.mime, next.headers, next.startAtMs),
+      )
       queuedNext = next
       true
     } catch (t: Throwable) {
       Log.w(TAG, "queue next failed", t)
       false
+    }
+  }
+
+  /** loadfile 一次性选项：start + HLS lavf + 请求头。 */
+  private fun buildLoadfileOpts(
+    url: String,
+    mime: String?,
+    headers: Map<String, String>,
+    startAtMs: Long,
+  ): List<String> {
+    val opts = ArrayList<String>(8)
+    if (startAtMs > 0L) opts.add("start=${startAtMs / 1000.0}")
+    KotvMedia3Playback.appendLavfHlsLoadOpts(url, mime, opts)
+    appendHeaderOptions(headers, opts)
+    return opts
+  }
+
+  private fun loadfile(url: String, mode: String, opts: List<String>) {
+    if (opts.isEmpty()) {
+      MPVLib.command(arrayOf("loadfile", url, mode))
+    } else {
+      MPVLib.command(arrayOf("loadfile", url, mode, "-1", encodeLoadfileOptions(opts)))
     }
   }
 
@@ -1869,6 +1879,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     retriedHlsMime = false
     retriedDecodeFallback = false
     eof = false
+    durationSec = 0.0
+    durationFullSec = 0.0
     maxPlayedSec = 0.0
     loadWallMs = SystemClock.elapsedRealtime()
     width = 0
@@ -2039,12 +2051,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "current-vo" -> {
         directActive = value == "mediacodec_embed"
         main.post { applyVideoFrame() }
-      }
-      "media-live" -> {
-        val live = value.trim().equals("yes", true) ||
-          value.trim().equals("true", true) ||
-          value.trim() == "1"
-        if (live) main.post { maybeUpgradeLiveFromMedia() }
       }
     }
   }
@@ -2234,11 +2240,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       emit(mapOf("event" to "error", "message" to msg))
       return
     }
-    if (KotvMedia3Playback.shouldRetryMpvHlsAfterError(msg, currentMime, retriedHlsMime)) {
+    val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
+    if (KotvMedia3Playback.shouldRetryMpvHlsAfterError(msg, url, currentMime, retriedHlsMime)) {
       Log.i(TAG, "retry load with HLS demuxer after: $msg")
       retriedHlsMime = true
       currentMime = "application/x-mpegURL"
-      val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
       val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
       if (url.isBlank()) {
         emit(mapOf("event" to "error", "message" to msg))

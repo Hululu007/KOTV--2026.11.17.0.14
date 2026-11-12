@@ -8,20 +8,23 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
 /**
- * Exo 开播辅助：URI、字幕 mime、错 mime 再开、IO 错码映射。
- * 安卓自研 MPVLib 共用：HLS lavf、[mpvDemuxerByteProps]、[nextDecodeMode]、文案重试判定。
+ * 安卓 Exo / 原生 MPV 共用开播辅助。
+ *
+ * Exo：URI、字幕 mime、错 mime 再开、IO 错码。
+ * MPV：HLS lavf（常量与 Dart [kotvDemuxerLavfO] / [kotvApplyLavfForOpen] 同源）、
+ * [mpvDemuxerByteProps]、解码回退、文案重试。改 lavf 串须同步 Dart。
  */
 internal object KotvMedia3Playback {
-  /** 与 Dart [kotvDemuxerLavfO] / 插件 LAVF_DEMUXER_O 同串。 */
+  /** Dart [kotvDemuxerLavfO]。 */
   const val LAVF_DEMUXER_O =
     "seg_max_retry=5,strict=experimental," +
       "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0," +
       "probesize=8000000,analyzeduration=8000000"
 
-  /** 与 Dart [kotvHlsLavfOAddForUri] 同串。 */
+  /** Dart [kotvHlsLavfOAddForUri]。 */
   const val HLS_LAVF_O_ADD_URI = "http_persistent=0"
 
-  /** 与 Dart [kotvHlsLavfOAddForMime] 同串。 */
+  /** Dart [kotvHlsLavfOAddForMime]。 */
   const val HLS_LAVF_O_ADD_MIME = "extension_picky=0,http_persistent=0"
   fun playUri(url: String): Uri {
     val t = url.trim()
@@ -134,15 +137,17 @@ internal object KotvMedia3Playback {
     }
 
   /**
-   * 原生 MPV / Dart [kotvShouldRetryMpvHlsAfterError]：尚未按 HLS 打开且文案像 IO/打开失败时再试一次。
+   * 原生 MPV：Dart [kotvShouldRetryMpvHlsAfterError]。
+   * 已按 URL/mime 当 HLS 开过则不再试；仅 IO/打开失败文案触发。
    */
   fun shouldRetryMpvHlsAfterError(
     errorText: String,
+    url: String,
     currentMime: String?,
     alreadyRetried: Boolean,
   ): Boolean {
     if (alreadyRetried) return false
-    if (isHlsMime(currentMime)) return false
+    if (isHls(url, currentMime)) return false
     val t = errorText.lowercase()
     if (t.contains("tcp:") || (t.contains("http") && t.contains("error"))) return true
     if (t.contains("failed to open") || t.contains("error opening") || t.contains("i/o")) {

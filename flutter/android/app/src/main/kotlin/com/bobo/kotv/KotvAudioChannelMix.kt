@@ -1,7 +1,7 @@
 package com.bobo.kotv
 
 /**
- * PCM 声道混合矩阵（源自 Media3 mpvplayer AudioChannelMix 公开源）。
+ * PCM 声道混合矩阵（公开 AudioChannelMix 算法）。
  * 用于 Exo ChannelMixingAudioProcessor / 软 EQ 路径。
  */
 object KotvAudioChannelMix {

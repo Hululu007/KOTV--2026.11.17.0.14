@@ -560,7 +560,7 @@ class NativeMpvPlayback extends KotvPlayback {
     bool sameSession() => _openSerial == session && _url.isNotEmpty;
     await kotvGuardSilentVideo(
       hasVideoSize: () => _w > 0 && _h > 0,
-      // 未 loaded 只当缓冲等待；loaded 后才进黑屏窗口（与桌面 media_kit 一致）。
+      // 未 loaded 只当缓冲等待；loaded 后才进黑屏窗口。
       isBuffering: () => sameSession() && (!_loaded || buffering),
       sessionAlive: () {
         if (_lastError != null) return false;
@@ -569,7 +569,7 @@ class NativeMpvPlayback extends KotvPlayback {
       isPlaying: () => _playing,
       position: () => _position,
       duration: () => _duration,
-      // 只信 open 标定或引擎 media-live 升过后的 [_live]。
+      // 只信 open 标定或引擎 media-live；勿用 duration==0 启发式。
       isLiveContent: () => _live,
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
@@ -602,6 +602,7 @@ class NativeMpvPlayback extends KotvPlayback {
 
   Future<void> _unloadKeepingContext() async {
     _queued = null;
+    _openSerial++;
     try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
@@ -751,6 +752,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _queued = null;
     _url = q.url;
     _headers = q.headers;
+    _openSerial++;
     _completed = false;
     _lastError = null;
     _position = Duration.zero;
