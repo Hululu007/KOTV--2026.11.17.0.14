@@ -1967,6 +1967,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentMime = next.mime
     retriedHlsMime = false
     retriedDecodeFallback = false
+    upgradedLiveFromMedia = false
+    engineLive = false
     eof = false
     durationSec = 0.0
     durationFullSec = 0.0
@@ -2217,8 +2219,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     emit(mapOf("event" to "live", "live" to true, "engineOnly" to true))
     Log.i(TAG, "upgrade live buffer from media-live url=$loadedUrl")
     retrySeekSec = positionSec.coerceAtLeast(0.0)
+    // startLoad 会清 queuedNext；升缓冲后按保留项再 append，避免无缝排队被拆掉。
+    val keepQueued = queuedNext
     try {
       ensurePlayerAndReload()
+      if (keepQueued != null && !livePlayback) {
+        queueNext(keepQueued)
+      }
     } catch (t: Throwable) {
       Log.w(TAG, "live upgrade reload failed", t)
       emitLoadFailure(t)
@@ -2299,6 +2306,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       return
     }
     if (pendingSeamlessId != null) return
+    // 标定直播且无排队：时间轴抖动勿当片尾硬切。
+    if (livePlayback) return
     eof = true
     playing = false
     emit(mapOf("event" to "completed"))

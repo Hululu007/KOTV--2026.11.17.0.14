@@ -440,6 +440,7 @@ class ExoPlayback extends KotvPlayback {
   }) async {
     _url = url;
     _live = live;
+    _engineLive = false;
     _format = format;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _drm = drm;
@@ -1293,6 +1294,7 @@ class ExoPlayback extends KotvPlayback {
     _headers = q.headers;
     _format = q.format;
     _subs = q.subs;
+    _engineLive = false;
     _completed = false;
     _lastError = null;
     _position = Duration.zero;

@@ -62,10 +62,11 @@ class NativeMpvPlayback extends KotvPlayback {
   Duration _buffered = Duration.zero;
   int _speedBps = 0;
   bool _live = false;
-  /// Native MPV 上下文创建时的 live 模式。
-  /// 目的：避免先因 setVideoScale/_setSurfaceLayerEnabled 创建了 VOD 上下文，
-  /// 再 open(live:true) 时因为 `_nativeReady` 直接 return 导致没重建。
-  bool _nativeLive = false;
+  /// create 时写入的标定 live（与 [_live] 同步）；供 [_ensureNative] 决定是否重建。
+  /// 勿与引擎 media-live 混用，否则 Surface 再挂会按点播 recreate 清掉引擎 live 态。
+  bool _createdAsLive = false;
+  /// 引擎 media-live（守卫用）；不挡 queueNext，也不参与 create 比较。
+  bool _engineLive = false;
   String _url = '';
   Map<String, String> _headers = const {};
   String? _lastError;
@@ -334,8 +335,8 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   Future<void> _ensureNative({bool live = false}) async {
-    // live 切换必须允许重建；否则 createdAsLive 不会更新。
-    if (_nativeReady && _nativeLive == live) return;
+    // 标定 live 切换必须允许重建；引擎 live 不参与比较。
+    if (_nativeReady && _createdAsLive == live) return;
     try {
       await _ch.invokeMethod<dynamic>('create', {
         'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
@@ -356,7 +357,7 @@ class NativeMpvPlayback extends KotvPlayback {
         _lastError = '$e';
         notifyListeners();
       });
-      _nativeLive = live;
+      _createdAsLive = live;
       _nativeReady = true;
       _bumpSurface();
       notifyListeners();
@@ -436,10 +437,9 @@ class NativeMpvPlayback extends KotvPlayback {
         notifyListeners();
         break;
       case 'live':
-        // 引擎 media-live：只记 _nativeLive（守卫/缓冲），不改开播标定的 _live，
-        // 否则点播 queueNext / 片尾连播会被挡掉。
-        if (m['live'] == true && !_nativeLive) {
-          _nativeLive = true;
+        // 引擎 media-live：只记 _engineLive，不改开播标定的 _live / _createdAsLive。
+        if (m['live'] == true && !_engineLive) {
+          _engineLive = true;
           notifyListeners();
         }
         break;
@@ -464,7 +464,8 @@ class NativeMpvPlayback extends KotvPlayback {
   }) async {
     _url = url;
     _live = live;
-    _nativeLive = live;
+    _createdAsLive = live;
+    _engineLive = false;
     _queued = null;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _completed = false;
@@ -572,7 +573,7 @@ class NativeMpvPlayback extends KotvPlayback {
       position: () => _position,
       duration: () => _duration,
       isLiveContent: () =>
-          kotvIsLiveForGuard(markedLive: _live, engineLive: _nativeLive),
+          kotvIsLiveForGuard(markedLive: _live, engineLive: _engineLive),
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,
@@ -763,6 +764,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _queued = null;
     _url = q.url;
     _headers = q.headers;
+    _engineLive = false;
     _openSerial++;
     _completed = false;
     _lastError = null;

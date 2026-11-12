@@ -293,7 +293,7 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> applyOpts(KotvMpvOpts opts) async {
     // Win7 建控制器时已按 hwdec 选定 ANGLE 后端，直出与否不能再改，改它要换 Player（见 [kotvMediaKitNeedsNewPlayer]）。
     _opts = kotvIsWindows7() ? opts.copyWith(direct: _opts.direct) : opts;
-    await _opts.applyAfterAttach(player, live: _live);
+    await _opts.applyAfterAttach(player, live: _live || _engineLive);
     notifyListeners();
   }
 
@@ -497,6 +497,7 @@ class MediaKitPlayback extends KotvPlayback {
     if (_queued == null || _queued!.id != q.id) return;
     _queued = null;
     _url = q.url;
+    _engineLive = false;
     _openGen++;
     _openSerial++;
     // 无缝换集：勿清成 0x0。同分辨率时 width/height 流可能不重发，清掉会一直显示 0x0。

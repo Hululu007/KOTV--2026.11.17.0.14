@@ -1065,7 +1065,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
     val nextDrmKey = drmKey(drm)
     val wantSecondary = secondarySubtitleMode != "off"
-    val wantLiveBuffer = livePlayback || engineLive
+    val wantLiveBuffer = liveBufferSession()
     val needRebuild =
       player == null ||
         playerBuiltLive != wantLiveBuffer ||
@@ -1117,6 +1117,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     main.post(tick)
   }
 
+  /** 标定直播或引擎判 live：去点播磁盘缓存。 */
+  private fun liveBufferSession(): Boolean = livePlayback || engineLive
+
   /**
    * 点播页打开滑窗直播：`isCurrentMediaItemLive` 为真时按直播缓冲再开（去磁盘缓存），
    * 不改开播标定的 [livePlayback]，避免点播 queueNext 被拒。
@@ -1130,6 +1133,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     upgradedLiveFromMedia = true
     engineLive = true
     val pos = p.currentPosition.coerceAtLeast(0L)
+    // openInternal 会清 queuedNext；升缓冲后按保留项再 append。
+    val keepQueued = queuedNext
     Log.i(TAG, "upgrade live buffer from isCurrentMediaItemLive")
     try {
       p.stop()
@@ -1145,6 +1150,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       startPositionMs = pos,
       resetRecovery = false,
     )
+    if (keepQueued != null && !livePlayback) {
+      queueNext(keepQueued)
+    }
     emit(mapOf("event" to "live", "live" to true, "engineOnly" to true))
   }
 
@@ -1237,6 +1245,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     formatRetried = false
     retriedDecodeFallback = false
     upgradedLiveFromMedia = false
+    engineLive = false
     secondaryAutoApplied = false
     transferredBytes.set(0)
     if (p.currentMediaItemIndex > 0) p.removeMediaItems(0, p.currentMediaItemIndex)
@@ -1461,7 +1470,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         override fun onPlaybackStateChanged(playbackState: Int) {
           val cur = player ?: return
           if (playbackState == Player.STATE_ENDED) {
-            emit(mapOf("event" to "completed"))
+            // 有排队由 onMediaItemTransition 切集；标定直播无排队勿报片尾。
+            if (queuedNext == null && !livePlayback) {
+              emit(mapOf("event" to "completed"))
+            }
           }
           if (playbackState == Player.STATE_READY) {
             maybeUpgradeLiveFromMedia()
