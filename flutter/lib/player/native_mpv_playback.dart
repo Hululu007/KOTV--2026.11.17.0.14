@@ -436,9 +436,9 @@ class NativeMpvPlayback extends KotvPlayback {
         notifyListeners();
         break;
       case 'live':
-        // 只信引擎 media-live 上报；勿用 duration==0 启发式。
-        if (m['live'] == true && !_live) {
-          _live = true;
+        // 引擎 media-live：只记 _nativeLive（守卫/缓冲），不改开播标定的 _live，
+        // 否则点播 queueNext / 片尾连播会被挡掉。
+        if (m['live'] == true && !_nativeLive) {
           _nativeLive = true;
           notifyListeners();
         }
@@ -464,6 +464,7 @@ class NativeMpvPlayback extends KotvPlayback {
   }) async {
     _url = url;
     _live = live;
+    _nativeLive = live;
     _queued = null;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _completed = false;
@@ -570,7 +571,8 @@ class NativeMpvPlayback extends KotvPlayback {
       isPlaying: () => _playing,
       position: () => _position,
       duration: () => _duration,
-      isLiveContent: () => kotvIsLiveForGuard(markedLive: _live),
+      isLiveContent: () =>
+          kotvIsLiveForGuard(markedLive: _live, engineLive: _nativeLive),
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,

@@ -145,7 +145,10 @@ class MediaKitPlayback extends KotvPlayback {
   bool _formatRetried = false;
   bool _buffering = false;
   bool _repeatOne = false;
+  /// 开播标定的直播会话（详情 live / 直播页）；点播勿被引擎 media-live 改写。
   bool _live;
+  /// 引擎 `media-live`（仅缓冲策略 / 守卫；不挡 queueNext 与片尾连播）。
+  bool _engineLive = false;
   /// 当前会话挂了 ClearKey（demuxer-lavf-o）；无缝排队不复用该会话。
   bool _drmSession = false;
   String? _clearKeyHex;
@@ -277,8 +280,9 @@ class MediaKitPlayback extends KotvPlayback {
       });
       await (platform as dynamic).observeProperty('media-live', (String raw) async {
         final live = raw.trim() == 'yes' || raw.trim() == 'true' || raw.trim() == '1';
-        if (!live || _live) return;
-        _live = true;
+        if (!live || _engineLive) return;
+        _engineLive = true;
+        // 只升缓冲策略；点播会话保持 !_live，否则 queueNext / 片尾连播会被挡掉。
         await _opts.applyAfterAttach(player, live: true);
         notifyListeners();
       });
@@ -358,8 +362,6 @@ class MediaKitPlayback extends KotvPlayback {
       if (!_completedCtrl.isClosed) _completedCtrl.add(false);
       return;
     }
-    // 直播时间轴抖动勿当片尾。
-    if (_live) return;
     // 仅图片轨、无音、无出画：keep-open 会 seek 到末帧并 completed，勿当正常片尾连播。
     // 起播守卫仍会因无尺寸抛 SilentVideo：点播可改开已下发透传 url，直播只走播放器 failover。
     if (_isUnplayableImageEof()) {
@@ -371,6 +373,8 @@ class MediaKitPlayback extends KotvPlayback {
     }
     final q = _queued;
     if (q != null && await _skipToQueued(q)) return;
+    // 标定直播且无排队：时间轴抖动勿当片尾硬切；点播仍报 completed。
+    if (_live) return;
     // 无排队或切入失败：清掉排队态，交给详情硬切下一集。
     _queued = null;
     _completedGate = true;
@@ -418,29 +422,13 @@ class MediaKitPlayback extends KotvPlayback {
       httpHeaders: fields.isEmpty ? null : fields,
       start: startAt > Duration.zero ? startAt : null,
     );
-    // media_kit Player.add 只 loadfile URI；start / HLS lavf 须挂在该项 loadfile 上。
-    final opts = <String>[];
-    if (startAt > Duration.zero) {
-      opts.add('start=${startAt.inMilliseconds / 1000.0}');
-    }
-    kotvAppendLavfHlsLoadOpts(url, mime, opts);
+    // media_kit Player.add 无法带 per-file 选项；HLS 先写会话 lavf，再 append，勿 playlist-remove
+    // 打乱 media_kit 与 libmpv 列表（会破坏片尾 skip / 无缝换集）。
     try {
-      if (opts.isEmpty) {
-        await player.add(media);
-      } else {
-        // 先同步 media_kit 播放列表，再把 mpv 末项换成带选项的 loadfile。
-        await player.add(media);
-        final idx = player.state.playlist.medias.length - 1;
-        if (idx < 0) return false;
-        await _mpvCmd(['playlist-remove', '$idx']);
-        await _mpvCmd([
-          'loadfile',
-          url,
-          'append',
-          '-1',
-          kotvEncodeMpvLoadfileOptions(opts),
-        ]);
+      if (kotvIsHls(url, mime)) {
+        await _applyLavfForOpen(url: url, format: mime, clearKey: _clearKeyHex);
       }
+      await player.add(media);
     } catch (_) {
       return false;
     }
@@ -612,6 +600,7 @@ class MediaKitPlayback extends KotvPlayback {
   }) async {
     _url = url;
     _live = live;
+    _engineLive = false;
     _openFormat = format;
     _formatRetried = false;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
@@ -681,7 +670,8 @@ class MediaKitPlayback extends KotvPlayback {
       isPlaying: () => playing,
       position: () => position,
       duration: () => duration,
-      isLiveContent: () => kotvIsLiveForGuard(markedLive: _live),
+      isLiveContent: () =>
+          kotvIsLiveForGuard(markedLive: _live, engineLive: _engineLive),
       onFixVideoSource: tryFixVideoSource,
       isAudioOnly: () => isAudioOnlyContent,
       hasVideoSource: () => hasVideoSourceHint,
@@ -702,6 +692,7 @@ class MediaKitPlayback extends KotvPlayback {
     _clearKeyHex = null;
     _openFormat = null;
     _formatRetried = false;
+    _engineLive = false;
     _durationFull = Duration.zero;
     _completedGate = null;
     _clearVideoSize();

@@ -101,7 +101,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var appliedOsdSize: String? = null
   /** 首选字幕语言（BCP-47，逗号分隔）→ mpv slang。 */
   private var preferredTextLangs = ""
+  /** 开播标定的直播会话；点播勿被引擎 media-live 改写（否则 queueNext 被拒）。 */
   private var livePlayback = false
+  /** 引擎 media-live：只影响缓冲/磁盘缓存，不挡无缝排队。 */
+  private var engineLive = false
   /** 已按 media-live 升过会话，避免重复重建。 */
   private var upgradedLiveFromMedia = false
   /** 错误恢复后 seek 到该秒；&lt;0 表示不恢复。 */
@@ -402,6 +405,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             positionSec = 0.0
             durationSec = 0.0
             durationFullSec = 0.0
+            engineLive = false
             upgradedLiveFromMedia = livePlayback
             width = 0
             height = 0
@@ -522,6 +526,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             positionSec = 0.0
             durationSec = 0.0
             durationFullSec = 0.0
+            engineLive = false
             upgradedLiveFromMedia = false
             loadedUrl = ""
             currentMime = null
@@ -1046,8 +1051,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     var rebuilt = false
     // 点播↔直播 demuxer/cache 选项在 init 时写入；模式变了必须重建上下文。
-    if (created.get() && createdAsLive != null && createdAsLive != livePlayback) {
-      Log.i(TAG, "recreate MPV context: live $createdAsLive -> $livePlayback")
+    val wantLiveBuffer = liveBufferSession()
+    if (created.get() && createdAsLive != null && createdAsLive != wantLiveBuffer) {
+      Log.i(TAG, "recreate MPV context: liveBuffer $createdAsLive -> $wantLiveBuffer")
       destroyPlayer()
       rebuilt = true
     }
@@ -1112,7 +1118,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setOptionString("image-exts", "")
       // ytdl_hook aborts load on devices without youtube-dl; disable.
       MPVLib.setOptionString("ytdl", "no")
-      if (livePlayback) {
+      val liveBuf = liveBufferSession()
+      if (liveBuf) {
         MPVLib.setOptionString("cache-pause", "no")
       }
       // Do not force gpu-api=vulkan on API 25: GLES path for picture;
@@ -1123,7 +1130,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       // 预加载下一集：本集将完时提前打开排在后面的一项。
       MPVLib.setOptionString("prefetch-playlist", "yes")
       MPVLib.setOptionString("loop-file", loopFile())
-      if (!livePlayback) {
+      if (!liveBuf) {
         if (diskCache) {
           val dir = File(ctx.cacheDir, "mpv-cache").apply { mkdirs() }
           MPVLib.setOptionString("cache-on-disk", "yes")
@@ -1154,7 +1161,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.addObserver(this)
       observeProps()
       created.set(true)
-      createdAsLive = livePlayback
+      createdAsLive = liveBufferSession()
       createdTlsVerify = tlsVerify
       createdDiskCache = diskCache
       createdBufferBytes = bufferBytes
@@ -1162,10 +1169,16 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       applyAudioDelay()
       main.removeCallbacks(tick)
       main.post(tick)
-      Log.i(TAG, "MPV context ready abi=${MPVLib.getLoadedAbi()} live=$livePlayback tlsVerify=$tlsVerify")
+      Log.i(
+        TAG,
+        "MPV context ready abi=${MPVLib.getLoadedAbi()} live=$livePlayback engineLive=$engineLive tlsVerify=$tlsVerify",
+      )
     }
     return rebuilt
   }
+
+  /** 标定直播或引擎 media-live：关 cache-pause / 磁盘缓存。 */
+  private fun liveBufferSession(): Boolean = livePlayback || engineLive
 
   /** 从 assets 拷 cacert.pem，设 tls-ca-file；关闭校验时 tls-verify=no。 */
   private fun applyTlsOptions(ctx: Context) {
@@ -1848,7 +1861,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       pendingStartAtMs = 0L
       maxPlayedSec = 0.0
       durationFullSec = 0.0
-      upgradedLiveFromMedia = livePlayback
+      upgradedLiveFromMedia = livePlayback || engineLive
       loadWallMs = SystemClock.elapsedRealtime()
       // lavf / headers / start 只挂在这一次 loadfile 上，播完恢复。
       loadfile(url, "replace", buildLoadfileOpts(url, currentMime, headers, startMs))
@@ -2192,16 +2205,17 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 引擎报告 media-live：升直播会话（关磁盘缓存 / cache-pause），保留进度再开。
+   * 引擎报告 media-live：升直播缓冲（关磁盘缓存 / cache-pause），保留进度再开。
+   * 不改 [livePlayback]（开播标定），避免点播无缝 queueNext 被拒。
    * 只信引擎信号，不用 duration==0 启发式。
    */
   private fun maybeUpgradeLiveFromMedia() {
-    if (livePlayback || upgradedLiveFromMedia) return
+    if (engineLive || upgradedLiveFromMedia) return
     if (!created.get() || loadedUrl.isBlank()) return
     upgradedLiveFromMedia = true
-    livePlayback = true
-    emit(mapOf("event" to "live", "live" to true))
-    Log.i(TAG, "upgrade to live from media-live url=$loadedUrl")
+    engineLive = true
+    emit(mapOf("event" to "live", "live" to true, "engineOnly" to true))
+    Log.i(TAG, "upgrade live buffer from media-live url=$loadedUrl")
     retrySeekSec = positionSec.coerceAtLeast(0.0)
     try {
       ensurePlayerAndReload()
@@ -2217,32 +2231,29 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         activeLoadGen = loadGen.get()
       }
       MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED, MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
-        val gen = activeLoadGen
-        main.post {
-          if (loadGen.get() != gen) return@post
-          buffering = false
-          // 属性观察可能晚于 restart；主动读一次，避免 Dart 侧一直 width=0 盖黑。
-          try {
-            width = MPVLib.getPropertyInt("width") ?: width
-            height = MPVLib.getPropertyInt("height") ?: height
-            if (width <= 0) width = MPVLib.getPropertyInt("video-params/w") ?: width
-            if (height <= 0) height = MPVLib.getPropertyInt("video-params/h") ?: height
-          } catch (_: Throwable) {
-          }
-          val seekTo = retrySeekSec
-          if (seekTo >= 0.5) {
-            retrySeekSec = -1.0
-            try {
-              MPVLib.command(arrayOf("seek", seekTo.toString(), "absolute"))
-            } catch (t: Throwable) {
-              Log.w(TAG, "retry seek failed", t)
-            }
-          } else {
-            retrySeekSec = -1.0
-          }
-          emitSize()
-          emit(mapOf("event" to "ready", "width" to width, "height" to height))
+        // 就绪事件不按 loadGen 丢弃（只挡过期 end-file）；否则 START_FILE 未对齐时会一直不 ready。
+        buffering = false
+        // 属性观察可能晚于 restart；主动读一次，避免 Dart 侧一直 width=0 盖黑。
+        try {
+          width = MPVLib.getPropertyInt("width") ?: width
+          height = MPVLib.getPropertyInt("height") ?: height
+          if (width <= 0) width = MPVLib.getPropertyInt("video-params/w") ?: width
+          if (height <= 0) height = MPVLib.getPropertyInt("video-params/h") ?: height
+        } catch (_: Throwable) {
         }
+        val seekTo = retrySeekSec
+        if (seekTo >= 0.5) {
+          retrySeekSec = -1.0
+          try {
+            MPVLib.command(arrayOf("seek", seekTo.toString(), "absolute"))
+          } catch (t: Throwable) {
+            Log.w(TAG, "retry seek failed", t)
+          }
+        } else {
+          retrySeekSec = -1.0
+        }
+        emitSize()
+        emit(mapOf("event" to "ready", "width" to width, "height" to height))
       }
       MPVLib.MpvEvent.MPV_EVENT_SHUTDOWN -> {
         created.set(false)
