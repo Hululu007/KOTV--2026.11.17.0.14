@@ -9,6 +9,7 @@ import 'drm_opts.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 import 'mpv_opts.dart';
+import 'play_format.dart';
 import 'play_headers.dart';
 import 'player_normalize.dart';
 import 'silent_video_guard.dart';
