@@ -60,7 +60,7 @@ String? kotvPlayMime(String url, String? format) {
 }
 
 /// 桌面 / 安卓 MPV：尚未按 HLS 处理，且错误文案指向网络/IO 失败时，锁 HLS 再开一次。
-/// 安卓同判定在 KotvMedia3Playback.shouldRetryMpvHlsAfterError。
+/// 安卓同判定在 KotvAndroidPlayback.shouldRetryMpvHlsAfterError。
 bool kotvShouldRetryMpvHlsAfterError({
   required String url,
   required String? format,

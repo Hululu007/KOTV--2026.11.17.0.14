@@ -93,7 +93,7 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// 把下一集排进播放器自己的播放列表，本集播完无缝接上；播到它时 [queuedStartStream] 发出 [id]。
   /// [startAt]>0：切入该集时的起播定位（片头跳过），与 [open] 的 startAt 同语义，须写进列表项本身，勿等切入后再 seek。
-  /// Exo、全部 MPV（Android Media3 + 桌面/iOS media_kit）支持；FVP / 网页返回 false，换集仍走 [open]。
+  /// Exo、全部 MPV（安卓原生 + 桌面/iOS media_kit）支持；FVP / 网页返回 false，换集仍走 [open]。
   Future<bool> queueNext({
     required String id,
     required String url,

@@ -158,7 +158,7 @@ class MediaKitPlayback extends KotvPlayback {
   /// 无缝切入后 player.state.completed 可能仍为 true；用闸门对外报未完成，直到真正 EOF。
   bool? _completedGate;
   Map<String, String> _extraOpenProps = const {};
-  /// Media3 观测 `duration/full`；无则回落 player.state.duration。
+  /// mpv `duration/full`；无则回落 player.state.duration。
   Duration _durationFull = Duration.zero;
   bool _observedMpvProps = false;
 

@@ -1149,7 +1149,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (url.isBlank()) return
     retriedDecodeFallback = true
     val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
-    decodeMode = KotvMedia3Playback.nextDecodeMode(decodeMode)
+    decodeMode = KotvAndroidPlayback.nextDecodeMode(decodeMode)
     try {
       player?.stop()
     } catch (_: Throwable) {
@@ -1496,7 +1496,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             }
           }
           if (!formatRetried) {
-            val retryMime = KotvMedia3Playback.mimeForError(error.errorCode)
+            val retryMime = KotvAndroidPlayback.mimeForError(error.errorCode)
             if (retryMime != null && retryMime != currentMime) {
               formatRetried = true
               currentMime = retryMime
@@ -1515,7 +1515,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               }
             }
           }
-          if (!retriedDecodeFallback && KotvMedia3Playback.isDecodeError(error)) {
+          if (!retriedDecodeFallback && KotvAndroidPlayback.isDecodeError(error)) {
             Log.i(TAG, "retry open with decode fallback after ${error.errorCodeName}")
             retryOpenWithDecodeFallback()
             return
@@ -2737,9 +2737,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       return low.startsWith("file:") || low.startsWith("content:") || t.startsWith("/")
     }
 
-    fun playUri(url: String): Uri = KotvMedia3Playback.playUri(url)
+    fun playUri(url: String): Uri = KotvAndroidPlayback.playUri(url)
 
-    fun subtitleMimeFromPath(url: String): String = KotvMedia3Playback.subtitleMimeFromPath(url)
+    fun subtitleMimeFromPath(url: String): String = KotvAndroidPlayback.subtitleMimeFromPath(url)
   }
 }
 

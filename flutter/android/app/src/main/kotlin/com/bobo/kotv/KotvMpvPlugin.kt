@@ -1041,7 +1041,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       // https→http、以及 HLS 分片伪装成 .png/.jpg：须放行扩展名。
       // 不设 protocol_whitelist，避免挡掉 RTSP/RTMP/RTP。
       // FFmpeg 9 默认 extension_picky=1，只认常见后缀；点播常首片 .ts、后面 .png（内容仍是 TS）。
-      MPVLib.setOptionString("demuxer-lavf-o", KotvMedia3Playback.LAVF_DEMUXER_O)
+      MPVLib.setOptionString("demuxer-lavf-o", KotvAndroidPlayback.LAVF_DEMUXER_O)
       // 不按后缀当播放列表/图片（.m3u8 可能是 FLV，.png 可能是 TS）；lavf 按内容探测。
       MPVLib.setOptionString("playlist-exts", "")
       MPVLib.setOptionString("image-exts", "")
@@ -1080,7 +1080,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setOptionString("sub-scale-signs", "yes")
       MPVLib.setOptionString("secondary-sub-ass-override", "yes")
       MPVLib.setOptionString("secondary-sid", "no")
-      for ((k, v) in KotvMedia3Playback.mpvDemuxerByteProps(bufferBytes)) {
+      for ((k, v) in KotvAndroidPlayback.mpvDemuxerByteProps(bufferBytes)) {
         MPVLib.setOptionString(k, v)
       }
       applyConfOptions(conf)
@@ -1821,7 +1821,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   ): List<String> {
     val opts = ArrayList<String>(8)
     if (startAtMs > 0L) opts.add("start=${startAtMs / 1000.0}")
-    KotvMedia3Playback.appendLavfHlsLoadOpts(url, mime, opts)
+    KotvAndroidPlayback.appendLavfHlsLoadOpts(url, mime, opts)
     appendHeaderOptions(headers, opts)
     return opts
   }
@@ -2234,14 +2234,14 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** IO/HLS 与解码失败各重试一次（文案判定见 [KotvMedia3Playback]）。 */
+  /** IO/HLS 与解码失败各重试一次（文案判定见 [KotvAndroidPlayback]）。 */
   private fun handleLoadError(msg: String) {
     if (loadedUrl.isBlank() && pendingUrl.isNullOrBlank()) {
       emit(mapOf("event" to "error", "message" to msg))
       return
     }
     val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
-    if (KotvMedia3Playback.shouldRetryMpvHlsAfterError(msg, url, currentMime, retriedHlsMime)) {
+    if (KotvAndroidPlayback.shouldRetryMpvHlsAfterError(msg, url, currentMime, retriedHlsMime)) {
       Log.i(TAG, "retry load with HLS demuxer after: $msg")
       retriedHlsMime = true
       currentMime = "application/x-mpegURL"
@@ -2263,10 +2263,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       return
     }
-    if (!retriedDecodeFallback && KotvMedia3Playback.isDecodeErrorText(msg)) {
+    if (!retriedDecodeFallback && KotvAndroidPlayback.isDecodeErrorText(msg)) {
       Log.i(TAG, "retry load with decode fallback after: $msg")
       retriedDecodeFallback = true
-      decodeMode = KotvMedia3Playback.nextDecodeMode(decodeMode)
+      decodeMode = KotvAndroidPlayback.nextDecodeMode(decodeMode)
       retrySeekSec = positionSec.coerceAtLeast(0.0)
       try {
         ensurePlayerAndReload()

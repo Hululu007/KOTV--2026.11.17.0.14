@@ -14,7 +14,7 @@ import java.nio.charset.StandardCharsets
  * MPV：HLS lavf（常量与 Dart [kotvDemuxerLavfO] / [kotvApplyLavfForOpen] 同源）、
  * [mpvDemuxerByteProps]、解码回退、文案重试。改 lavf 串须同步 Dart。
  */
-internal object KotvMedia3Playback {
+internal object KotvAndroidPlayback {
   /** Dart [kotvDemuxerLavfO]。 */
   const val LAVF_DEMUXER_O =
     "seg_max_retry=5,strict=experimental," +
