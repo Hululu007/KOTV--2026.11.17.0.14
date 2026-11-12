@@ -19,14 +19,14 @@ void main() {
     expect(next.decodeMode, 'hard');
   });
 
-  test('mpv hard goes straight to the next player', () {
+  test('mpv hard falls back to auto like other engines', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'hard');
     f.markAttempt();
-    final next = f.nextStep();
-    expect(next, isNotNull);
-    expect(next!.kind, KotvFailoverKind.nextPlayer);
-    expect(next.playerVal, 'innie#fvp');
-    expect(next.decodeMode, 'hard');
+    final step = f.nextStep();
+    expect(step, isNotNull);
+    expect(step!.kind, KotvFailoverKind.autoDecode);
+    expect(step.decodeMode, 'auto');
+    expect(f.decodeMode, 'auto');
   });
 
   test('auto goes straight to the next player', () {

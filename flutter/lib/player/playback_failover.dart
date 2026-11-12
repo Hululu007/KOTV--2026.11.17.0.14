@@ -68,7 +68,8 @@ class KotvPlaybackFailover {
     if (lockExoForDrm) return null;
     if (!_playerVal.startsWith('innie#')) return null;
 
-    if (_decodeMode == 'hard' && _playerVal != 'innie#mpv') {
+    // 各内置引擎（含桌面 MPV）硬解失败先改自动再开一次；安卓原生 MPV 插件内也会 soft↔hard。
+    if (_decodeMode == 'hard') {
       _decodeMode = 'auto';
       return KotvFailoverStep(
         kind: KotvFailoverKind.autoDecode,

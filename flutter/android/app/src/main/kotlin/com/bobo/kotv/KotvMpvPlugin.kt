@@ -688,7 +688,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             val uri = if (path.startsWith("/")) Uri.fromFile(File(path)) else Uri.parse(path)
             val builder = MediaItem.SubtitleConfiguration.Builder(uri)
             if (title.isNotEmpty()) builder.setLabel(title)
-            mimeFromPath(path)?.let { builder.setMimeType(it) }
+            KotvMedia3Playback.subtitleMimeFromPath(path).let { builder.setMimeType(it) }
             val ok = p.addSubtitle(builder.build())
             result.success(ok)
           } catch (e: Throwable) {
@@ -1717,17 +1717,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     } catch (_: Throwable) {
       Color.WHITE
-    }
-  }
-
-  private fun mimeFromPath(path: String): String? {
-    val lower = path.lowercase()
-    return when {
-      lower.endsWith(".ass") || lower.endsWith(".ssa") -> MimeTypes.TEXT_SSA
-      lower.endsWith(".vtt") -> MimeTypes.TEXT_VTT
-      lower.endsWith(".srt") -> MimeTypes.APPLICATION_SUBRIP
-      lower.endsWith(".ttml") || lower.endsWith(".xml") -> MimeTypes.APPLICATION_TTML
-      else -> null
     }
   }
 

@@ -41,13 +41,13 @@ void main() {
     expect(kotvPlayMime('https://cdn/play.php', null), isNull);
   });
 
-  test('mpv hls retry only when format empty and error is format/io', () {
+  test('mpv hls retry on io when not already hls', () {
     expect(
       kotvShouldRetryMpvHlsAfterError(
         url: 'https://cdn/play.php?id=1',
         format: null,
         alreadyRetried: false,
-        errorText: 'Failed to recognize file format',
+        errorText: 'tcp: Connection refused',
       ),
       isTrue,
     );
@@ -56,16 +56,25 @@ void main() {
         url: 'https://cdn/play.php?id=1',
         format: 'video/mp4',
         alreadyRetried: false,
-        errorText: 'Failed to recognize file format',
+        errorText: 'tcp: Connection refused',
       ),
-      isFalse,
+      isTrue,
     );
     expect(
       kotvShouldRetryMpvHlsAfterError(
         url: 'https://cdn/a.m3u8',
         format: null,
         alreadyRetried: false,
-        errorText: 'unknown format',
+        errorText: 'tcp: Connection refused',
+      ),
+      isFalse,
+    );
+    expect(
+      kotvShouldRetryMpvHlsAfterError(
+        url: 'https://cdn/play.php?id=1',
+        format: 'application/x-mpegURL',
+        alreadyRetried: false,
+        errorText: 'failed to open',
       ),
       isFalse,
     );
@@ -74,7 +83,7 @@ void main() {
         url: 'https://cdn/play.php?id=1',
         format: null,
         alreadyRetried: true,
-        errorText: 'unknown format',
+        errorText: 'tcp: Connection refused',
       ),
       isFalse,
     );

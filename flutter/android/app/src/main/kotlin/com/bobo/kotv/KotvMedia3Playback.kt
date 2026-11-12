@@ -73,8 +73,8 @@ internal object KotvMedia3Playback {
     }
 
   /**
-   * MPV：仅当开播未带 mime（无 format 信号）时，对 IO/容器/清单解析错锁 M3U8 再开一次。
-   * 已有非空 mime 时不覆盖（避免把明确点播容器强改成 HLS）。
+   * MPV：`ERROR_CODE_IO_UNSPECIFIED` 且当前 mime 还不是 HLS 时，锁 M3U8 再开一次。
+   * （含空 mime 与错误容器 mime；已是 HLS 则不再覆盖。）
    */
   fun shouldRetryMpvHlsMime(
     error: PlaybackException,
@@ -82,16 +82,8 @@ internal object KotvMedia3Playback {
     alreadyRetried: Boolean,
   ): Boolean {
     if (alreadyRetried) return false
-    if (!currentMime.isNullOrBlank()) return false
-    return when (error.errorCode) {
-      PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
-      PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
-      PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
-      PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
-      PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
-      -> true
-      else -> false
-    }
+    if (isHlsMime(currentMime)) return false
+    return error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED
   }
 
   fun isDecodeError(error: PlaybackException): Boolean =

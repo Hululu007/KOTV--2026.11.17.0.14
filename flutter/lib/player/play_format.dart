@@ -59,8 +59,7 @@ String? kotvPlayMime(String url, String? format) {
   return null;
 }
 
-/// 桌面 libmpv：开播未带 format、URI 也非 HLS，且错误文案指向「格式不可识别 / 加载失败」时，
-/// 锁 HLS mime 再开一次（对应安卓 MPV 空 mime + IO/容器/清单解析错 → M3U8）。
+/// 桌面 libmpv：当前尚未按 HLS 处理，且错误文案指向网络/IO 失败时，锁 HLS mime 再开一次。
 bool kotvShouldRetryMpvHlsAfterError({
   required String url,
   required String? format,
@@ -68,20 +67,12 @@ bool kotvShouldRetryMpvHlsAfterError({
   required String errorText,
 }) {
   if (alreadyRetried) return false;
-  if ((format?.trim() ?? '').isNotEmpty) return false;
-  if (kotvUrlIsHls(url)) return false;
+  if (kotvIsHls(url, format)) return false;
   final t = errorText.toLowerCase();
-  if (t.contains('unknown format') ||
-      t.contains('failed to recognize') ||
-      t.contains('no demuxer') ||
-      t.contains('nothing to play')) {
-    return true;
-  }
-  // media_kit 把 ffmpeg tcp / stream 网络失败也推到 error；空 mime 时按 IO 未指明再试 HLS。
   if (t.contains('tcp:') || (t.contains('http') && t.contains('error'))) {
     return true;
   }
-  if (t.contains('failed to open') || t.contains('error opening')) {
+  if (t.contains('failed to open') || t.contains('error opening') || t.contains('i/o')) {
     return true;
   }
   return false;

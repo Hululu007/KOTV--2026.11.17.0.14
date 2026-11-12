@@ -833,7 +833,7 @@ class FvpPlayback extends KotvPlayback {
     return sum;
   }
 
-  /// 内容态升 live：引擎 `isLive()` 为真时切短队列缓冲（对标 isCurrentMediaItemLive / media-live）。
+  /// 内容态升 live：引擎 `isLive()` 为真时切短队列缓冲。
   void _maybeUpgradeLiveFromContent(VideoPlayerController c) {
     if (_live || !identical(_c, c)) return;
     try {
