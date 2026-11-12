@@ -94,5 +94,25 @@ while IFS= read -r abi; do
   done
 done <<<"$abis"
 
-echo "ok: APK Media3 MPV + libav* in lib/; Vulkan stub in assets only (abis: $(echo "$abis" | tr '\n' ' '))"
-unzip -l "$APK" | awk '/mpv-libs|libvulkan|libkotv_dl|libmpv\.so|libplayer\.so|libav|libsw/ {print $1, $4}' | head -40
+# libc++ / libavcodec 必须是配套完整版（否则 libmpv dlopen 失败）。
+while IFS= read -r abi; do
+  [[ -n "$abi" ]] || continue
+  case "$abi" in arm64-v8a|armeabi-v7a) ;; *) continue ;; esac
+  tmp="$(mktemp)"
+  unzip -p "$APK" "lib/${abi}/libc++_shared.so" >"$tmp"
+  if ! kotv_android_libcxx_has_from_chars "$tmp"; then
+    rm -f "$tmp"
+    echo "ERROR: APK lib/${abi}/libc++_shared.so lacks ${KOTV_ANDROID_LIBCXX_REQUIRED_SYM}" >&2
+    exit 1
+  fi
+  unzip -p "$APK" "lib/${abi}/libavcodec.so" >"$tmp"
+  if ! kotv_android_libavcodec_is_complete "$tmp"; then
+    rm -f "$tmp"
+    echo "ERROR: APK lib/${abi}/libavcodec.so lacks ${KOTV_ANDROID_LIBAV_REQUIRED_SYM} (mixed with nextlib?)" >&2
+    exit 1
+  fi
+  rm -f "$tmp"
+done <<<"$abis"
+
+echo "ok: APK Media3 MPV + libav* + mpvplayer libc++ in lib/; Vulkan stub in assets only (abis: $(echo "$abis" | tr '\n' ' '))"
+unzip -l "$APK" | awk '/mpv-libs|libvulkan|libkotv_dl|libmpv\.so|libplayer\.so|libc\+\+|libav|libsw/ {print $1, $4}' | head -40

@@ -107,7 +107,7 @@ android {
             // stub .so is already small; AGP stripReleaseDebugSymbols corrupts it
             keepDebugSymbols.add("**/libvulkan.so")
             keepDebugSymbols.add("**/libkotv_dl.so")
-            // Media3 mpvplayer / nextlib / fvp 都可能带 libc++_shared；取一份即可。
+            // 多份 libc++ / libav*：ass 旧 libc++、nextlib 残缺 libav*；merge 后再用 jniLibs（prepare 抽出）覆盖。
             pickFirsts += "**/libc++_shared.so"
             pickFirsts += "**/libmpv.so"
             pickFirsts += "**/libplayer.so"
@@ -302,12 +302,12 @@ tasks.register("prepareKotvEngineSo") {
     }
 }
 
-// Media3 MpvPlayer：libmpv 来自 media3-mpvplayer AAR；这里只准备 Vulkan stub + kotv_dl。
+// Media3 MpvPlayer：prepare 抽出配套 libc++ + Vulkan stub + kotv_dl。
 tasks.register("prepareKotvMpvNative", Exec) {
     workingDir = repoRoot
     commandLine "bash", "scripts/prepare-android-mpv-native.sh"
     doFirst {
-        println "[android] preparing Vulkan stub + kotv_dl for Media3 MpvPlayer …"
+        println "[android] preparing Vulkan stub + kotv_dl + mpvplayer libc++ …"
     }
 }
 
@@ -319,5 +319,40 @@ tasks.named("preBuild") {
 afterEvaluate {
     android.defaultConfig.targetSdk = kotvTargetSdk
     println "[android] pinned targetSdk=${android.defaultConfig.targetSdk} (KOTV_TARGET_SDK=${System.getenv("KOTV_TARGET_SDK") ?: "28"})"
-    // libc++ 由 Media3 mpvplayer / nextlib / fvp 经 pickFirst 合并；不再从 jniLibs 覆盖。
+    // pickFirst 会误选 ass 旧 libc++ / nextlib 残缺 libav*；merge 后再盖 prepare 写入的 jniLibs。
+    // 名表与 scripts/android-mpv-lib-names.sh 的 KOTV_ANDROID_MPV_MERGE_OVERLAY 保持一致。
+    def kotvMpvMergeOverlay = [
+        "libc++_shared.so",
+        "libavcodec.so", "libavfilter.so", "libavformat.so", "libavutil.so", "libavdevice.so",
+        "libswresample.so", "libswscale.so",
+    ]
+    android.applicationVariants.configureEach { variant ->
+        def mergeName = "merge${variant.name.capitalize()}NativeLibs"
+        tasks.matching { it.name == mergeName }.configureEach { task ->
+            task.doLast {
+                kotvAbiFilters.each { abi ->
+                    kotvMpvMergeOverlay.each { so ->
+                        def src = file("src/main/jniLibs/${abi}/${so}")
+                        if (!src.exists() || src.length() == 0L) {
+                            throw new GradleException("[android] missing jniLibs/${abi}/${so} (run prepare-android-mpv-native.sh)")
+                        }
+                        def matches = fileTree("${project.buildDir}/intermediates").matching {
+                            include "**/lib/${abi}/${so}"
+                        }
+                        if (matches.isEmpty()) {
+                            def dest = file("${project.buildDir}/intermediates/merged_native_libs/${variant.dirName}/merge${variant.name.capitalize()}NativeLibs/out/lib/${abi}/${so}")
+                            dest.parentFile.mkdirs()
+                            ant.copy(file: src, tofile: dest, overwrite: true)
+                            println "[android] overlay ${so} → ${dest}"
+                        } else {
+                            matches.each { dest ->
+                                ant.copy(file: src, tofile: dest, overwrite: true)
+                                println "[android] overlay ${so} → ${dest}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
