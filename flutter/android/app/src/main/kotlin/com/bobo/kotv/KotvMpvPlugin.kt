@@ -801,11 +801,24 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     emit(mapOf("event" to "transition", "id" to next.id))
   }
 
+  /** Media3 [MpvPlayer.isAvailable] 为 false 时再 load 一次，把真实 dlopen 原因带进 CREATE_FAILED。 */
+  private fun requireMpvNativeAvailable() {
+    if (MpvPlayer.isAvailable()) return
+    val why =
+      try {
+        System.loadLibrary("mpv")
+        "isAvailable=false"
+      } catch (e: UnsatisfiedLinkError) {
+        e.message ?: e.toString()
+      } catch (e: Throwable) {
+        e.message ?: e.toString()
+      }
+    throw IllegalStateException("MpvPlayer native libraries unavailable: $why")
+  }
+
   private fun ensurePlayer(forceRebuild: Boolean = false) {
     val ctx = appContext ?: error("no context")
-    if (!MpvPlayer.isAvailable()) {
-      throw IllegalStateException("MpvPlayer native libraries unavailable")
-    }
+    requireMpvNativeAvailable()
     val key = configKey()
     if (!forceRebuild && player != null && builtConfigKey == key) {
       bindPlayerSurface()

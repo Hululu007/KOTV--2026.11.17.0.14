@@ -113,8 +113,7 @@ android {
             pickFirsts += "**/libplayer.so"
             // fvp 与 ass-kt 都带 libass.so；Exo ASS 用 peerless2012，取其一即可。
             pickFirsts += "**/libass.so"
-            // nextlib-media3ext（Exo 软解/AV3A）与 media3-decoder-ffmpeg（mpvplayer 传递依赖）
-            // 会各带一份 libav*；Exo 软解走 nextlib，故下方 exclude decoder-ffmpeg，这里再 pickFirst 兜底。
+            // decoder-ffmpeg 全套 libav*（含 libmpv 要的 filter/format/device）与 nextlib 部分 libav* 重叠时取一份。
             pickFirsts += "**/libavcodec.so"
             pickFirsts += "**/libavutil.so"
             pickFirsts += "**/libavformat.so"
@@ -244,10 +243,9 @@ dependencies {
     implementation "androidx.media3:media3-database:$media3"
     // Surface/Texture 共用：帧着色器调色（setVideoEffects）
     implementation "androidx.media3:media3-effect:$media3"
-    // Exo 软解/AV3A 用 nextlib；mpvplayer 自带 libmpv，不需要再并入 media3-decoder-ffmpeg 的 libav*。
-    implementation("androidx.media3:media3-mpvplayer:$media3") {
-        exclude group: "androidx.media3", module: "media3-decoder-ffmpeg"
-    }
+    // libmpv 动态依赖 libavfilter/avformat/avdevice 等，由 media3-decoder-ffmpeg 提供（勿 exclude）。
+    // 与 nextlib 重叠的 libav* 靠上方 pickFirst；Exo 软解/AV3A 仍用 nextlib。
+    implementation "androidx.media3:media3-mpvplayer:$media3"
     implementation "io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1"
     implementation "com.squareup.okhttp3:okhttp-android:5.5.0"
     // CatVodSpider dex jar 内 JS 依赖 QuickJS JNI，须在 App CL load

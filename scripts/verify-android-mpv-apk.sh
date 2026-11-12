@@ -85,12 +85,14 @@ while IFS= read -r abi; do
       exit 1
     fi
   done
-  # 旧 libmvcodec 名不得再进包（Media3 libmpv 内嵌编解码）。
-  if grep -qxF "lib/${abi}/libmvcodec.so" <<<"$listing"; then
-    echo "ERROR: APK must not contain lib/${abi}/libmvcodec.so (legacy suite)" >&2
-    exit 1
-  fi
+  for dup in "${KOTV_ANDROID_MPV_APK_FORBIDDEN[@]}"; do
+    p="lib/${abi}/${dup}"
+    if grep -qxF "$p" <<<"$listing"; then
+      echo "ERROR: APK must not contain $p (legacy suite)" >&2
+      exit 1
+    fi
+  done
 done <<<"$abis"
 
-echo "ok: APK Media3 MPV (libmpv/libplayer) in lib/; Vulkan stub in assets only (abis: $(echo "$abis" | tr '\n' ' '))"
-unzip -l "$APK" | awk '/mpv-libs|libvulkan|libkotv_dl|libmpv\.so|libplayer\.so/ {print $1, $4}' | head -30
+echo "ok: APK Media3 MPV + libav* in lib/; Vulkan stub in assets only (abis: $(echo "$abis" | tr '\n' ' '))"
+unzip -l "$APK" | awk '/mpv-libs|libvulkan|libkotv_dl|libmpv\.so|libplayer\.so|libav|libsw/ {print $1, $4}' | head -40
