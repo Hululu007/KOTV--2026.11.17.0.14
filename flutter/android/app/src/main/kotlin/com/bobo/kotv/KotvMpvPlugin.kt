@@ -1080,7 +1080,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
 
         override fun onPlayerError(error: PlaybackException) {
-          if (KotvMpvHls.shouldRetryHlsMime(error, currentMime, retriedHlsMime)) {
+          if (KotvMedia3Playback.shouldRetryMpvHlsMime(error, currentMime, retriedHlsMime)) {
             Log.i(TAG, "retry open with HLS mime after ${error.errorCodeName}: ${error.message}")
             retryOpenWithHlsMime()
             return

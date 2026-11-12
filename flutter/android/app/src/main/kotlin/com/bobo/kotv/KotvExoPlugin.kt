@@ -2740,9 +2740,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     fun playUri(url: String): Uri = KotvMedia3Playback.playUri(url)
 
     fun subtitleMimeFromPath(url: String): String = KotvMedia3Playback.subtitleMimeFromPath(url)
-
-    /** 错 mime 再开：容器/IO → HLS；清单错 → octet-stream。 */
-    fun mimeForError(errorCode: Int): String? = KotvMedia3Playback.mimeForError(errorCode)
   }
 }
 

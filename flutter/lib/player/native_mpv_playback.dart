@@ -325,7 +325,7 @@ class NativeMpvPlayback extends KotvPlayback {
     if (_nativeReady && _nativeLive == live) return;
     try {
       final res = await _ch.invokeMethod<dynamic>('create', {
-        'decode': _opts.hwdecValue(),
+        'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
         'conf': _opts.conf,
@@ -495,7 +495,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'headers': _headers,
         if (mime != null) 'mime': mime,
         'live': live,
-        'decode': _opts.hwdecValue(),
+        'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
         'conf': confExtra.toString(),
@@ -669,7 +669,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _opts = _opts.copyWith(decodeMode: mode);
     try {
       await _ch.invokeMethod('setDecode', {
-        'decode': _opts.hwdecValue(),
+        'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
       });
     } catch (_) {}
   }
@@ -796,7 +796,7 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       await KotvBufferBudget.warm(force: true);
       await _ch.invokeMethod('setOpts', {
-        'decode': opts.hwdecValue(),
+        'decode': kotvNormalizeDecodeMode(opts.decodeMode),
         'gpuNext': opts.gpuNext,
         'vulkan': opts.vulkan,
         'conf': opts.conf,

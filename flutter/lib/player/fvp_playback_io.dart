@@ -123,8 +123,14 @@ class FvpPlayback extends KotvPlayback {
   }
 
   /// 起播整段（含 initialize）视为缓冲，避免 `stop()` 清掉标记后浮层消失。
+  /// 已确认纯音频时不抬起播缓冲，避免封面叠层被缓冲态拖死。
   @override
-  bool get buffering => _opening || (_c?.value.isBuffering ?? false);
+  bool get buffering {
+    if (isAudioOnlyContent && (_c?.value.isPlaying == true || position > Duration.zero)) {
+      return false;
+    }
+    return _opening || (_c?.value.isBuffering ?? false);
+  }
 
   @override
   double get volume => _volume;
@@ -500,38 +506,70 @@ class FvpPlayback extends KotvPlayback {
     final v = c.value;
     if (v.hasError) return false;
     if (isAudioOnlyContent) return true;
-    // Web 上 fvp 的 MediaInfo 是 dummy（无 video/audio）；用 dynamic 避免 dart2js 编译失败。
     try {
-      final info = c.getMediaInfo() as dynamic;
-      final videos = info?.video as List?;
-      if (videos != null && videos.isNotEmpty) {
+      if (_fvpHasRealVideoTrack(c)) {
         final active = c.getActiveVideoTracks() ?? const <int>[];
-        // 有视频流但未激活任何轨 → 视源异常，触发重选。
+        // 有实视频流但未激活任何轨 → 视源异常，触发重选。
         return active.isNotEmpty;
       }
+      if (_fvpHasRealAudioTrack(c)) return true;
     } catch (_) {}
     return v.isInitialized || _opening;
   }
 
+  /// 有实音轨且无实视频轨（封面/albumart/图片 codec 不算视频）。
+  /// 不因 buffering/_opening 否定；封面轨带尺寸也不挡纯音频叠层。
   @override
   bool get isAudioOnlyContent {
     final c = _c;
     if (c == null) return false;
     final v = c.value;
-    if (!v.isInitialized || v.isBuffering || _opening) return false;
-    if (v.size.width > 0 && v.size.height > 0) return false;
-    // 仅在 demux 确认「无视轨 + 有音轨」时放行；禁止用「在播+无尺寸」瞎猜。
+    if (!v.isInitialized || v.hasError) return false;
+    if (!_fvpHasRealAudioTrack(c)) return false;
+    if (_fvpHasRealVideoTrack(c)) return false;
+    return v.isPlaying || v.position > Duration.zero;
+  }
+
+  bool _fvpHasRealAudioTrack(VideoPlayerController c) {
     try {
       final info = c.getMediaInfo() as dynamic;
-      if (info != null) {
-        final hasVideo = (info.video as List?)?.isNotEmpty == true;
-        final hasAudio = (info.audio as List?)?.isNotEmpty == true;
-        if (!hasVideo && hasAudio) {
-          return v.isPlaying || v.position > const Duration(milliseconds: 500);
+      final audios = info?.audio as List?;
+      return audios != null && audios.isNotEmpty;
+    } catch (_) {
+      return _audioTracks.isNotEmpty;
+    }
+  }
+
+  bool _fvpHasRealVideoTrack(VideoPlayerController c) {
+    try {
+      final info = c.getMediaInfo() as dynamic;
+      final videos = info?.video as List?;
+      if (videos == null || videos.isEmpty) return false;
+      for (final s in videos) {
+        final codec = '${s.codec.codec ?? ''}'.trim();
+        final meta = Map<String, String>.from(
+          (s.metadata as Map?)?.map((k, v) => MapEntry('$k', '$v')) ?? const {},
+        );
+        final disposition = (meta['disposition'] ?? meta['DISPOSITION'] ?? '').toLowerCase();
+        final albumart = disposition.contains('attached_pic') ||
+            disposition.contains('album') ||
+            (meta['albumart'] ?? '').toLowerCase() == '1' ||
+            (meta['image'] ?? '').toLowerCase() == '1';
+        if (kotvIsRealVideoTrack(
+          id: '${s.index}',
+          codec: codec,
+          albumart: albumart,
+          image: albumart || kotvIsImageMediaCodec(codec),
+        )) {
+          return true;
         }
       }
-    } catch (_) {}
-    return false;
+      return false;
+    } catch (_) {
+      return _videoTracks.any(
+        (t) => kotvIsRealVideoTrack(id: t.id, codec: t.codec),
+      );
+    }
   }
 
   @override
@@ -541,13 +579,17 @@ class FvpPlayback extends KotvPlayback {
     try {
       final info = c.getMediaInfo() as dynamic;
       final videos = List<dynamic>.from((info?.video as List?) ?? const []);
-      if (videos.isNotEmpty) {
-        videos.sort((a, b) {
+      final realVideos = videos.where((s) {
+        final codec = '${s.codec.codec ?? ''}'.trim();
+        return kotvIsRealVideoTrack(id: '${s.index}', codec: codec);
+      }).toList();
+      if (realVideos.isNotEmpty) {
+        realVideos.sort((a, b) {
           final aa = (a.codec.width as int) * (a.codec.height as int);
           final bb = (b.codec.width as int) * (b.codec.height as int);
           return bb.compareTo(aa);
         });
-        for (final stream in videos) {
+        for (final stream in realVideos) {
           try {
             c.setVideoTracks([stream.index as int]);
             await Future<void>.delayed(const Duration(milliseconds: 350));
@@ -908,6 +950,7 @@ class FvpPlayback extends KotvPlayback {
             id: '$index',
             label: _metaLabel(meta, codec: codec, w: w, h: h),
             language: (meta['language'] ?? meta['lang'] ?? '').trim(),
+            codec: codec,
           ),
         );
       } catch (_) {}

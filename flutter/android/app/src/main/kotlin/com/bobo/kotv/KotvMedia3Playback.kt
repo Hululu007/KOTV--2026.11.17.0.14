@@ -111,7 +111,7 @@ internal object KotvMedia3Playback {
       else -> "soft"
     }
 
-  /** 与 Dart [KotvBufferBudget.mpvCacheProps] 同表；[budgetBytes]≤0 时返回空。 */
+  /** 对应 Dart [KotvBufferBudget.mpvCacheProps]；[budgetBytes]≤0 时返回空。 */
   fun mpvDemuxerByteProps(budgetBytes: Int): Map<String, String> {
     if (budgetBytes <= 0) return emptyMap()
     fun miB(n: Int): String {
