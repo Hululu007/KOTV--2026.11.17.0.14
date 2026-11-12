@@ -58,9 +58,6 @@ import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import okhttp3.OkHttpClient
-import java.io.File
-import java.net.URLDecoder
-import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
@@ -112,6 +109,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var currentMime: String? = null
   private var currentDrm: Map<String, Any?>? = null
   private var formatRetried = false
+  /** 本集是否已做过一次解码 soft/hard 回退。 */
+  private var retriedDecodeFallback = false
+  /** 本集是否已按 isCurrentMediaItemLive 升过 live 会话。 */
+  private var upgradedLiveFromMedia = false
   /** auto | soft | hard；硬/自动优先 MediaCodec 硬解直出。 */
   private var decodeMode: String = "auto"
   /** false=SurfaceView（HDR 默认），true=Flutter Texture 兼容模式。 */
@@ -1040,8 +1041,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     drm: Map<String, Any?>?,
     live: Boolean = false,
     startPositionMs: Long = C.TIME_UNSET,
+    resetRecovery: Boolean = true,
   ) {
-    formatRetried = false
+    if (resetRecovery) {
+      formatRetried = false
+      retriedDecodeFallback = false
+      upgradedLiveFromMedia = false
+    }
     secondaryAutoApplied = false
     queuedNext = null
     livePlayback = live
@@ -1105,6 +1111,57 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     applyAudioEq()
     main.removeCallbacks(tick)
     main.post(tick)
+  }
+
+  /**
+   * 点播页打开滑窗直播：`isCurrentMediaItemLive` 为真时升 live 会话，
+   * 去掉点播磁盘缓存后按当前 mime/进度再开。
+   */
+  private fun maybeUpgradeLiveFromMedia() {
+    if (livePlayback || upgradedLiveFromMedia) return
+    val p = player ?: return
+    if (!p.isCurrentMediaItemLive) return
+    val url = currentUrl
+    if (url.isBlank()) return
+    upgradedLiveFromMedia = true
+    livePlayback = true
+    val pos = p.currentPosition.coerceAtLeast(0L)
+    Log.i(TAG, "upgrade to live session from isCurrentMediaItemLive")
+    try {
+      p.stop()
+    } catch (_: Throwable) {
+    }
+    openInternal(
+      url = url,
+      headers = currentHeaders,
+      mime = currentMime,
+      drm = currentDrm,
+      live = true,
+      startPositionMs = pos,
+      resetRecovery = false,
+    )
+  }
+
+  /** 解码失败：在 soft/hard 间切换一次并保留 mime/进度再开。 */
+  private fun retryOpenWithDecodeFallback() {
+    val url = currentUrl
+    if (url.isBlank()) return
+    retriedDecodeFallback = true
+    val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+    decodeMode = KotvMedia3Playback.nextDecodeMode(decodeMode)
+    try {
+      player?.stop()
+    } catch (_: Throwable) {
+    }
+    openInternal(
+      url = url,
+      headers = currentHeaders,
+      mime = currentMime,
+      drm = currentDrm,
+      live = livePlayback,
+      startPositionMs = pos,
+      resetRecovery = false,
+    )
   }
 
   /** open 时刷新 PreferAAC / 首选字幕语言（无需整机重建）。 */
@@ -1172,6 +1229,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentMime = next.mime
     currentSubs = next.subs
     formatRetried = false
+    retriedDecodeFallback = false
+    upgradedLiveFromMedia = false
     secondaryAutoApplied = false
     transferredBytes.set(0)
     if (p.currentMediaItemIndex > 0) p.removeMediaItems(0, p.currentMediaItemIndex)
@@ -1399,6 +1458,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             emit(mapOf("event" to "completed"))
           }
           if (playbackState == Player.STATE_READY) {
+            maybeUpgradeLiveFromMedia()
             applyVideoEq()
             val f = cur.videoSize
             if (f.width > 0 && f.height > 0) {
@@ -1435,11 +1495,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             }
           }
           if (!formatRetried) {
-            val retryMime = mimeForError(error.errorCode)
+            val retryMime = KotvMedia3Playback.mimeForError(error.errorCode)
             if (retryMime != null && retryMime != currentMime) {
               formatRetried = true
-              // 空串表示清 mime（勿写成 octet-stream 再锁死）；Media3 再按 URI 选源。
-              currentMime = retryMime.ifEmpty { null }
+              currentMime = retryMime
               try {
                 val cur = player ?: return
                 val pos = cur.currentPosition.coerceAtLeast(0L)
@@ -1454,6 +1513,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
                 Log.e(TAG, "exo retry failed", t)
               }
             }
+          }
+          if (!retriedDecodeFallback && KotvMedia3Playback.isDecodeError(error)) {
+            Log.i(TAG, "retry open with decode fallback after ${error.errorCodeName}")
+            retryOpenWithDecodeFallback()
+            return
           }
           emit(mapOf("event" to "error", "message" to (error.message ?: error.errorCodeName)))
         }
@@ -2363,6 +2427,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentMime = null
     currentDrm = null
     formatRetried = false
+    retriedDecodeFallback = false
+    upgradedLiveFromMedia = false
     // Flutter Texture 跨 open 复用；仅 dispose/detach 时 releaseFlutterTexture。
   }
 
@@ -2670,54 +2736,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       return low.startsWith("file:") || low.startsWith("content:") || t.startsWith("/")
     }
 
-    fun playUri(url: String): Uri {
-      val t = url.trim()
-      val low = t.lowercase()
-      if (low.startsWith("content:")) return Uri.parse(t)
-      if (t.startsWith("/")) return Uri.fromFile(File(t))
-      if (low.startsWith("file:")) {
-        try {
-          val parsed = Uri.parse(t)
-          var path = parsed.path
-          if (!path.isNullOrEmpty()) {
-            path = URLDecoder.decode(path, StandardCharsets.UTF_8.name())
-            return Uri.fromFile(File(path))
-          }
-        } catch (_: Throwable) {
-        }
-        return Uri.parse(t)
-      }
-      return Uri.parse(t)
-    }
+    fun playUri(url: String): Uri = KotvMedia3Playback.playUri(url)
 
-    fun subtitleMimeFromPath(url: String): String {
-      val path =
-        try {
-          Uri.parse(url).path ?: url
-        } catch (_: Throwable) {
-          url
-        }.lowercase()
-      return when {
-        path.endsWith(".vtt") -> MimeTypes.TEXT_VTT
-        path.endsWith(".ssa") || path.endsWith(".ass") -> MimeTypes.TEXT_SSA
-        path.endsWith(".ttml") || path.endsWith(".xml") || path.endsWith(".dfxp") -> MimeTypes.APPLICATION_TTML
-        else -> MimeTypes.APPLICATION_SUBRIP
-      }
-    }
+    fun subtitleMimeFromPath(url: String): String = KotvMedia3Playback.subtitleMimeFromPath(url)
 
-    /** 错 mime 再开：容器/IO → 试 HLS；清单错 → 空串清 mime，改由 URI 选源。 */
-    fun mimeForError(errorCode: Int): String? {
-      return when (errorCode) {
-        PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
-        PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
-        PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
-        -> MimeTypes.APPLICATION_M3U8
-        PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
-        PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
-        -> ""
-        else -> null
-      }
-    }
+    /** 错 mime 再开：容器/IO → HLS；清单错 → octet-stream。 */
+    fun mimeForError(errorCode: Int): String? = KotvMedia3Playback.mimeForError(errorCode)
   }
 }
 

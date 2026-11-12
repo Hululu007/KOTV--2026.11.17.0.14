@@ -29,12 +29,5 @@ internal object KotvMpvHls {
     return error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED
   }
 
-  fun isDecodeError(error: PlaybackException): Boolean =
-    when (error.errorCode) {
-      PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
-      PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
-      PlaybackException.ERROR_CODE_DECODING_FAILED,
-      -> true
-      else -> false
-    }
+  fun isDecodeError(error: PlaybackException): Boolean = KotvMedia3Playback.isDecodeError(error)
 }

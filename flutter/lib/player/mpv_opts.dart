@@ -26,9 +26,8 @@ const kotvDemuxerLavfO =
 const kotvHlsLavfOAddForUri = 'http_persistent=0';
 const kotvHlsLavfOAddForMime = 'extension_picky=0,http_persistent=0';
 
-/// 开播 lavf（与 Media3 `MpvNetworkOptions.apply` 同条件）：
-/// 已知 HLS → `demuxer-lavf-format=hls` + `demuxer-lavf-o-add`；否则清空 format。
-/// [lavfO] 为会话基线（含 ClearKey）；HLS 附加项走 o-add，避免整串覆盖基线。
+/// 开播 lavf：仅当 URI/mime 为 HLS 时设 `demuxer-lavf-format=hls` + o-add。
+/// 非 HLS 不写空 format（不主动清空）；[lavfO] 为会话基线（含 ClearKey）。
 Future<void> kotvApplyLavfForOpen({
   required Future<void> Function(String key, String value) set,
   required String url,
@@ -36,10 +35,7 @@ Future<void> kotvApplyLavfForOpen({
   required String lavfO,
 }) async {
   await set('demuxer-lavf-o', lavfO);
-  if (!kotvIsHls(url, format)) {
-    await set('demuxer-lavf-format', '');
-    return;
-  }
+  if (!kotvIsHls(url, format)) return;
   await set('demuxer-lavf-format', 'hls');
   final add = kotvUrlIsHls(url) ? kotvHlsLavfOAddForUri : kotvHlsLavfOAddForMime;
   await set('demuxer-lavf-o-add', add);

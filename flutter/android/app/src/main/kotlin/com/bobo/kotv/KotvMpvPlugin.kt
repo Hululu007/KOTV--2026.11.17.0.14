@@ -832,13 +832,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (url.isBlank()) return
     retriedDecodeFallback = true
     val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
-    val next =
-      when (KotvPlayerNormalize.decodeModeLabel(decodeMode)) {
-        "soft" -> "hard"
-        "hard" -> "soft"
-        else -> "soft"
-      }
-    decodeMode = next
+    decodeMode = KotvMedia3Playback.nextDecodeMode(decodeMode)
     try {
       player?.stop()
     } catch (_: Throwable) {
@@ -1028,19 +1022,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return out
   }
 
-  private fun playUri(url: String): Uri {
-    val trimmed = url.trim()
-    return when {
-      trimmed.startsWith("content:", ignoreCase = true) ||
-        trimmed.startsWith("file:", ignoreCase = true) ||
-        trimmed.startsWith("http:", ignoreCase = true) ||
-        trimmed.startsWith("https:", ignoreCase = true) ||
-        trimmed.startsWith("rtsp:", ignoreCase = true) ||
-        trimmed.startsWith("rtmp:", ignoreCase = true) -> Uri.parse(trimmed)
-      trimmed.startsWith("/") -> Uri.fromFile(File(trimmed))
-      else -> Uri.parse(trimmed)
-    }
-  }
+  private fun playUri(url: String): Uri = KotvMedia3Playback.playUri(url)
 
   private fun cacheKeyFor(url: String, headers: Map<String, String>): String {
     val ua = headers.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value.orEmpty()

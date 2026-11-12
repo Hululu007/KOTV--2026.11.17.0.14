@@ -13,7 +13,6 @@ import 'fvp_register.dart';
 import 'kotv_playback.dart';
 import 'video_player_toggle.dart';
 import 'kotv_platform.dart';
-import 'play_format.dart';
 import 'play_headers.dart';
 import 'playback_settings.dart';
 import 'player_normalize.dart';
@@ -60,8 +59,6 @@ class FvpPlayback extends KotvPlayback {
   double _volume = 100;
   double _rate = 1;
   String _decodeMode = 'auto';
-  /// 点播 HLS：节目单 EXTINF 加总，覆盖引擎偏短 demux 时长。
-  Duration? _playlistDuration;
   String? _lastUrl;
   String _videoScale = 'default';
   /// 仅尺寸/比例/错误变化时递增，供 buildView 重建（勿绑 position/buffering）。
@@ -112,8 +109,7 @@ class FvpPlayback extends KotvPlayback {
   Duration get position => _c?.value.position ?? Duration.zero;
 
   @override
-  Duration get duration =>
-      kotvPreferPlaylistDuration(_c?.value.duration ?? Duration.zero, _playlistDuration);
+  Duration get duration => _c?.value.duration ?? Duration.zero;
 
   @override
   Duration get buffered {
@@ -285,7 +281,6 @@ class FvpPlayback extends KotvPlayback {
     _vodBufferSet = false;
     _lastError = null;
     _completed = false;
-    _playlistDuration = null;
     _audioTracks = const [];
     _videoTracks = const [];
     _subtitleTracks = const [];
@@ -301,12 +296,6 @@ class FvpPlayback extends KotvPlayback {
       await _disposeController();
       notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
-      unawaited(_refreshPlaylistDuration(
-        url: url,
-        headers: h,
-        live: live,
-        format: format,
-      ));
       // 点播续播/片头：X-KOTV-Prepare-Ms → fvp patch prepare(ms)（mdk prepare startPosition）。
       // 勿 prepare(0) 后再 seekTo——避免解码器二次启动/刷新开销。
       final openHeaders = Map<String, String>.from(h);
@@ -604,26 +593,9 @@ class FvpPlayback extends KotvPlayback {
   Future<void> stop() async {
     _opening = false;
     _lastError = null;
-    _playlistDuration = null;
     await _disposeController();
     notifyListeners();
   }
-
-  Future<void> _refreshPlaylistDuration({
-    required String url,
-    required Map<String, String> headers,
-    required bool live,
-    required String? format,
-  }) =>
-      kotvApplyHlsPlaylistDurationRefresh(
-        url: url,
-        headers: headers,
-        live: live,
-        format: format,
-        stillCurrent: () => _lastUrl == url,
-        setPlaylistDuration: (d) => _playlistDuration = d,
-        onUpdated: notifyListeners,
-      );
 
   @override
   Future<void> stopForEpisodeSwitch() async {
