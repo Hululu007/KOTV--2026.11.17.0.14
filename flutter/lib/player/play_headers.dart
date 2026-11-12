@@ -71,7 +71,7 @@ bool kotvIsLocalProxyUrl(String url) {
 
 /// 这次打开能否把请求头交给播放器。为真且直链可连时，打开站点地址。
 ///
-/// - Exo、MPV：列表和分片走各自的 HTTP 栈，整份头带上。
+/// - Exo、FVP、MPV：列表和分片走各自的 HTTP 栈，整份头带上。
 /// - html / art / 西瓜 / 全能：只有 HLS 且 hls.js 可用时由 xhr 带上。
 bool kotvPlaybackSendsHeaders({
   required String playerVal,
@@ -81,6 +81,7 @@ bool kotvPlaybackSendsHeaders({
 }) {
   switch (playerVal) {
     case 'innie#exo':
+    case 'innie#fvp':
     case 'innie#mpv':
       return true;
     case 'innie#html':

@@ -460,6 +460,7 @@ jobs:
 
       - name: Package Flutter macOS x86_64
         env:
+          KOTV_MACOS_NO_FVP: "0"
           KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
           CGO_ENABLED: "1"
           KOTV_JAVA_TOOLCHAIN: "21"
@@ -474,6 +475,7 @@ jobs:
           if [[ "$(uname -m)" == "arm64" ]]; then
             arch -x86_64 bash -lc '
               export PATH="/usr/local/bin:$PATH"
+              export KOTV_MACOS_NO_FVP=0
               export KOTV_MACOS_FORCE_ARCH=x86_64
               export GOARCH=amd64
               export GOOS=darwin

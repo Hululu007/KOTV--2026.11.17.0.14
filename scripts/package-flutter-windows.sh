@@ -65,8 +65,12 @@ trap kotv_flutter_asset_engines_restore EXIT
 
 echo "==> flutter build windows --release"
 cd "$ROOT/flutter"
+# shellcheck source=kotv-fvp-deps.sh
+source "$ROOT/scripts/kotv-fvp-deps.sh"
+kotv_export_fvp_deps
 flutter config --enable-windows-desktop
 KOTV_FLUTTER_TARGET=windows "$ROOT/scripts/flutter-pub-get.sh"
+kotv_ensure_mdk_windows_sdk
 flutter build windows --release
 
 [[ -f "$RELEASE_DIR/kotv.exe" ]] || { echo "missing $RELEASE_DIR/kotv.exe" >&2; exit 1; }

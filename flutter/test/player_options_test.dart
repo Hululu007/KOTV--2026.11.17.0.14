@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kotv/player/kotv_platform.dart';
 
 void main() {
-  test('android options are exo mpv outie', () {
+  test('android options exclude fvp; clamp migrates old fvp', () {
     // kotvPlayerOptions 在测试里按真实 Platform；用 clamp 表语义覆盖纠偏。
     const androidLike = [
       ('内置 ExoPlayer（默认）', 'innie#exo'),

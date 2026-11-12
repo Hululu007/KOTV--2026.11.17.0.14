@@ -1,6 +1,6 @@
 package com.bobo.kotv
 
-/** Exo / 安卓原生 MPV 共用的解码、渲染与请求头归一。 */
+/** Exo / Media3 Mpv 共用的解码、渲染与请求头归一。 */
 object KotvPlayerNormalize {
   fun decodeModeLabel(raw: String): String =
     when (raw.trim().lowercase()) {

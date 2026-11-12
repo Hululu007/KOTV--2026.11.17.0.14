@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 
 /// 将设置里的 videoScale（default/fill/zoom/16:9/4:3）映射为 Flutter [BoxFit]。
 /// `16:9` / `4:3` 不走 stretch（[BoxFit.fill]）；由 [kotvForcedAspectRatio] + 布局强制画幅。
-/// Exo Texture；MPV 走 keepaspect / video-aspect-override。
+/// Exo Texture 与 FVP 共用；MPV 走 keepaspect / video-aspect-override。
 BoxFit kotvFitFromVideoScale(String scale, BoxFit fallback) {
   switch (scale.trim().toLowerCase()) {
     case 'fill':

@@ -8,6 +8,7 @@ import 'kotv_platform.dart';
 /// 前向到达上限就停止继续读。已经播过、超出回看保留的数据会丢掉，空出来的额度继续往前补。
 /// mpv：`demuxer-max-bytes` 是前向上限，`demuxer-max-back-bytes` 是保留的已播数据。
 /// Exo：`targetBufferBytes` 或最长缓冲时长到了就停读；回看缓冲时长为 0，播放位置之前的样本会丢掉。
+/// FVP：队列时长到了就不再推包；`drop` 为 false 时等解码把队列消化到上限以下。
 /// 磁盘缓存只在点播且设置开启时另走。不设 mpv `cache-secs` / `demuxer-readahead-secs`。
 /// Web 和外部播放器不走这份预算。
 ///
@@ -99,6 +100,19 @@ class KotvBufferBudget {
     var mib = (n / (1024 * 1024)).round();
     if (mib < 1) mib = 1;
     return '${mib}MiB';
+  }
+
+  /// mdk [setBufferRange] 只有毫秒。把内存预算按这条流的码率换成能放下的媒体时长。
+  ///
+  /// [bitsPerSec] 来自容器或音视频轨。为 0 时返回 0，调用方用临时上限并继续等码率。
+  /// 返回值至少 1：0 在 mdk 里表示不限制时长（且与 drop 组合时可能只留关键帧）。
+  static int fvpMaxBufferMs(int budgetBytes, {required int bitsPerSec}) {
+    if (budgetBytes <= 0 || bitsPerSec <= 0) return 0;
+    final bytesPerSec = bitsPerSec / 8.0;
+    var ms = (budgetBytes / bytesPerSec * 1000.0).round();
+    if (ms < 1) ms = 1;
+    if (ms > 2 * 3600 * 1000) return 2 * 3600 * 1000;
+    return ms;
   }
 
   @visibleForTesting

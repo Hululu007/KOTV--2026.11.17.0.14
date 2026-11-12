@@ -67,6 +67,14 @@ void main() {
       isTrue,
     );
     expect(
+      kotvShouldPreferPlayDirect(playerVal: 'innie#fvp', adFilterOn: false),
+      isTrue,
+    );
+    expect(
+      kotvShouldPreferPlayDirect(playerVal: 'innie#fvp', adFilterOn: true),
+      isFalse,
+    );
+    expect(
       kotvShouldSwitchToProxyAfterOpenFailure(
         playerVal: 'innie#mpv',
         openUrl: 'https://cdn.example/a.m3u8',
@@ -79,6 +87,15 @@ void main() {
       kotvShouldSwitchToProxyAfterOpenFailure(
         playerVal: 'innie#exo',
         openUrl: 'https://cdn.example/a.m3u8',
+        playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
+        alreadySwitched: false,
+      ),
+      isFalse,
+    );
+    expect(
+      kotvShouldSwitchToProxyAfterOpenFailure(
+        playerVal: 'innie#fvp',
+        openUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
         playUrl: 'http://127.0.0.1:9978/proxy/play?id=1',
         alreadySwitched: false,
       ),
@@ -143,7 +160,14 @@ void main() {
     expect(kotvIsLocalProxyUrl('https://cdn.example/a.m3u8'), isFalse);
   });
 
-  test('exo mpv always send headers; web hls.js only on playlists', () {
+  test('fvp exo mpv always; web hls.js only on playlists', () {
+    expect(
+      kotvPlaybackSendsHeaders(
+        playerVal: 'innie#fvp',
+        mediaUrl: 'https://cdn.example/a.mp4',
+      ),
+      isTrue,
+    );
     expect(
       kotvPlaybackSendsHeaders(
         playerVal: 'innie#exo',

@@ -12,6 +12,19 @@
 # 删掉 media_kit 写死的 cache-on-disk=yes。该缓存文件只追加，媒体关掉才删除。
 # 直播开播不会改这个选项；点播需要磁盘缓存时由应用在开播前写成 yes。
 #
+# fvp 的 dispose 在删除播放器前等待视频尺寸。尺寸 Completer 被换掉后可能永远等不到，
+# mdkPlayerAPI_delete 不执行，上一集的包缓存就留在进程里。补丁让释放纹理时不等尺寸，并等待删除完成。
+#
+# FvpVideoView.surfaceDestroyed 上游会 release()→nativeSetSurface(null)。全屏改
+# LayoutParams 常触发临时 surfaceDestroyed，整表抹掉 players 后易定格/崩。改成空
+# 实现（与 KotvExo SurfaceView 同语义）；永久卸面仍走 dispose()→release()。
+#
+# PlatformView 卸面 UAF：nativeSetSurface 清面分支不读 JNI tunnel，只看绑定时写入的
+# TexturePlayer.directSurface。真正崩溃是 Dart 先 mdkPlayerAPI_delete，而
+# players[surfaceId] 仍包装同一 handle，随后 FvpVideoView.release→setDecoders。
+# 补丁：dispose 在 delete 前调 ReleasePlayer，按 handle 卸面并 erase map。
+# （误用 release(tunnel=false) 无效，已撤销。）
+#
 # prepare 失败写入 _players[-hashCode] 时若覆盖同 key，旧 player 会泄漏；改为先 dispose 再挂新的。
 #
 # Windows 插件原来每帧 CopyResource 进同一张 shared 纹理。Flutter 只在 handle 变化时
@@ -20,6 +33,10 @@
 #
 # reader.buffering 把毫秒的 position 装进了 Duration(microseconds:)。改成毫秒。
 # getPosition 组装缓冲区间时也用毫秒。
+#
+# Windows 插件在 prepare 之前建一个 D3D11 设备，交给 d3d11.device，并设 d3d11.copy=0
+# （均为 mdk Global-Options 文档项）。上游 fvp 会写 d3d11.sync.cpu，wiki/mdk.dll 均无此
+# 全局选项（仅有环境变量 D3D11_SYNC_CPU 与文档项 d3d11.sync.kmt），故删掉那一行。
 #
 # window_manager 0.4.3 有边框进入系统全屏会先 SC_MAXIMIZE。窗口已经最大化后，
 # 紧接着的 SetWindowPos 常常改不到尺寸，子窗口收不到新的 WM_SIZE，画面停在最后一帧。
@@ -36,7 +53,7 @@
 # 开「硬解直出」：dxva2 经 dxva2-egl 零拷贝，须 ANGLE D3D9Ex；直出被拒（10 位 / Haswell H265）则软解，不要 dxva2-copy。
 # 补丁在建播放器时读 hwdec：含 dxva2（直出）则 D3D9 优先，否则 D3D11 优先。
 #
-# 按平台：Dart 部分各平台共用，总是打；原生部分（window_manager、
+# 按平台：Dart 部分各平台共用，总是打；原生部分（fvp 的 Windows / 安卓、window_manager、
 # avfoundation、Win7 的 media_kit_video）只在 KOTV_FLUTTER_TARGET 对应的平台打。
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：KOTV_FLUTTER_TARGET=<平台> scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
@@ -245,6 +262,1089 @@ if "'cache-on-disk'" in check:
     sys.exit(1)
 print(f"ok media_kit ({version}) patches applied ({target})")
 PY
+
+# fvp（Dart，各平台）
+_kotv_patch_py <<'PY'
+import re
+
+# fvp：width/height <= 0 时不要等视频尺寸，并等播放器真正删掉。
+fvp_root = pkg_or_skip("fvp")
+fvp_version = fvp_root.name
+tag = f"fvp ({fvp_version})"
+
+player_dart = fvp_root / "lib" / "src" / "player.dart"
+mdk_dart = fvp_root / "lib" / "src" / "video_player_mdk.dart"
+if not player_dart.is_file() or not mdk_dart.is_file():
+    print(f"ERROR: fvp sources missing under {fvp_root}", file=sys.stderr)
+    sys.exit(1)
+
+DISPOSE_OLD = """  /// Release resources
+  void dispose() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    // await: ensure no player ref in fvp plugin before mdkPlayerAPI_delete() in dart
+    await updateTexture(width: -1);
+    state = PlaybackState.stopped;"""
+# Previous KOTV dispose patch (stop + updateTexture, no ReleasePlayer).
+DISPOSE_LEGACY = """  /// Release resources
+  Future<void> dispose() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    // KOTV patch (scripts/patch-media-kit.sh): stop before delete so the demux
+    // packet cache goes away with the player.
+    state = PlaybackState.stopped;
+    // await: ensure no player ref in fvp plugin before mdkPlayerAPI_delete() in dart
+    await updateTexture(width: -1);"""
+# Brief intermediate: ReleasePlayer on all platforms (desktop MissingPluginException).
+DISPOSE_RELEASE_ALWAYS = """  /// Release resources
+  Future<void> dispose() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    // KOTV patch (scripts/patch-media-kit.sh): stop before delete so the demux
+    // packet cache goes away with the player.
+    state = PlaybackState.stopped;
+    // Texture: ReleaseRT via updateTexture. PlatformView never sets textureId —
+    // ReleasePlayer drops native players[surfaceId] while the handle is still live.
+    await updateTexture(width: -1);
+    await FvpPlatform.instance.releasePlayer(nativeHandle);"""
+DISPOSE_NEW = """  /// Release resources
+  Future<void> dispose() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    // KOTV patch (scripts/patch-media-kit.sh): stop before delete so the demux
+    // packet cache goes away with the player.
+    state = PlaybackState.stopped;
+    // Texture: ReleaseRT via updateTexture. Android PlatformView never sets
+    // textureId — ReleasePlayer drops native players[surfaceId] while alive.
+    await updateTexture(width: -1);
+    if (Platform.isAndroid) {
+      await FvpPlatform.instance.releasePlayer(nativeHandle);
+    }"""
+# fvp 0.40+: dispose() → unawaited(disposeAsync()); 真正卸面在 disposeAsync。
+DISPOSE_ASYNC_OLD = """  /// Release resources and wait for native teardown to finish.
+  Future<void> disposeAsync() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    await updateTexture(width: -1);
+    state = PlaybackState.stopped;"""
+DISPOSE_ASYNC_NEW = """  /// Release resources and wait for native teardown to finish.
+  Future<void> disposeAsync() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    // KOTV patch (scripts/patch-media-kit.sh): stop before delete so the demux
+    // packet cache goes away with the player.
+    state = PlaybackState.stopped;
+    // Texture: ReleaseRT via updateTexture. Android PlatformView never sets
+    // textureId — ReleasePlayer drops native players[surfaceId] while alive.
+    await updateTexture(width: -1);
+    if (Platform.isAndroid) {
+      await FvpPlatform.instance.releasePlayer(nativeHandle);
+    }"""
+SIZE_WAIT_OLD = """      textureId.value = null;
+    }
+    final size = await _videoSize.future;"""
+SIZE_WAIT_NEW = """      textureId.value = null;
+    }
+    // KOTV patch (scripts/patch-media-kit.sh): releasing the texture must not wait
+    // for a video size. dispose passes width -1; a replaced _videoSize completer
+    // would otherwise never finish and mdkPlayerAPI_delete would not run.
+    if ((width != null && width <= 0) || (height != null && height <= 0)) {
+      return -1;
+    }
+    final size = await _videoSize.future;"""
+# fvp 0.40+ 已上游化同等逻辑（注释不同）；当作已打补丁。
+SIZE_WAIT_UPSTREAM = """      textureId.value = null;
+    }
+    // Releasing a texture must not wait for media/video size. That future may
+    // never complete when an in-flight load is cancelled by disposal.
+    if ((width != null && width <= 0) || (height != null && height <= 0)) {
+      return -1;
+    }
+    final size = await _videoSize.future;"""
+# 0.39 在删播放器前先清 platform view；Win7 的 0.37.3 没有这一行。
+AWAIT_PAIRS = (
+    (
+        """    _platformViewParams.remove(playerId);
+    _players.remove(playerId)?.dispose();""",
+        """    _platformViewParams.remove(playerId);
+    await _players.remove(playerId)?.dispose();""",
+    ),
+    (
+        """  Future<void> dispose(int playerId) async {
+    _players.remove(playerId)?.dispose();
+  }""",
+        """  Future<void> dispose(int playerId) async {
+    await _players.remove(playerId)?.dispose();
+  }""",
+    ),
+)
+# Player.dispose 改成 Future 后，子类 MdkVideoPlayer.dispose 仍是 void 就编不过。
+SUB_DISPOSE_OLD = """  @override
+  void dispose() {
+    streamCtl.close();
+    _initialized = false;
+    super.dispose();
+  }"""
+SUB_DISPOSE_NEW = """  @override
+  Future<void> dispose() async {
+    streamCtl.close();
+    _initialized = false;
+    await super.dispose();
+  }"""
+
+player_orig = player_text = player_dart.read_text(encoding="utf-8")
+mdk_orig = mdk_text = mdk_dart.read_text(encoding="utf-8")
+
+player_text = one_of(
+    tag,
+    "dispose stops before delete + ReleasePlayer",
+    player_text,
+    (
+        (DISPOSE_ASYNC_OLD, DISPOSE_ASYNC_NEW),
+        (DISPOSE_OLD, DISPOSE_NEW),
+        (DISPOSE_LEGACY, DISPOSE_NEW),
+        (DISPOSE_RELEASE_ALWAYS, DISPOSE_NEW),
+    ),
+)
+player_text = one_of(
+    tag,
+    "updateTexture release does not wait for size",
+    player_text,
+    (
+        (SIZE_WAIT_OLD, SIZE_WAIT_NEW),
+        (SIZE_WAIT_OLD, SIZE_WAIT_UPSTREAM),
+    ),
+)
+if (
+    "await player?.disposeAsync()" in mdk_text
+    or "await _players.remove(playerId)?.disposeAsync()" in mdk_text
+    or "await _players.remove(playerId)?.dispose()" in mdk_text
+):
+    print(f"ok {tag} already patched: platform dispose awaits player delete")
+else:
+    mdk_text = one_of(tag, "platform dispose awaits player delete", mdk_text, AWAIT_PAIRS)
+if "await super.disposeAsync()" in mdk_text or (
+    "Future<void> dispose() async" in mdk_text and "await super.dispose()" in mdk_text
+):
+    print(f"ok {tag} already patched: MdkVideoPlayer.dispose returns Future")
+else:
+    mdk_text = once(tag, "MdkVideoPlayer.dispose returns Future", mdk_text, SUB_DISPOSE_OLD, SUB_DISPOSE_NEW)
+# reader.buffering 的 position 是毫秒。getPosition 也按毫秒组装区间。
+# 片段带上 reader.buffering，避免和 getPosition 里已是毫秒的区间撞车。
+BUF_RANGE_OLD = """      if (ev.category == "reader.buffering") {
+        final pos = position;
+        final bufLen = buffered();
+        streamCtl.add(
+          VideoEvent(
+            eventType: VideoEventType.bufferingUpdate,
+            buffered: [
+              DurationRange(
+                Duration(microseconds: pos),
+                Duration(milliseconds: pos + bufLen),
+              ),"""
+BUF_RANGE_NEW = """      if (ev.category == "reader.buffering") {
+        final pos = position;
+        final bufLen = buffered();
+        streamCtl.add(
+          VideoEvent(
+            eventType: VideoEventType.bufferingUpdate,
+            buffered: [
+              DurationRange(
+                Duration(milliseconds: pos),
+                Duration(milliseconds: pos + bufLen),
+              ),"""
+mdk_text = once(tag, "reader.buffering range start is milliseconds", mdk_text, BUF_RANGE_OLD, BUF_RANGE_NEW)
+
+# prepare / 出纹理失败时都写 _players[-hashCode]。同一 key 被覆盖时上一只 player
+# 再也 dispose 不到，连播重试/换集会把 mdk 包缓存堆在进程里。
+# 助手内部用 failedId 赋值，避免全局替换把助手自己也改成递归调用。
+# fvp 0.40+：void dispose() 只是 unawaited(disposeAsync())，必须 await disposeAsync。
+_orphan_dispose = (
+    "await prev.disposeAsync();"
+    if "disposeAsync()" in mdk_text
+    else "await prev.dispose();"
+)
+ORPHAN_HELPER = f"""
+  /// KOTV patch: keep at most one failed player under [-hashCode]; dispose the previous.
+  Future<void> _storeFailedPlayer(MdkVideoPlayer player) async {{
+    final failedId = -hashCode;
+    final prev = _players.remove(failedId);
+    _players[failedId] = player;
+    if (prev != null && !identical(prev, player)) {{
+      {_orphan_dispose}
+    }}
+  }}
+"""
+# 清掉旧版误补丁（递归助手、重复注释、误挂的 @override）。
+mdk_text, n_broken = re.subn(
+    r"  @override\n\n  /// KOTV patch: keep at most one failed player[^\n]*\n"
+    r"(?:  /// KOTV patch: keep at most one failed player[^\n]*\n)?"
+    r"  Future<void> _storeFailedPlayer\(MdkVideoPlayer player\) async \{\n"
+    r"    final prev = _players\.remove\(-hashCode\);\n"
+    r"    await _storeFailedPlayer\(player\);\n"
+    r"    if \(prev != null && !identical\(prev, player\)\) \{\n"
+    r"      await prev\.dispose\(\);\n"
+    r"    \}\n"
+    r"  \}\n+",
+    ORPHAN_HELPER.lstrip("\n") + "\n",
+    mdk_text,
+    count=1,
+)
+if n_broken:
+    print(f"patched fvp ({fvp_version}): fix recursive failed-player helper")
+
+mdk_text, n_dup = re.subn(
+    r"  @override\n\n  /// KOTV patch: keep at most one failed player[^\n]*\n"
+    r"  /// KOTV patch: keep at most one failed player[^\n]*\n"
+    r"  Future<void> _storeFailedPlayer\(MdkVideoPlayer player\) async \{\n"
+    r"    final failedId = -hashCode;\n"
+    r"    final prev = _players\.remove\(failedId\);\n"
+    r"    _players\[failedId\] = player;\n"
+    r"    if \(prev != null && !identical\(prev, player\)\) \{\n"
+    r"      await prev\.dispose\(\);\n"
+    r"    \}\n"
+    r"  \}\n+",
+    ORPHAN_HELPER.lstrip("\n") + "\n",
+    mdk_text,
+    count=1,
+)
+if n_dup:
+    print(f"patched fvp ({fvp_version}): clean failed-player helper placement")
+
+if "final failedId = -hashCode;" not in mdk_text:
+    anchor = "  Future<void> dispose(int playerId) async {"
+    if anchor not in mdk_text:
+        print("ERROR: fvp platform dispose anchor missing for orphan helper", file=sys.stderr)
+        sys.exit(1)
+    mdk_text = mdk_text.replace(anchor, ORPHAN_HELPER + "\n" + anchor, 1)
+    print(f"patched fvp ({fvp_version}): failed-player orphan helper")
+else:
+    print(f"ok fvp ({fvp_version}) already patched: failed-player orphan helper")
+
+orphan_n = mdk_text.count("_players[-hashCode] = player;")
+if orphan_n:
+    mdk_text = mdk_text.replace(
+        "_players[-hashCode] = player;",
+        "await _storeFailedPlayer(player);",
+    )
+    print(f"patched fvp ({fvp_version}): store failed players via helper ({orphan_n})")
+elif "await _storeFailedPlayer(player);" in mdk_text:
+    print(f"ok fvp ({fvp_version}) already patched: store failed players via helper")
+else:
+    print(
+        f"ERROR: fvp ({fvp_version}) failed-player store sites missing",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+helper_body = mdk_text.split("final failedId = -hashCode;", 1)[-1].split(
+    "Future<void> dispose(int playerId)", 1
+)[0]
+if "await _storeFailedPlayer(player);" in helper_body:
+    print("ERROR: failed-player helper still calls itself", file=sys.stderr)
+    sys.exit(1)
+if mdk_text.count("await _storeFailedPlayer(player);") < 3:
+    print("ERROR: expected at least 3 failed-player store call sites", file=sys.stderr)
+    sys.exit(1)
+
+# 上游可能仍写 d3d11.sync.cpu；缓存里也可能已被旧补丁删掉（注释文案会变）。
+if "setGlobalOption('d3d11.sync.cpu'" in mdk_text:
+    mdk_text = once(
+        tag,
+        "remove undocumented d3d11.sync.cpu",
+        mdk_text,
+        "    mdk.setGlobalOption('d3d11.sync.cpu', 1);\n",
+        "    // KOTV patch: upstream fvp sets d3d11.sync.cpu, but mdk Global-Options has\n"
+        "    // no such key (only env D3D11_SYNC_CPU / d3d11.sync.kmt). Drop it; Windows\n"
+        "    // plugin publishes d3d11.device + d3d11.copy=0 instead.\n",
+    )
+else:
+    print(f"ok fvp ({fvp_version}) already patched: remove undocumented d3d11.sync.cpu")
+
+# create：player 属性写完后显式 setBufferRange(min:0, max:0)。
+# max 必须显式 >=0：Dart 默认 max=-1 会把 max/drop 打回默认值。
+# 不用 lowLatency（会把 analyzeduration 砍到 100ms，伪扩展名 prepare 易失败）。
+BUF_RANGE_CREATE_OLD = """    _playerOpts?.forEach((key, value) {
+      player.setProperty(key, value);
+    });
+    // KOTV: mdk default minMs=1000 → ~1fps on queue underrun. Call the API
+    // (same as lowLatency) without shrinking analyzeduration.
+    if (_lowLatency <= 0) {
+      player.setBufferRange(min: 0);
+    }
+
+    if (_decoders != null) {
+"""
+BUF_RANGE_CREATE_NEW = """    _playerOpts?.forEach((key, value) {
+      player.setProperty(key, value);
+    });
+    // KOTV: min=0 decode ASAP; max=0 → INT64_MAX. Never pass max=-1.
+    if (_lowLatency <= 0) {
+      player.setBufferRange(min: 0, max: 0);
+    }
+
+    if (_decoders != null) {
+"""
+if "player.setBufferRange(min: 0, max: 0);" in mdk_text:
+    print(f"ok fvp ({fvp_version}) already patched: setBufferRange min=0 max=0 after player opts")
+elif "player.setBufferRange(min: 0);" in mdk_text and "_lowLatency <= 0" in mdk_text:
+    mdk_text = once(
+        tag,
+        "setBufferRange min=0 max=0 after player opts",
+        mdk_text,
+        BUF_RANGE_CREATE_OLD,
+        BUF_RANGE_CREATE_NEW,
+    )
+else:
+    mdk_text = once(
+        tag,
+        "setBufferRange min=0 max=0 after player opts",
+        mdk_text,
+        """    _playerOpts?.forEach((key, value) {
+      player.setProperty(key, value);
+    });
+
+    if (_decoders != null) {
+""",
+        BUF_RANGE_CREATE_NEW,
+    )
+
+# create：X-KOTV-Prepare-Ms → prepare(startPosition)；勿发往 CDN。
+# Mac MPV Media(start:) / mdk prepare(ms) 同思路；避免 prepare(0)+seekTo 触发安卓 AMediaCodec FLUSHING。
+# fvp 0.40+：prepare 包在 _untilCancelled 里，并带 cancellation 早退；旧版仍是 await player.prepare()。
+PREPARE_HDR_UA_REFERER = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip before avio.headers (CDN).
+    // UA / Referer 走 avio.user_agent / avio.referer，其余进 avio.headers。
+    var prepareMs = 0;
+    var ua = '';
+    var referer = '';
+    var headers = '';
+    if (dataSource.httpHeaders.isNotEmpty) {
+      dataSource.httpHeaders.forEach((key, value) {
+        if (key == 'X-KOTV-Prepare-Ms') {
+          prepareMs = int.tryParse(value) ?? 0;
+          return;
+        }
+        final low = key.toLowerCase();
+        if (low == 'user-agent' || low == 'ua') {
+          ua = value;
+          return;
+        }
+        if (low == 'referer' || low == 'referrer') {
+          referer = value;
+          return;
+        }
+        headers += '$key: $value\\r\\n';
+      });
+    }
+    if (ua.isNotEmpty) player.setProperty('avio.user_agent', ua);
+    if (referer.isNotEmpty) player.setProperty('avio.referer', referer);
+    if (headers.isNotEmpty) player.setProperty('avio.headers', headers);
+    player.media = uri;
+"""
+PREPARE_HDR_MID = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip before avio.headers (CDN).
+    // Same idea as Mac MPV Media(start:) / mdk prepare(startPosition).
+    var prepareMs = 0;
+    if (dataSource.httpHeaders.isNotEmpty) {
+      String headers = '';
+      dataSource.httpHeaders.forEach((key, value) {
+        if (key == 'X-KOTV-Prepare-Ms') {
+          prepareMs = int.tryParse(value) ?? 0;
+          return;
+        }
+        headers += '$key: $value\\r\\n';
+      });
+      if (headers.isNotEmpty) {
+        player.setProperty('avio.headers', headers);
+      }
+    }
+    player.media = uri;
+"""
+PREPARE_HDR_OLD = """    if (dataSource.httpHeaders.isNotEmpty) {
+      String headers = '';
+      dataSource.httpHeaders.forEach((key, value) {
+        headers += '$key: $value\\r\\n';
+      });
+      player.setProperty('avio.headers', headers);
+    }
+    player.media = uri;
+"""
+PREPARE_CALL_LEGACY_OLD = "    int ret = await player.prepare(); // required!\n"
+PREPARE_CALL_LEGACY_MID = "    int ret = await player.prepare(position: prepareMs); // required!\n"
+PREPARE_CALL_LEGACY_NEW = "    int ret = await player.prepare(position: prepareMs); // required!\n"
+PREPARE_CALL_V40_OLD = """    if (cancellation?.isCancelled ?? false) {
+      return _finishCancelledCreate(player);
+    }
+    final preparation = await _untilCancelled(player.prepare(), cancellation);
+"""
+PREPARE_CALL_V40_MID = """    if (cancellation?.isCancelled ?? false) {
+      return _finishCancelledCreate(player);
+    }
+    final preparation = await _untilCancelled(player.prepare(position: prepareMs), cancellation);
+"""
+PREPARE_CALL_V40_NEW = """    if (cancellation?.isCancelled ?? false) {
+      return _finishCancelledCreate(player);
+    }
+    final preparation = await _untilCancelled(player.prepare(position: prepareMs), cancellation);
+"""
+if "avio.user_agent" in mdk_text and "avio.referer" in mdk_text and "prepare(position: prepareMs)" in mdk_text:
+    print(f"ok fvp ({fvp_version}) already patched: prepare(startPosition) + avio.user_agent / avio.referer")
+else:
+    # 先统一 headers 段，再改 prepare 调用（0.40 _untilCancelled / 旧 await）。
+    mdk_text = one_of(
+        tag,
+        "prepare headers + X-KOTV-Prepare-Ms / avio UA+Referer",
+        mdk_text,
+        (
+            (PREPARE_HDR_UA_REFERER, PREPARE_HDR_UA_REFERER),
+            (PREPARE_HDR_MID, PREPARE_HDR_UA_REFERER),
+            (PREPARE_HDR_OLD, PREPARE_HDR_UA_REFERER),
+        ),
+    )
+    mdk_text = one_of(
+        tag,
+        "prepare(startPosition) via X-KOTV-Prepare-Ms",
+        mdk_text,
+        (
+            (PREPARE_CALL_V40_NEW, PREPARE_CALL_V40_NEW),
+            (PREPARE_CALL_V40_MID, PREPARE_CALL_V40_NEW),
+            (PREPARE_CALL_V40_OLD, PREPARE_CALL_V40_NEW),
+            (PREPARE_CALL_LEGACY_NEW, PREPARE_CALL_LEGACY_NEW),
+            (PREPARE_CALL_LEGACY_MID, PREPARE_CALL_LEGACY_NEW),
+            (PREPARE_CALL_LEGACY_OLD, PREPARE_CALL_LEGACY_NEW),
+        ),
+    )
+
+# lowLatency 分支：setBufferRange(min:0) 省略 max → Dart 默认 max=-1 会把 max/drop
+# 打回默认，并可能让后续路径回到 minMs=1000（ADB timediff≈1000ms）。
+LOW_LAT_BUF_OLD = """      if (_lowLatency > 1) {
+        player.setBufferRange(min: 0, max: 1000, drop: true);
+      } else {
+        player.setBufferRange(min: 0);
+      }
+"""
+LOW_LAT_BUF_NEW = """      if (_lowLatency > 1) {
+        player.setBufferRange(min: 0, max: 1000, drop: true);
+      } else {
+        // KOTV: never omit max (default -1 resets max/drop; undoes min=0).
+        player.setBufferRange(min: 0, max: 0);
+      }
+"""
+if "never omit max (default -1 resets max/drop" in mdk_text:
+    print(f"ok fvp ({fvp_version}) already patched: lowLatency setBufferRange max=0")
+elif "player.setBufferRange(min: 0);" in mdk_text:
+    mdk_text = once(
+        tag,
+        "lowLatency setBufferRange max=0",
+        mdk_text,
+        LOW_LAT_BUF_OLD,
+        LOW_LAT_BUF_NEW,
+    )
+else:
+    print(f"ok fvp ({fvp_version}): no bare setBufferRange(min: 0) in lowLatency branch")
+
+if player_text != player_orig:
+    player_dart.write_text(player_text, encoding="utf-8")
+if mdk_text != mdk_orig:
+    mdk_dart.write_text(mdk_text, encoding="utf-8")
+
+_player_dispose_chunk = (
+    player_dart.read_text(encoding="utf-8").split("Future<void> disposeAsync", 1)[-1][:500]
+    if "Future<void> disposeAsync" in player_dart.read_text(encoding="utf-8")
+    else player_dart.read_text(encoding="utf-8").split("Future<void> dispose", 1)[-1][:500]
+)
+if "state = PlaybackState.stopped;" not in _player_dispose_chunk:
+    print("ERROR: fvp dispose patch verification failed", file=sys.stderr)
+    sys.exit(1)
+if "width <= 0" not in player_dart.read_text(encoding="utf-8"):
+    print("ERROR: fvp updateTexture patch verification failed", file=sys.stderr)
+    sys.exit(1)
+mdk_check = mdk_dart.read_text(encoding="utf-8")
+if not (
+    "await player?.disposeAsync();" in mdk_check
+    or "await _players.remove(playerId)?.disposeAsync();" in mdk_check
+    or "await _players.remove(playerId)?.dispose();" in mdk_check
+):
+    print("ERROR: fvp platform dispose patch verification failed", file=sys.stderr)
+    sys.exit(1)
+if "await super.disposeAsync();" not in mdk_check and "await super.dispose();" not in mdk_check:
+    print("ERROR: fvp MdkVideoPlayer.dispose patch verification failed", file=sys.stderr)
+    sys.exit(1)
+buf_at = mdk_check.find('reader.buffering')
+buf_chunk = mdk_check[buf_at:buf_at + 700] if buf_at >= 0 else ""
+if "Duration(microseconds: pos)" in buf_chunk or "Duration(milliseconds: pos)" not in buf_chunk:
+    print("ERROR: fvp reader.buffering still uses microseconds", file=sys.stderr)
+    sys.exit(1)
+if "setGlobalOption('d3d11.sync.cpu'" in mdk_check:
+    print("ERROR: fvp still sets undocumented d3d11.sync.cpu", file=sys.stderr)
+    sys.exit(1)
+if "player.setBufferRange(min: 0, max: 0);" not in mdk_check or "_lowLatency <= 0" not in mdk_check:
+    print("ERROR: fvp create missing setBufferRange(min: 0, max: 0) after player opts", file=sys.stderr)
+    sys.exit(1)
+if "X-KOTV-Prepare-Ms" not in mdk_check or "prepare(position: prepareMs)" not in mdk_check:
+    print("ERROR: fvp create missing prepare(startPosition) via X-KOTV-Prepare-Ms", file=sys.stderr)
+    sys.exit(1)
+if "avio.user_agent" not in mdk_check or "avio.referer" not in mdk_check:
+    print("ERROR: fvp create missing avio.user_agent / avio.referer", file=sys.stderr)
+    sys.exit(1)
+if "player.setBufferRange(min: 0);" in mdk_check and "_lowLatency > 1" in mdk_check:
+    print("ERROR: fvp lowLatency still has setBufferRange(min: 0) without max", file=sys.stderr)
+    sys.exit(1)
+fvp_plat = fvp_root / "lib" / "src" / "fvp_platform_interface.dart"
+fvp_ch = fvp_root / "lib" / "src" / "fvp_method_channel.dart"
+for p in (fvp_plat, fvp_ch):
+    if not p.is_file():
+        print(f"ERROR: missing {p}", file=sys.stderr)
+        sys.exit(1)
+
+PLAT_OLD = """  Future<void> releaseTexture(int playerHandle, int textureId) {
+    throw UnimplementedError('releaseTexture() has not been implemented.');
+  }
+
+  Future<void> setMixWithOthers(bool mixWithOthers) async {
+    throw UnimplementedError('setMixWithOthers() has not been implemented.');
+  }
+}"""
+PLAT_NEW = """  Future<void> releaseTexture(int playerHandle, int textureId) {
+    throw UnimplementedError('releaseTexture() has not been implemented.');
+  }
+
+  /// Clear native surface bindings for [playerHandle] (PlatformView path).
+  Future<void> releasePlayer(int playerHandle) {
+    throw UnimplementedError('releasePlayer() has not been implemented.');
+  }
+
+  Future<void> setMixWithOthers(bool mixWithOthers) async {
+    throw UnimplementedError('setMixWithOthers() has not been implemented.');
+  }
+}"""
+CH_OLD = """  @override
+  Future<void> releaseTexture(int playerHandle, int textureId) async {
+    await methodChannel.invokeMethod('ReleaseRT', {
+      "player": playerHandle,
+      "texture": textureId,
+    });
+  }
+
+  @override
+  Future<void> setMixWithOthers(bool mixWithOthers) async {
+    await methodChannel.invokeMethod('MixWithOthers', {"value": mixWithOthers});
+  }
+}"""
+CH_NEW = """  @override
+  Future<void> releaseTexture(int playerHandle, int textureId) async {
+    await methodChannel.invokeMethod('ReleaseRT', {
+      "player": playerHandle,
+      "texture": textureId,
+    });
+  }
+
+  @override
+  Future<void> releasePlayer(int playerHandle) async {
+    await methodChannel.invokeMethod('ReleasePlayer', {
+      "player": playerHandle,
+    });
+  }
+
+  @override
+  Future<void> setMixWithOthers(bool mixWithOthers) async {
+    await methodChannel.invokeMethod('MixWithOthers', {"value": mixWithOthers});
+  }
+}"""
+plat_text = fvp_plat.read_text(encoding="utf-8")
+if "releasePlayer(int playerHandle)" in plat_text:
+    print(f"ok fvp ({fvp_version}) already patched: FvpPlatform.releasePlayer")
+elif PLAT_OLD in plat_text:
+    fvp_plat.write_text(plat_text.replace(PLAT_OLD, PLAT_NEW, 1), encoding="utf-8")
+    print(f"patched fvp ({fvp_version}): FvpPlatform.releasePlayer")
+else:
+    print(
+        f"ERROR: fvp ({fvp_version}) FvpPlatform.releasePlayer anchor missing",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+ch_text = fvp_ch.read_text(encoding="utf-8")
+if "ReleasePlayer" in ch_text:
+    print(f"ok fvp ({fvp_version}) already patched: MethodChannel ReleasePlayer")
+elif CH_OLD in ch_text:
+    fvp_ch.write_text(ch_text.replace(CH_OLD, CH_NEW, 1), encoding="utf-8")
+    print(f"patched fvp ({fvp_version}): MethodChannel ReleasePlayer")
+else:
+    print(
+        f"ERROR: fvp ({fvp_version}) MethodChannel ReleasePlayer anchor missing",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+# player.dart may have been written earlier in this run; re-read for final checks.
+player_check = player_dart.read_text(encoding="utf-8")
+_dispose_chunk = (
+    player_check.split("Future<void> disposeAsync", 1)[-1][:900]
+    if "Future<void> disposeAsync" in player_check
+    else player_check.split("Future<void> dispose", 1)[-1][:900]
+)
+if "releasePlayer(nativeHandle)" not in player_check or "Platform.isAndroid" not in _dispose_chunk:
+    print("ERROR: Player.dispose missing Android-gated releasePlayer before mdk delete", file=sys.stderr)
+    sys.exit(1)
+
+print(f"ok fvp ({fvp_version}) patches applied ({player_dart})")
+PY
+
+# fvp Windows 插件
+if _kotv_for_target windows; then
+_kotv_patch_py <<'PY'
+fvp_root = pkg_or_skip("fvp")
+fvp_version = fvp_root.name
+tag = f"fvp ({fvp_version})"
+
+# Windows：三张 shared 纹理轮换。renderVideo 画进 Flutter 没拿着的那张，取纹理时只交 handle。
+WIN_PLUGIN = fvp_root / "windows" / "fvp_plugin.cpp"
+WIN_COPY_OLD = """        D3D11_TEXTURE2D_DESC desc;
+        rt->GetDesc(&desc);
+        desc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED;
+        MS_ENSURE(dev->CreateTexture2D(&desc, nullptr, &tex));
+
+        ComPtr<IDXGIResource> res;
+        MS_ENSURE(tex.As(&res));
+        HANDLE shared_handle = nullptr;
+        MS_ENSURE(res->GetSharedHandle(&shared_handle));
+        flt_surface_desc->struct_size = sizeof(FlutterDesktopGpuSurfaceDescriptor);
+        flt_surface_desc->handle = shared_handle;// tex.Get();
+        //flt_surface_desc->handle = tex.Get(); // eglbind error
+        flt_surface_desc->width = flt_surface_desc->visible_width = desc.Width;
+        flt_surface_desc->height = flt_surface_desc->visible_height = desc.Height;
+        flt_surface_desc->release_context = nullptr;
+        flt_surface_desc->release_callback = [](void* release_context) {};
+        //flt_surface_desc->format = kFlutterDesktopPixelFormatBGRA8888;
+        flt_tex = make_unique<flutter::TextureVariant>(flutter::GpuSurfaceTexture(
+            kFlutterDesktopGpuSurfaceTypeDxgiSharedHandle
+            //kFlutterDesktopGpuSurfaceTypeD3d11Texture2D
+            , [pflt_surface_desc = flt_surface_desc.get(), this](size_t width, size_t height) {
+                //printf("ObtainDescriptorCallback %llux%llu. shared_handle_ %p\\n", width, height, shared_handle_); fflush(nullptr);
+                //player.renderVideo(); // stutter
+                scoped_lock lock(mtx);
+                ctx->CopyResource(tex.Get(), rt.Get());
+                ctx->Flush();
+                return pflt_surface_desc;
+            }));
+        textureId = texRegistrar->RegisterTexture(flt_tex.get());
+
+
+        D3D11RenderAPI ra{};
+        ra.rtv = rt.Get();
+        setRenderAPI(&ra);
+        setVideoSurfaceSize(desc.Width, desc.Height);
+        setRenderCallback([this, texRegistrar](void*) {
+            scoped_lock lock(mtx);
+            renderVideo();
+            texRegistrar->MarkTextureFrameAvailable(textureId);
+            });"""
+WIN_COPY_NEW = """        D3D11_TEXTURE2D_DESC desc;
+        rt->GetDesc(&desc);
+        desc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED;
+        shared_tex[0] = rt;
+        MS_ENSURE(dev->CreateTexture2D(&desc, nullptr, &shared_tex[1]));
+        MS_ENSURE(dev->CreateTexture2D(&desc, nullptr, &shared_tex[2]));
+        for (int i = 0; i < 3; ++i) {
+            ComPtr<IDXGIResource> res;
+            MS_ENSURE(shared_tex[i].As(&res));
+            HANDLE shared_handle = nullptr;
+            MS_ENSURE(res->GetSharedHandle(&shared_handle));
+            flt_surface_desc[i].struct_size = sizeof(FlutterDesktopGpuSurfaceDescriptor);
+            flt_surface_desc[i].handle = shared_handle;
+            flt_surface_desc[i].width = flt_surface_desc[i].visible_width = desc.Width;
+            flt_surface_desc[i].height = flt_surface_desc[i].visible_height = desc.Height;
+            flt_surface_desc[i].release_context = nullptr;
+            flt_surface_desc[i].release_callback = [](void*) {};
+        }
+        flt_tex = make_unique<flutter::TextureVariant>(flutter::GpuSurfaceTexture(
+            kFlutterDesktopGpuSurfaceTypeDxgiSharedHandle
+            , [this](size_t width, size_t height) {
+                scoped_lock lock(mtx);
+                previous = held;
+                held = presented;
+                return &flt_surface_desc[presented];
+            }));
+        textureId = texRegistrar->RegisterTexture(flt_tex.get());
+
+
+        D3D11RenderAPI ra{};
+        ra.rtv = shared_tex[0].Get();
+        setRenderAPI(&ra);
+        setVideoSurfaceSize(desc.Width, desc.Height);
+        setRenderCallback([this, texRegistrar](void*) {
+            scoped_lock lock(mtx);
+            // KOTV patch (scripts/patch-media-kit.sh): draw into a texture Flutter
+            // is not holding. rtv accepts the texture itself. No CopyResource.
+            int i = 0;
+            for (int k = 0; k < 3; ++k) {
+                if (k != held && k != previous) {
+                    i = k;
+                    break;
+                }
+            }
+            D3D11RenderAPI frame{};
+            frame.rtv = shared_tex[i].Get();
+            setRenderAPI(&frame);
+            renderVideo();
+            presented = i;
+            texRegistrar->MarkTextureFrameAvailable(textureId);
+            });"""
+WIN_MEMBERS_OLD = """    unique_ptr<FlutterDesktopGpuSurfaceDescriptor> flt_surface_desc = make_unique<FlutterDesktopGpuSurfaceDescriptor>();
+    ComPtr<ID3D11Texture2D> tex;"""
+WIN_MEMBERS_NEW = """    FlutterDesktopGpuSurfaceDescriptor flt_surface_desc[3]{};
+    ComPtr<ID3D11Texture2D> shared_tex[3];
+    int held = 0;
+    int previous = 0;
+    int presented = 0;"""
+
+if not WIN_PLUGIN.is_file():
+    print(f"ERROR: fvp windows plugin missing: {WIN_PLUGIN}", file=sys.stderr)
+    sys.exit(1)
+win_orig = win_text = WIN_PLUGIN.read_text(encoding="utf-8")
+win_text = once(tag, "windows texture is rendered without a copy", win_text, WIN_COPY_OLD, WIN_COPY_NEW)
+win_text = once(tag, "windows texture members", win_text, WIN_MEMBERS_OLD, WIN_MEMBERS_NEW)
+
+DEVICE_BODY = """  // KOTV patch (scripts/patch-media-kit.sh): one D3D11 device before prepare.
+  // Decoder and Flutter textures share it. d3d11.copy=0 skips the cross-device copy.
+  MS_WARN(D3D11CreateDevice(adapter_.Get(), adapter_ ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &dev_, nullptr, &ctx_));
+  if (dev_) {
+    ComPtr<ID3D10Multithread> mt;
+    if (SUCCEEDED(dev_.As(&mt)))
+      mt->SetMultithreadProtected(TRUE);
+    SetGlobalOption("d3d11.device", static_cast<void*>(dev_.Get()));
+    const int d3d_copy = 0;
+    SetGlobalOption("d3d11.copy", d3d_copy);
+  }
+"""
+WIN_DEVICE_PAIRS = (
+    (
+        """FvpPlugin::FvpPlugin(flutter::TextureRegistrar* tr, IDXGIAdapter* adapter)
+    : texture_registrar_(tr)
+    , adapter_(adapter)
+{
+  MdkCallbacksStartup();
+}""",
+        """FvpPlugin::FvpPlugin(flutter::TextureRegistrar* tr, IDXGIAdapter* adapter)
+    : texture_registrar_(tr)
+    , adapter_(adapter)
+{
+  MdkCallbacksStartup();
+""" + DEVICE_BODY + "}",
+    ),
+    (
+        """FvpPlugin::FvpPlugin(flutter::TextureRegistrar* tr, IDXGIAdapter* adapter)
+    : texture_registrar_(tr)
+    , adapter_(adapter)
+{}""",
+        """FvpPlugin::FvpPlugin(flutter::TextureRegistrar* tr, IDXGIAdapter* adapter)
+    : texture_registrar_(tr)
+    , adapter_(adapter)
+{""" + "\n" + DEVICE_BODY + "}",
+    ),
+)
+win_text = one_of(tag, "d3d11 device exists before prepare", win_text, WIN_DEVICE_PAIRS)
+win_text = once(
+    tag,
+    "CreateRT reuses the shared d3d11 device",
+    win_text,
+    """      MS_WARN(D3D11CreateDevice(adapter_.Get(), adapter_ ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &dev_, nullptr, &ctx_));
+      if (!dev_) {
+          result->Error("device", "create device failed");
+          return;
+      }
+      ComPtr<ID3D10Multithread> mt;
+      if (SUCCEEDED(dev_.As(&mt)))
+          mt->SetMultithreadProtected(TRUE);""",
+    """      // KOTV patch (scripts/patch-media-kit.sh): device is created in the
+      // constructor and published as d3d11.device before prepare.
+      if (!dev_) {
+          result->Error("device", "create device failed");
+          return;
+      }""",
+)
+
+if win_text != win_orig:
+    WIN_PLUGIN.write_text(win_text, encoding="utf-8")
+
+win_check = WIN_PLUGIN.read_text(encoding="utf-8")
+if "frame.rtv = shared_tex[i].Get();" not in win_check or "k != held" not in win_check:
+    print("ERROR: fvp windows zero-copy texture patch verification failed", file=sys.stderr)
+    sys.exit(1)
+if "CopyResource(" in win_check:
+    print("ERROR: fvp windows plugin still copies the frame", file=sys.stderr)
+    sys.exit(1)
+if 'SetGlobalOption("d3d11.device"' not in win_check or 'SetGlobalOption("d3d11.copy"' not in win_check:
+    print("ERROR: fvp windows plugin does not publish the shared d3d11 device", file=sys.stderr)
+    sys.exit(1)
+if win_check.count("D3D11CreateDevice(") != 1:
+    print("ERROR: fvp windows plugin must create the d3d11 device once", file=sys.stderr)
+    sys.exit(1)
+PY
+fi
+
+# fvp 安卓插件
+if _kotv_for_target android; then
+_kotv_patch_py <<'PY'
+fvp_root = pkg_or_skip("fvp")
+fvp_version = fvp_root.name
+tag = f"fvp ({fvp_version})"
+
+# Android FvpVideoView：临时 surfaceDestroyed 勿 release（全屏改尺寸会触发）。
+fvp_video_view = (
+    fvp_root
+    / "android"
+    / "src"
+    / "main"
+    / "java"
+    / "com"
+    / "mediadevkit"
+    / "fvp"
+    / "FvpVideoView.java"
+)
+if not fvp_video_view.is_file():
+    print(f"ERROR: missing {fvp_video_view}", file=sys.stderr)
+    sys.exit(1)
+FVP_SURFACE_DESTROYED_OLD = """    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+        release();
+    }"""
+FVP_SURFACE_DESTROYED_NEW = """    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+        // KOTV patch (scripts/patch-media-kit.sh): fullscreen / LayoutParams
+        // changes often destroy the Surface temporarily. Do not release() here
+        // (that erases native players and freezes or crashes on rebind).
+        // Permanent teardown still goes through dispose() → release().
+    }"""
+fvv_text = fvp_video_view.read_text(encoding="utf-8")
+if FVP_SURFACE_DESTROYED_NEW in fvv_text:
+    print(f"ok fvp ({fvp_version}) already patched: FvpVideoView.surfaceDestroyed no-op")
+elif FVP_SURFACE_DESTROYED_OLD in fvv_text:
+    fvp_video_view.write_text(
+        fvv_text.replace(FVP_SURFACE_DESTROYED_OLD, FVP_SURFACE_DESTROYED_NEW, 1),
+        encoding="utf-8",
+    )
+    print(f"patched fvp ({fvp_version}): FvpVideoView.surfaceDestroyed no-op")
+else:
+    print(
+        f"ERROR: fvp ({fvp_version}) FvpVideoView.surfaceDestroyed snippet missing; "
+        "upstream changed — update scripts/patch-media-kit.sh",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+fvv_check = fvp_video_view.read_text(encoding="utf-8")
+if "surfaceDestroyed(SurfaceHolder holder) {\n        release();" in fvv_check:
+    print("ERROR: FvpVideoView.surfaceDestroyed still calls release()", file=sys.stderr)
+    sys.exit(1)
+if "dispose() {\n        surfaceView.getHolder().removeCallback(this);\n        release();" not in fvv_check:
+    print("ERROR: FvpVideoView.dispose must still call release()", file=sys.stderr)
+    sys.exit(1)
+
+# 撤销误判的 tunnel=false：清面路径不读 JNI tunnel（见 fvp_plugin.cpp）。
+FVP_RELEASE_WRONG = """    private void release() {
+        if (released) {
+            return;
+        }
+        released = true;
+        // KOTV: match ReleaseRT — clear with tunnel=false. Passing the bind-time
+        // tunnel=true here UAF's on Redmi MediaCodec during PlatformView.dispose.
+        FvpPlugin.nativeSetSurface(0, surfaceId, null, -1, -1, false);
+    }"""
+FVP_RELEASE_UPSTREAM = """    private void release() {
+        if (released) {
+            return;
+        }
+        released = true;
+        FvpPlugin.nativeSetSurface(0, surfaceId, null, -1, -1, tunnel);
+    }"""
+fvv_text = fvp_video_view.read_text(encoding="utf-8")
+if FVP_RELEASE_UPSTREAM in fvv_text:
+    print(f"ok fvp ({fvp_version}): FvpVideoView.release uses upstream tunnel arg")
+elif FVP_RELEASE_WRONG in fvv_text:
+    fvp_video_view.write_text(
+        fvv_text.replace(FVP_RELEASE_WRONG, FVP_RELEASE_UPSTREAM, 1),
+        encoding="utf-8",
+    )
+    print(f"patched fvp ({fvp_version}): revert FvpVideoView.release tunnel=false")
+else:
+    print(
+        f"ERROR: fvp ({fvp_version}) FvpVideoView.release snippet missing; "
+        "upstream changed — update scripts/patch-media-kit.sh",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+fvv_check = fvp_video_view.read_text(encoding="utf-8")
+if "nativeSetSurface(0, surfaceId, null, -1, -1, false);" in fvv_check:
+    print("ERROR: FvpVideoView.release still forced tunnel=false", file=sys.stderr)
+    sys.exit(1)
+if "nativeSetSurface(0, surfaceId, null, -1, -1, tunnel);" not in fvv_check:
+    print("ERROR: FvpVideoView.release must pass bind-time tunnel", file=sys.stderr)
+    sys.exit(1)
+
+# PlatformView：dispose 在 mdkPlayerAPI_delete 前按 handle 清 native players map。
+fvp_plugin_cpp = fvp_root / "android" / "fvp_plugin.cpp"
+fvp_plugin_java = (
+    fvp_root
+    / "android"
+    / "src"
+    / "main"
+    / "java"
+    / "com"
+    / "mediadevkit"
+    / "fvp"
+    / "FvpPlugin.java"
+)
+for p in (fvp_plugin_cpp, fvp_plugin_java):
+    if not p.is_file():
+        print(f"ERROR: missing {p}", file=sys.stderr)
+        sys.exit(1)
+
+CPP_TP_OLD = """    TexturePlayer(jlong handle)
+        : mdk::Player(reinterpret_cast<mdkPlayerAPI*>(handle))
+    {
+    }
+
+    int width = 0;
+    int height = 0;
+    jobject surface = nullptr;
+    void* vo_opaque = nullptr; // can change by TextureRegistry.SurfaceProducer.Callback
+    bool directSurface = false; // decoder renders into the surface, no GL renderer
+private:
+};"""
+CPP_TP_NEW = """    TexturePlayer(jlong handle)
+        : mdk::Player(reinterpret_cast<mdkPlayerAPI*>(handle))
+        , apiHandle(handle)
+    {
+    }
+
+    jlong apiHandle = 0;
+    int width = 0;
+    int height = 0;
+    jobject surface = nullptr;
+    void* vo_opaque = nullptr; // can change by TextureRegistry.SurfaceProducer.Callback
+    bool directSurface = false; // decoder renders into the surface, no GL renderer
+private:
+};"""
+CPP_RELEASE_FN = """
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_mediadevkit_fvp_FvpPlugin_nativeReleasePlayer(JNIEnv *env, jobject thiz, jlong player_handle) {
+    // KOTV patch (scripts/patch-media-kit.sh): PlatformView never goes through
+    // ReleaseRT. Drop every native map entry for this handle while it is still
+    // alive — before Dart mdkPlayerAPI_delete — so a later FvpVideoView.release
+    // cannot setDecoders/updateNativeSurface on a freed player.
+    if (!player_handle) {
+        return;
+    }
+    for (auto it = players.begin(); it != players.end(); ) {
+        auto player = it->second;
+        if (player->apiHandle != player_handle) {
+            ++it;
+            continue;
+        }
+        auto s = player->surface;
+        if (player->directSurface) {
+            player->setDecoders(mdk::MediaType::Video, {});
+        }
+        player->updateNativeSurface(nullptr);
+        if (s) {
+            env->DeleteGlobalRef(s);
+        }
+        it = players.erase(it);
+    }
+}
+"""
+cpp_text = fvp_plugin_cpp.read_text(encoding="utf-8")
+if "nativeReleasePlayer" in cpp_text and "apiHandle" in cpp_text:
+    print(f"ok fvp ({fvp_version}) already patched: nativeReleasePlayer")
+else:
+    if CPP_TP_OLD not in cpp_text:
+        print(
+            f"ERROR: fvp ({fvp_version}) TexturePlayer snippet missing; "
+            "upstream changed — update scripts/patch-media-kit.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    cpp_text = cpp_text.replace(CPP_TP_OLD, CPP_TP_NEW, 1)
+    if "Java_com_mediadevkit_fvp_FvpPlugin_nativeSetSurfaceSize" not in cpp_text:
+        print("ERROR: nativeSetSurfaceSize anchor missing for ReleasePlayer", file=sys.stderr)
+        sys.exit(1)
+    cpp_text = cpp_text.replace(
+        "extern \"C\"\nJNIEXPORT void JNICALL\nJava_com_mediadevkit_fvp_FvpPlugin_nativeSetSurfaceSize",
+        CPP_RELEASE_FN.lstrip("\n")
+        + "\nextern \"C\"\nJNIEXPORT void JNICALL\nJava_com_mediadevkit_fvp_FvpPlugin_nativeSetSurfaceSize",
+        1,
+    )
+    fvp_plugin_cpp.write_text(cpp_text, encoding="utf-8")
+    print(f"patched fvp ({fvp_version}): nativeReleasePlayer")
+cpp_check = fvp_plugin_cpp.read_text(encoding="utf-8")
+if "nativeReleasePlayer" not in cpp_check or "apiHandle" not in cpp_check:
+    print("ERROR: fvp_plugin.cpp missing nativeReleasePlayer", file=sys.stderr)
+    sys.exit(1)
+
+JAVA_NATIVE_OLD = """  static native void nativeSetSurface(long playerHandle, long texId, Surface surface, int w, int h, boolean tunnel);
+
+  /*!
+    Surface size change (SurfaceHolder.Callback.surfaceChanged). Only the GL
+    render path needs it; with "tunnel" the decoder owns the buffer geometry.
+   */
+  static native void nativeSetSurfaceSize(long texId, int w, int h);"""
+JAVA_NATIVE_NEW = """  static native void nativeSetSurface(long playerHandle, long texId, Surface surface, int w, int h, boolean tunnel);
+
+  /*!
+    Drop every native players[] entry for this handle (PlatformView surfaceIds).
+    Must run before Dart mdkPlayerAPI_delete.
+   */
+  static native void nativeReleasePlayer(long playerHandle);
+
+  /*!
+    Surface size change (SurfaceHolder.Callback.surfaceChanged). Only the GL
+    render path needs it; with "tunnel" the decoder owns the buffer geometry.
+   */
+  static native void nativeSetSurfaceSize(long texId, int w, int h);"""
+JAVA_HANDLER_OLD = """    } else if (call.method.equals("ReleaseRT")) {
+      final int texId = call.argument("texture"); // 32bit int, 0, 1, 2 .... but SurfaceTexture.id() is long
+      final long texId64 = texId; // MUST cast texId to long, otherwise remove() error
+      nativeSetSurface(0, texId, null, -1, -1, false);"""
+JAVA_HANDLER_NEW = """    } else if (call.method.equals("ReleasePlayer")) {
+      final Number h = call.argument("player");
+      nativeReleasePlayer(h.longValue());
+      result.success(null);
+    } else if (call.method.equals("ReleaseRT")) {
+      final int texId = call.argument("texture"); // 32bit int, 0, 1, 2 .... but SurfaceTexture.id() is long
+      final long texId64 = texId; // MUST cast texId to long, otherwise remove() error
+      nativeSetSurface(0, texId, null, -1, -1, false);"""
+java_text = fvp_plugin_java.read_text(encoding="utf-8")
+if "nativeReleasePlayer" in java_text and 'equals("ReleasePlayer")' in java_text:
+    print(f"ok fvp ({fvp_version}) already patched: FvpPlugin ReleasePlayer")
+else:
+    if JAVA_NATIVE_OLD not in java_text or JAVA_HANDLER_OLD not in java_text:
+        print(
+            f"ERROR: fvp ({fvp_version}) FvpPlugin ReleasePlayer anchors missing; "
+            "upstream changed — update scripts/patch-media-kit.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    java_text = java_text.replace(JAVA_HANDLER_OLD, JAVA_HANDLER_NEW, 1)
+    java_text = java_text.replace(JAVA_NATIVE_OLD, JAVA_NATIVE_NEW, 1)
+    fvp_plugin_java.write_text(java_text, encoding="utf-8")
+    print(f"patched fvp ({fvp_version}): FvpPlugin ReleasePlayer")
+java_check = fvp_plugin_java.read_text(encoding="utf-8")
+if "nativeReleasePlayer" not in java_check or 'equals("ReleasePlayer")' not in java_check:
+    print("ERROR: FvpPlugin.java missing ReleasePlayer", file=sys.stderr)
+    sys.exit(1)
+PY
+fi
 
 # window_manager（Windows）
 if _kotv_for_target windows; then

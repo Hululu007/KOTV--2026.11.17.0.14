@@ -411,9 +411,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           KotvQueuedNext(
             id = call.argument<String>("id")?.trim().orEmpty(),
             url = call.argument<String>("url")?.trim().orEmpty(),
-            headers = stringMapArg(call, "headers"),
+            headers = KotvPlayerNormalize.normalizeHeaders(stringMapArg(call, "headers")),
             mime = call.argument<String>("mime")?.trim()?.ifEmpty { null },
-            subs = emptyList(),
+            subs = listMapArg(call, "subs"),
             startAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L } ?: 0L,
           )
         main.post { result.success(queueNext(next)) }
@@ -1410,10 +1410,20 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** create / open / setOpts 共用的播放选项。 */
   /** 通道参数里的字典（headers / props）转成字符串表；没传为空表。 */
   private fun stringMapArg(call: MethodCall, key: String): Map<String, String> =
     (call.argument<Map<*, *>>(key) ?: emptyMap<Any, Any>()).entries.associate { "${it.key}" to "${it.value}" }
+
+  /** 通道参数里的 map 列表（如 queueNext.subs）；元素非 map 则跳过。 */
+  private fun listMapArg(call: MethodCall, key: String): List<Map<String, Any?>> {
+    val raw = call.argument<List<*>>(key) ?: return emptyList()
+    val out = ArrayList<Map<String, Any?>>(raw.size)
+    for (item in raw) {
+      val m = item as? Map<*, *> ?: continue
+      out.add(m.entries.associate { "${it.key}" to it.value })
+    }
+    return out
+  }
 
   private fun ingestPlayerArgs(call: MethodCall) {
     decodeMode = call.argument<String>("decode") ?: decodeMode
@@ -1729,7 +1739,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       queuedNext = null
       pendingSeamlessId = null
       loadedUrl = url
-      loadedHeaders = headers
+      loadedHeaders = KotvPlayerNormalize.normalizeHeaders(headers)
       applySpdif()
       MPVLib.setPropertyDouble("volume", volume)
       MPVLib.setPropertyDouble("speed", rate)
@@ -1763,6 +1773,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
    */
   private fun queueNext(next: KotvQueuedNext): Boolean {
     if (!created.get() || livePlayback || next.id.isEmpty() || next.url.isEmpty() || loadedUrl.isEmpty() || repeatOne) {
+      return false
+    }
+    // 请求头与当前集不同则不排（http-header-fields 是播放器级共用）。
+    val curHeaders = KotvPlayerNormalize.normalizeHeaders(loadedHeaders)
+    if (next.headers != curHeaders) {
+      clearQueuedNext()
       return false
     }
     return try {
@@ -1834,7 +1850,32 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     loadWallMs = SystemClock.elapsedRealtime()
     width = 0
     height = 0
+    applyQueuedSubs(next.subs)
     emit(mapOf("event" to "transition", "id" to next.id))
+  }
+
+  /** 无缝切入后挂外挂字幕（与 Dart queueNext 的 subs 一致）。 */
+  private fun applyQueuedSubs(subs: List<Map<String, Any?>>) {
+    if (!created.get() || subs.isEmpty()) return
+    for (m in subs) {
+      val path = m["path"]?.toString()?.trim().orEmpty()
+      if (path.isEmpty()) continue
+      val title = m["title"]?.toString()?.trim().orEmpty()
+      val select = when (val raw = m["select"]) {
+        is Boolean -> raw
+        else -> true
+      }
+      val flags = if (select) "select" else "auto"
+      try {
+        if (title.isNotEmpty()) {
+          MPVLib.command(arrayOf("sub-add", path, flags, title))
+        } else {
+          MPVLib.command(arrayOf("sub-add", path, flags))
+        }
+      } catch (t: Throwable) {
+        Log.w(TAG, "queue sub-add failed", t)
+      }
+    }
   }
 
   /** HLS mime 时在本次 loadfile 锁定 lavf demuxer。 */
@@ -2202,6 +2243,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     )
     private const val TAG = "KotvMpv"
     // 仅作 open 前的初值；之后由 props 里的 demuxer-lavf-o 覆盖。
+    // 与 Dart kotvDemuxerLavfO（mpv_opts.dart）同串；勿在第三处再散落一份。
     // 不设 protocol_whitelist：写了就是拒绝名单外协议（RTSP/RTMP/RTP）。
     private const val LAVF_DEMUXER_O =
       "seg_max_retry=5,strict=experimental," +

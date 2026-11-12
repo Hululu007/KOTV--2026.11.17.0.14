@@ -4,7 +4,7 @@ import 'package:kotv/player/playback_failover.dart';
 
 void main() {
   test('hard falls back to auto then next player restores settings decode', () {
-    final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'hard');
+    final f = KotvPlaybackFailover(playerVal: 'innie#fvp', decodeMode: 'hard');
     f.markAttempt();
     final step = f.nextStep();
     expect(step, isNotNull);
@@ -13,7 +13,10 @@ void main() {
     expect(f.decodeMode, 'auto');
 
     final next = f.nextStep();
-    expect(next, isNull);
+    expect(next, isNotNull);
+    expect(next!.kind, KotvFailoverKind.nextPlayer);
+    expect(next.playerVal, 'innie#mpv');
+    expect(next.decodeMode, 'hard');
   });
 
   test('mpv hard falls back to auto like other engines', () {
@@ -26,10 +29,14 @@ void main() {
     expect(f.decodeMode, 'auto');
   });
 
-  test('auto on desktop mpv has no next innie', () {
+  test('auto goes straight to the next player', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'auto');
     f.markAttempt();
-    expect(f.nextStep(), isNull);
+    final next = f.nextStep();
+    expect(next, isNotNull);
+    expect(next!.kind, KotvFailoverKind.nextPlayer);
+    expect(next.playerVal, 'innie#fvp');
+    expect(next.decodeMode, 'auto');
   });
 
   test('drm lock gives up', () {
@@ -42,8 +49,8 @@ void main() {
     expect(f.nextStep(), isNull);
   });
 
-  test('soft goes straight to the next player on android ring', () {
-    final f = KotvPlaybackFailover(playerVal: 'innie#exo', decodeMode: 'soft');
+  test('soft goes straight to the next player', () {
+    final f = KotvPlaybackFailover(playerVal: 'innie#fvp', decodeMode: 'soft');
     f.markAttempt();
     final next = f.nextStep();
     expect(next!.playerVal, 'innie#mpv');
@@ -93,7 +100,7 @@ void main() {
 
   test('plan: off + other engine keeps session', () {
     final f = KotvPlaybackFailover(
-      playerVal: 'innie#html',
+      playerVal: 'innie#fvp',
       decodeMode: 'auto',
       enabled: false,
     );
@@ -102,18 +109,19 @@ void main() {
     expect(plan.action, KotvSilentRecoverAction.keepSession);
   });
 
-  test('plan: on + next player applies step on android', () {
-    final f = KotvPlaybackFailover(playerVal: 'innie#exo', decodeMode: 'auto');
+  test('plan: on + next player applies step', () {
+    final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'auto');
     f.markAttempt();
     final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: true);
     expect(plan.action, KotvSilentRecoverAction.applyStep);
-    expect(plan.step!.playerVal, 'innie#mpv');
-    expect(f.playerVal, 'innie#mpv');
+    expect(plan.step!.playerVal, 'innie#fvp');
+    expect(f.playerVal, 'innie#fvp');
   });
 
   test('plan: on + exhausted ring recreates desktop mpv', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'auto');
     f.markAttempt();
+    // 先耗尽环上其它引擎。
     while (true) {
       final s = f.nextStep();
       if (s == null) break;
@@ -124,7 +132,7 @@ void main() {
   });
 
   test('plan: on + exhausted ring without recreate gives up', () {
-    final f = KotvPlaybackFailover(playerVal: 'innie#html', decodeMode: 'auto');
+    final f = KotvPlaybackFailover(playerVal: 'innie#fvp', decodeMode: 'auto');
     f.markAttempt();
     while (true) {
       final s = f.nextStep();

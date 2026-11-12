@@ -30,7 +30,7 @@ String? kotvVideoColorLabel(Map<Object?, Object?>? info) {
   return display.isEmpty ? head : '$head（显示器：$display）';
 }
 
-/// 统一播放后端：Exo / 原生 MPV / HTML 等共用同一套菜单/控件。
+/// 统一播放后端：Exo / 原生 MPV / FVP / HTML 等共用同一套菜单/控件。
 abstract class KotvPlayback extends ChangeNotifier {
   bool? _keepAwakeWant;
 
@@ -75,7 +75,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   String? get lastError => null;
 
   /// [live]=true：直播页语境。内存缓冲仍按同一比例封顶，不做点播磁盘预读。
-  /// [startAt]>0：开播定位。MPV=Media/loadfile start。
+  /// [startAt]>0：开播定位。MPV=Media/loadfile start；FVP=prepare(ms)（勿 prepare(0) 后再 seek）。
   /// [waitReady]=false：只把媒体交给引擎即返回（直播换台）；出画守卫由调用方后台跑。
   /// 默认 true：等 silent-video 守卫完成（点播详情）。
   Future<void> open(
@@ -93,7 +93,7 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// 把下一集排进播放器自己的播放列表，本集播完无缝接上；播到它时 [queuedStartStream] 发出 [id]。
   /// [startAt]>0：切入该集时的起播定位（片头跳过），与 [open] 的 startAt 同语义，须写进列表项本身，勿等切入后再 seek。
-  /// Exo、全部 MPV（Android Media3 + 桌面/iOS media_kit）支持；网页返回 false，换集仍走 [open]。
+  /// Exo、全部 MPV（Android Media3 + 桌面/iOS media_kit）支持；FVP / 网页返回 false，换集仍走 [open]。
   Future<bool> queueNext({
     required String id,
     required String url,
@@ -225,7 +225,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   ///
   /// **页面契约**：soft pause → `await release()` → 再清 `_playUrl` 卸宿主 →
   /// `dispose()` 包装类。`release()` 内须先停声并拆掉原生绑定。
-  /// Texture / Exo / MPV：release 内或插件侧清面后即可删 player。
+  /// Texture / Exo / MPV / FVP：release 内或插件侧清面后即可删 player。
   /// 默认等同 [stop]；原生引擎应覆盖为 stop 后销毁实例。
   Future<void> release() => stop();
 
@@ -266,7 +266,7 @@ abstract class KotvPlayback extends ChangeNotifier {
 
 /// 离开播放统一拆机：stop → 短等排空 AO/事件线程 → dispose。
 ///
-/// 对应 Windows media_kit [kotvDisposeMpvPlayer]；各平台 MPV / Exo 共用。
+/// 对应 Windows media_kit [kotvDisposeMpvPlayer]；各平台 MPV / FVP / Exo 共用。
 /// 勿对会囤包缓存/解码缓冲的引擎设 [disposeTimeout]：超时把 dispose 丢后台会导致泄漏。
 /// 调用方宜先 pause；本函数不改音量。
 Future<void> kotvTeardownPlayback({
@@ -304,7 +304,7 @@ Future<void> kotvSoftPausePlayers(Iterable<KotvPlayback?> players) async {
   await Future.wait<void>(players.map(one));
 }
 
-/// 点播换集：对各后端 [KotvPlayback.stopForEpisodeSwitch]。
+/// 点播换集：对各后端 [KotvPlayback.stopForEpisodeSwitch]（FVP 会 dispose 缓冲）。
 Future<void> kotvStopPlayersForEpisodeSwitch(Iterable<KotvPlayback?> players) async {
   Future<void> one(KotvPlayback? p) async {
     if (p == null) return;
@@ -316,9 +316,10 @@ Future<void> kotvStopPlayersForEpisodeSwitch(Iterable<KotvPlayback?> players) as
   await Future.wait<void>(players.map(one));
 }
 
-/// 页面硬停：先 [KotvPlayback.release]，**调用方再清 `_playUrl` 卸页面宿主**。
+/// 页面硬停：先 [KotvPlayback.release]（含 FVP 先卸 PlatformView 再删 mdk），
+/// **调用方再清 `_playUrl` 卸页面宿主**。
 ///
-/// [waitFirst] 可指定需优先等完 release 的后端，勿与其它后端共用 timeout 半路放弃。
+/// [waitFirst]（通常为 FVP）单独等完卸面+dispose，勿与其它后端共用 timeout 半路放弃。
 Future<void> kotvHardReleasePlayers(
   Iterable<KotvPlayback?> players, {
   KotvPlayback? waitFirst,
@@ -526,7 +527,7 @@ void kotvDisposePlaybackStreams({
   completed.close();
 }
 
-/// MPV / Exo 开播后长时间无视频尺寸（有声无画或 Texture 0×0）。
+/// MPV / FVP / Exo 开播后长时间无视频尺寸（有声无画或 Texture 0×0）。
 class KotvSilentVideoException implements Exception {
   const KotvSilentVideoException([this.message = '播放器无画面']);
   final String message;

@@ -1,6 +1,6 @@
 package com.bobo.kotv
 
-/** Exo / 安卓原生 MPV 无缝排队共用：下一集元数据。 */
+/** Exo / Media3 Mpv 无缝排队共用：下一集元数据。 */
 data class KotvQueuedNext(
   val id: String,
   val url: String,

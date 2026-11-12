@@ -1,0 +1,39 @@
+// 安卓不编入 fvp/mdk：settings.gradle 在 plugin-loader 前从 deps 去掉 fvp；
+// 此处收拢 packaging 排除与 GeneratedPluginRegistrant 剥离（flutter 仍按 pubspec 写回）。
+// 禁止的 .so 名与 scripts/android-mpv-lib-names.sh 的 KOTV_ANDROID_FVP_APK_FORBIDDEN 一致。
+
+ext.kotvAndroidFvpForbiddenSo = [
+    "libfvp.so",
+    "libmdk.so",
+    "libffmpeg.so",
+    "libdav1d.so",
+]
+
+ext.kotvStripFvpPluginRegistrant = {
+    def reg = file("src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java")
+    if (!reg.exists()) return
+    def text = reg.getText("UTF-8")
+    if (!text.contains("FvpPlugin")) return
+    def cleaned = text.replaceAll(
+        /(?s)\s*try \{\s*\n\s*flutterEngine\.getPlugins\(\)\.add\(new com\.mediadevkit\.fvp\.FvpPlugin\(\)\);\s*\n\s*\} catch \(Exception e\) \{\s*\n\s*Log\.e\(TAG, "Error registering plugin fvp,.*?\n\s*\}\n/,
+        "\n"
+    )
+    if (cleaned == text) {
+        throw new GradleException("[android] FvpPlugin still in GeneratedPluginRegistrant but strip pattern missed")
+    }
+    reg.write(cleaned, "UTF-8")
+    println "[android] stripped FvpPlugin from GeneratedPluginRegistrant"
+}
+
+tasks.register("kotvStripFvpPluginRegistrant") {
+    doLast { kotvStripFvpPluginRegistrant() }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn "kotvStripFvpPluginRegistrant"
+}
+
+// compileFlutterBuild* 可能在 preBuild 之后又写回 registrant；javac 再剥一次。
+tasks.withType(JavaCompile).configureEach { t ->
+    t.doFirst { kotvStripFvpPluginRegistrant() }
+}

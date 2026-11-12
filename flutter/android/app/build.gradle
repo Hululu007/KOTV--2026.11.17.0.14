@@ -6,6 +6,8 @@ plugins {
     id "com.chaquo.python"
 }
 
+apply from: "../kotv_android_no_fvp.gradle"
+
 // Chaquopy 不能与 --split-per-abi 同用；分 ABI 由 package-flutter-android.sh 设 KOTV_ABI_FILTERS 各打一次。
 // Flutter 3.35+ 默认 abiFilters=armv7+arm64+x86_64，会盖住「单 ABI」意图 → APK lib/ 仍三套都在。
 def kotvAbiFilters = (System.getenv("KOTV_ABI_FILTERS") ?: "arm64-v8a,armeabi-v7a")
@@ -111,6 +113,7 @@ android {
             pickFirsts += "**/libc++_shared.so"
             // Exo ASS（ass-kt / peerless2012 ass）。
             pickFirsts += "**/libass.so"
+            kotvAndroidFvpForbiddenSo.each { so -> excludes += "**/${so}" }
             useLegacyPackaging = true
             excludes += "**/.gitkeep"
             for (abi in kotvAllAbis) {

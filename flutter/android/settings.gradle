@@ -1,4 +1,20 @@
 pluginManagement {
+    // 安卓不编 fvp（pubspec 仍留给桌面/iOS）。须在本块内、且在 plugin-loader 之前改 deps。
+    def kotvFlutterPluginsDeps = file("../.flutter-plugins-dependencies")
+    if (kotvFlutterPluginsDeps.exists()) {
+        def slurper = new groovy.json.JsonSlurper()
+        def data = slurper.parse(kotvFlutterPluginsDeps)
+        def androidPlugins = data?.plugins?.android
+        if (androidPlugins instanceof List) {
+            def filtered = androidPlugins.findAll { it?.name != "fvp" }
+            if (filtered.size() != androidPlugins.size()) {
+                data.plugins.android = filtered
+                kotvFlutterPluginsDeps.write(groovy.json.JsonOutput.toJson(data), "UTF-8")
+                println "[android] settings: removed fvp from .flutter-plugins-dependencies"
+            }
+        }
+    }
+
     def flutterSdkPath = {
         def properties = new Properties()
         file("local.properties").withInputStream { properties.load(it) }

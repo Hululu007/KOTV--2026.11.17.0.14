@@ -332,6 +332,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'tlsVerify': _opts.tlsVerify,
         'audioPassThrough': _opts.audioPassThrough,
         'diskCache': _opts.diskCache && !live,
+        'bufferBytes': KotvBufferBudget.bytes(),
         'render': _renderMode,
         // 直播须在 create 时写入，磁盘缓存和 cache-pause 按这次会话来。
         'live': live,
@@ -420,12 +421,6 @@ class NativeMpvPlayback extends KotvPlayback {
         _playing = false;
         if (!_endedCtrl.isClosed) _endedCtrl.add(true);
         notifyListeners();
-        break;
-      case 'live':
-        if (m['live'] == true) {
-          _live = true;
-          notifyListeners();
-        }
         break;
       case 'error':
         _lastError = '${m['message'] ?? 'MPV error'}';

@@ -43,6 +43,9 @@ echo "==> version=$VERSION arch=$REL_ARCH ($PLAT) GOARCH=$GOARCH (uname=$(uname 
 
 chmod +x "$ROOT/scripts/"*.sh
 
+export KOTV_MACOS_NO_FVP="${KOTV_MACOS_NO_FVP:-0}"
+echo "==> KOTV_MACOS_NO_FVP=$KOTV_MACOS_NO_FVP"
+
 echo "==> fetch desktop libmpv (AV3A source)"
 "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 
@@ -72,7 +75,7 @@ if ! echo "$ENG_FILE_ARCH" | grep -q "$WANT_ENGINE_ARCH"; then
   exit 1
 fi
 
-echo "==> flutter build macos --release"
+echo "==> flutter build macos --release (KOTV_MACOS_NO_FVP=$KOTV_MACOS_NO_FVP)"
 # shellcheck source=kotv-flutter-asset-engines.sh
 source "$ROOT/scripts/kotv-flutter-asset-engines.sh"
 kotv_flutter_asset_engines_hide
@@ -84,8 +87,21 @@ rm -rf \
   2>/dev/null || true
 # 双保险：pubspec 已关 SPM，CI 全局再关一次
 flutter config --no-enable-swift-package-manager || true
+# fvp 依赖 mdk；优先用预解压的本地 pod，避免 CocoaPods 卡在 SourceForge。
+# shellcheck source=kotv-fvp-deps.sh
+source "$ROOT/scripts/kotv-fvp-deps.sh"
+kotv_export_fvp_deps
 KOTV_FLUTTER_TARGET=macos "$ROOT/scripts/flutter-pub-get.sh"
-flutter build macos --release
+if [[ "$KOTV_MACOS_NO_FVP" == "1" ]]; then
+  "$ROOT/scripts/kotv-macos-exclude-fvp.sh"
+  rm -rf "$ROOT/flutter/macos/Pods" "$ROOT/flutter/macos/Podfile.lock"
+  (cd "$ROOT/flutter/macos" && KOTV_MACOS_NO_FVP=1 pod install)
+  "$ROOT/scripts/kotv-macos-exclude-fvp.sh"
+else
+  kotv_ensure_mdk_apple_pod
+fi
+flutter build macos --release \
+  --dart-define=KOTV_MACOS_NO_FVP=$KOTV_MACOS_NO_FVP
 
 APP_SRC=""
 for cand in \

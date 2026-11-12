@@ -56,7 +56,10 @@ fi
 
 echo "==> flutter build apk --release (per-ABI; Chaquopy 禁用 --split-per-abi)"
 cd "$ROOT/flutter"
+# 安卓不编 fvp/mdk，无需拉 mdk-sdk（桌面/iOS 仍走 kotv-fvp-deps.sh）。
 KOTV_FLUTTER_TARGET=android "$ROOT/scripts/flutter-pub-get.sh"
+chmod +x "$ROOT/scripts/kotv-exclude-fvp-plugin.sh"
+"$ROOT/scripts/kotv-exclude-fvp-plugin.sh" android
 chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 echo "==> fetch Exo AV3A stack (webhtv nextlib + Media3 fongmi)"
@@ -94,6 +97,8 @@ build_one_abi() {
   local out_name="$3"     # KO影视-…-aarch64.apk
   echo "==> ABI $abi_filter ($flutter_plat)"
   rm -f "$OUT_DIR/app-release.apk"
+  # pub get / 工具链可能写回插件列表；每次 build 前再排除一次。
+  "$ROOT/scripts/kotv-exclude-fvp-plugin.sh" android
   KOTV_ABI_FILTERS="$abi_filter" \
     flutter build apk --release \
       --target-platform="$flutter_plat" \

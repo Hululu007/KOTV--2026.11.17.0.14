@@ -2,6 +2,11 @@ PODS:
   - file_selector_macos (0.0.1):
     - FlutterMacOS
   - FlutterMacOS (1.0.0)
+  - fvp (0.39.1):
+    - Flutter
+    - FlutterMacOS
+    - mdk (~> 0.39.0)
+  - mdk (0.39.0)
   - media_kit_libs_macos_video (1.0.4):
     - FlutterMacOS
   - media_kit_video (0.0.1):
@@ -28,6 +33,8 @@ PODS:
 DEPENDENCIES:
   - file_selector_macos (from `Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
+  - fvp (from `Flutter/ephemeral/.symlinks/plugins/fvp/darwin`)
+  - mdk (from `/tmp/mdk-sdk-local`)
   - media_kit_libs_macos_video (from `Flutter/ephemeral/.symlinks/plugins/media_kit_libs_macos_video/macos`)
   - media_kit_video (from `Flutter/ephemeral/.symlinks/plugins/media_kit_video/macos`)
   - package_info_plus (from `Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos`)
@@ -44,6 +51,10 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos
   FlutterMacOS:
     :path: Flutter/ephemeral
+  fvp:
+    :path: Flutter/ephemeral/.symlinks/plugins/fvp/darwin
+  mdk:
+    :path: "/tmp/mdk-sdk-local"
   media_kit_libs_macos_video:
     :path: Flutter/ephemeral/.symlinks/plugins/media_kit_libs_macos_video/macos
   media_kit_video:
@@ -68,6 +79,8 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   file_selector_macos: 3af0fddc391c32a6a3956a7d3898ca3a86057a4f
   FlutterMacOS: c232990155153907050900a2e175c7773903ba4e
+  fvp: 385cbd708aab66c4c875657ed55ef00d9ea551e2
+  mdk: 79b4bd6e39422d293c6012d23374db171936e185
   media_kit_libs_macos_video: 85a23e549b5f480e72cae3e5634b5514bc692f65
   media_kit_video: fa6564e3799a0a28bff39442334817088b7ca758
   package_info_plus: f0052d280d17aa382b932f399edf32507174e870
@@ -79,6 +92,6 @@ SPEC CHECKSUMS:
   wakelock_plus: 917609be14d812ddd9e9528876538b2263aaa03b
   window_manager: 1d01fa7ac65a6e6f83b965471b1a7fdd3f06166c
 
-PODFILE CHECKSUM: f0c21717cb7ee9112f915044c74bfceb5b12e02a
+PODFILE CHECKSUM: 2636d2352d5e7a0d13e067a915c1dce525430928
 
 COCOAPODS: 1.16.2

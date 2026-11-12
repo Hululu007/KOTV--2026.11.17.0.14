@@ -111,7 +111,8 @@ func Stop() {
 func Available() map[string]bool {
 	return map[string]bool{
 		"view":      true,
-		// Flutter 页内 MPV 走原生通道或 media_kit，库在应用包内。
+		"embed_fvp": true,
+		// Flutter 页内 MPV 走原生通道，库与 fvp/mdk 同目录。
 		"embed_mpv": true,
 	}
 }

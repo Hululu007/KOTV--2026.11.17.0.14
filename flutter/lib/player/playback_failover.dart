@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+import '../util/kotv_io.dart';
 import 'kotv_platform.dart';
 import 'player_normalize.dart';
 
@@ -100,13 +101,17 @@ class KotvPlaybackFailover {
       return const ['innie#html', 'innie#art', 'innie#xg', 'innie#zw'];
     }
     if (kotvIsAndroid()) {
+      // Android 仅 Exo + Media3 MPV（无 FVP）。
       return const ['innie#exo', 'innie#mpv'];
     }
     if (kotvIsIOS()) {
-      return const ['innie#html', 'innie#mpv'];
+      return const ['innie#html', 'innie#mpv', 'innie#fvp'];
     }
-    // 桌面（含 Windows）：media_kit MPV + 外部播放器（环上仅内置 MPV）。
-    return const ['innie#mpv'];
+    // 桌面（含 Windows）：media_kit MPV + FVP；macOS 可用 KOTV_MACOS_NO_FVP=1 打纯 MPV 包。
+    if (Platform.isMacOS && kotvMacosNoFvp) {
+      return const ['innie#mpv'];
+    }
+    return const ['innie#mpv', 'innie#fvp'];
   }
 
   static String _innieLabel(String playerVal) {
@@ -115,6 +120,8 @@ class KotvPlaybackFailover {
         return '内置 ExoPlayer';
       case 'innie#mpv':
         return '内置 MPV';
+      case 'innie#fvp':
+        return '内置 FVP';
       case 'innie#html':
         return kotvHtmlPlayerLabel();
       case 'innie#art':
