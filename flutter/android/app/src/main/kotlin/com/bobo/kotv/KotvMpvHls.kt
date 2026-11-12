@@ -16,8 +16,8 @@ internal object KotvMpvHls {
   }
 
   /**
-   * 无扩展名代理等：首次未带 HLS mime 时，按 Media3 实际错误码决定是否锁 M3U8 再开一次。
-   * `MPV_ERROR_UNKNOWN_FORMAT` 会映射到 [PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED]。
+   * 与 TV `MpvPlayerEngine.retryHls` 相同：仅 `ERROR_CODE_IO_UNSPECIFIED`，
+   * 且当前尚未是 M3U8 mime 时，锁 APPLICATION_M3U8 再开一次。
    */
   fun shouldRetryHlsMime(
     error: PlaybackException,
@@ -26,13 +26,7 @@ internal object KotvMpvHls {
   ): Boolean {
     if (alreadyRetried) return false
     if (isHlsMime(currentMime)) return false
-    return when (error.errorCode) {
-      PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
-      PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
-      PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
-      -> true
-      else -> false
-    }
+    return error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED
   }
 
   fun isDecodeError(error: PlaybackException): Boolean =

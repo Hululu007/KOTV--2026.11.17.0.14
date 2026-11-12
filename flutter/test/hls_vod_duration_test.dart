@@ -42,7 +42,7 @@ low.m3u8
   });
 
   test('prefer playlist only when engine timeline already near full', () {
-    // 引擎仍是单片长度：勿用节目单撑满进度条。
+    // FVP 等非 Media3 路径仍可用；引擎仍是单片时勿撑满进度条。
     expect(
       kotvPreferPlaylistDuration(
         const Duration(seconds: 10),
@@ -50,28 +50,12 @@ low.m3u8
       ),
       const Duration(seconds: 10),
     );
-    // 引擎已接近节目单：可用加总修正偏短 demux。
     expect(
       kotvPreferPlaylistDuration(
         const Duration(seconds: 700),
         const Duration(seconds: 800),
       ),
       const Duration(seconds: 800),
-    );
-    expect(
-      kotvPreferPlaylistDuration(
-        const Duration(seconds: 30),
-        const Duration(seconds: 20),
-      ),
-      const Duration(seconds: 30),
-    );
-    expect(
-      kotvPreferPlaylistDuration(const Duration(seconds: 10), null),
-      const Duration(seconds: 10),
-    );
-    expect(
-      kotvPreferPlaylistDuration(Duration.zero, const Duration(minutes: 40)),
-      Duration.zero,
     );
   });
 

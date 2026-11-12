@@ -147,10 +147,10 @@ Future<int?> kotvFetchHlsVodDurationMs({
   return kotvHlsVodDurationMs(body);
 }
 
-/// 点播 HLS：节目单加总与引擎 demux 时长取较大者。
+/// 点播 HLS：节目单加总与引擎 demux 时长取较大者（FVP 等非 Media3 路径）。
+/// Media3 / 桌面 libmpv 用引擎 `duration`/`duration/full`，不走此覆盖。
 ///
-/// 仅当引擎时长已接近节目单（整表时间轴已打开）时才用节目单拉长 UI。
-/// 引擎仍停在单片长度时禁止用 EXTINF 加总撑满进度条，否则拖动会超出可 seek 窗口。
+/// 仅当引擎时长已接近节目单时才用节目单拉长 UI。
 Duration kotvPreferPlaylistDuration(Duration engine, Duration? playlist) {
   if (playlist == null || playlist <= Duration.zero) return engine;
   if (engine <= Duration.zero) return engine;

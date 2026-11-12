@@ -93,6 +93,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var retriedHlsMime = false
   /** 本集是否已做过一次解码 soft/hard 回退。 */
   private var retriedDecodeFallback = false
+  /** 本集是否已按 isCurrentMediaItemLive 升过 live 会话（关磁盘缓存）。 */
+  private var upgradedLiveFromMedia = false
   private var pendingStartAtMs = 0L
   /** 排在播放列表里的下一集；播到它时 [onMediaItemTransition] 把它切成当前集。 */
   private var queuedNext: KotvQueuedNext? = null
@@ -744,6 +746,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (resetHlsRetry) {
       retriedHlsMime = false
       retriedDecodeFallback = false
+      upgradedLiveFromMedia = false
     }
     ensurePlayer()
     val p = player ?: error("mpv player missing")
@@ -791,6 +794,34 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       headers = currentHeaders,
       startPositionMs = pos,
       mime = MimeTypes.APPLICATION_M3U8,
+      resetHlsRetry = false,
+    )
+  }
+
+  /**
+   * 点播页打开滑窗直播：Media3 `isCurrentMediaItemLive` 为真时升 live 会话，
+   * 去掉点播磁盘缓存后按当前 mime/进度再开（与 PlayerManager.isLive 同源信号）。
+   */
+  private fun maybeUpgradeLiveFromMedia() {
+    if (livePlayback || upgradedLiveFromMedia) return
+    val p = player ?: return
+    if (!p.isCurrentMediaItemLive) return
+    val url = currentUrl
+    if (url.isBlank()) return
+    upgradedLiveFromMedia = true
+    livePlayback = true
+    val pos = p.currentPosition.coerceAtLeast(0L)
+    Log.i(TAG, "upgrade to live session from isCurrentMediaItemLive")
+    try {
+      p.stop()
+    } catch (_: Throwable) {
+    }
+    ensurePlayer(forceRebuild = true)
+    openInternal(
+      url = url,
+      headers = currentHeaders,
+      startPositionMs = pos,
+      mime = currentMime,
       resetHlsRetry = false,
     )
   }
@@ -1039,6 +1070,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           when (playbackState) {
             Player.STATE_ENDED -> emit(mapOf("event" to "completed"))
             Player.STATE_READY -> {
+              maybeUpgradeLiveFromMedia()
               val vs = p.videoSize
               if (vs.width > 0 && vs.height > 0) {
                 videoWidth = vs.width

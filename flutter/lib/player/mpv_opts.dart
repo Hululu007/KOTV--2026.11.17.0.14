@@ -21,24 +21,28 @@ const kotvDemuxerLavfO =
     'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0,'
     'probesize=8000000,analyzeduration=8000000';
 
-/// 已知 HLS 时追加的 lavf 网络项（整表时间轴）。
-const kotvHlsLavfOAdd = 'http_persistent=0';
+/// Media3 MpvNetworkOptions：URI 已是 HLS 时只加 `http_persistent=0`；
+/// 仅靠 mime/format 认 HLS（无扩展名代理）时再加 `extension_picky=0`。
+const kotvHlsLavfOAddForUri = 'http_persistent=0';
+const kotvHlsLavfOAddForMime = 'extension_picky=0,http_persistent=0';
 
-/// 开播前写入 lavf：已知 HLS 锁 `demuxer-lavf-format=hls`（整表）；否则清空 format 按内容探测。
-/// [lavfO] 由调用方拼好（含 ClearKey 时用 [kotvLavfOWithClearKey]）。
+/// 开播 lavf（与 Media3 `MpvNetworkOptions.apply` 同条件）：
+/// 已知 HLS → `demuxer-lavf-format=hls` + `demuxer-lavf-o-add`；否则清空 format。
+/// [lavfO] 为会话基线（含 ClearKey）；HLS 附加项走 o-add，避免整串覆盖基线。
 Future<void> kotvApplyLavfForOpen({
   required Future<void> Function(String key, String value) set,
   required String url,
   String? format,
   required String lavfO,
 }) async {
-  final hls = kotvIsHls(url, format);
-  var o = lavfO;
-  if (hls && !o.contains('http_persistent=')) {
-    o = '$o,$kotvHlsLavfOAdd';
+  await set('demuxer-lavf-o', lavfO);
+  if (!kotvIsHls(url, format)) {
+    await set('demuxer-lavf-format', '');
+    return;
   }
-  await set('demuxer-lavf-o', o);
-  await set('demuxer-lavf-format', hls ? 'hls' : '');
+  await set('demuxer-lavf-format', 'hls');
+  final add = kotvUrlIsHls(url) ? kotvHlsLavfOAddForUri : kotvHlsLavfOAddForMime;
+  await set('demuxer-lavf-o-add', add);
 }
 
 /// FVP/mdk 侧与 [kotvDemuxerLavfO] 同源的探测窗口（avformat.*）。

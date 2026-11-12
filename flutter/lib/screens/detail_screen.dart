@@ -33,7 +33,6 @@ import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/playback_settings.dart';
 import '../player/native_mpv_playback.dart';
-import '../player/play_format.dart';
 import '../player/play_headers.dart';
 import '../player/player_normalize.dart';
 import '../player/subtitle_style_util.dart';
@@ -2594,24 +2593,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (_skipOpeningEnding || startMs > 0) {
             _openingSeekDone = true;
           }
-          // 点播页也可能是无 ENDLIST 的滑窗 HLS：按正文升 live，关掉 cache-pause/磁盘缓存。
-          var openLive = false;
-          try {
-            openLive = await kotvDetectHlsLivePlayback(
-              url: openUrl,
-              headers: openHeaders,
-              format: format,
-            );
-          } catch (_) {}
-          if (serial != _playAtSerial || !mounted) {
-            await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
-            return;
-          }
+          // live 由引擎内容态提升（桌面 media-live / 安卓 isCurrentMediaItemLive），不预拉节目单。
           await pb.open(
             openUrl,
             headers: openHeaders,
             drm: hasDrm ? drm : null,
-            live: openLive,
             format: format,
             startAt: Duration(milliseconds: startMs),
           );

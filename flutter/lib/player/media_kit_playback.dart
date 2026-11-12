@@ -9,7 +9,6 @@ import 'drm_opts.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 import 'mpv_opts.dart';
-import 'play_format.dart';
 import 'play_headers.dart';
 import 'player_normalize.dart';
 import 'silent_video_guard.dart';
@@ -151,28 +150,13 @@ class MediaKitPlayback extends KotvPlayback {
   /// 无缝切入后 player.state.completed 可能仍为 true；用闸门对外报未完成，直到真正 EOF。
   bool? _completedGate;
   Map<String, String> _extraOpenProps = const {};
-  /// 点播 HLS：节目单 EXTINF 加总；覆盖 lavf 在 DISCONTINUITY 下偏短的 demux 时长。
-  Duration? _playlistDuration;
+  /// Media3 观测 `duration/full`；无则回落 player.state.duration。
+  Duration _durationFull = Duration.zero;
+  bool _observedMpvProps = false;
 
   void setExtraOpenProps(Map<String, String> props) {
     _extraOpenProps = Map<String, String>.from(props);
   }
-
-  Future<void> _refreshPlaylistDuration({
-    required String url,
-    required Map<String, String> headers,
-    required bool live,
-    required String? format,
-  }) =>
-      kotvApplyHlsPlaylistDurationRefresh(
-        url: url,
-        headers: headers,
-        live: live,
-        format: format,
-        stillCurrent: () => _url == url,
-        setPlaylistDuration: (d) => _playlistDuration = d,
-        onUpdated: notifyListeners,
-      );
 
   void _clearVideoSize() {
     _acceptSize = false;
@@ -234,6 +218,33 @@ class MediaKitPlayback extends KotvPlayback {
         }
       }
       await _opts.applyAfterAttach(player, live: _live);
+      await _ensureMpvTimelineObservers();
+    } catch (_) {}
+  }
+
+  /// 与 Media3 MpvPlayer 相同属性：`duration/full`、`media-live`（不用 EXTINF 撑 UI）。
+  Future<void> _ensureMpvTimelineObservers() async {
+    if (_observedMpvProps) return;
+    final platform = player.platform;
+    if (platform == null) return;
+    try {
+      await (platform as dynamic).observeProperty('duration/full', (String raw) async {
+        final sec = double.tryParse(raw.trim()) ?? 0;
+        final next = sec > 0
+            ? Duration(milliseconds: (sec * 1000).round())
+            : Duration.zero;
+        if (next == _durationFull) return;
+        _durationFull = next;
+        notifyListeners();
+      });
+      await (platform as dynamic).observeProperty('media-live', (String raw) async {
+        final live = raw.trim() == 'yes' || raw.trim() == 'true' || raw.trim() == '1';
+        if (!live || _live) return;
+        _live = true;
+        await _opts.applyAfterAttach(player, live: true);
+        notifyListeners();
+      });
+      _observedMpvProps = true;
     } catch (_) {}
   }
 
@@ -263,8 +274,10 @@ class MediaKitPlayback extends KotvPlayback {
   Duration get position => player.state.position;
 
   @override
-  Duration get duration =>
-      kotvPreferPlaylistDuration(player.state.duration, _playlistDuration);
+  Duration get duration {
+    if (_durationFull > Duration.zero) return _durationFull;
+    return player.state.duration;
+  }
 
   @override
   Duration get buffered => player.state.buffer;
@@ -538,17 +551,11 @@ class MediaKitPlayback extends KotvPlayback {
     _url = url;
     _live = live;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
-    _playlistDuration = null;
+    _durationFull = Duration.zero;
     // 换源清尺寸（与 Exo / 原生 MPV 一致）；避免 libmpv 残留宽高误判就绪。
     _clearVideoSize();
     _completedGate = null;
     notifyListeners();
-    unawaited(_refreshPlaylistDuration(
-      url: url,
-      headers: _headers,
-      live: live,
-      format: format,
-    ));
     final clearKeyHex = kotvIsLocalClearKey(drm) ? kotvClearKeyHex(drm) : null;
     if (drm != null && drm.isNotEmpty && clearKeyHex == null) {
       throw StateError('MPV 不支持该 DRM，请用内置 ExoPlayer');
@@ -556,6 +563,7 @@ class MediaKitPlayback extends KotvPlayback {
     _drmSession = clearKeyHex != null;
     await _optsReady;
     await _opts.applyAfterAttach(player, live: live);
+    await _ensureMpvTimelineObservers();
     if (_extraOpenProps.isNotEmpty) {
       for (final e in _extraOpenProps.entries) {
         await _mpvSet(e.key, e.value);
@@ -600,7 +608,6 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Future<void> awaitReadyAfterOpen() async {
     final session = _openSerial;
-    final live = _live;
     bool sameSession() => _openSerial == session && _url.isNotEmpty;
     await kotvGuardSilentVideo(
       hasVideoSize: () => width > 0 && height > 0,
@@ -609,7 +616,8 @@ class MediaKitPlayback extends KotvPlayback {
       isPlaying: () => playing,
       position: () => position,
       duration: () => duration,
-      isLiveContent: () => live || (duration <= Duration.zero && playing),
+      // 读 [_live]：media-live 升会话后须立刻按直播守卫，勿捕获 open 入参快照。
+      isLiveContent: () => _live || (duration <= Duration.zero && playing),
       onFixVideoSource: tryFixVideoSource,
       isAudioOnly: () => isAudioOnlyContent,
       hasVideoSource: () => hasVideoSourceHint,
@@ -627,7 +635,7 @@ class MediaKitPlayback extends KotvPlayback {
     _url = '';
     _queued = null;
     _drmSession = false;
-    _playlistDuration = null;
+    _durationFull = Duration.zero;
     _completedGate = null;
     _clearVideoSize();
     _speedBps = 0;
