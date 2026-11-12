@@ -148,6 +148,45 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var loadWallMs = 0L
   /** 正向播放中见到的最大 time-pos（seek 到末帧不计入）。 */
   private var maxPlayedSec = 0.0
+  /** AudioFocus duck 乘子；用户音量仍存 [volume]。 */
+  private var audioFocusVolumeMul = 1f
+  private val audioFocus by lazy {
+    KotvMpvAudioFocus(
+      appContext = { appContext },
+      main = main,
+      host =
+        object : KotvMpvAudioFocus.Host {
+          override fun isPlayerCreated(): Boolean = created.get()
+
+          override fun isPlayingDesired(): Boolean = !paused && playing
+
+          override fun pauseForAudioInterruption() {
+            if (!created.get()) return
+            try {
+              MPVLib.setPropertyBoolean("pause", true)
+            } catch (_: Throwable) {
+            }
+            paused = true
+            playing = false
+          }
+
+          override fun resumeAfterAudioFocus() {
+            if (!created.get()) return
+            try {
+              MPVLib.setPropertyBoolean("pause", false)
+            } catch (_: Throwable) {
+            }
+            paused = false
+            playing = true
+          }
+
+          override fun applyVolumeMultiplier(multiplier: Float) {
+            audioFocusVolumeMul = multiplier.coerceIn(0f, 1f)
+            applyVolumeProperty()
+          }
+        },
+    )
+  }
 
   private val tick = object : Runnable {
     override fun run() {
@@ -390,9 +429,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               result.success(null)
               return@post
             }
-            MPVLib.setPropertyBoolean("pause", false)
-            paused = false
-            playing = true
+            unpauseWithAudioFocus()
             result.success(null)
           } catch (e: Throwable) {
             result.error("PLAY_FAILED", e.message, null)
@@ -409,6 +446,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             MPVLib.setPropertyBoolean("pause", true)
             paused = true
             playing = false
+            audioFocus.abandon()
             result.success(null)
           } catch (e: Throwable) {
             result.error("PAUSE_FAILED", e.message, null)
@@ -464,6 +502,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             retriedDecodeFallback = false
             queuedNext = null
             pendingSeamlessId = null
+            audioFocus.abandon()
             result.success(null)
           } catch (e: Throwable) {
             result.error("STOP_FAILED", e.message, null)
@@ -487,9 +526,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         volume = (call.argument<Number>("volume") ?: 80).toDouble().coerceIn(0.0, 100.0)
         main.post {
           try {
-            if (created.get()) {
-              MPVLib.setPropertyDouble("volume", volume)
-            }
+            applyVolumeProperty()
             result.success(null)
           } catch (e: Throwable) {
             result.error("VOLUME_FAILED", e.message, null)
@@ -918,7 +955,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           try {
             if (created.get()) {
               MPVLib.command(arrayOf("playlist-play-index", "current"))
-              MPVLib.setPropertyBoolean("pause", false)
+              unpauseWithAudioFocus()
             }
             result.success(null)
           } catch (e: Throwable) {
@@ -1480,7 +1517,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       Log.w(TAG, "apply video eq", t)
     }
     try {
-      MPVLib.setPropertyString("vf", videoVf)
+      // mediacodec_embed 直出时画面不经 mpv 滤镜链；锐度 vf 无效且宜清空。
+      val vf = if (directActive) "" else videoVf
+      MPVLib.setPropertyString("vf", vf)
     } catch (t: Throwable) {
       Log.w(TAG, "apply video vf", t)
     }
@@ -1762,7 +1801,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       loadedUrl = url
       loadedHeaders = KotvPlayerNormalize.normalizeHeaders(headers)
       applySpdif()
-      MPVLib.setPropertyDouble("volume", volume)
+      applyVolumeProperty()
       MPVLib.setPropertyDouble("speed", rate)
       val startMs = pendingStartAtMs
       pendingStartAtMs = 0L
@@ -1772,9 +1811,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       loadWallMs = SystemClock.elapsedRealtime()
       // lavf / headers / start 只挂在这一次 loadfile 上，播完恢复。
       loadfile(url, "replace", buildLoadfileOpts(url, currentMime, headers, startMs))
-      MPVLib.setPropertyBoolean("pause", false)
-      paused = false
-      playing = true
+      unpauseWithAudioFocus()
       buffering = true
       eof = false
     } catch (e: Throwable) {
@@ -1856,9 +1893,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return try {
       pendingSeamlessId = next.id
       MPVLib.command(arrayOf("playlist-next"))
-      MPVLib.setPropertyBoolean("pause", false)
-      paused = false
-      playing = true
+      unpauseWithAudioFocus()
       eof = false
       true
     } catch (t: Throwable) {
@@ -1990,6 +2025,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     directActive = false
     videoAspect = 0.0
     appliedSpdif = null
+    audioFocus.abandon()
+    audioFocusVolumeMul = 1f
     if (!created.getAndSet(false)) return
     try {
       MPVLib.removeObserver(this)
@@ -2002,6 +2039,31 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     playing = false
     buffering = false
+  }
+
+  private fun applyVolumeProperty() {
+    if (!created.get()) return
+    try {
+      MPVLib.setPropertyDouble("volume", volume * audioFocusVolumeMul.toDouble())
+    } catch (t: Throwable) {
+      Log.w(TAG, "apply volume", t)
+    }
+  }
+
+  /** 开播/切集前申请焦点；失败则保持 pause。 */
+  private fun unpauseWithAudioFocus() {
+    if (!audioFocus.requestForPlayback()) {
+      paused = true
+      playing = false
+      try {
+        MPVLib.setPropertyBoolean("pause", true)
+      } catch (_: Throwable) {
+      }
+      return
+    }
+    MPVLib.setPropertyBoolean("pause", false)
+    paused = false
+    playing = true
   }
 
   private fun emitLoadFailure(e: Throwable) {
@@ -2049,8 +2111,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   override fun eventProperty(property: String, value: String) {
     when (property) {
       "current-vo" -> {
-        directActive = value == "mediacodec_embed"
-        main.post { applyVideoFrame() }
+        val nextDirect = value == "mediacodec_embed"
+        val changed = nextDirect != directActive
+        directActive = nextDirect
+        main.post {
+          applyVideoFrame()
+          if (changed) applyEqualizer()
+        }
       }
     }
   }
