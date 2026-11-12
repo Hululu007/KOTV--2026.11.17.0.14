@@ -657,8 +657,7 @@ class MediaKitPlayback extends KotvPlayback {
       isPlaying: () => playing,
       position: () => position,
       duration: () => duration,
-      // 只信 media-live 升过后的 [_live]；勿用 duration==0 启发式当直播。
-      isLiveContent: () => _live,
+      isLiveContent: () => kotvIsLiveForGuard(markedLive: _live),
       onFixVideoSource: tryFixVideoSource,
       isAudioOnly: () => isAudioOnlyContent,
       hasVideoSource: () => hasVideoSourceHint,

@@ -539,7 +539,7 @@ class ExoPlayback extends KotvPlayback {
       position: () => _position,
       duration: () => _duration,
       // 只信原生 isCurrentMediaItemLive 升会话后的 [_live]。
-      isLiveContent: () => _live,
+      isLiveContent: () => kotvIsLiveForGuard(markedLive: _live),
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,

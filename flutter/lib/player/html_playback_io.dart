@@ -195,11 +195,7 @@ class HtmlPlayback extends KotvPlayback {
       },
       position: () => c.value.position,
       duration: () => c.value.duration,
-      isLiveContent: () =>
-          _live ||
-          (identical(_c, c) &&
-              c.value.duration <= Duration.zero &&
-              c.value.isPlaying),
+      isLiveContent: () => kotvIsLiveForGuard(markedLive: _live),
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,

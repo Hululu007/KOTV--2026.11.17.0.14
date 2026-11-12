@@ -13,6 +13,7 @@ import 'fvp_register.dart';
 import 'kotv_playback.dart';
 import 'video_player_toggle.dart';
 import 'kotv_platform.dart';
+import 'play_format.dart';
 import 'play_headers.dart';
 import 'playback_settings.dart';
 import 'player_normalize.dart';
@@ -276,11 +277,12 @@ class FvpPlayback extends KotvPlayback {
     _lastUrl = url;
     _hookFvpDecoderLog();
     _fvpLastVideoDecoder = null;
-    // 不预锁 avformat.input；靠大 probesize 内容探测。
+    // 已知 HLS 锁 avformat.input=hls；否则不写 input，靠 probesize 内容探测。
     kotvEnsureFvpRegistered(
       decodeMode: _decodeMode,
       clearKeyHex: clearKeyHex,
       syncClearKey: true,
+      preferHls: kotvIsHls(url, format),
     );
     _opening = true;
     _live = live;
@@ -471,12 +473,11 @@ class FvpPlayback extends KotvPlayback {
       position: () => c.value.position,
       duration: () => c.value.duration,
       isLiveContent: () {
-        if (_live) return true;
+        var engineLive = false;
         try {
-          return identical(_c, c) && c.isLive();
-        } catch (_) {
-          return false;
-        }
+          engineLive = identical(_c, c) && c.isLive();
+        } catch (_) {}
+        return kotvIsLiveForGuard(markedLive: _live, engineLive: engineLive);
       },
       hasVideoSource: () {
         if (!identical(_c, c)) return true;

@@ -19,21 +19,25 @@ String _kotvFvpClearKey = '';
 
 /// [decodeMode] 决定 prepare 用的解码器。
 /// [syncClearKey] 为 true 时用 [clearKeyHex] 覆盖已记住的密钥（空串表示这次没有密钥）。
+/// [preferHls]：URL/mime 已是 HLS 时锁 demuxer（与 MPV `demuxer-lavf-format=hls` 同角色）；
+/// 非 HLS 不写 input，仍按内容探测。
 void kotvEnsureFvpRegistered({
   String decodeMode = 'auto',
   String? clearKeyHex,
   bool syncClearKey = false,
+  bool preferHls = false,
 }) {
   if (kIsWeb || kotvIsAndroid()) return;
   if (syncClearKey) _kotvFvpClearKey = (clearKeyHex ?? '').trim();
   final sig =
-      '${kotvFvpVideoDecoders(decodeMode).join('\u0001')}|$_kotvFvpClearKey';
+      '${kotvFvpVideoDecoders(decodeMode).join('\u0001')}|$_kotvFvpClearKey|${preferHls ? 'hls' : ''}';
   if (_kotvFvpRegistered && _kotvFvpSig == sig) return;
   _kotvFvpRegistered = true;
   _kotvFvpSig = sig;
   kotvRegisterFvp(
     decodeMode: decodeMode,
     clearKeyHex: _kotvFvpClearKey,
+    preferHls: preferHls,
   );
 }
 
@@ -62,12 +66,13 @@ void kotvUseSystemVideoPlayer() {
 ///    盖掉 create 里的 0。Win7 不写（会卡住平台线程；解码列表见 [kotvFvpVideoDecoders]）。
 ///
 /// 302 跟跳交给 mdk 默认 IO（勿在 Dart 里预跳，CDN 签名会过期）。
-/// 不设 `avformat.input`，假后缀仍按内容探测。
+/// 非 HLS 不设 `avformat.input`，假后缀仍按内容探测；已知 HLS 时锁 input=hls。
 ///
 /// Android 内置引擎仅 Exo/MPV，不注册 FVP。
 void kotvRegisterFvp({
   String decodeMode = 'auto',
   String? clearKeyHex,
+  bool preferHls = false,
 }) {
   if (kIsWeb || kotvIsAndroid()) return;
   const platforms = ['windows', 'macos', 'linux', 'ios'];
@@ -79,6 +84,9 @@ void kotvRegisterFvp({
     // create patch 再调 setBufferRange(min:0, max:0)。开播后再写带预算的 max。
     'buffer': '0+0',
   };
+  if (preferHls) {
+    playerOpts['avformat.input'] = 'hls';
+  }
   final key = (clearKeyHex ?? '').trim();
   if (key.isNotEmpty) {
     playerOpts['demux.lavf.o'] = kotvLavfOWithClearKey(key);

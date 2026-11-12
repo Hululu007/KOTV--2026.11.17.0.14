@@ -99,4 +99,11 @@ void main() {
     expect(kotvIsRealVideoTrack(id: 'auto', codec: 'h264'), isFalse);
     expect(kotvIsRealVideoTrack(id: '1', codec: 'h264', image: true), isFalse);
   });
+
+  test('live guard only trusts marked or engine live', () {
+    expect(kotvIsLiveForGuard(markedLive: false), isFalse);
+    expect(kotvIsLiveForGuard(markedLive: true), isTrue);
+    expect(kotvIsLiveForGuard(markedLive: false, engineLive: true), isTrue);
+    expect(kotvIsLiveForGuard(markedLive: false, engineLive: false), isFalse);
+  });
 }

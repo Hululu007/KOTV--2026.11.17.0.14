@@ -348,11 +348,7 @@ class WebJsPlayback extends KotvPlayback {
         _pullState();
         return _duration;
       },
-      isLiveContent: () {
-        if (_live) return true;
-        _pullState();
-        return _duration == Duration.zero && _playing;
-      },
+      isLiveContent: () => kotvIsLiveForGuard(markedLive: _live),
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,

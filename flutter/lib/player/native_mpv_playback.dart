@@ -569,8 +569,7 @@ class NativeMpvPlayback extends KotvPlayback {
       isPlaying: () => _playing,
       position: () => _position,
       duration: () => _duration,
-      // 只信 open 标定或引擎 media-live；勿用 duration==0 启发式。
-      isLiveContent: () => _live,
+      isLiveContent: () => kotvIsLiveForGuard(markedLive: _live),
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,

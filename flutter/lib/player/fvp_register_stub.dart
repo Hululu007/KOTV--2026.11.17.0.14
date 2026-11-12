@@ -3,6 +3,7 @@ void kotvEnsureFvpRegistered({
   String decodeMode = 'auto',
   String? clearKeyHex,
   bool syncClearKey = false,
+  bool preferHls = false,
 }) {}
 
 void kotvUseSystemVideoPlayer() {}
@@ -10,4 +11,5 @@ void kotvUseSystemVideoPlayer() {}
 void kotvRegisterFvp({
   String decodeMode = 'auto',
   String? clearKeyHex,
+  bool preferHls = false,
 }) {}

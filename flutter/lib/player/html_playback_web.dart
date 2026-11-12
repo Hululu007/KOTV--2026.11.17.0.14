@@ -255,9 +255,8 @@ class HtmlPlayback extends KotvPlayback {
         return Duration(milliseconds: (d * 1000).round());
       },
       isLiveContent: () {
-        if (_live) return true;
         final d = _video.duration;
-        return d.isInfinite;
+        return kotvIsLiveForGuard(markedLive: _live, engineLive: d.isInfinite);
       },
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
