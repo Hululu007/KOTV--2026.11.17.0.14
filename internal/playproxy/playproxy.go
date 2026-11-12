@@ -518,7 +518,7 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr, playI
 	}
 	body := string(raw)
 	if e.Filter {
-		body = m3u8.FilterPlaylist(body, final, e.Headers)
+		body = m3u8.FilterPlaylist(body, final)
 	}
 	// 有登记头或去广告时，子资源改写进同一 /proxy/play 以便带头发往；否则只补绝对地址。
 	inject := hasHeaders(e.Headers) || e.Filter

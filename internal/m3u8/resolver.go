@@ -8,21 +8,25 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 )
 
-// FilterPlaylist 去广告开着时过滤节目单，相对切片按这一次响应的最终地址补全。
-// 关闭或不是节目单时原样返回。判断不了广告时只补全地址，不改切片。
-func FilterPlaylist(content, base string, _ map[string]string) string {
+// FilterPlaylist 去广告开启且正文为节目单时：先补全相对地址，再 Process。
+// 关闭、非节目单、或判不出广告时不改切片（仍可能只做地址补全）。
+func FilterPlaylist(content, base string) string {
 	if !settings.IsAdFilterEnabled() || !strings.HasPrefix(strings.TrimSpace(content), "#EXTM3U") {
 		return content
 	}
-	text := absolutizeTagURIs(absolutizeURIs(content, base), base)
-	return Process(text)
+	return Process(absolutizePlaylist(content, base))
+}
+
+func absolutizePlaylist(content, base string) string {
+	text := absolutizeURIs(content, base)
+	return absolutizeTagURIs(text, base)
 }
 
 func absolutizeURIs(content, base string) string {
-	lines := strings.Split(content, "\n")
+	lines := splitLines(content)
 	for i, line := range lines {
 		trim := strings.TrimSpace(line)
-		if trim == "" || strings.HasPrefix(trim, "#") {
+		if !isSegmentURI(trim) {
 			continue
 		}
 		lines[i] = util.AbsHTTPRef(base, trim)

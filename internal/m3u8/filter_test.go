@@ -30,7 +30,8 @@ func TestLastDiscontinuityBlockKept(t *testing.T) {
 	}
 }
 
-func TestMinorityHostRemoved(t *testing.T) {
+// 仅主机不同、无 DISCONTINUITY：证据不足，不删（避免双 CDN 正片被当成广告）。
+func TestHostOnlyDifferenceKept(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n")
 	for i := 1; i <= 8; i++ {
@@ -39,18 +40,9 @@ func TestMinorityHostRemoved(t *testing.T) {
 	b.WriteString("#EXTINF:4.0,\nhttps://ad.example/x/ad1.ts\n")
 	b.WriteString("#EXTINF:4.0,\nhttps://ad.example/x/ad2.ts\n")
 	b.WriteString("#EXT-X-ENDLIST\n")
-	got := Process(b.String())
-	if strings.Contains(got, "ad.example") {
-		t.Fatalf("minority host should go:\n%s", got)
-	}
-	if !strings.Contains(got, "https://cdn.example/a/8.ts") || !strings.Contains(got, "#EXT-X-ENDLIST") {
-		t.Fatalf("content and endlist must stay:\n%s", got)
-	}
-	if !strings.Contains(got, "#EXT-X-PLAYLIST-TYPE:VOD") {
-		t.Fatalf("playlist tag must stay:\n%s", got)
-	}
-	if strings.Count(got, "#EXT-X-ENDLIST") != 1 {
-		t.Fatalf("one endlist:\n%s", got)
+	in := b.String()
+	if got := Process(in); got != in {
+		t.Fatalf("host-only difference without discontinuity must stay\n got:\n%s", got)
 	}
 }
 
@@ -66,8 +58,8 @@ func TestEqualHostsNotCut(t *testing.T) {
 	}
 }
 
-// 逐片 DISCONTINUITY + 双主机：不能按少数主机删，否则会误伤正片前缀 CDN。
-func TestDiscSaturatedMultiHostKept(t *testing.T) {
+// 逐片 DISCONTINUITY + 双主机：众数块长为 1，不连续规则不删。
+func TestPerSegmentDiscMultiHostKept(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:50\n")
 	for i := 1; i <= 4; i++ {
@@ -82,7 +74,7 @@ func TestDiscSaturatedMultiHostKept(t *testing.T) {
 	in := b.String()
 	got := Process(in)
 	if got != in {
-		t.Fatalf("disc-saturated multi-host must stay intact\n got:\n%s", got)
+		t.Fatalf("per-segment discontinuity multi-host must stay intact\n got:\n%s", got)
 	}
 	if !strings.Contains(got, "cdn-a.example") || !strings.Contains(got, "cdn-b.example") {
 		t.Fatalf("both hosts must stay:\n%s", got)
