@@ -627,8 +627,9 @@ func writePlaylist(w http.ResponseWriter, resp *http.Response, body []byte) {
 	w.Header().Del("Content-Length")
 	w.Header().Del("Content-Range")
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-	// 正文已是 #EXTM3U：覆盖上游 text/plain、octet-stream 等，避免播放器按错误 MIME 拒认 HLS。
-	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(body)
 }

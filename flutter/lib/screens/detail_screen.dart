@@ -33,6 +33,7 @@ import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/playback_settings.dart';
 import '../player/native_mpv_playback.dart';
+import '../player/play_format.dart';
 import '../player/play_headers.dart';
 import '../player/player_normalize.dart';
 import '../player/subtitle_style_util.dart';
@@ -2593,10 +2594,24 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (_skipOpeningEnding || startMs > 0) {
             _openingSeekDone = true;
           }
+          // 点播页也可能是无 ENDLIST 的滑窗 HLS：按正文升 live，关掉 cache-pause/磁盘缓存。
+          var openLive = false;
+          try {
+            openLive = await kotvDetectHlsLivePlayback(
+              url: openUrl,
+              headers: openHeaders,
+              format: format,
+            );
+          } catch (_) {}
+          if (serial != _playAtSerial || !mounted) {
+            await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
+            return;
+          }
           await pb.open(
             openUrl,
             headers: openHeaders,
             drm: hasDrm ? drm : null,
+            live: openLive,
             format: format,
             startAt: Duration(milliseconds: startMs),
           );
@@ -2604,9 +2619,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
             return;
           }
-          try {
-            await pb.play();
-          } catch (_) {}
+          // MediaKitPlayback.open 已 unpause；其它后端仍补一次 play。
+          if (pb is! MediaKitPlayback) {
+            try {
+              await pb.play();
+            } catch (_) {}
+          }
           opened = true;
           break;
         } on KotvSilentVideoException catch (e) {

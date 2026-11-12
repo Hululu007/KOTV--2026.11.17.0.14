@@ -148,9 +148,70 @@ Future<int?> kotvFetchHlsVodDurationMs({
 }
 
 /// 点播 HLS：节目单加总与引擎 demux 时长取较大者。
+///
+/// 仅当引擎时长已接近节目单（整表时间轴已打开）时才用节目单拉长 UI。
+/// 引擎仍停在单片长度时禁止用 EXTINF 加总撑满进度条，否则拖动会超出可 seek 窗口。
 Duration kotvPreferPlaylistDuration(Duration engine, Duration? playlist) {
   if (playlist == null || playlist <= Duration.zero) return engine;
-  return playlist >= engine ? playlist : engine;
+  if (engine <= Duration.zero) return engine;
+  if (playlist <= engine) return engine;
+  // 引擎不足节目单 1/4 且不足 60s：视为仍按切片 demux，不用节目单掩盖。
+  if (engine < const Duration(seconds: 60) &&
+      engine.inMilliseconds * 4 < playlist.inMilliseconds) {
+    return engine;
+  }
+  return playlist;
+}
+
+/// 媒体节目单正文是否为直播（有 EXTINF、无 ENDLIST、非主清单）。
+bool kotvHlsBodyIsLiveMediaPlaylist(String body) {
+  final text = body.trimLeft();
+  if (!text.startsWith('#EXTM3U')) return false;
+  var hasEnd = false;
+  var hasStreamInf = false;
+  var anyInf = false;
+  for (final raw in text.split('\n')) {
+    final line = raw.trim();
+    if (line.isEmpty) continue;
+    final upper = line.toUpperCase();
+    if (upper.startsWith('#EXT-X-ENDLIST')) {
+      hasEnd = true;
+      continue;
+    }
+    if (_streamInfRe.hasMatch(line)) {
+      hasStreamInf = true;
+      continue;
+    }
+    if (_extinfRe.hasMatch(line)) anyInf = true;
+  }
+  if (hasStreamInf || !anyInf) return false;
+  return !hasEnd;
+}
+
+/// 拉取 HLS 正文判断是否直播清单（主清单跟首条 variant）。点播页据此升 live 会话。
+Future<bool> kotvDetectHlsLivePlayback({
+  required String url,
+  required Map<String, String> headers,
+  String? format,
+}) async {
+  if (!kotvIsHls(url, format)) return false;
+  Future<String?> getBody(String u) async {
+    final res = await http
+        .get(Uri.parse(u), headers: headers.isEmpty ? null : headers)
+        .timeout(const Duration(seconds: 12));
+    if (res.statusCode < 200 || res.statusCode >= 300) return null;
+    return res.body;
+  }
+
+  var body = await getBody(url);
+  if (body == null) return false;
+  if (kotvHlsBodyIsLiveMediaPlaylist(body)) return true;
+  final variant = kotvHlsFirstVariantUri(body);
+  if (variant == null || variant.isEmpty) return false;
+  final child = Uri.parse(url).resolve(variant).toString();
+  body = await getBody(child);
+  if (body == null) return false;
+  return kotvHlsBodyIsLiveMediaPlaylist(body);
 }
 
 /// 拉取点播 HLS 时长；[stillCurrent] 为 false 时丢弃过期结果（换源竞态）。

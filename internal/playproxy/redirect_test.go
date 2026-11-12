@@ -362,26 +362,6 @@ func TestHandleKeepsAbsoluteCDNSegmentsWithoutHeaders(t *testing.T) {
 	}
 }
 
-func TestHandlePlaylistOverridesWrongContentType(t *testing.T) {
-	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:1,\nhttps://cdn.example/seg.ts\n"))
-	}))
-	defer srv.Close()
-
-	proxyURL := playproxy.Register(srv.URL+"/v.m3u8", nil, false)
-	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
-	rr := httptest.NewRecorder()
-	playproxy.Handle(rr, req)
-	res := rr.Result()
-	defer res.Body.Close()
-	ct := res.Header.Get("Content-Type")
-	if !strings.Contains(ct, "mpegurl") {
-		t.Fatalf("playlist Content-Type should be mpegurl, got %q", ct)
-	}
-}
-
 func TestHandleProxiesChildrenWhenFilterOn(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

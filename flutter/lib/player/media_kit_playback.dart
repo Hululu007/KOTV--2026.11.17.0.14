@@ -203,13 +203,20 @@ class MediaKitPlayback extends KotvPlayback {
     await player.play();
   }
 
-  /// 写 lavf 探测选项（含 ClearKey）；不预锁 demuxer-lavf-format。
-  Future<void> _applyLavfO(String? clearKey) async {
-    try {
-      await player.stop();
-    } catch (_) {}
-    await _mpvSet('demuxer-lavf-o', kotvLavfOWithClearKey(clearKey));
-    await _mpvSet('demuxer-lavf-format', '');
+  /// 开播 lavf：已知 HLS 锁整表时间轴；否则按内容探测（含 ClearKey）。
+  Future<void> _applyLavfForOpen({
+    required String url,
+    String? format,
+    String? clearKey,
+  }) async {
+    await kotvApplyLavfForOpen(
+      set: (k, v) async {
+        await _mpvSet(k, v);
+      },
+      url: url,
+      format: format,
+      lavfO: kotvLavfOWithClearKey(clearKey),
+    );
   }
 
   Future<void> _prepareOpts() async {
@@ -570,7 +577,7 @@ class MediaKitPlayback extends KotvPlayback {
     _openGen++;
     final gen = _openGen;
     final job = () async {
-      await _applyLavfO(clearKeyHex);
+      await _applyLavfForOpen(url: url, format: format, clearKey: clearKeyHex);
       if (gen != _openGen || _url.isEmpty) return;
       await _applyMpvHeaderProps();
       if (gen != _openGen || _url.isEmpty) return;

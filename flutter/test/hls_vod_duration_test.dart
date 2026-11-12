@@ -41,13 +41,22 @@ low.m3u8
     expect(kotvHlsFirstVariantUri(body), 'media.m3u8');
   });
 
-  test('prefer playlist over shorter demux', () {
+  test('prefer playlist only when engine timeline already near full', () {
+    // 引擎仍是单片长度：勿用节目单撑满进度条。
     expect(
       kotvPreferPlaylistDuration(
         const Duration(seconds: 10),
-        const Duration(seconds: 20),
+        const Duration(minutes: 40),
       ),
-      const Duration(seconds: 20),
+      const Duration(seconds: 10),
+    );
+    // 引擎已接近节目单：可用加总修正偏短 demux。
+    expect(
+      kotvPreferPlaylistDuration(
+        const Duration(seconds: 700),
+        const Duration(seconds: 800),
+      ),
+      const Duration(seconds: 800),
     );
     expect(
       kotvPreferPlaylistDuration(
@@ -60,6 +69,34 @@ low.m3u8
       kotvPreferPlaylistDuration(const Duration(seconds: 10), null),
       const Duration(seconds: 10),
     );
+    expect(
+      kotvPreferPlaylistDuration(Duration.zero, const Duration(minutes: 40)),
+      Duration.zero,
+    );
+  });
+
+  test('live media playlist without ENDLIST', () {
+    const live = '''
+#EXTM3U
+#EXTINF:6.0,
+a.ts
+#EXTINF:6.0,
+b.ts
+''';
+    expect(kotvHlsBodyIsLiveMediaPlaylist(live), isTrue);
+    const vod = '''
+#EXTM3U
+#EXTINF:6.0,
+a.ts
+#EXT-X-ENDLIST
+''';
+    expect(kotvHlsBodyIsLiveMediaPlaylist(vod), isFalse);
+    const master = '''
+#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=800000
+media.m3u8
+''';
+    expect(kotvHlsBodyIsLiveMediaPlaylist(master), isFalse);
   });
 
   test('fetch skips live and non-hls', () async {

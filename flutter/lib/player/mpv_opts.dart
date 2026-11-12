@@ -6,6 +6,7 @@ import '../util/kotv_app_dirs.dart';
 import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
+import 'play_format.dart';
 import 'playback_settings.dart';
 import 'player_normalize.dart';
 import 'video_eq.dart';
@@ -19,6 +20,26 @@ const kotvDemuxerLavfO =
     'seg_max_retry=5,strict=experimental,'
     'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0,'
     'probesize=8000000,analyzeduration=8000000';
+
+/// 已知 HLS 时追加的 lavf 网络项（整表时间轴）。
+const kotvHlsLavfOAdd = 'http_persistent=0';
+
+/// 开播前写入 lavf：已知 HLS 锁 `demuxer-lavf-format=hls`（整表）；否则清空 format 按内容探测。
+/// [lavfO] 由调用方拼好（含 ClearKey 时用 [kotvLavfOWithClearKey]）。
+Future<void> kotvApplyLavfForOpen({
+  required Future<void> Function(String key, String value) set,
+  required String url,
+  String? format,
+  required String lavfO,
+}) async {
+  final hls = kotvIsHls(url, format);
+  var o = lavfO;
+  if (hls && !o.contains('http_persistent=')) {
+    o = '$o,$kotvHlsLavfOAdd';
+  }
+  await set('demuxer-lavf-o', o);
+  await set('demuxer-lavf-format', hls ? 'hls' : '');
+}
 
 /// FVP/mdk 侧与 [kotvDemuxerLavfO] 同源的探测窗口（avformat.*）。
 Map<String, String> kotvFvpAvformatProbeOpts() => const {
@@ -332,8 +353,9 @@ class KotvMpvOpts {
           await set(e.key, e.value);
         }
         if (live) {
-          // 直播不写 cache-secs；关掉 cache-pause 避免播一段停一段。
+          // 直播不写 cache-secs；关掉 cache-pause / 磁盘缓存，避免播几秒就 paused-for-cache。
           await set('cache-pause', 'no');
+          await set('cache-on-disk', 'no');
         } else {
           await set('cache-on-disk', diskCache ? 'yes' : 'no');
           // 桌面须定点 demuxer-cache-dir；安卓原生插件另写 cacheDir/mpv-cache。

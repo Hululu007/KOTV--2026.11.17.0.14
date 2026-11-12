@@ -31,7 +31,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
-import androidx.media3.mpvplayer.MpvAndroidOptions
 import androidx.media3.mpvplayer.MpvPlayer
 import androidx.media3.mpvplayer.MpvPlayerConfig
 import androidx.media3.mpvplayer.MpvSubtitleOptions
@@ -92,6 +91,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var currentMime: String? = null
   /** 本集是否已用 APPLICATION_M3U8 做过一次格式重试。 */
   private var retriedHlsMime = false
+  /** 本集是否已做过一次解码 soft/hard 回退。 */
+  private var retriedDecodeFallback = false
   private var pendingStartAtMs = 0L
   /** 排在播放列表里的下一集；播到它时 [onMediaItemTransition] 把它切成当前集。 */
   private var queuedNext: KotvQueuedNext? = null
@@ -460,7 +461,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
             ensurePlayer(forceRebuild = true)
             if (url.isNotBlank()) {
-              openInternal(url, headers, pos)
+              openInternal(url, headers, pos, currentMime)
             } else {
               applyEqualizer()
               applySubtitleStyle()
@@ -740,7 +741,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentUrl = url
     currentHeaders = KotvPlayerNormalize.normalizeHeaders(headers)
     currentMime = mime?.trim()?.ifEmpty { null }
-    if (resetHlsRetry) retriedHlsMime = false
+    if (resetHlsRetry) {
+      retriedHlsMime = false
+      retriedDecodeFallback = false
+    }
     ensurePlayer()
     val p = player ?: error("mpv player missing")
     applyTrackSelectionPrefs()
@@ -772,25 +776,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     main.post(tick)
   }
 
-  /** 无扩展名代理地址等场景：首次未带 HLS mime 时，解析失败再锁 APPLICATION_M3U8 重开一次。 */
-  private fun shouldRetryHlsMime(error: PlaybackException): Boolean {
-    if (retriedHlsMime) return false
-    if (isHlsMime(currentMime)) return false
-    return when (error.errorCode) {
-      PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
-      PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
-      PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
-      PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
-      PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
-      -> true
-      else -> {
-        val msg = error.message.orEmpty()
-        msg.contains("Not detecting m3u8", ignoreCase = true) ||
-          msg.contains("Failed to recognize file format", ignoreCase = true)
-      }
-    }
-  }
-
+  /** 无扩展名代理等：首次未带 HLS mime 时，解析失败再锁 APPLICATION_M3U8 重开一次。 */
   private fun retryOpenWithHlsMime() {
     val url = currentUrl
     if (url.isBlank()) return
@@ -809,13 +795,31 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     )
   }
 
-  private fun isHlsMime(mime: String?): Boolean {
-    val m = mime?.trim().orEmpty()
-    if (m.isEmpty()) return false
-    return m.equals(MimeTypes.APPLICATION_M3U8, ignoreCase = true) ||
-      m.equals("application/vnd.apple.mpegurl", ignoreCase = true) ||
-      m.equals("audio/mpegurl", ignoreCase = true) ||
-      m.equals("audio/x-mpegurl", ignoreCase = true)
+  /** 解码失败：在 soft/hard 间切换一次并保留 mime/进度再开。 */
+  private fun retryOpenWithDecodeFallback() {
+    val url = currentUrl
+    if (url.isBlank()) return
+    retriedDecodeFallback = true
+    val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+    val next =
+      when (KotvPlayerNormalize.decodeModeLabel(decodeMode)) {
+        "soft" -> "hard"
+        "hard" -> "soft"
+        else -> "soft"
+      }
+    decodeMode = next
+    try {
+      player?.stop()
+    } catch (_: Throwable) {
+    }
+    ensurePlayer(forceRebuild = true)
+    openInternal(
+      url = url,
+      headers = currentHeaders,
+      startPositionMs = pos,
+      mime = currentMime,
+      resetHlsRetry = false,
+    )
   }
 
   /** 点播、headers 与当前集相同才排队（无 DRM 会话；Exo 另有 currentDrm 守卫）。 */
@@ -920,67 +924,20 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       conf.hashCode(),
     ).joinToString("|")
 
-  private fun buildConfig(ctx: Context): MpvPlayerConfig {
-    val configDir = File(ctx.filesDir, "mpv").apply { mkdirs() }
-    val cacheDir = File(ctx.cacheDir, "mpv").apply { mkdirs() }
-    KotvFontConfig.prepare(configDir, cacheDir)
-    val androidOpts =
-      MpvAndroidOptions.Builder()
-        .setShaderCacheDirectory(cacheDir)
-        .setAudioPassthroughEnabled(audioPassThrough)
-        .setGpuNextEnabled(gpuNext)
-        .setVulkanEnabled(vulkanEnabled)
-        .setDolbyVisionOutputPolicy(resolveDolbyVisionPolicy(dolbyVisionPolicy))
-        .build()
-    val builder =
-      MpvPlayerConfig.Builder()
-        .setDefaultUserAgent(defaultUserAgent())
-        .addAndroidDefaults(androidOpts)
-        .addConfigDirectory(configDir)
-        .addAndroidFontConfig(configDir, cacheDir)
-        .addAndroidSubtitleOptions(ctx, buildSubtitleOptions())
-    if (tlsVerify) {
-      val ca = File(ctx.filesDir, "cacert.pem")
-      builder.addTlsCaFileFromAsset(ctx, "cacert.pem", ca)
-    } else {
-      builder.addPreInitStringOption("tls-verify", "no")
-    }
-    if (!livePlayback && diskCache) {
-      val dir = File(ctx.cacheDir, "mpv-cache").apply { mkdirs() }
-      builder.addDiskCacheOptions(dir, 3600)
-    }
-    applyConfToBuilder(builder, conf)
-    return builder.build()
-  }
-
-  private fun applyConfToBuilder(builder: MpvPlayerConfig.Builder, text: String) {
-    for (raw in text.split(Regex("[\r\n]+"))) {
-      var line = raw.trim()
-      if (line.isEmpty() || line.startsWith("#")) continue
-      val hash = line.indexOf('#')
-      if (hash > 0) line = line.substring(0, hash).trim()
-      if (line.isEmpty()) continue
-      val key: String
-      val value: String
-      val eq = line.indexOf('=')
-      if (eq > 0) {
-        key = line.substring(0, eq).trim()
-        value = line.substring(eq + 1).trim()
-      } else {
-        val sp = Regex("\\s+").find(line) ?: continue
-        key = line.substring(0, sp.range.first).trim()
-        value = line.substring(sp.range.last + 1).trim()
-      }
-      if (key.isEmpty() || key.startsWith("kotv-")) continue
-      val base = if (key.startsWith("no-")) key.substring(3) else key
-      if (MANAGED_CONF_OPTIONS.contains(key) || MANAGED_CONF_OPTIONS.contains(base)) continue
-      try {
-        builder.addAppOwnedStringOption(key, value.ifEmpty { "yes" })
-      } catch (t: Throwable) {
-        Log.w(TAG, "skip conf option $key", t)
-      }
-    }
-  }
+  private fun buildConfig(ctx: Context): MpvPlayerConfig =
+    KotvMpvConfig.build(
+      ctx = ctx,
+      tlsVerify = tlsVerify,
+      diskCache = diskCache,
+      livePlayback = livePlayback,
+      audioPassThrough = audioPassThrough,
+      gpuNext = gpuNext,
+      vulkanEnabled = vulkanEnabled,
+      dolbyVisionPolicy = dolbyVisionPolicy,
+      conf = conf,
+      subtitleOptions = buildSubtitleOptions(),
+      resolveDolbyVisionPolicy = ::resolveDolbyVisionPolicy,
+    )
 
   private fun buildMediaItem(
     url: String,
@@ -1104,9 +1061,14 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
 
         override fun onPlayerError(error: PlaybackException) {
-          if (shouldRetryHlsMime(error)) {
+          if (KotvMpvHls.shouldRetryHlsMime(error, currentMime, retriedHlsMime)) {
             Log.i(TAG, "retry open with HLS mime after ${error.errorCodeName}: ${error.message}")
             retryOpenWithHlsMime()
+            return
+          }
+          if (!retriedDecodeFallback && KotvMpvHls.isDecodeError(error)) {
+            Log.i(TAG, "retry open with decode fallback after ${error.errorCodeName}: ${error.message}")
+            retryOpenWithDecodeFallback()
             return
           }
           emit(mapOf("event" to "error", "message" to (error.message ?: error.errorCodeName)))
@@ -1747,9 +1709,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  private fun defaultUserAgent(): String =
-    "KOTV/${Build.VERSION.RELEASE} (Linux; Android ${Build.VERSION.RELEASE})"
-
   private fun emit(payload: Map<String, Any?>) {
     val sink = eventSink ?: return
     main.post {
@@ -1762,34 +1721,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   companion object {
-    private val MANAGED_CONF_OPTIONS =
-      setOf(
-        "vo",
-        "wid",
-        "android-surface-size",
-        "gpu-api",
-        "gpu-context",
-        "hwdec",
-        "audio-spdif",
-        "android-dolby-vision-output",
-        "demuxer-dovi-profile7",
-        "cache",
-        "cache-on-disk",
-        "demuxer-cache-dir",
-        "cache-secs",
-        "demuxer-max-bytes",
-        "demuxer-max-back-bytes",
-        "cache-pause",
-        "cache-pause-initial",
-        "tls-verify",
-        "tls-ca-file",
-        "slang",
-        "brightness",
-        "contrast",
-        "saturation",
-        "gamma",
-        "hue",
-      )
     private const val TAG = "KotvMpv"
     const val VIEW_TYPE = "kotv_mpv/surface"
   }
