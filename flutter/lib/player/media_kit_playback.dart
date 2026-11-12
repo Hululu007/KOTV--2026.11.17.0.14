@@ -358,6 +358,8 @@ class MediaKitPlayback extends KotvPlayback {
       if (!_completedCtrl.isClosed) _completedCtrl.add(false);
       return;
     }
+    // 直播时间轴抖动勿当片尾。
+    if (_live) return;
     // 仅图片轨、无音、无出画：keep-open 会 seek 到末帧并 completed，勿当正常片尾连播。
     // 起播守卫仍会因无尺寸抛 SilentVideo：点播可改开已下发透传 url，直播只走播放器 failover。
     if (_isUnplayableImageEof()) {
@@ -410,13 +412,35 @@ class MediaKitPlayback extends KotvPlayback {
     }
     await clearNext();
     final fields = kotvSplitMpvHeaders(h).fields;
+    final mime = kotvPlayMime(url, format);
     final media = Media(
       url,
       httpHeaders: fields.isEmpty ? null : fields,
       start: startAt > Duration.zero ? startAt : null,
     );
+    // media_kit Player.add 只 loadfile URI；start / HLS lavf 须挂在该项 loadfile 上。
+    final opts = <String>[];
+    if (startAt > Duration.zero) {
+      opts.add('start=${startAt.inMilliseconds / 1000.0}');
+    }
+    kotvAppendLavfHlsLoadOpts(url, mime, opts);
     try {
-      await player.add(media);
+      if (opts.isEmpty) {
+        await player.add(media);
+      } else {
+        // 先同步 media_kit 播放列表，再把 mpv 末项换成带选项的 loadfile。
+        await player.add(media);
+        final idx = player.state.playlist.medias.length - 1;
+        if (idx < 0) return false;
+        await _mpvCmd(['playlist-remove', '$idx']);
+        await _mpvCmd([
+          'loadfile',
+          url,
+          'append',
+          '-1',
+          kotvEncodeMpvLoadfileOptions(opts),
+        ]);
+      }
     } catch (_) {
       return false;
     }
@@ -701,7 +725,18 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> playOrPause() => player.playOrPause();
 
   @override
-  Future<void> play() => player.play();
+  Future<void> play() async {
+    await kotvPlayRestartingFromEndIfNeeded(
+      completed: completed,
+      position: position,
+      duration: duration,
+      seekZero: () async {
+        await player.seek(Duration.zero);
+        _completedGate = false;
+      },
+      play: () => player.play(),
+    );
+  }
 
   @override
   Future<void> pause() => player.pause();
@@ -1024,6 +1059,13 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> setSubtitleOffsetMs(int offsetMs) async {
     final sec = (offsetMs.clamp(-300000, 300000) / 1000.0);
     await _mpvSet('sub-delay', sec.toStringAsFixed(3));
+  }
+
+  @override
+  Future<void> setAudioOffsetMs(int offsetMs) async {
+    final ms = offsetMs.clamp(-10000, 10000);
+    _opts = _opts.copyWith(audioOffsetMs: ms);
+    await _mpvSet('audio-delay', (ms / 1000.0).toStringAsFixed(3));
   }
 
   @override

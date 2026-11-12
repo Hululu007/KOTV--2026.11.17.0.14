@@ -215,6 +215,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 字幕时间偏移（毫秒）；正值字幕延后。不支持的引擎忽略。
   Future<void> setSubtitleOffsetMs(int offsetMs) async {}
 
+  /// 音画偏移（毫秒）；正值音频延后。不支持的引擎忽略。
+  Future<void> setAudioOffsetMs(int offsetMs) async {}
+
   /// 临时旁路画面/音频效果（按住看原画 / 试听原音）；松手后恢复。
   Future<void> setFxPreview({bool? videoOriginal, bool? audioOriginal}) async {}
 
@@ -546,4 +549,36 @@ Future<void> kotvTogglePlayback({
   } else {
     await play();
   }
+}
+
+/// keep-open / 片尾态再点播放：应先回起点，避免只 unpause 停在末帧。
+///
+/// [completed] 为引擎 completed / eof；时长未知或 ≤1s 时只信 completed。
+bool kotvShouldRestartFromEnd({
+  required bool completed,
+  required Duration position,
+  required Duration duration,
+}) {
+  if (completed) return true;
+  final durMs = duration.inMilliseconds;
+  if (durMs <= 1000) return false;
+  return position.inMilliseconds >= durMs - 350;
+}
+
+/// 片尾后再播：需要时先 [seekZero]，再 [play]。
+Future<void> kotvPlayRestartingFromEndIfNeeded({
+  required bool completed,
+  required Duration position,
+  required Duration duration,
+  required Future<void> Function() seekZero,
+  required Future<void> Function() play,
+}) async {
+  if (kotvShouldRestartFromEnd(
+    completed: completed,
+    position: position,
+    duration: duration,
+  )) {
+    await seekZero();
+  }
+  await play();
 }

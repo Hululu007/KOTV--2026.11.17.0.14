@@ -9,7 +9,7 @@ import 'kotv_playback.dart';
 /// - **会话已死仍无画面**：抛错。
 /// - **纯音频**：确认无视轨后仍要进度前进（与点播相同）。
 /// - **播放中进度卡死**：点播在「出画/纯音频」后若 [isPlaying] 且进度长期不涨 → 抛错切播放器。
-///   直播（[isLiveContent] / 时长一直为 0）跳过进度检查。
+///   直播（[isLiveContent]，仅标定/引擎信号）跳过进度检查。
 Future<void> kotvGuardSilentVideo({
   required bool Function() hasVideoSize,
   required bool Function() sessionAlive,

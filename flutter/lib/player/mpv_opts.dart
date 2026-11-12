@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -40,6 +42,37 @@ Future<void> kotvApplyLavfForOpen({
   await set('demuxer-lavf-format', 'hls');
   final add = kotvUrlIsHls(url) ? kotvHlsLavfOAddForUri : kotvHlsLavfOAddForMime;
   await set('demuxer-lavf-o-add', add);
+}
+
+/// loadfile 一次性选项：仅 HLS 时追加 `demuxer-lavf-format` / `demuxer-lavf-o-add`。
+/// 与安卓 [KotvAndroidPlayback.appendLavfHlsLoadOpts] 同语义。
+void kotvAppendLavfHlsLoadOpts(
+  String url,
+  String? mimeOrFormat,
+  List<String> opts,
+) {
+  if (!kotvIsHls(url, mimeOrFormat)) return;
+  opts.add('demuxer-lavf-format=hls');
+  final add =
+      kotvUrlIsHls(url) ? kotvHlsLavfOAddForUri : kotvHlsLavfOAddForMime;
+  opts.add('demuxer-lavf-o-add=$add');
+}
+
+/// mpv loadfile 选项串：按 UTF-8 字节长度包一层，避免值里的 `=` / `,` 被拆开。
+String kotvEncodeMpvLoadfileOptions(List<String> options) {
+  if (options.isEmpty) return '';
+  return options.map((option) {
+    final eq = option.indexOf('=');
+    if (eq <= 0) return kotvEncodeMpvLoadfilePart(option);
+    final key = option.substring(0, eq);
+    final value = option.substring(eq + 1);
+    return '${kotvEncodeMpvLoadfilePart(key)}=${kotvEncodeMpvLoadfilePart(value)}';
+  }).join(',');
+}
+
+String kotvEncodeMpvLoadfilePart(String value) {
+  final n = utf8.encode(value).length;
+  return '%$n%$value';
 }
 
 /// FVP/mdk 侧与 [kotvDemuxerLavfO] 同源的探测窗口（avformat.*）。

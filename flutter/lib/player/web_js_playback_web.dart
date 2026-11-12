@@ -400,7 +400,18 @@ class WebJsPlayback extends KotvPlayback {
   @override
   Future<void> play() async {
     try {
-      _api.play(_container);
+      await kotvPlayRestartingFromEndIfNeeded(
+        completed: _completed,
+        position: _position,
+        duration: _duration,
+        seekZero: () async {
+          _api.seek(_container, 0);
+          _completed = false;
+        },
+        play: () async {
+          _api.play(_container);
+        },
+      );
     } catch (_) {}
     _pullState();
     notifyListeners();

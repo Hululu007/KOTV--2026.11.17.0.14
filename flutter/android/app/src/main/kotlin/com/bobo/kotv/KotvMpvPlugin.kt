@@ -53,7 +53,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var surfaceHost: KotvMpvSurfaceHost? = null
 
   private val main = Handler(Looper.getMainLooper())
+  /** 每次 load 请求递增；[activeLoadGen] 在 START_FILE 时对齐，用于丢弃过期 end-file。 */
   private val loadGen = AtomicInteger(0)
+  @Volatile private var activeLoadGen = 0
   private val created = AtomicBoolean(false)
   private var playing = false
   private var buffering = false
@@ -150,6 +152,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var maxPlayedSec = 0.0
   /** AudioFocus duck 乘子；用户音量仍存 [volume]。 */
   private var audioFocusVolumeMul = 1f
+  /** 音画偏移（秒），对应 mpv `audio-delay`。 */
+  private var audioDelaySec = 0.0
   private val audioFocus by lazy {
     KotvMpvAudioFocus(
       appContext = { appContext },
@@ -429,10 +433,33 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               result.success(null)
               return@post
             }
+            // keep-open 片尾后再播：先回起点，避免只 unpause 停在 EOF。
+            if (eof || (effectiveDurationSec() > 1.0 &&
+                positionSec >= effectiveDurationSec() - 0.35)
+            ) {
+              try {
+                MPVLib.command(arrayOf("seek", "0", "absolute"))
+              } catch (_: Throwable) {
+              }
+              eof = false
+              positionSec = 0.0
+            }
             unpauseWithAudioFocus()
             result.success(null)
           } catch (e: Throwable) {
             result.error("PLAY_FAILED", e.message, null)
+          }
+        }
+      }
+      "setAudioOffsetMs" -> {
+        val ms = call.argument<Number>("ms")?.toDouble() ?: 0.0
+        audioDelaySec = (ms / 1000.0).coerceIn(-10.0, 10.0)
+        main.post {
+          try {
+            applyAudioDelay()
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("AUDIO_OFFSET_FAILED", e.message, null)
           }
         }
       }
@@ -987,6 +1014,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     applyDolbyVisionOptions()
     applyPreferredSubtitleLangs()
     applyEqualizer()
+    applyAudioDelay()
     applySpdif()
     if (rebuilt && url.isNotBlank()) {
       retrySeekSec = pos.coerceAtLeast(0.0)
@@ -1131,6 +1159,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       createdDiskCache = diskCache
       createdBufferBytes = bufferBytes
       applyAspectMode()
+      applyAudioDelay()
       main.removeCallbacks(tick)
       main.post(tick)
       Log.i(TAG, "MPV context ready abi=${MPVLib.getLoadedAbi()} live=$livePlayback tlsVerify=$tlsVerify")
@@ -1486,6 +1515,18 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     call.argument<Number>("bufferBytes")?.toLong()?.let { n ->
       bufferBytes =
         if (n > 0L) n.coerceAtMost(Int.MAX_VALUE.toLong()).toInt() else 0
+    }
+    call.argument<Number>("audioOffsetMs")?.toDouble()?.let { ms ->
+      audioDelaySec = (ms / 1000.0).coerceIn(-10.0, 10.0)
+    }
+  }
+
+  private fun applyAudioDelay() {
+    if (!created.get()) return
+    try {
+      MPVLib.setPropertyDouble("audio-delay", audioDelaySec)
+    } catch (t: Throwable) {
+      Log.w(TAG, "audio-delay", t)
     }
   }
 
@@ -2102,9 +2143,25 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         paused = value
         playing = !value
       }
-      "eof-reached" -> if (value) markEnded() else eof = false
+      "eof-reached" -> {
+        if (value) {
+          val gen = activeLoadGen
+          main.post {
+            if (loadGen.get() != gen) return@post
+            markEnded()
+          }
+        } else {
+          eof = false
+        }
+      }
       "paused-for-cache", "seeking" -> buffering = value
-      "media-live" -> if (value) main.post { maybeUpgradeLiveFromMedia() }
+      "media-live" -> if (value) {
+        val gen = activeLoadGen
+        main.post {
+          if (loadGen.get() != gen) return@post
+          maybeUpgradeLiveFromMedia()
+        }
+      }
     }
   }
 
@@ -2156,29 +2213,36 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   override fun event(eventId: Int) {
     when (eventId) {
+      MPVLib.MpvEvent.MPV_EVENT_START_FILE -> {
+        activeLoadGen = loadGen.get()
+      }
       MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED, MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
-        buffering = false
-        // 属性观察可能晚于 restart；主动读一次，避免 Dart 侧一直 width=0 盖黑。
-        try {
-          width = MPVLib.getPropertyInt("width") ?: width
-          height = MPVLib.getPropertyInt("height") ?: height
-          if (width <= 0) width = MPVLib.getPropertyInt("video-params/w") ?: width
-          if (height <= 0) height = MPVLib.getPropertyInt("video-params/h") ?: height
-        } catch (_: Throwable) {
-        }
-        val seekTo = retrySeekSec
-        if (seekTo >= 0.5) {
-          retrySeekSec = -1.0
+        val gen = activeLoadGen
+        main.post {
+          if (loadGen.get() != gen) return@post
+          buffering = false
+          // 属性观察可能晚于 restart；主动读一次，避免 Dart 侧一直 width=0 盖黑。
           try {
-            MPVLib.command(arrayOf("seek", seekTo.toString(), "absolute"))
-          } catch (t: Throwable) {
-            Log.w(TAG, "retry seek failed", t)
+            width = MPVLib.getPropertyInt("width") ?: width
+            height = MPVLib.getPropertyInt("height") ?: height
+            if (width <= 0) width = MPVLib.getPropertyInt("video-params/w") ?: width
+            if (height <= 0) height = MPVLib.getPropertyInt("video-params/h") ?: height
+          } catch (_: Throwable) {
           }
-        } else {
-          retrySeekSec = -1.0
+          val seekTo = retrySeekSec
+          if (seekTo >= 0.5) {
+            retrySeekSec = -1.0
+            try {
+              MPVLib.command(arrayOf("seek", seekTo.toString(), "absolute"))
+            } catch (t: Throwable) {
+              Log.w(TAG, "retry seek failed", t)
+            }
+          } else {
+            retrySeekSec = -1.0
+          }
+          emitSize()
+          emit(mapOf("event" to "ready", "width" to width, "height" to height))
         }
-        emitSize()
-        emit(mapOf("event" to "ready", "width" to width, "height" to height))
       }
       MPVLib.MpvEvent.MPV_EVENT_SHUTDOWN -> {
         created.set(false)
@@ -2281,15 +2345,22 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   override fun endFile(reason: Int, error: Int, errorText: String?) {
+    val gen = activeLoadGen
     when (reason) {
       // 有排队或正在无缝切入：不算播完（keep-open 下由 eof-reached / skipToQueued 切集；旧文件 end-file 晚到也忽略）。
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_EOF -> {
-        if (queuedNext != null || pendingSeamlessId != null) return
-        markEnded()
+        main.post {
+          if (loadGen.get() != gen) return@post
+          if (queuedNext != null || pendingSeamlessId != null) return@post
+          markEnded()
+        }
       }
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
         val msg = errorText?.takeIf { it.isNotBlank() } ?: "MPV error $error"
-        main.post { handleLoadError(msg) }
+        main.post {
+          if (loadGen.get() != gen) return@post
+          handleLoadError(msg)
+        }
       }
       else -> {}
     }

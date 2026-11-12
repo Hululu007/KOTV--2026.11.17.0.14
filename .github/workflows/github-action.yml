@@ -558,6 +558,17 @@ jobs:
           sdkmanager "platforms;android-37.0" "build-tools;36.0.0" >/dev/null
           sdkmanager --list_installed 2>/dev/null | grep -E 'platforms;android-3|build-tools' || true
 
+      # 源码编 Android libmpv/FFmpeg 主机依赖（缺 gperf 会在 prepare 阶段直接失败）。
+      - name: Install Android MPV host build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gperf meson ninja-build nasm pkg-config \
+            python3-pip python3-setuptools
+          command -v gperf
+          command -v meson
+          command -v ninja
+
       - name: Cache Android MPV native suite (jniLibs + Vulkan stub)
         uses: actions/cache@v4
         with:

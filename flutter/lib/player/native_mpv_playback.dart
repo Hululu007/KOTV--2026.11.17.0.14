@@ -521,6 +521,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'bufferBytes': KotvBufferBudget.bytes(),
         'dolbyVisionPolicy': _opts.dolbyVisionPolicy,
         'preferredTextLangs': _opts.preferredTextLangs,
+        'audioOffsetMs': _opts.audioOffsetMs,
         'render': _renderMode,
         if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
         ..._opts.equalizerChannelArgs(),
@@ -584,7 +585,16 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   Future<void> play() async {
     try {
-      await _ch.invokeMethod('play');
+      await kotvPlayRestartingFromEndIfNeeded(
+        completed: _completed,
+        position: _position,
+        duration: _duration,
+        seekZero: () async {
+          await seek(Duration.zero);
+          _completed = false;
+        },
+        play: () => _ch.invokeMethod('play'),
+      );
       _playing = true;
       notifyListeners();
     } catch (_) {}
@@ -827,7 +837,17 @@ class NativeMpvPlayback extends KotvPlayback {
         'bufferBytes': KotvBufferBudget.bytes(),
         'dolbyVisionPolicy': opts.dolbyVisionPolicy,
         'preferredTextLangs': opts.preferredTextLangs,
+        'audioOffsetMs': opts.audioOffsetMs,
         ...opts.equalizerChannelArgs(),
+      });
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setAudioOffsetMs(int offsetMs) async {
+    try {
+      await _ch.invokeMethod('setAudioOffsetMs', {
+        'ms': offsetMs.clamp(-10000, 10000),
       });
     } catch (_) {}
   }

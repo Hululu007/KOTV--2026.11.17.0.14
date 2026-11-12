@@ -625,7 +625,19 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   Future<void> play() async {
-    await _c?.play();
+    final c = _c;
+    if (c != null) {
+      await kotvPlayRestartingFromEndIfNeeded(
+        completed: _completed || c.value.isCompleted,
+        position: c.value.position,
+        duration: c.value.duration,
+        seekZero: () async {
+          await c.seekTo(Duration.zero);
+          _completed = false;
+        },
+        play: () => c.play(),
+      );
+    }
     notifyListeners();
   }
 
@@ -1139,6 +1151,16 @@ class FvpPlayback extends KotvPlayback {
       // mpv 风格：秒
       final sec = offsetMs.clamp(-300000, 300000) / 1000.0;
       c.setProperty('subtitle.delay', sec.toStringAsFixed(3));
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setAudioOffsetMs(int offsetMs) async {
+    _audioOffsetMs = offsetMs.clamp(-10000, 10000);
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      c.setProperty('audio.delay', (_audioOffsetMs / 1000.0).toStringAsFixed(3));
     } catch (_) {}
   }
 

@@ -623,7 +623,16 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> play() async {
-    await _ch.invokeMethod('play');
+    await kotvPlayRestartingFromEndIfNeeded(
+      completed: _completed,
+      position: _position,
+      duration: _duration,
+      seekZero: () async {
+        await seek(Duration.zero);
+        _completed = false;
+      },
+      play: () => _ch.invokeMethod('play'),
+    );
     _playing = true;
     notifyListeners();
   }
@@ -1190,6 +1199,15 @@ class ExoPlayback extends KotvPlayback {
     try {
       await _ensureNative();
       await _ch.invokeMethod('setSubtitleOffsetMs', {'ms': _subtitleOffsetMs});
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setAudioOffsetMs(int offsetMs) async {
+    _audioOffsetMs = offsetMs.clamp(-10000, 10000);
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('setOpts', {'audioOffsetMs': _audioOffsetMs});
     } catch (_) {}
   }
 

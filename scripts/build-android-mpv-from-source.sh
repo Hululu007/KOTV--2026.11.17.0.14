@@ -22,8 +22,15 @@ STAMP="$ASSET/.kotv-source-build"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
 for cmd in git curl python3 pkg-config perl cmake gperf make; do
-  need "$cmd"
+  if ! command -v "$cmd" >/dev/null; then
+    echo "ERROR: missing host tool '$cmd' (Android MPV source build)." >&2
+    echo "  Debian/Ubuntu: sudo apt-get install -y gperf meson ninja-build nasm pkg-config cmake" >&2
+    exit 1
+  fi
 done
+# meson/ninja 在交叉编 libplacebo 时需要；未进上面列表以免 macOS brew 路径差异误报过早。
+command -v meson >/dev/null || echo "WARN: meson not in PATH (libplacebo may fail)" >&2
+command -v ninja >/dev/null || echo "WARN: ninja not in PATH (libplacebo may fail)" >&2
 
 resolve_ffmpeg_sha() {
   if [[ -n "${KOTV_FFMPEG_COMMIT:-}" ]]; then

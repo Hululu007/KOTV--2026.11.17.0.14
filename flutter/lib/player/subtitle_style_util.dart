@@ -79,4 +79,6 @@ Future<void> kotvApplySubtitleSettings(KotvPlayback p, Map<String, dynamic> sett
   );
   final offset = int.tryParse(str('subtitleOffsetMs', '0')) ?? 0;
   await p.setSubtitleOffsetMs(offset.clamp(-300000, 300000));
+  final audioOffset = int.tryParse(str('audioOffsetMs', '0')) ?? 0;
+  await p.setAudioOffsetMs(audioOffset.clamp(-10000, 10000));
 }

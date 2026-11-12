@@ -380,7 +380,18 @@ class HtmlPlayback extends KotvPlayback {
   @override
   Future<void> play() async {
     try {
-      await _video.play().toDart;
+      await kotvPlayRestartingFromEndIfNeeded(
+        completed: _completed || _video.ended,
+        position: position,
+        duration: duration,
+        seekZero: () async {
+          _video.currentTime = 0;
+          _completed = false;
+        },
+        play: () async {
+          await _video.play().toDart;
+        },
+      );
     } catch (_) {}
     notifyListeners();
   }

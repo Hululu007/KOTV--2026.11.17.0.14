@@ -243,7 +243,19 @@ class HtmlPlayback extends KotvPlayback {
 
   @override
   Future<void> play() async {
-    await _c?.play();
+    final c = _c;
+    if (c != null) {
+      await kotvPlayRestartingFromEndIfNeeded(
+        completed: _completed || c.value.isCompleted,
+        position: c.value.position,
+        duration: c.value.duration,
+        seekZero: () async {
+          await c.seekTo(Duration.zero);
+          _completed = false;
+        },
+        play: () => c.play(),
+      );
+    }
     notifyListeners();
   }
 
