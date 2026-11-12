@@ -59,6 +59,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var buffering = false
   private var paused = false
   private var durationSec = 0.0
+  /** 优先于 [durationSec]：HLS 整表时长（mpv `duration/full`）。 */
+  private var durationFullSec = 0.0
   private var positionSec = 0.0
   private var width = 0
   private var height = 0
@@ -98,6 +100,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** 首选字幕语言（BCP-47，逗号分隔）→ mpv slang。 */
   private var preferredTextLangs = ""
   private var livePlayback = false
+  /** 已按 media-live 升过会话，避免重复重建。 */
+  private var upgradedLiveFromMedia = false
   /** 错误恢复后 seek 到该秒；&lt;0 表示不恢复。 */
   private var retrySeekSec = -1.0
   /** open(startAtMs)：loadfile 后、unpause 前 seek，避免 play 后再 seek。 */
@@ -150,14 +154,17 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       if (!created.get()) return
       try {
         val pos = MPVLib.getPropertyDouble("time-pos") ?: positionSec
-        val dur = MPVLib.getPropertyDouble("duration") ?: durationSec
+        val durProp = MPVLib.getPropertyDouble("duration")
+        if (durProp != null && durProp > 0) durationSec = durProp
+        val fullProp = MPVLib.getPropertyDouble("duration/full")
+        if (fullProp != null && fullProp > 0) durationFullSec = fullProp
+        val dur = effectiveDurationSec()
         val pause = MPVLib.getPropertyBoolean("pause") ?: paused
         val idle = MPVLib.getPropertyBoolean("idle-active") ?: false
         val coreIdle = MPVLib.getPropertyBoolean("core-idle") ?: false
         val seeking = MPVLib.getPropertyBoolean("seeking") ?: false
         val pausedForCache = MPVLib.getPropertyBoolean("paused-for-cache") ?: false
         positionSec = pos
-        durationSec = dur
         paused = pause
         playing = !pause && !idle && !coreIdle
         if (playing && !seeking && !eof && pos > maxPlayedSec) {
@@ -351,6 +358,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             playing = false
             positionSec = 0.0
             durationSec = 0.0
+            durationFullSec = 0.0
+            upgradedLiveFromMedia = livePlayback
             width = 0
             height = 0
             maxPlayedSec = 0.0
@@ -447,6 +456,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             height = 0
             positionSec = 0.0
             durationSec = 0.0
+            durationFullSec = 0.0
+            upgradedLiveFromMedia = false
             loadedUrl = ""
             currentMime = null
             retriedHlsMime = false
@@ -1030,7 +1041,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       // https→http、以及 HLS 分片伪装成 .png/.jpg：须放行扩展名。
       // 不设 protocol_whitelist，避免挡掉 RTSP/RTMP/RTP。
       // FFmpeg 9 默认 extension_picky=1，只认常见后缀；点播常首片 .ts、后面 .png（内容仍是 TS）。
-      MPVLib.setOptionString("demuxer-lavf-o", LAVF_DEMUXER_O)
+      MPVLib.setOptionString("demuxer-lavf-o", KotvMedia3Playback.LAVF_DEMUXER_O)
       // 不按后缀当播放列表/图片（.m3u8 可能是 FLV，.png 可能是 TS）；lavf 按内容探测。
       MPVLib.setOptionString("playlist-exts", "")
       MPVLib.setOptionString("image-exts", "")
@@ -1645,6 +1656,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private fun observeProps() {
     MPVLib.observeProperty("time-pos", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
     MPVLib.observeProperty("duration", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
+    MPVLib.observeProperty("duration/full", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
+    MPVLib.observeProperty("media-live", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
+    MPVLib.observeProperty("media-live", MPVLib.MpvFormat.MPV_FORMAT_STRING)
     MPVLib.observeProperty("pause", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     MPVLib.observeProperty("paused-for-cache", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     MPVLib.observeProperty("seeking", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
@@ -1657,6 +1671,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.observeProperty("video-params/aspect", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
     MPVLib.observeProperty("current-vo", MPVLib.MpvFormat.MPV_FORMAT_STRING)
   }
+
+  private fun effectiveDurationSec(): Double =
+    when {
+      durationFullSec > 0.0 -> durationFullSec
+      durationSec > 0.0 -> durationSec
+      else -> 0.0
+    }
 
   private fun resolveRenderTexture(mode: String): Boolean {
     val m = mode.trim().lowercase()
@@ -1746,11 +1767,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       val startMs = pendingStartAtMs
       pendingStartAtMs = 0L
       maxPlayedSec = 0.0
+      durationFullSec = 0.0
+      upgradedLiveFromMedia = livePlayback
       loadWallMs = SystemClock.elapsedRealtime()
       // 只写在这一次 loadfile 上，播完恢复，不留在会话里。
       val opts = ArrayList<String>(8)
       if (startMs > 0L) opts.add("start=${startMs / 1000.0}")
-      appendMimeOptions(currentMime, opts)
+      KotvMedia3Playback.appendLavfHlsLoadOpts(url, currentMime, opts)
       appendHeaderOptions(headers, opts)
       if (opts.isEmpty()) {
         MPVLib.command(arrayOf("loadfile", url, "replace"))
@@ -1786,7 +1809,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.command(arrayOf("playlist-clear"))
       val opts = ArrayList<String>(8)
       if (next.startAtMs > 0L) opts.add("start=${next.startAtMs / 1000.0}")
-      appendMimeOptions(next.mime, opts)
+      KotvMedia3Playback.appendLavfHlsLoadOpts(next.url, next.mime, opts)
       appendHeaderOptions(next.headers, opts)
       if (opts.isEmpty()) {
         MPVLib.command(arrayOf("loadfile", next.url, "append"))
@@ -1875,13 +1898,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       } catch (t: Throwable) {
         Log.w(TAG, "queue sub-add failed", t)
       }
-    }
-  }
-
-  /** HLS mime 时在本次 loadfile 锁定 lavf demuxer。 */
-  private fun appendMimeOptions(mime: String?, opts: MutableList<String>) {
-    if (KotvMedia3Playback.isHlsMime(mime)) {
-      opts.add("demuxer-lavf-format=hls")
     }
   }
 
@@ -2014,13 +2030,22 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "eof-reached" -> if (value) markEnded() else eof = false
       "paused-for-cache", "seeking" -> buffering = value
+      "media-live" -> if (value) main.post { maybeUpgradeLiveFromMedia() }
     }
   }
 
   override fun eventProperty(property: String, value: String) {
-    if (property == "current-vo") {
-      directActive = value == "mediacodec_embed"
-      main.post { applyVideoFrame() }
+    when (property) {
+      "current-vo" -> {
+        directActive = value == "mediacodec_embed"
+        main.post { applyVideoFrame() }
+      }
+      "media-live" -> {
+        val live = value.trim().equals("yes", true) ||
+          value.trim().equals("true", true) ||
+          value.trim() == "1"
+        if (live) main.post { maybeUpgradeLiveFromMedia() }
+      }
     }
   }
 
@@ -2028,10 +2053,31 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     when (property) {
       "time-pos", "playback-time" -> positionSec = value
       "duration" -> durationSec = value
+      "duration/full" -> if (value > 0.0) durationFullSec = value
       "video-params/aspect" -> {
         videoAspect = value
         main.post { applyVideoFrame() }
       }
+    }
+  }
+
+  /**
+   * 引擎报告 media-live：升直播会话（关磁盘缓存 / cache-pause），保留进度再开。
+   * 只信引擎信号，不用 duration==0 启发式。
+   */
+  private fun maybeUpgradeLiveFromMedia() {
+    if (livePlayback || upgradedLiveFromMedia) return
+    if (!created.get() || loadedUrl.isBlank()) return
+    upgradedLiveFromMedia = true
+    livePlayback = true
+    emit(mapOf("event" to "live", "live" to true))
+    Log.i(TAG, "upgrade to live from media-live url=$loadedUrl")
+    retrySeekSec = positionSec.coerceAtLeast(0.0)
+    try {
+      ensurePlayerAndReload()
+    } catch (t: Throwable) {
+      Log.w(TAG, "live upgrade reload failed", t)
+      emitLoadFailure(t)
     }
   }
 
@@ -2242,13 +2288,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "brightness", "contrast", "saturation", "gamma", "hue",
     )
     private const val TAG = "KotvMpv"
-    // 仅作 open 前的初值；之后由 props 里的 demuxer-lavf-o 覆盖。
-    // 与 Dart kotvDemuxerLavfO（mpv_opts.dart）同串；勿在第三处再散落一份。
-    // 不设 protocol_whitelist：写了就是拒绝名单外协议（RTSP/RTMP/RTP）。
-    private const val LAVF_DEMUXER_O =
-      "seg_max_retry=5,strict=experimental," +
-        "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0," +
-        "probesize=8000000,analyzeduration=8000000"
     const val VIEW_TYPE = "kotv_mpv/surface"
   }
 }

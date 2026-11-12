@@ -16,7 +16,7 @@ import 'video_eq.dart';
 /// **不要写 protocol_whitelist**：一旦写了就是拒绝名单外的协议。
 /// 旧写法 `file\,http` 还会被拆成 `file\`，HLS 嵌套 https 也挂。
 /// 不设则 lavf 默认放行 RTSP/RTMP/RTP/MMS/HTTP/HLS 等。
-/// 与安卓 [KotvMpvPlugin] `LAVF_DEMUXER_O` 同串；改一处须同步另一处。
+/// 与安卓 [KotvMedia3Playback.LAVF_DEMUXER_O] 同串；改一处须同步另一处。
 const kotvDemuxerLavfO =
     'seg_max_retry=5,strict=experimental,'
     'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0,'

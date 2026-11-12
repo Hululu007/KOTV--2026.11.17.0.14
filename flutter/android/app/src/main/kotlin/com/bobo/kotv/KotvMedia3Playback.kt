@@ -8,10 +8,21 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
 /**
- * Media3 Exo 开播辅助：URI、字幕 mime、错 mime 再开、IO 错码映射。
- * 安卓自研 MPVLib 共用：[mpvDemuxerByteProps]、[nextDecodeMode]、HLS/解码重试文案判定。
+ * Exo 开播辅助：URI、字幕 mime、错 mime 再开、IO 错码映射。
+ * 安卓自研 MPVLib 共用：HLS lavf、[mpvDemuxerByteProps]、[nextDecodeMode]、文案重试判定。
  */
 internal object KotvMedia3Playback {
+  /** 与 Dart [kotvDemuxerLavfO] / 插件 LAVF_DEMUXER_O 同串。 */
+  const val LAVF_DEMUXER_O =
+    "seg_max_retry=5,strict=experimental," +
+      "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0," +
+      "probesize=8000000,analyzeduration=8000000"
+
+  /** 与 Dart [kotvHlsLavfOAddForUri] 同串。 */
+  const val HLS_LAVF_O_ADD_URI = "http_persistent=0"
+
+  /** 与 Dart [kotvHlsLavfOAddForMime] 同串。 */
+  const val HLS_LAVF_O_ADD_MIME = "extension_picky=0,http_persistent=0"
   fun playUri(url: String): Uri {
     val t = url.trim()
     val low = t.lowercase()
@@ -55,6 +66,56 @@ internal object KotvMedia3Playback {
       m.equals("audio/mpegurl", ignoreCase = true) ||
       m.equals("audio/x-mpegurl", ignoreCase = true) ||
       m.equals("application/x-mpegURL", ignoreCase = true)
+  }
+
+  /** 与 Dart [kotvFormatIsHls] 一致（含 `hls` / `m3u8` 短名）。 */
+  fun formatIsHls(format: String?): Boolean {
+    val f = format?.trim()?.lowercase().orEmpty()
+    if (f.isEmpty()) return false
+    if (isHlsMime(format)) return true
+    return f == "hls" || f == "m3u8"
+  }
+
+  /** 与 Dart [kotvUrlIsHls] 一致的 URL 强信号。 */
+  fun urlIsHls(url: String): Boolean {
+    val raw = url.trim()
+    if (raw.isEmpty()) return false
+    val uri =
+      try {
+        Uri.parse(raw)
+      } catch (_: Throwable) {
+        return raw.lowercase().contains("=m3u8")
+      }
+    val scheme = uri.scheme?.lowercase().orEmpty()
+    if (scheme == "rtsp" || scheme == "rtspt") return false
+    if (scheme == "data") {
+      val body = if (raw.length > 5) raw.substring(5) else ""
+      val mime = body.substringBefore(',').lowercase().trim()
+      return mime.contains("mpegurl") || mime.contains("m3u8")
+    }
+    val lower = raw.lowercase()
+    if (lower.contains("=m3u8")) return true
+    if (lower.contains("=mpd")) return false
+    for (seg in uri.pathSegments) {
+      if (seg.isNullOrEmpty()) continue
+      if (seg.lowercase().contains("m3u8")) return true
+    }
+    return false
+  }
+
+  /** 与 Dart [kotvIsHls]：URL 强信号或 mime/format 表示 HLS。 */
+  fun isHls(url: String, mimeOrFormat: String?): Boolean =
+    urlIsHls(url) || formatIsHls(mimeOrFormat)
+
+  /**
+   * 与 Dart [kotvApplyLavfForOpen] 等价：仅 HLS 时写入 loadfile 的
+   * `demuxer-lavf-format=hls` + `demuxer-lavf-o-add=…`。
+   */
+  fun appendLavfHlsLoadOpts(url: String, mimeOrFormat: String?, opts: MutableList<String>) {
+    if (!isHls(url, mimeOrFormat)) return
+    opts.add("demuxer-lavf-format=hls")
+    val add = if (urlIsHls(url)) HLS_LAVF_O_ADD_URI else HLS_LAVF_O_ADD_MIME
+    opts.add("demuxer-lavf-o-add=$add")
   }
 
   /**

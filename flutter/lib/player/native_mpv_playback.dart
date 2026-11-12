@@ -51,6 +51,8 @@ class NativeMpvPlayback extends KotvPlayback {
   bool _repeatOne = false;
   bool _buffering = false;
   bool _ready = false;
+  /// 换源递增；旧 [kotvGuardSilentVideo] 会话见 serial 变化即退出。
+  int _openSerial = 0;
   double _volume = 80;
   double _rate = 1;
   int _w = 0;
@@ -239,11 +241,22 @@ class NativeMpvPlayback extends KotvPlayback {
   bool get _hasRealVideoTrack =>
       _videoTracks.any((t) => kotvIsRealVideoTrack(id: t.id, codec: t.codec));
 
+  bool get _hasRealAudioTrack => _audioTracks.isNotEmpty;
+
+  /// 文件已 demux（对应插件 ready / 轨表）：未 loaded 前不当成「已播黑屏」。
+  bool get _loaded =>
+      _ready ||
+      _hasRealVideoTrack ||
+      _hasRealAudioTrack ||
+      _duration > Duration.zero ||
+      _position > Duration.zero ||
+      (_w > 0 && _h > 0);
+
   bool get _isAudioOnlyUnlocked {
     if (_lastError != null || !_ready) return false;
     if (_w > 0 && _h > 0) return false;
     if (_hasRealVideoTrack) return false;
-    return _audioTracks.isNotEmpty;
+    return _hasRealAudioTrack;
   }
 
   @override
@@ -422,6 +435,14 @@ class NativeMpvPlayback extends KotvPlayback {
         if (!_endedCtrl.isClosed) _endedCtrl.add(true);
         notifyListeners();
         break;
+      case 'live':
+        // 只信引擎 media-live 上报；勿用 duration==0 启发式。
+        if (m['live'] == true && !_live) {
+          _live = true;
+          _nativeLive = true;
+          notifyListeners();
+        }
+        break;
       case 'error':
         _lastError = '${m['message'] ?? 'MPV error'}';
         _playing = false;
@@ -525,6 +546,7 @@ class NativeMpvPlayback extends KotvPlayback {
       rethrow;
     }
 
+    _openSerial++;
     if (waitReady) {
       await awaitReadyAfterOpen();
     } else {
@@ -534,17 +556,20 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   Future<void> awaitReadyAfterOpen() async {
+    final session = _openSerial;
+    bool sameSession() => _openSerial == session && _url.isNotEmpty;
     await kotvGuardSilentVideo(
-      hasVideoSize: () => _ready && _w > 0 && _h > 0,
-      isBuffering: () => !_ready || buffering,
+      hasVideoSize: () => _w > 0 && _h > 0,
+      // 未 loaded 只当缓冲等待；loaded 后才进黑屏窗口（与桌面 media_kit 一致）。
+      isBuffering: () => sameSession() && (!_loaded || buffering),
       sessionAlive: () {
         if (_lastError != null) return false;
-        return _ready || _playing || _position > Duration.zero;
+        return sameSession() && !completed && _loaded;
       },
       isPlaying: () => _playing,
       position: () => _position,
       duration: () => _duration,
-      // 只信 Dart 侧标定的 [_live]（原生无 Media3 live 升会话）。
+      // 只信 open 标定或引擎 media-live 升过后的 [_live]。
       isLiveContent: () => _live,
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
