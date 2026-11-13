@@ -253,7 +253,7 @@
      if (new_fctx->initial_pool_size)
 --- video/d3d.c
 +++ video/d3d.c
-@@ -264,6 +264,56 @@
+@@ -264,6 +264,61 @@
      d3d9_free_av_device_ref(ctx);
      av_buffer_unref(&device_ref);
      return NULL;
@@ -352,7 +352,7 @@
  }
  
  static int hotplug_init(struct ao *ao)
-@@ -513,8 +515,13 @@
+@@ -513,9 +515,14 @@
      MP_DBG(ao, "Hotplug init\n");
      struct wasapi_state *state = ao->priv;
      state->log = ao->log;
