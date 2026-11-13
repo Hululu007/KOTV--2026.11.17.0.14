@@ -1978,6 +1978,8 @@ for name, pairs in edits.items():
     print(f"patched media_kit_video ({root.name}) {name}: ANGLE backend by hwdec")
 
 # --- DXGI HEVC adapter for ANGLE D3D11 textures（与 FVP 共用 install_dxgi_hevc_header）---
+# 1.2.5（Win7 钉死）：CreateD3DTexture 里直接 EnumAdapters→adapter_。
+# 1.3.x：IsWindows10RTMOrGreater 的 else 分支用局部 adapter。
 install_dxgi_hevc_header(win)
 
 cc = win / "angle_surface_manager.cc"
@@ -1990,7 +1992,13 @@ if "kotv_dxgi_hevc_adapter.h" not in text_cc:
         '#include "angle_surface_manager.h"\n#include "kotv_dxgi_hevc_adapter.h"\n',
         1,
     )
-old_enum = """    } else {
+text_cc = one_of(
+    f"media_kit_video ({root.name})",
+    "ANGLE DXGI HEVC adapter",
+    text_cc,
+    (
+        (
+            """    } else {
       IDXGIFactory* dxgi = nullptr;
       ::CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&dxgi);
       // As far as my experience goes, this is the safest approach. Passing NULL
@@ -1999,8 +2007,8 @@ old_enum = """    } else {
       // D3D_DRIVER_TYPE_UNKNOWN| must be passed with manual adapter selection.
       dxgi->EnumAdapters(0, &adapter);
       dxgi->Release();
-    }"""
-new_enum = """    } else {
+    }""",
+            """    } else {
       // KOTV: prefer adapter with HEVC decode (Optimus); else first hardware.
       adapter = kotv_dxgi::PickAdapterPreferHevc();
       if (!adapter) {
@@ -2011,15 +2019,31 @@ new_enum = """    } else {
           dxgi->Release();
         }
       }
-    }"""
-if "PickAdapterPreferHevc" not in text_cc:
-    if old_enum not in text_cc:
-        print("ERROR: ANGLE CreateD3DTexture adapter anchor missing", file=sys.stderr)
-        sys.exit(1)
-    text_cc = text_cc.replace(old_enum, new_enum, 1)
-    print(f"patched media_kit_video ({root.name}): ANGLE DXGI HEVC adapter")
-else:
-    print(f"ok media_kit_video ({root.name}): ANGLE DXGI HEVC adapter already patched")
+    }""",
+        ),
+        (
+            """    IDXGIFactory* dxgi = nullptr;
+    ::CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&dxgi);
+    // Manually selecting adapter. As far as my experience goes, this is the
+    // safest approach. Passing NULL (so-called default) seems to cause issues
+    // on Windows 7 or maybe some older graphics drivers.
+    // First adapter is the default.
+    // |D3D_DRIVER_TYPE_UNKNOWN| must be passed with manual adapter selection.
+    dxgi->EnumAdapters(0, &adapter_);
+    dxgi->Release();""",
+            """    // KOTV: prefer adapter with HEVC decode (Optimus); else first hardware.
+    adapter_ = kotv_dxgi::PickAdapterPreferHevc();
+    if (!adapter_) {
+      IDXGIFactory* dxgi = nullptr;
+      ::CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&dxgi);
+      if (dxgi) {
+        dxgi->EnumAdapters(0, &adapter_);
+        dxgi->Release();
+      }
+    }""",
+        ),
+    ),
+)
 
 # Public getter for prefer_d3d9_ (soft-fallback rebuild).
 text_h = hh.read_text(encoding="utf-8")
