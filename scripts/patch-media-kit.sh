@@ -1117,9 +1117,11 @@ PY
 fi
 
 # FVP：按 DXGI HEVC 能力选适配器（头文件经 install_dxgi_hevc_header，与 ANGLE 共用）。
+# 0.39.x（Win7 线）用 View_GetGraphicsAdapter；0.40+ 用 Registrar_GetGraphicsAdapter。
 if _kotv_for_target windows; then
 _kotv_patch_py <<'PY'
 fvp_root = pkg_or_fail("fvp")
+tag = f"fvp ({fvp_root.name})"
 WIN = fvp_root / "windows"
 install_dxgi_hevc_header(WIN)
 plugin = WIN / "fvp_plugin.cpp"
@@ -1129,25 +1131,43 @@ if "kotv_dxgi_hevc_adapter.h" not in text:
     if needle not in text:
         raise SystemExit("ERROR: fvp_plugin.cpp missing include anchor")
     text = text.replace(needle, needle + "\n#include \"kotv_dxgi_hevc_adapter.h\"", 1)
-old = """  ComPtr<IDXGIAdapter> adapter = Registrar_GetGraphicsAdapter(registrar, 0);
+# (原文, 新文)：0.40+ Registrar；0.39 View。
+text = one_of(
+    tag,
+    "DXGI HEVC adapter pick",
+    text,
+    (
+        (
+            """  ComPtr<IDXGIAdapter> adapter = Registrar_GetGraphicsAdapter(registrar, 0);
   if (!adapter)
     clog << "Flutter graphics adapter is not available, texture may be invisible" << endl;
-  auto channel ="""
-new = """  // KOTV: prefer DXGI adapter with HEVC decode when present (Optimus).
+  auto channel =""",
+            """  // KOTV: prefer DXGI adapter with HEVC decode when present (Optimus).
   ComPtr<IDXGIAdapter> adapter;
   adapter.Attach(kotv_dxgi::PickAdapterPreferHevc());
   if (!adapter)
     adapter = Registrar_GetGraphicsAdapter(registrar, 0);
   if (!adapter)
     clog << "Flutter graphics adapter is not available, texture may be invisible" << endl;
-  auto channel ="""
-if "PickAdapterPreferHevc" not in text:
-    if old not in text:
-        raise SystemExit("ERROR: fvp RegisterWithRegistrar adapter anchor missing")
-    text = text.replace(old, new, 1)
-    print(f"patched fvp ({fvp_root.name}): DXGI HEVC adapter pick")
-else:
-    print(f"ok fvp ({fvp_root.name}): DXGI HEVC adapter pick already patched")
+  auto channel =""",
+        ),
+        (
+            """  IDXGIAdapter *adapter = View_GetGraphicsAdapter(registrar->GetView());
+  if (!adapter)
+    clog << "FlutterView::GetGraphicsAdapter() is not available, texture may be invisible" << endl;
+  auto channel =""",
+            """  // KOTV: prefer DXGI adapter with HEVC decode when present (Optimus).
+  ComPtr<IDXGIAdapter> hevc_adapter;
+  hevc_adapter.Attach(kotv_dxgi::PickAdapterPreferHevc());
+  IDXGIAdapter *adapter = hevc_adapter.Get();
+  if (!adapter)
+    adapter = View_GetGraphicsAdapter(registrar->GetView());
+  if (!adapter)
+    clog << "FlutterView::GetGraphicsAdapter() is not available, texture may be invisible" << endl;
+  auto channel =""",
+        ),
+    ),
+)
 plugin.write_text(text, encoding="utf-8")
 PY
 fi
