@@ -49,9 +49,11 @@
 # X-KOTV-Asset-Mime，这里把它从 HTTP 头里拿掉，改成 AVURLAsset 的 MIME。
 #
 # Win7 线（KOTV_WIN7=1）：media_kit_video 的 ANGLE 依次试 D3D11 → D3D11 9_3 → D3D9 → WARP。
-# 关「硬解直出」：d3d11va 直出挂不上（实测），走 d3d11va-copy（回读，不依赖 dxva2-egl），ANGLE 用 D3D11。
-# 开「硬解直出」：dxva2 经 dxva2-egl 零拷贝，须 ANGLE D3D9Ex；直出被拒（10 位 / Haswell H265）则软解，不要 dxva2-copy。
+# 关「硬解直出」：hwdec=auto（MPV 自选），ANGLE 用 D3D11 优先。
+# 开「硬解直出」：dxva2 经 dxva2-egl 零拷贝，须 ANGLE D3D9Ex；被拒则软解。软解若仍停在 D3D9
+# （与 D3D11 共享纹理）会蓝屏，补丁在 hwdec-current=no 时重建为 D3D11。
 # 补丁在建播放器时读 hwdec：含 dxva2（直出）则 D3D9 优先，否则 D3D11 优先。
+# FVP / ANGLE 的 D3D11 设备：按 DXGI HEVC 解码能力选适配器（scripts/native/kotv_dxgi_hevc_adapter.h）。
 #
 # 按平台：Dart 部分各平台共用，总是打；原生部分（fvp 的 Windows / 安卓、window_manager、
 # avfoundation、Win7 的 media_kit_video）只在 KOTV_FLUTTER_TARGET 对应的平台打。
@@ -1093,6 +1095,59 @@ if win_check.count("D3D11CreateDevice(") != 1:
 PY
 fi
 
+# FVP：按 DXGI HEVC 能力选适配器（与 ANGLE 共用 kotv_dxgi_hevc_adapter.h）。
+if _kotv_for_target windows; then
+_kotv_patch_py <<PY
+import json, pathlib, shutil, sys
+ROOT = pathlib.Path(r"$ROOT")
+PKG_CFG = ROOT / "flutter/.dart_tool/package_config.json"
+cfg = json.loads(PKG_CFG.read_text(encoding="utf-8"))
+fvp_root = None
+for p in cfg["packages"]:
+    if p["name"] != "fvp":
+        continue
+    root = pathlib.Path(p["rootUri"].replace("file://", ""))
+    if not root.is_absolute():
+        root = (PKG_CFG.parent / root).resolve()
+    fvp_root = root
+    break
+if fvp_root is None:
+    raise SystemExit("ERROR: fvp package not found")
+WIN = fvp_root / "windows"
+HDR_SRC = ROOT / "scripts/native/kotv_dxgi_hevc_adapter.h"
+if not HDR_SRC.is_file():
+    raise SystemExit(f"ERROR: missing {HDR_SRC}")
+shutil.copy2(HDR_SRC, WIN / "kotv_dxgi_hevc_adapter.h")
+plugin = WIN / "fvp_plugin.cpp"
+text = plugin.read_text(encoding="utf-8")
+if "kotv_dxgi_hevc_adapter.h" not in text:
+    needle = '#include "fvp_plugin.h"'
+    if needle not in text:
+        raise SystemExit("ERROR: fvp_plugin.cpp missing include anchor")
+    text = text.replace(needle, needle + "\n#include \"kotv_dxgi_hevc_adapter.h\"", 1)
+old = """  ComPtr<IDXGIAdapter> adapter = Registrar_GetGraphicsAdapter(registrar, 0);
+  if (!adapter)
+    clog << "Flutter graphics adapter is not available, texture may be invisible" << endl;
+  auto channel ="""
+new = """  // KOTV: prefer DXGI adapter with HEVC decode when present (Optimus).
+  ComPtr<IDXGIAdapter> adapter;
+  adapter.Attach(kotv_dxgi::PickAdapterPreferHevc());
+  if (!adapter)
+    adapter = Registrar_GetGraphicsAdapter(registrar, 0);
+  if (!adapter)
+    clog << "Flutter graphics adapter is not available, texture may be invisible" << endl;
+  auto channel ="""
+if "PickAdapterPreferHevc" not in text:
+    if old not in text:
+        raise SystemExit("ERROR: fvp RegisterWithRegistrar adapter anchor missing")
+    text = text.replace(old, new, 1)
+    print(f"patched fvp ({fvp_root.name}): DXGI HEVC adapter pick")
+else:
+    print(f"ok fvp ({fvp_root.name}): DXGI HEVC adapter pick already patched")
+plugin.write_text(text, encoding="utf-8")
+PY
+fi
+
 # fvp 安卓插件
 if _kotv_for_target android; then
 _kotv_patch_py <<'PY'
@@ -1897,4 +1952,133 @@ for name, pairs in edits.items():
         text = text.replace(hit, new, 1)
     path.write_text(text, encoding="utf-8")
     print(f"patched media_kit_video ({root.name}) {name}: ANGLE backend by hwdec")
+
+# --- DXGI HEVC adapter for ANGLE D3D11 textures (same header as FVP) ---
+import shutil
+# cfg = flutter/.dart_tool/package_config.json → parents[2] = repo root
+HDR_SRC = cfg.resolve().parents[2] / "scripts" / "native" / "kotv_dxgi_hevc_adapter.h"
+if not HDR_SRC.is_file():
+    print(f"ERROR: missing {HDR_SRC}", file=sys.stderr)
+    sys.exit(1)
+shutil.copy2(HDR_SRC, win / "kotv_dxgi_hevc_adapter.h")
+
+cc = win / "angle_surface_manager.cc"
+hh = win / "angle_surface_manager.h"
+vo = win / "video_output.cc"
+text_cc = cc.read_text(encoding="utf-8")
+if "kotv_dxgi_hevc_adapter.h" not in text_cc:
+    text_cc = text_cc.replace(
+        '#include "angle_surface_manager.h"\n',
+        '#include "angle_surface_manager.h"\n#include "kotv_dxgi_hevc_adapter.h"\n',
+        1,
+    )
+old_enum = """    } else {
+      IDXGIFactory* dxgi = nullptr;
+      ::CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&dxgi);
+      // As far as my experience goes, this is the safest approach. Passing NULL
+      // (so-called default) seems to cause issues on Windows 7 or maybe some
+      // older graphics drivers. First adapter is the default.
+      // D3D_DRIVER_TYPE_UNKNOWN| must be passed with manual adapter selection.
+      dxgi->EnumAdapters(0, &adapter);
+      dxgi->Release();
+    }"""
+new_enum = """    } else {
+      // KOTV: prefer adapter with HEVC decode (Optimus); else first hardware.
+      adapter = kotv_dxgi::PickAdapterPreferHevc();
+      if (!adapter) {
+        IDXGIFactory* dxgi = nullptr;
+        ::CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&dxgi);
+        if (dxgi) {
+          dxgi->EnumAdapters(0, &adapter);
+          dxgi->Release();
+        }
+      }
+    }"""
+if "PickAdapterPreferHevc" not in text_cc:
+    if old_enum not in text_cc:
+        print("ERROR: ANGLE CreateD3DTexture adapter anchor missing", file=sys.stderr)
+        sys.exit(1)
+    text_cc = text_cc.replace(old_enum, new_enum, 1)
+    print(f"patched media_kit_video ({root.name}): ANGLE DXGI HEVC adapter")
+else:
+    print(f"ok media_kit_video ({root.name}): ANGLE DXGI HEVC adapter already patched")
+
+# Public getter for prefer_d3d9_ (soft-fallback rebuild).
+text_h = hh.read_text(encoding="utf-8")
+if "bool prefer_d3d9() const" not in text_h:
+    if "  void MakeCurrent(bool value);\n" not in text_h:
+        print("ERROR: MakeCurrent anchor missing in angle header", file=sys.stderr)
+        sys.exit(1)
+    text_h = text_h.replace(
+        "  void MakeCurrent(bool value);\n",
+        "  void MakeCurrent(bool value);\n\n"
+        "  bool prefer_d3d9() const { return prefer_d3d9_; }\n",
+        1,
+    )
+    hh.write_text(text_h, encoding="utf-8")
+
+# Soft on D3D9 ANGLE + D3D11 share handle → blue. Rebuild once on D3D11.
+text_vo = vo.read_text(encoding="utf-8")
+if "MaybeRewriteAngleForSoft" not in text_vo:
+    anchor = "void VideoOutput::CheckAndResize() {\n"
+    inject = """void VideoOutput::CheckAndResize() {
+  // KOTV: dxva2 asked for D3D9; if decode fell to soft, D3D9+D3D11-share is blue — rebuild on D3D11.
+  if (surface_manager_ != nullptr && surface_manager_->prefer_d3d9() && render_context_) {
+    if (auto cur = mpv_get_property_string(handle_, "hwdec-current")) {
+      const std::string s(cur);
+      mpv_free(cur);
+      if (s == "no") {
+        const int32_t w = surface_manager_->width();
+        const int32_t h = surface_manager_->height();
+        mpv_render_context_free(render_context_);
+        render_context_ = nullptr;
+        surface_manager_.reset();
+        try {
+          surface_manager_ = std::make_unique<ANGLESurfaceManager>(w, h, false);
+          surface_manager_->MakeCurrent(true);
+          mpv_opengl_init_params gl_init_params{
+              [](auto, auto name) {
+                return reinterpret_cast<void*>(eglGetProcAddress(name));
+              },
+              nullptr,
+          };
+          mpv_render_param params[] = {
+              {MPV_RENDER_PARAM_API_TYPE, MPV_RENDER_API_TYPE_OPENGL},
+              {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl_init_params},
+              {MPV_RENDER_PARAM_INVALID, nullptr},
+          };
+          if (mpv_render_context_create(&render_context_, handle_, params) == 0) {
+            mpv_render_context_set_update_callback(
+                render_context_,
+                [](void* context) {
+                  auto that = reinterpret_cast<VideoOutput*>(context);
+                  that->NotifyRender();
+                },
+                reinterpret_cast<void*>(this));
+            std::cout << "media_kit: VideoOutput: rebuilt ANGLE on D3D11 after soft fallback."
+                      << std::endl;
+          }
+        } catch (...) {
+          std::cout << "media_kit: VideoOutput: D3D11 ANGLE rebuild failed." << std::endl;
+        }
+      }
+    }
+  }
+"""
+    if text_vo.count(anchor) != 1:
+        print("ERROR: CheckAndResize anchor missing/ambiguous", file=sys.stderr)
+        sys.exit(1)
+    text_vo = text_vo.replace(anchor, inject, 1)
+    # Mark helper name for idempotency without adding a real method:
+    text_vo = text_vo.replace(
+        "rebuilt ANGLE on D3D11 after soft fallback.",
+        "rebuilt ANGLE on D3D11 after soft fallback. /* MaybeRewriteAngleForSoft */",
+        1,
+    )
+    vo.write_text(text_vo, encoding="utf-8")
+    print(f"patched media_kit_video ({root.name}): soft-fallback D3D11 ANGLE rebuild")
+else:
+    print(f"ok media_kit_video ({root.name}): soft-fallback D3D11 rebuild already patched")
+
+cc.write_text(text_cc, encoding="utf-8")
 PY

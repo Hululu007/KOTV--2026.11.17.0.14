@@ -65,6 +65,52 @@ func TestHandleKeepsCookieAcrossRedirect(t *testing.T) {
 	}
 }
 
+// 跨 Host 302：Go 会把 Referer 设成中间网关；xhscdn 等会因此防盗链 403。
+// 代理跟跳须去掉 Referer，同时仍带上 Cookie。
+func TestHandleDropsRefererOnCrossHostRedirect(t *testing.T) {
+	t.Parallel()
+	var gotRef, gotCookie string
+	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRef = r.Header.Get("Referer")
+		gotCookie = r.Header.Get("Cookie")
+		if gotRef != "" {
+			http.Error(w, "forbid referer", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("PNGDATA"))
+	}))
+	defer final.Close()
+
+	bounce := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, final.URL+"/seg.png", http.StatusFound)
+	}))
+	defer bounce.Close()
+
+	proxyURL := playproxy.Register(bounce.URL+"/nby/ts", map[string]string{
+		"Cookie":  "qk=1",
+		"Referer": bounce.URL + "/",
+	}, false)
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	rr := httptest.NewRecorder()
+	playproxy.Handle(rr, req)
+	res := rr.Result()
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s ref=%q", res.StatusCode, body, gotRef)
+	}
+	if gotRef != "" {
+		t.Fatalf("cross-host redirect must drop Referer, got %q", gotRef)
+	}
+	if !strings.Contains(gotCookie, "qk=1") {
+		t.Fatalf("cookie must still be kept, got %q", gotCookie)
+	}
+	if string(body) != "PNGDATA" {
+		t.Fatalf("body=%q", body)
+	}
+}
+
 func TestTryHandleEmbeddedProxy(t *testing.T) {
 	t.Parallel()
 	defer hostclient.Bind(hostclient.Request{ClientID: "embedded-proxy", PublicBase: "http://192.168.1.8:9978"})()

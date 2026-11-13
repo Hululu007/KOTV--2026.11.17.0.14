@@ -758,6 +758,10 @@ func clientSpliceUA(r *http.Request, headers map[string]string) string {
 
 func openRawUpstream(slot *spliceHold, e entry, rangeHdr, ua, ifRange, connectionHdr, acceptEncoding string) (*bufio.Reader, rawHead, []byte, string, error) {
 	current := e.URL
+	startHost := ""
+	if su, err := url.Parse(e.URL); err == nil {
+		startHost = su.Host
+	}
 	for hop := 0; hop < 10; hop++ {
 		if !slot.alive() {
 			return nil, rawHead{}, nil, "", context.Canceled
@@ -775,7 +779,12 @@ func openRawUpstream(slot *spliceHold, e entry, rangeHdr, ua, ifRange, connectio
 			conn.Close()
 			return nil, rawHead{}, nil, "", context.Canceled
 		}
-		if werr := writeRawRequest(conn, u, e.Headers, rangeHdr, ua, ifRange, connectionHdr, acceptEncoding); werr != nil {
+		// 跨 Host 跟跳不带 Referer，避免中间网关 Referer 触发 CDN 防盗链 403；Cookie 仍带。
+		hdrs := e.Headers
+		if startHost != "" && !strings.EqualFold(startHost, u.Host) {
+			hdrs = headersWithoutReferer(e.Headers)
+		}
+		if werr := writeRawRequest(conn, u, hdrs, rangeHdr, ua, ifRange, connectionHdr, acceptEncoding); werr != nil {
 			_ = slot.takeConn()
 			conn.Close()
 			return nil, rawHead{}, nil, "", werr
@@ -1059,17 +1068,34 @@ func (e entry) fetch(r *http.Request, rangeHdr string) (*http.Response, error) {
 		// 不设 Timeout：整片可能很长。关闭自动解压，避免声明 gzip 后把 Content-Length 拿掉。
 		Transport: playTransport,
 		// 网盘 CDN 常 302 到另一域名；默认 Client 跨域会剥 Cookie → 403 HTML →
-		// 播放器报 invalid or unsupported media。
+		// 播放器报 invalid or unsupported media。故跟跳时重打登记头（含 Cookie）。
+		// 但 Go 跨域 302 会把 Referer 设成跳转前地址；xhscdn 等防盗链会因此 403。
+		// Cookie 仍重打；跨 Host 时去掉 Referer（登记的或 Client 自动的）。
 		CheckRedirect: func(next *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("stopped after 10 redirects")
 			}
 			applyUpstreamHeaders(next, e.Headers)
 			applyPlaybackHeaders(next, r, e.Headers, rangeHdr)
+			if crossHostRedirect(via, next) {
+				next.Header.Del("Referer")
+			}
 			return nil
 		},
 	}
 	return client.Do(req)
+}
+
+// crossHostRedirect 上一跳与目标 Host 不同（忽略端口外的大小写差异由 URL.Host 原样比较）。
+func crossHostRedirect(via []*http.Request, next *http.Request) bool {
+	if len(via) == 0 || next == nil || next.URL == nil {
+		return false
+	}
+	prev := via[len(via)-1]
+	if prev == nil || prev.URL == nil {
+		return false
+	}
+	return !strings.EqualFold(prev.URL.Host, next.URL.Host)
 }
 
 var playTransport = newPlayTransport()
@@ -1091,6 +1117,20 @@ func applyUpstreamHeaders(req *http.Request, headers map[string]string) {
 		}
 		req.Header.Set(k, v)
 	}
+}
+
+func headersWithoutReferer(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return headers
+	}
+	out := make(map[string]string, len(headers))
+	for k, v := range headers {
+		if strings.EqualFold(k, "referer") {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // skipUpstreamHeader 这些头单独写。Host 用上游地址，UA、Range、If-Range 在后面按登记和这次请求补。

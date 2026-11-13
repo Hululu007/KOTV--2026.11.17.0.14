@@ -3414,6 +3414,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _suppressDetailPopUntil = DateTime.now().add(const Duration(milliseconds: 800));
       _fsSwipeDy.value = 0;
       final wasDisplay = _desktopFs == KotvDesktopFullscreenKind.display;
+      // RK HWC：先卸 Surface，再改沉浸图层，避免 SF SIGSEGV 整机重启。
+      final park = await kotvShouldParkSurfaceForImmersiveExit();
+      if (park) await kotvParkSurfaceForImmersiveExit(_playback);
       // 两阶段：先清沉浸标志并 hold 整屏几何，再 remount/退系统栏/量槽，最后一次缩到槽。
       ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
       if (mounted) {
@@ -3428,17 +3431,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
       if (!mounted) {
         _holdImmersiveVideoGeom = false;
+        if (park) await kotvUnparkSurfaceAfterImmersiveExit(_playback);
         return;
       }
-      if (_immersiveFullscreen) return;
+      if (_immersiveFullscreen) {
+        if (park) await kotvUnparkSurfaceAfterImmersiveExit(_playback);
+        return;
+      }
       await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || _immersiveFullscreen) return;
+      if (!mounted || _immersiveFullscreen) {
+        if (park) await kotvUnparkSurfaceAfterImmersiveExit(_playback);
+        return;
+      }
       _syncVideoSlotRect();
       await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || _immersiveFullscreen) return;
+      if (!mounted || _immersiveFullscreen) {
+        if (park) await kotvUnparkSurfaceAfterImmersiveExit(_playback);
+        return;
+      }
       if (_holdImmersiveVideoGeom) {
         setState(() => _holdImmersiveVideoGeom = false);
       }
+      if (park) await kotvUnparkSurfaceAfterImmersiveExit(_playback);
     });
   }
 

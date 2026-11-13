@@ -234,7 +234,7 @@
          new_fctx->sw_format = imgfmt2pixfmt(ctx->hwdec_opts->hwdec_image_format);
  
 +#if HAVE_D3D9_HWACCEL
-+    // Refuse dxva2-egl for these frames (green otherwise). Next hwdec method
++    // Refuse dxva2-egl for these frames (green/blue otherwise). Next hwdec method
 +    // runs instead — KOTV Win7 uses dxva2,no so that is software decode.
 +    if (!ctx->hwdec.copying &&
 +        new_fctx->device_ctx->type == AV_HWDEVICE_TYPE_DXVA2 &&
@@ -260,7 +260,7 @@
 +}
 +
 +// Haswell and Broadwell have no fixed-function HEVC decoder. The driver's
-+// hybrid CPU+GPU HEVC decoder yields surfaces that go green when converted
++// hybrid CPU+GPU HEVC decoder yields surfaces that go green/blue when converted
 +// with StretchRect for dxva2-egl; refuse interop and fall through to soft.
 +static bool d3d9_intel_hybrid_hevc(UINT device_id)
 +{
@@ -291,20 +291,25 @@
 +    D3DADAPTER_IDENTIFIER9 id;
 +    bool allowed = true;
 +
++    // Fail closed: cannot query adapter → refuse interop (avoids hybrid HEVC blue/green).
 +    if (FAILED(IDirect3DDeviceManager9_OpenDeviceHandle(hwctx->devmgr, &handle)))
-+        return true;
-+    if (SUCCEEDED(IDirect3DDeviceManager9_LockDevice(hwctx->devmgr, handle,
-+                                                     &device, TRUE)))
++        return false;
++    if (FAILED(IDirect3DDeviceManager9_LockDevice(hwctx->devmgr, handle,
++                                                  &device, TRUE)))
 +    {
-+        if (SUCCEEDED(IDirect3DDevice9_GetDirect3D(device, &d3d9)) &&
-+            SUCCEEDED(IDirect3DDevice9_GetCreationParameters(device, &params)) &&
-+            SUCCEEDED(IDirect3D9_GetAdapterIdentifier(d3d9, params.AdapterOrdinal,
-+                                                      0, &id)))
-+            allowed = !(id.VendorId == 0x8086 && d3d9_intel_hybrid_hevc(id.DeviceId));
-+        SAFE_RELEASE(d3d9);
-+        IDirect3DDeviceManager9_UnlockDevice(hwctx->devmgr, handle, FALSE);
-+        SAFE_RELEASE(device);
++        IDirect3DDeviceManager9_CloseDeviceHandle(hwctx->devmgr, handle);
++        return false;
 +    }
++    if (SUCCEEDED(IDirect3DDevice9_GetDirect3D(device, &d3d9)) &&
++        SUCCEEDED(IDirect3DDevice9_GetCreationParameters(device, &params)) &&
++        SUCCEEDED(IDirect3D9_GetAdapterIdentifier(d3d9, params.AdapterOrdinal,
++                                                  0, &id)))
++        allowed = !(id.VendorId == 0x8086 && d3d9_intel_hybrid_hevc(id.DeviceId));
++    else
++        allowed = false;
++    SAFE_RELEASE(d3d9);
++    IDirect3DDeviceManager9_UnlockDevice(hwctx->devmgr, handle, FALSE);
++    SAFE_RELEASE(device);
 +    IDirect3DDeviceManager9_CloseDeviceHandle(hwctx->devmgr, handle);
 +    return allowed;
  }

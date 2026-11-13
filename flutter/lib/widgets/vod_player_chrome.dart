@@ -12,6 +12,7 @@ import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
+import '../player/kotv_win7_direct.dart';
 import '../player/player_normalize.dart';
 import '../player/tv_remote_keys.dart';
 import '../remote/remote_bridge.dart';
@@ -500,7 +501,7 @@ double _sliderBuffered(KotvPlayback player, double total) {
   return buf < pos ? pos : buf;
 }
 
-/// 「硬解直出」图标：开=闪电；关=划掉的闪电（D3D11 渲染，解码由 MPV 自动选择）。点一下切换并落盘 `mpvDirect`。
+/// 「硬解直出」图标：开=闪电（DXVA2 零拷贝）；关=划掉的闪电（hwdec=auto，MPV 自选）。点一下切换并落盘 `mpvDirect`。
 _IconAct _directOutputIcon({
   required KotvPlayback player,
   required double size,
@@ -519,7 +520,8 @@ _IconAct _directOutputIcon({
   );
 }
 
-String _directOutputNext(KotvPlayback player) => player.directOutput ? 'false' : 'true';
+String _directOutputNext(KotvPlayback player) =>
+    kotvWin7DirectNextValue(player.directOutput);
 
 class _IconAct extends StatelessWidget {
   const _IconAct({

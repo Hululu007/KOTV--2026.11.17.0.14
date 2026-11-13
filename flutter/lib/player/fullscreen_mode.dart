@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../theme/layout_scale.dart';
 import 'fullscreen_sys.dart' if (dart.library.html) 'fullscreen_sys_web.dart' as sys;
+import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 
 /// 桌面/Web 全屏：铺满当前窗口，或占满整块屏幕。
@@ -158,4 +159,44 @@ Rect kotvVideoContainRect({
     dw,
     dh,
   );
+}
+
+/// 旧 Android / Rockchip HWC：退出沉浸改图层时若仍挂着
+/// SurfaceView，`SquashFrame`/`PrepareAndCacheFramebuffer` 易对空
+/// GraphicBuffer SIGSEGV，拖垮 surfaceflinger 整机重启。
+/// 电视盒或原生判定需 park 时，退出前先卸画面输出。
+bool? _hwcSurfaceParkCached;
+
+Future<bool> kotvShouldParkSurfaceForImmersiveExit() async {
+  if (!kotvIsAndroid()) return false;
+  if (KotvLayout.television) return true;
+  final cached = _hwcSurfaceParkCached;
+  if (cached != null) return cached;
+  try {
+    final v = await const MethodChannel('kotv_android')
+        .invokeMethod<bool>('needsHwcSurfacePark');
+    return _hwcSurfaceParkCached = v == true;
+  } catch (_) {
+    return _hwcSurfaceParkCached = false;
+  }
+}
+
+/// 卸掉视频 Surface（及 OSD 挖空层），等一两帧让 HWC 消化。
+Future<void> kotvParkSurfaceForImmersiveExit(KotvPlayback playback) async {
+  try {
+    await playback.setVideoOutputEnabled(false);
+  } catch (_) {}
+  try {
+    await WidgetsBinding.instance.endOfFrame;
+  } catch (_) {}
+  await Future<void>.delayed(const Duration(milliseconds: 120));
+  try {
+    await WidgetsBinding.instance.endOfFrame;
+  } catch (_) {}
+}
+
+Future<void> kotvUnparkSurfaceAfterImmersiveExit(KotvPlayback playback) async {
+  try {
+    await playback.setVideoOutputEnabled(true);
+  } catch (_) {}
 }

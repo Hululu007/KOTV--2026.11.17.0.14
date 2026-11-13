@@ -25,6 +25,7 @@ import '../player/mini_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
+import '../player/kotv_win7_direct.dart';
 import '../player/playback_settings.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
@@ -2478,6 +2479,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _exitImmersive() async {
     if (!_immersive) return;
+    final park = await kotvShouldParkSurfaceForImmersiveExit();
+    if (park) await kotvParkSurfaceForImmersiveExit(_playback);
     if (mounted) {
       setState(() {
         _immersive = false;
@@ -2490,6 +2493,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     await kotvExitSystemFullscreen(
       wasDisplayFullscreen: _desktopFs == KotvDesktopFullscreenKind.display,
     );
+    if (park) await kotvUnparkSurfaceAfterImmersiveExit(_playback);
     if (!mounted) return;
     // 竖屏列表重建后直接停在当前分组、频道和节目。
     _scheduleScrollToCurrent();
@@ -2500,12 +2504,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   /// 切换硬解直出：Win7 上换 ANGLE 后端，须换 Player 并按当前进度重开。
   Future<void> _toggleDirectOutput() async {
     final prev = _mpvOpts;
+    final next = !_mpvOpts.direct;
     final pos = _playUrl.isNotEmpty ? _playback.position : Duration.zero;
-    setState(() => _mpvOpts = _mpvOpts.copyWith(direct: !_mpvOpts.direct));
+    setState(() => _mpvOpts = _mpvOpts.copyWith(direct: next));
     try {
-      await _persistLiveSetting('mpvDirect', _mpvOpts.direct ? 'true' : 'false');
+      await _persistLiveSetting('mpvDirect', kotvWin7DirectNextValue(prev.direct));
     } catch (_) {}
-    if (_backend == KotvEmbedBackend.mpv && kotvMediaKitNeedsNewPlayer(prev, _mpvOpts)) {
+    if (_backend == KotvEmbedBackend.mpv &&
+        kotvWin7DirectToggleNeedsNewPlayer(from: prev, nextDirect: next)) {
       await _releaseMpv();
       await _reopenCurrent(pos);
     }

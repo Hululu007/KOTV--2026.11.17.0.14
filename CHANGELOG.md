@@ -10,7 +10,7 @@
 - Node 切站：修复 watch 休眠后误杀新进程；未登记 api 时保留已起源包，避免 Win7 长时间转圈。
 - 桌面 MPV 无缝换集：排队下一集时关掉 media_kit 的 `keep-open`，否则 EOF 不前进播放列表。
 - Win7 系统全屏：子窗按客户区对齐，未对齐延后重试（去掉固定毫秒盲踢）；详情/直播进全屏时序收拢。
-- Win7 MPV：硬解直出只试 `dxva2`，不行直接软解（去掉 `dxva2-copy`）；关掉直出时显式 `d3d11va,d3d11va-copy`（回读，不经 dxva2-egl）。
+- Win7 MPV：关直出=`hwdec=auto`（MPV 自选）；开直出=`dxva2`（ANGLE D3D9），拒互通后干净软解（D3D11 ANGLE 重建，去掉 `dxva2-copy`）；FVP/MPV 按 DXGI HEVC 能力选适配器。
 - 本机站点/网盘凭证落 `/TV/`；远端 `/TV/s_u_<用户名>/`（跟登录名，不跟账号 UUID）；不建 `s_c_*`。目录名收拢到 `Util.tvDirName` / `paths.TVDirName`。子 goroutine 用 `Bind(Snapshot())` 带上 username。全部清理：`ui/` 只留 `client.json`；TV 删 `s_c_*` 与旧 `s_u_<uuid>`。
 - 安卓清理缓存：宿主清 `cacheDir` 下 jar/js/py/epg/jpa/mpv/mpv-cache/proxy、`codeCache/kotv_site_jars` 与 Exo；全部时按 `IsLegacyTVDir` 删外置遗留 TV 桶（Go 只扫 `filesDir/KOTV`）。
 
@@ -32,7 +32,7 @@
 - 本机 9978 端口被别的程序（如其它影视应用）占着时立即提示，不再无限转圈；引擎也不再反复拉起。
 - 安卓 MPV：Rockchip 与 Android 8.0 以下硬解直出，全屏黑边不再透出详情页；播完自动播下一集。
 - Windows MPV：硬解交给 mpv 官方的自动选择；Win10 及以上的 libmpv 不再按 Win7 目标编译，也不再打 Win7 补丁。
-- Win7 MPV：「硬解直出」默认关：ANGLE 用 D3D11，`d3d11va-copy`（不经 dxva2-egl）；打开后 ANGLE 用 D3D9、`dxva2` 直出，10 位 / Intel 四五代 H265 拒绝互通后直接软解（不经 `dxva2-copy`）。开关在设置、详情页播放器、直播与回看（软解时不显示）。
+- Win7 MPV：「硬解直出」默认关：`hwdec=auto`，ANGLE D3D11；打开后 ANGLE D3D9 + `dxva2`，10 位 / Intel 四五代 H265 拒绝互通后直接软解（不经 `dxva2-copy`）。开关在设置、详情页播放器、直播与回看（软解时不显示）。
 - iOS 系统播放器：地址不带 .m3u8 后缀的 HLS 也按 HLS 打开。
 - 开播无画面时：Exo、FVP 硬解改「自动」重试一次（只对这次播放；MPV 硬解不成自己会落到软解，不重试），其余直接换下一个内置播放器，不再软硬互换；Exo 不再自己软解重建，选「硬」时视频只用硬件解码器。播放信息里的解码器名一律大写。
 - 「循环播放视频」由详情页统一保存，各平台各播放器换集、换播放器后仍生效；Exo 改用自带的单集循环，不再播完重开。
