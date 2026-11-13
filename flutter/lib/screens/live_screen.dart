@@ -2479,25 +2479,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _exitImmersive() async {
     if (!_immersive) return;
-    await kotvRunImmersiveExitGuardingHwcSurface(
-      playback: _playback,
-      exitBody: () async {
-        if (mounted) {
-          setState(() {
-            _immersive = false;
-            _leftOpen = false;
-            _rightOpen = false;
-            _chromeVisible = false;
-          });
-          ref.read(liveImmersiveFullscreenProvider.notifier).state = false;
-        }
-        await kotvExitSystemFullscreen(
-          wasDisplayFullscreen: _desktopFs == KotvDesktopFullscreenKind.display,
-        );
-        try {
-          await WidgetsBinding.instance.endOfFrame;
-        } catch (_) {}
-      },
+    if (mounted) {
+      setState(() {
+        _immersive = false;
+        _leftOpen = false;
+        _rightOpen = false;
+        _chromeVisible = false;
+      });
+      ref.read(liveImmersiveFullscreenProvider.notifier).state = false;
+    }
+    await kotvExitSystemFullscreen(
+      wasDisplayFullscreen: _desktopFs == KotvDesktopFullscreenKind.display,
     );
     if (!mounted) return;
     // 竖屏列表重建后直接停在当前分组、频道和节目。

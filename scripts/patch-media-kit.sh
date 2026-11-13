@@ -54,7 +54,8 @@
 # （与 D3D11 共享纹理）会蓝/黑屏：MaybeRewriteAngleForSoft 在 hwdec-current=no 时事务式重建
 # 为 D3D11，并 Resize 重挂 Flutter DXGI 纹理（同尺寸也要重挂，否则仍黑屏）。
 # 补丁在建播放器时读 hwdec：含 dxva2（直出）则 D3D9 优先，否则 D3D11 优先。
-# FVP / ANGLE 的 D3D11 设备：按 DXGI HEVC 解码能力选适配器（scripts/native/kotv_dxgi_hevc_adapter.h）。
+# ANGLE/FVP 的 D3D11 纹理设备用 stock 首适配器（EnumAdapters(0) / Flutter graphics adapter），
+# 不按 HEVC 解码能力选卡（显示卡≠解码卡时会黑屏；同步探测还会拖死非 NVIDIA 机）。
 #
 # 按平台：Dart 部分各平台共用，总是打；原生部分（fvp 的 Windows / 安卓、window_manager、
 # avfoundation、Win7 的 media_kit_video）只在 KOTV_FLUTTER_TARGET 对应的平台打。
@@ -118,22 +119,6 @@ def pkg_or_fail(name):
         print(f"ERROR: {name} not in package_config.json", file=sys.stderr)
         sys.exit(1)
     return root
-
-
-def repo_root():
-    """cfg = <repo>/flutter/.dart_tool/package_config.json → 仓库根。"""
-    return cfg.resolve().parents[2]
-
-
-def install_dxgi_hevc_header(dest_dir):
-    """把 scripts/native/kotv_dxgi_hevc_adapter.h 拷进插件 windows/（FVP 与 ANGLE 共用）。"""
-    hdr = repo_root() / "scripts" / "native" / "kotv_dxgi_hevc_adapter.h"
-    if not hdr.is_file():
-        raise SystemExit(f"ERROR: missing {hdr}")
-    dest = pathlib.Path(dest_dir)
-    dest.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(hdr, dest / "kotv_dxgi_hevc_adapter.h")
-    return hdr
 
 
 def one_of(tag, label, blob, pairs):
@@ -1117,32 +1102,23 @@ if win_check.count("D3D11CreateDevice(") != 1:
 PY
 fi
 
-# FVP：按 DXGI HEVC 能力选适配器（头文件经 install_dxgi_hevc_header，与 ANGLE 共用）。
-# 0.39.x（Win7 线）用 View_GetGraphicsAdapter；0.40+ 用 Registrar_GetGraphicsAdapter。
+# FVP：撤回 HEVC 选卡，恢复 Flutter graphics adapter（显示路径，非解码选卡）。
 if _kotv_for_target windows; then
 _kotv_patch_py <<'PY'
 fvp_root = pkg_or_fail("fvp")
 tag = f"fvp ({fvp_root.name})"
 WIN = fvp_root / "windows"
-install_dxgi_hevc_header(WIN)
 plugin = WIN / "fvp_plugin.cpp"
 text = plugin.read_text(encoding="utf-8")
-if "kotv_dxgi_hevc_adapter.h" not in text:
-    needle = '#include "fvp_plugin.h"'
-    if needle not in text:
-        raise SystemExit("ERROR: fvp_plugin.cpp missing include anchor")
-    text = text.replace(needle, needle + "\n#include \"kotv_dxgi_hevc_adapter.h\"", 1)
-# (原文, 新文)：0.40+ Registrar；0.39 View。
+# Strip leftover PreferHevc header include.
+text = text.replace('#include "fvp_plugin.h"\n#include "kotv_dxgi_hevc_adapter.h"\n', '#include "fvp_plugin.h"\n')
+# Reverse PreferHevc → stock (idempotent if already stock).
 text = one_of(
     tag,
-    "DXGI HEVC adapter pick",
+    "FVP graphics adapter stock",
     text,
     (
         (
-            """  ComPtr<IDXGIAdapter> adapter = Registrar_GetGraphicsAdapter(registrar, 0);
-  if (!adapter)
-    clog << "Flutter graphics adapter is not available, texture may be invisible" << endl;
-  auto channel =""",
             """  // KOTV: prefer DXGI adapter with HEVC decode when present (Optimus).
   ComPtr<IDXGIAdapter> adapter;
   adapter.Attach(kotv_dxgi::PickAdapterPreferHevc());
@@ -1151,12 +1127,12 @@ text = one_of(
   if (!adapter)
     clog << "Flutter graphics adapter is not available, texture may be invisible" << endl;
   auto channel =""",
+            """  ComPtr<IDXGIAdapter> adapter = Registrar_GetGraphicsAdapter(registrar, 0);
+  if (!adapter)
+    clog << "Flutter graphics adapter is not available, texture may be invisible" << endl;
+  auto channel =""",
         ),
         (
-            """  IDXGIAdapter *adapter = View_GetGraphicsAdapter(registrar->GetView());
-  if (!adapter)
-    clog << "FlutterView::GetGraphicsAdapter() is not available, texture may be invisible" << endl;
-  auto channel =""",
             """  // KOTV: prefer DXGI adapter with HEVC decode when present (Optimus).
   ComPtr<IDXGIAdapter> hevc_adapter;
   hevc_adapter.Attach(kotv_dxgi::PickAdapterPreferHevc());
@@ -1166,10 +1142,22 @@ text = one_of(
   if (!adapter)
     clog << "FlutterView::GetGraphicsAdapter() is not available, texture may be invisible" << endl;
   auto channel =""",
+            """  IDXGIAdapter *adapter = View_GetGraphicsAdapter(registrar->GetView());
+  if (!adapter)
+    clog << "FlutterView::GetGraphicsAdapter() is not available, texture may be invisible" << endl;
+  auto channel =""",
         ),
     ),
 )
+hdr = WIN / "kotv_dxgi_hevc_adapter.h"
+if hdr.is_file():
+    hdr.unlink()
+    print(f"removed {hdr}")
 plugin.write_text(text, encoding="utf-8")
+if "PickAdapterPreferHevc" in text or "kotv_dxgi_hevc_adapter.h" in text:
+    print(f"ERROR: {tag} still references PreferHevc after strip", file=sys.stderr)
+    sys.exit(1)
+print(f"ok {tag}: Flutter graphics adapter (no PreferHevc)")
 PY
 fi
 
@@ -1978,37 +1966,23 @@ for name, pairs in edits.items():
     path.write_text(text, encoding="utf-8")
     print(f"patched media_kit_video ({root.name}) {name}: ANGLE backend by hwdec")
 
-# --- DXGI HEVC adapter for ANGLE D3D11 textures（与 FVP 共用 install_dxgi_hevc_header）---
+# --- ANGLE D3D11 textures：撤回 HEVC 选卡，恢复 stock EnumAdapters(0) ---
 # 1.2.5（Win7 钉死）：CreateD3DTexture 里直接 EnumAdapters→adapter_。
 # 1.3.x：IsWindows10RTMOrGreater 的 else 分支用局部 adapter。
-install_dxgi_hevc_header(win)
-
 cc = win / "angle_surface_manager.cc"
 hh = win / "angle_surface_manager.h"
 vo = win / "video_output.cc"
 text_cc = cc.read_text(encoding="utf-8")
-if "kotv_dxgi_hevc_adapter.h" not in text_cc:
-    text_cc = text_cc.replace(
-        '#include "angle_surface_manager.h"\n',
-        '#include "angle_surface_manager.h"\n#include "kotv_dxgi_hevc_adapter.h"\n',
-        1,
-    )
+text_cc = text_cc.replace(
+    '#include "angle_surface_manager.h"\n#include "kotv_dxgi_hevc_adapter.h"\n',
+    '#include "angle_surface_manager.h"\n',
+)
 text_cc = one_of(
     f"media_kit_video ({root.name})",
-    "ANGLE DXGI HEVC adapter",
+    "ANGLE EnumAdapters(0) stock",
     text_cc,
     (
         (
-            """    } else {
-      IDXGIFactory* dxgi = nullptr;
-      ::CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&dxgi);
-      // As far as my experience goes, this is the safest approach. Passing NULL
-      // (so-called default) seems to cause issues on Windows 7 or maybe some
-      // older graphics drivers. First adapter is the default.
-      // D3D_DRIVER_TYPE_UNKNOWN| must be passed with manual adapter selection.
-      dxgi->EnumAdapters(0, &adapter);
-      dxgi->Release();
-    }""",
             """    } else {
       // KOTV: prefer adapter with HEVC decode (Optimus); else first hardware.
       adapter = kotv_dxgi::PickAdapterPreferHevc();
@@ -2021,17 +1995,18 @@ text_cc = one_of(
         }
       }
     }""",
+            """    } else {
+      IDXGIFactory* dxgi = nullptr;
+      ::CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&dxgi);
+      // As far as my experience goes, this is the safest approach. Passing NULL
+      // (so-called default) seems to cause issues on Windows 7 or maybe some
+      // older graphics drivers. First adapter is the default.
+      // D3D_DRIVER_TYPE_UNKNOWN| must be passed with manual adapter selection.
+      dxgi->EnumAdapters(0, &adapter);
+      dxgi->Release();
+    }""",
         ),
         (
-            """    IDXGIFactory* dxgi = nullptr;
-    ::CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&dxgi);
-    // Manually selecting adapter. As far as my experience goes, this is the
-    // safest approach. Passing NULL (so-called default) seems to cause issues
-    // on Windows 7 or maybe some older graphics drivers.
-    // First adapter is the default.
-    // |D3D_DRIVER_TYPE_UNKNOWN| must be passed with manual adapter selection.
-    dxgi->EnumAdapters(0, &adapter_);
-    dxgi->Release();""",
             """    // KOTV: prefer adapter with HEVC decode (Optimus); else first hardware.
     adapter_ = kotv_dxgi::PickAdapterPreferHevc();
     if (!adapter_) {
@@ -2042,9 +2017,28 @@ text_cc = one_of(
         dxgi->Release();
       }
     }""",
+            """    IDXGIFactory* dxgi = nullptr;
+    ::CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&dxgi);
+    // Manually selecting adapter. As far as my experience goes, this is the
+    // safest approach. Passing NULL (so-called default) seems to cause issues
+    // on Windows 7 or maybe some older graphics drivers.
+    // First adapter is the default.
+    // |D3D_DRIVER_TYPE_UNKNOWN| must be passed with manual adapter selection.
+    dxgi->EnumAdapters(0, &adapter_);
+    dxgi->Release();""",
         ),
     ),
 )
+hdr_angle = win / "kotv_dxgi_hevc_adapter.h"
+if hdr_angle.is_file():
+    hdr_angle.unlink()
+    print(f"removed {hdr_angle}")
+if "PickAdapterPreferHevc" in text_cc or "kotv_dxgi_hevc_adapter.h" in text_cc:
+    print(
+        f"ERROR: media_kit_video ({root.name}) still references PreferHevc after strip",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 # Public getter for prefer_d3d9_ (soft-fallback rebuild).
 text_h = hh.read_text(encoding="utf-8")

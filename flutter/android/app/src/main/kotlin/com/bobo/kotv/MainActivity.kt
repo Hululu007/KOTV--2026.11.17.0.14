@@ -206,8 +206,6 @@ class MainActivity : FlutterActivity() {
         "ensureReadMediaPermission" -> ensureReadMediaPermission(result)
         "pickConfigFile" -> pickConfigFile(result)
         "isTelevision" -> result.success(KotvFileChooser.isTelevision(this))
-        // 旧 Rockchip HWC：退出全屏前须先卸 Surface，否则 SF SquashFrame 空缓冲崩机。
-        "needsHwcSurfacePark" -> result.success(needsHwcSurfacePark())
         "useFileBrowser" -> result.success(KotvFileChooser.shouldUseFileBrowser(this))
         "storageRoot" -> result.success(KotvFileChooser.storageRoot())
         "listDir" -> {
@@ -442,22 +440,6 @@ class MainActivity : FlutterActivity() {
     try {
       setPictureInPictureParams(pipParams(enabled))
     } catch (_: Throwable) {
-    }
-  }
-
-  /** API&lt;26 或 Rockchip：退出沉浸改图层前须先卸 SurfaceView。 */
-  private fun needsHwcSurfacePark(): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-      Build.SOC_MANUFACTURER.equals("Rockchip", ignoreCase = true)
-    ) {
-      return true
-    }
-    val hw = (Build.HARDWARE ?: "").lowercase()
-    if (hw.startsWith("rk")) return true
-    return listOf(Build.BOARD, Build.PRODUCT, Build.MODEL).any {
-      val s = (it ?: "").lowercase()
-      s.contains("rk3") || s.contains("cr19")
     }
   }
 

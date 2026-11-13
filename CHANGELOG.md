@@ -2,10 +2,10 @@
 
 ## v0.3.1
 
-- Win7 MPV 硬解直出落后到软解：`MaybeRewriteAngleForSoft` 事务式重建 D3D11 ANGLE，并 `Resize` 重挂 Flutter DXGI 纹理（同尺寸也重挂，避免黑屏）；DXGI HEVC 选卡进程内只探测一次。
+- Win7 MPV：关直出恢复 `d3d11va,d3d11va-copy[,no]`；开直出仍 `dxva2`，拒互通后 `MaybeRewriteAngleForSoft` 事务式重建 D3D11 ANGLE 并 `Resize` 重挂纹理。撤回 ANGLE/FVP 的 DXGI HEVC 选卡（改回 stock 首适配器 / Flutter graphics adapter），去掉同步视频能力探测。
+- 撤回 RK/旧安卓退全屏 HWC park（接受旧机退全屏崩溃风险）；`setSurfaceLayerEnabled` 恢复 park 前逻辑。
 - Android CI：打包后清 `flutter/build` 等中间产物再上传；APK `compression-level: 0`；按 ABI 拆 `android-aarch64` / `android-armv7` artifact。
 - 开播 failover 注释与实现一致：含桌面 MPV 在硬解无画面时先改自动再试。
-- RK/旧安卓退全屏：详情与直播共用 HWC park 守卫（先卸面、缩槽后再挂回）；native enable 无层则重建，去掉盲等与散落 unpark。
 - Node 首页：`homeVod` 失败/空体再试 `homeVideo`，真实错误上抛；空推荐不钉死 home 缓存；去掉误导性「没有返回推荐」横幅。
 - Win7 全屏：子窗对齐失败继续重试；对齐后再确认踢一次（ANGLE/纹理晚落稳）。
 - Node 切站：启动失败清掉 `stopping`，避免 Ensure/watch 空转无限转圈。
@@ -14,7 +14,6 @@
 - Node 切站：修复 watch 休眠后误杀新进程；未登记 api 时保留已起源包，避免 Win7 长时间转圈。
 - MPV 无缝换集（桌面 media_kit + 安卓原生）：有排队时 `keep-open=no` 让列表自然前进（消片尾 pause）；无排队恢复 `yes` 以 `eof-reached` 报 completed；单集循环拒 queue；手动下一集仍走 playlist-pos/next。
 - Win7 系统全屏：子窗按客户区对齐，未对齐延后重试（去掉固定毫秒盲踢）；详情/直播进全屏时序收拢。
-- Win7 MPV：关直出=`hwdec=auto`（MPV 自选）；开直出=`dxva2`（ANGLE D3D9），拒互通后干净软解（D3D11 ANGLE 重建，去掉 `dxva2-copy`）；FVP/MPV 按 DXGI HEVC 能力选适配器。
 - 本机站点/网盘凭证落 `/TV/`；远端 `/TV/s_u_<用户名>/`（跟登录名，不跟账号 UUID）；不建 `s_c_*`。目录名收拢到 `Util.tvDirName` / `paths.TVDirName`。子 goroutine 用 `Bind(Snapshot())` 带上 username。全部清理：`ui/` 只留 `client.json`；TV 删 `s_c_*` 与旧 `s_u_<uuid>`。
 - 安卓清理缓存：宿主清 `cacheDir` 下 jar/js/py/epg/jpa/mpv/mpv-cache/proxy、`codeCache/kotv_site_jars` 与 Exo；全部时按 `IsLegacyTVDir` 删外置遗留 TV 桶（Go 只扫 `filesDir/KOTV`）。
 
@@ -36,7 +35,7 @@
 - 本机 9978 端口被别的程序（如其它影视应用）占着时立即提示，不再无限转圈；引擎也不再反复拉起。
 - 安卓 MPV：Rockchip 与 Android 8.0 以下硬解直出，全屏黑边不再透出详情页；播完自动播下一集。
 - Windows MPV：硬解交给 mpv 官方的自动选择；Win10 及以上的 libmpv 不再按 Win7 目标编译，也不再打 Win7 补丁。
-- Win7 MPV：「硬解直出」默认关：`hwdec=auto`，ANGLE D3D11；打开后 ANGLE D3D9 + `dxva2`，10 位 / Intel 四五代 H265 拒绝互通后直接软解（不经 `dxva2-copy`）。开关在设置、详情页播放器、直播与回看（软解时不显示）。
+- Win7 MPV：「硬解直出」默认关：关=`d3d11va-copy` 链，ANGLE D3D11；打开后 ANGLE D3D9 + `dxva2`，10 位 / Intel 四五代 H265 拒绝互通后直接软解（不经 `dxva2-copy`）。开关在设置、详情页播放器、直播与回看（软解时不显示）。
 - iOS 系统播放器：地址不带 .m3u8 后缀的 HLS 也按 HLS 打开。
 - 开播无画面时：各内置引擎（含桌面 MPV）硬解无画面先改「自动」再试一次（只对这次播放），再换下一个内置播放器，不再软硬互换；Exo 不再自己软解重建，选「硬」时视频只用硬件解码器。播放信息里的解码器名一律大写。
 - 「循环播放视频」由详情页统一保存，各平台各播放器换集、换播放器后仍生效；Exo 改用自带的单集循环，不再播完重开。

@@ -857,24 +857,24 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       surfaceLayerEnabled = enabled
       return
     }
+    if (surfaceLayerEnabled == enabled) {
+      if (enabled) bindPlayerSurface()
+      return
+    }
+    surfaceLayerEnabled = enabled
+    val host = surfaceHost
     if (!enabled) {
-      if (!surfaceLayerEnabled) return
-      surfaceLayerEnabled = false
-      surfaceHost?.let { unbindPlayerOutput(it) }
+      host?.let { unbindPlayerOutput(it) }
       boundSurfaceView = null
       try {
         player?.clearVideoSurface()
       } catch (_: Throwable) {
       }
-      surfaceHost?.clearVideoLayer()
+      host?.clearVideoLayer()
       return
     }
-    surfaceLayerEnabled = true
-    val host = surfaceHost ?: return
-    // 无视频层（含 HWC park 卸层后）：重建；有则 bind。onSurfaceReady 再异步挂接。
-    if (host.surfaceView == null && host.textureView == null) {
-      host.setRender(false, ::onSurfaceReady)
-    }
+    if (host == null) return
+    host.setRender(false, ::onSurfaceReady)
     bindPlayerSurface()
   }
 

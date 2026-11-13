@@ -3414,39 +3414,31 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _suppressDetailPopUntil = DateTime.now().add(const Duration(milliseconds: 800));
       _fsSwipeDy.value = 0;
       final wasDisplay = _desktopFs == KotvDesktopFullscreenKind.display;
-      // HWC：park → 改图层/缩槽 → finally unpark（见 kotvRunImmersiveExitGuardingHwcSurface）。
-      await kotvRunImmersiveExitGuardingHwcSurface(
-        playback: _playback,
-        exitBody: () async {
-          // 两阶段：先清沉浸标志并 hold 整屏几何，再退系统栏/量槽，最后缩到槽。
-          ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
-          if (mounted) {
-            setState(() {
-              _immersiveFullscreen = false;
-              _immersiveEpCover = false;
-              _holdImmersiveVideoGeom = true;
-            });
-          } else {
-            _holdImmersiveVideoGeom = true;
-          }
-          await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
-          if (!mounted) {
-            _holdImmersiveVideoGeom = false;
-            return;
-          }
-          if (_immersiveFullscreen) return;
-          await WidgetsBinding.instance.endOfFrame;
-          if (!mounted || _immersiveFullscreen) return;
-          _syncVideoSlotRect();
-          await WidgetsBinding.instance.endOfFrame;
-          if (!mounted || _immersiveFullscreen) return;
-          if (_holdImmersiveVideoGeom) {
-            setState(() => _holdImmersiveVideoGeom = false);
-          }
-          // 缩槽布局落地后再交给 finally unpark。
-          await WidgetsBinding.instance.endOfFrame;
-        },
-      );
+      // 两阶段：先清沉浸标志并 hold 整屏几何，再退系统栏/量槽，最后缩到槽。
+      ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
+      if (mounted) {
+        setState(() {
+          _immersiveFullscreen = false;
+          _immersiveEpCover = false;
+          _holdImmersiveVideoGeom = true;
+        });
+      } else {
+        _holdImmersiveVideoGeom = true;
+      }
+      await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
+      if (!mounted) {
+        _holdImmersiveVideoGeom = false;
+        return;
+      }
+      if (_immersiveFullscreen) return;
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || _immersiveFullscreen) return;
+      _syncVideoSlotRect();
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || _immersiveFullscreen) return;
+      if (_holdImmersiveVideoGeom) {
+        setState(() => _holdImmersiveVideoGeom = false);
+      }
     });
   }
 
