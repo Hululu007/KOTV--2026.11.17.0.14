@@ -61,7 +61,12 @@
 # 用法：KOTV_FLUTTER_TARGET=<平台> scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PKG_CFG="$ROOT/flutter/.dart_tool/package_config.json"
+# shellcheck source=kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
+# package_config 经 kotv_native_path（Windows 上 cygpath -m → C:/…）：
+# 与 flutter-pub-get.sh 相同，bash 与原生 WinPython pathlib 都能打开。
+# 禁止把未转换的 MSYS /d/... 写进 Python 源码字符串。
+PKG_CFG="$(kotv_native_path "$ROOT/flutter/.dart_tool/package_config.json")"
 [[ -f "$PKG_CFG" ]] || { echo "missing $PKG_CFG (run flutter pub get first)" >&2; exit 1; }
 
 _kotv_python() {
@@ -77,9 +82,9 @@ _kotv_python() {
   fi
 }
 
-# 各段补丁共用的 Python 开头：读 package_config.json 找包根目录，以及按片段替换的公共函数。
+# 各段补丁共用的 Python 开头：读 package_config.json 找包根 / 仓库根，以及按片段替换。
 _KOTV_PKG_ROOT_PY='
-import json, pathlib, sys
+import json, pathlib, shutil, sys
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -112,6 +117,22 @@ def pkg_or_fail(name):
         print(f"ERROR: {name} not in package_config.json", file=sys.stderr)
         sys.exit(1)
     return root
+
+
+def repo_root():
+    """cfg = <repo>/flutter/.dart_tool/package_config.json → 仓库根。"""
+    return cfg.resolve().parents[2]
+
+
+def install_dxgi_hevc_header(dest_dir):
+    """把 scripts/native/kotv_dxgi_hevc_adapter.h 拷进插件 windows/（FVP 与 ANGLE 共用）。"""
+    hdr = repo_root() / "scripts" / "native" / "kotv_dxgi_hevc_adapter.h"
+    if not hdr.is_file():
+        raise SystemExit(f"ERROR: missing {hdr}")
+    dest = pathlib.Path(dest_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(hdr, dest / "kotv_dxgi_hevc_adapter.h")
+    return hdr
 
 
 def one_of(tag, label, blob, pairs):
@@ -1095,20 +1116,12 @@ if win_check.count("D3D11CreateDevice(") != 1:
 PY
 fi
 
-# FVP：按 DXGI HEVC 能力选适配器（与 ANGLE 共用 kotv_dxgi_hevc_adapter.h）。
-# 勿在脚本里写死 bash $ROOT：MSYS 只转换传给 WinPython 的 argv，heredoc 里的 /d/... 打不开。
+# FVP：按 DXGI HEVC 能力选适配器（头文件经 install_dxgi_hevc_header，与 ANGLE 共用）。
 if _kotv_for_target windows; then
 _kotv_patch_py <<'PY'
-import shutil
-
 fvp_root = pkg_or_fail("fvp")
-# cfg = …/flutter/.dart_tool/package_config.json → parents[2] = 仓库根
-repo_root = cfg.resolve().parents[2]
 WIN = fvp_root / "windows"
-HDR_SRC = repo_root / "scripts" / "native" / "kotv_dxgi_hevc_adapter.h"
-if not HDR_SRC.is_file():
-    raise SystemExit(f"ERROR: missing {HDR_SRC}")
-shutil.copy2(HDR_SRC, WIN / "kotv_dxgi_hevc_adapter.h")
+install_dxgi_hevc_header(WIN)
 plugin = WIN / "fvp_plugin.cpp"
 text = plugin.read_text(encoding="utf-8")
 if "kotv_dxgi_hevc_adapter.h" not in text:
@@ -1944,14 +1957,8 @@ for name, pairs in edits.items():
     path.write_text(text, encoding="utf-8")
     print(f"patched media_kit_video ({root.name}) {name}: ANGLE backend by hwdec")
 
-# --- DXGI HEVC adapter for ANGLE D3D11 textures (same header as FVP) ---
-# cfg 来自 argv（MSYS 会转成 Win 路径）；勿用 heredoc 展开的 bash $ROOT。
-import shutil
-HDR_SRC = cfg.resolve().parents[2] / "scripts" / "native" / "kotv_dxgi_hevc_adapter.h"
-if not HDR_SRC.is_file():
-    print(f"ERROR: missing {HDR_SRC}", file=sys.stderr)
-    sys.exit(1)
-shutil.copy2(HDR_SRC, win / "kotv_dxgi_hevc_adapter.h")
+# --- DXGI HEVC adapter for ANGLE D3D11 textures（与 FVP 共用 install_dxgi_hevc_header）---
+install_dxgi_hevc_header(win)
 
 cc = win / "angle_surface_manager.cc"
 hh = win / "angle_surface_manager.h"
