@@ -582,6 +582,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         repeatOne = call.argument<Boolean>("on") == true
         main.post {
           try {
+            if (repeatOne) clearQueuedNext()
             applyRepeatOne()
             result.success(null)
           } catch (e: Throwable) {
@@ -1126,6 +1127,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       // libvulkan.so is only to satisfy libmpv DT_NEEDED.
       MPVLib.setOptionString("force-window", "no")
       MPVLib.setOptionString("idle", "yes")
+      // 默认 yes：无排队时末项 eof-reached→completed；有排队时 queueNext 改为 no（见 applyKeepOpenForQueue）。
       MPVLib.setOptionString("keep-open", "yes")
       // 预加载下一集：本集将完时提前打开排在后面的一项。
       MPVLib.setOptionString("prefetch-playlist", "yes")
@@ -1875,7 +1877,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   /**
    * 把下一集追加到 mpv 播放列表（请求头、片头 start 只写在这一项上）；prefetch-playlist 让 mpv
-   * 在本集将完时就打开它，播完直接接上。
+   * 在本集将完时就打开它。成功后 keep-open=no，EOF 自然前进（契约与 Dart KotvPlayback.queueNext 一致）。
    */
   private fun queueNext(next: KotvQueuedNext): Boolean {
     if (!created.get() || livePlayback || next.id.isEmpty() || next.url.isEmpty() || loadedUrl.isEmpty() || repeatOne) {
@@ -1896,6 +1898,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         buildLoadfileOpts(next.url, next.mime, next.headers, next.startAtMs),
       )
       queuedNext = next
+      applyKeepOpenForQueue(hasQueued = true)
       true
     } catch (t: Throwable) {
       Log.w(TAG, "queue next failed", t)
@@ -1925,7 +1928,20 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** 只留正在播的一项。 */
+  /**
+   * 有排队 → keep-open=no（列表自然前进）；否则 → yes（末项 eof-reached→completed）。
+   * 与桌面 media_kit 同一契约（见 Dart KotvPlayback.queueNext）。
+   */
+  private fun applyKeepOpenForQueue(hasQueued: Boolean) {
+    if (!created.get()) return
+    try {
+      MPVLib.setPropertyString("keep-open", if (hasQueued) "no" else "yes")
+    } catch (t: Throwable) {
+      Log.w(TAG, "keep-open", t)
+    }
+  }
+
+  /** 只留正在播的一项；恢复 keep-open=yes。 */
   private fun clearQueuedNext() {
     if (queuedNext == null && pendingSeamlessId == null) return
     queuedNext = null
@@ -1936,11 +1952,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       } catch (_: Throwable) {
       }
     }
+    applyKeepOpenForQueue(hasQueued = false)
   }
 
   /**
-   * 切入已 append 的下一集：playlist-next + 解除 keep-open 停在片尾的 pause。
-   * 片尾跳过、EOF、按钮下一集共用这一处，避免散落各写一遍。
+   * 手动下一集 / keep-open 未切到 no 时的兜底：playlist-next + unpause。
+   * 有排队且 keep-open=no 时主路径是 mpv 自动前进 → playlist-pos 观察进 [enterQueuedNext]。
    */
   private fun skipToQueued(next: KotvQueuedNext): Boolean {
     if (!created.get() || queuedNext !== next) return false
@@ -1957,10 +1974,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** 已播到排好的下一集：它成为当前集，通知 Dart 换集。播完的上一项等下次排队时一并清掉。 */
+  /** 已播到排好的下一集：它成为当前集，通知 Dart 换集；恢复 keep-open=yes。 */
   private fun enterQueuedNext(next: KotvQueuedNext) {
     queuedNext = null
     pendingSeamlessId = null
+    applyKeepOpenForQueue(hasQueued = false)
     loadGen.incrementAndGet()
     loadedUrl = next.url
     loadedHeaders = next.headers
@@ -2277,8 +2295,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   /**
    * 播到片尾，每次加载只报一次 completed。
-   * keep-open=yes 时 mpv 停在最后一帧、不结束文件，只置 eof-reached；有排队项时在这里 playlist-next 并解除 pause。
-   * 仅图片轨且未出画、几乎没播过：seek 末帧的假 EOF，报 error 而不是 completed（页面可改开已下发的透传 url）。
+   * 无排队且 keep-open=yes：eof-reached 停末帧 → 对外 completed。
+   * 有排队：主路径 keep-open=no 已自然前进；此处 skipToQueued 仅作竞态兜底。
+   * 仅图片轨且未出画、几乎没播过：seek 末帧的假 EOF，报 error 而不是 completed。
    */
   private fun markEnded() {
     if (eof) return
@@ -2287,6 +2306,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       playing = false
       queuedNext = null
       pendingSeamlessId = null
+      applyKeepOpenForQueue(hasQueued = false)
       Log.w(TAG, "image-only eof suppressed url=$loadedUrl played=$maxPlayedSec")
       emit(mapOf("event" to "error", "message" to "无法解码该片源画面"))
       return
@@ -2300,6 +2320,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           playing = false
           queuedNext = null
           pendingSeamlessId = null
+          applyKeepOpenForQueue(hasQueued = false)
           emit(mapOf("event" to "completed"))
         }
       }
@@ -2367,7 +2388,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   override fun endFile(reason: Int, error: Int, errorText: String?) {
     val gen = activeLoadGen
     when (reason) {
-      // 有排队或正在无缝切入：不算播完（keep-open 下由 eof-reached / skipToQueued 切集；旧文件 end-file 晚到也忽略）。
+      // 有排队或正在无缝切入：不算播完（keep-open=no 自然前进 / skipToQueued 兜底；旧文件 end-file 晚到也忽略）。
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_EOF -> {
         main.post {
           if (loadGen.get() != gen) return@post

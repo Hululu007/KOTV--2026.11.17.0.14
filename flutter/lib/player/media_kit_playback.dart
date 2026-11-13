@@ -354,8 +354,8 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Stream<String> get queuedStartStream => _queuedStartCtrl.stream;
 
-  /// media_kit 固定 `keep-open=yes`：EOF 只置 completed，播放列表不前进。
-  /// 有排队项时拦截 completed，改走 [_skipToQueued]；无排队项才向外报片尾。
+  /// media_kit 默认 `keep-open=yes`（见 [KotvPlayback.queueNext] 契约）。
+  /// 有排队时主路径是 playlist 前进 → [_enterQueued]；此处拦截 completed 作竞态兜底。
   Future<void> _onPlayerCompleted(bool done) async {
     if (!done) {
       _completedGate = false;
@@ -366,6 +366,7 @@ class MediaKitPlayback extends KotvPlayback {
     // 起播守卫仍会因无尺寸抛 SilentVideo：点播可改开已下发透传 url，直播只走播放器 failover。
     if (_isUnplayableImageEof()) {
       _queued = null;
+      await _setKeepOpen(true);
       _completedGate = false;
       if (!_completedCtrl.isClosed) _completedCtrl.add(false);
       notifyListeners();
@@ -377,6 +378,7 @@ class MediaKitPlayback extends KotvPlayback {
     if (_live) return;
     // 无排队或切入失败：清掉排队态，交给详情硬切下一集。
     _queued = null;
+    await _setKeepOpen(true);
     _completedGate = true;
     if (!_completedCtrl.isClosed) _completedCtrl.add(true);
   }
@@ -400,6 +402,7 @@ class MediaKitPlayback extends KotvPlayback {
   /// 只排请求头和本集相同的：UA、Referer 是整个播放器共用的属性；
   /// 其余请求头按媒体写（加载该项时写 http-header-fields）。
   /// [startAt] 写入 Media.start，切入时由 libmpv 定位（片头），勿等 transition 后再 seek。
+  /// 成功排队后 `keep-open=no`（见 [KotvPlayback.queueNext]）。
   @override
   Future<bool> queueNext({
     required String id,
@@ -411,7 +414,7 @@ class MediaKitPlayback extends KotvPlayback {
   }) async {
     final h = kotvNormalizePlayHeaders(headers, url: url);
     // ClearKey 写在播放器全局 lavf；列表项无法带独立密钥。外挂字幕亦无 Media 字段可挂。
-    if (_url.isEmpty || _live || _drmSession || !mapEquals(h, _headers)) {
+    if (_url.isEmpty || _live || _repeatOne || _drmSession || !mapEquals(h, _headers)) {
       return false;
     }
     await clearNext();
@@ -433,12 +436,14 @@ class MediaKitPlayback extends KotvPlayback {
       return false;
     }
     _queued = (id: id, url: url, media: media);
+    await _setKeepOpen(false);
     return true;
   }
 
-  /// 只留正在播的一项（也删掉无缝接上后留在前面的上一集）。
+  /// 只留正在播的一项（也删掉无缝接上后留在前面的上一集）；恢复 `keep-open=yes`。
   @override
   Future<void> clearNext() async {
+    final had = _queued != null;
     _queued = null;
     final current = player.state.playlist.index;
     for (var i = player.state.playlist.medias.length - 1; i >= 0; i--) {
@@ -447,6 +452,7 @@ class MediaKitPlayback extends KotvPlayback {
         await player.remove(i);
       } catch (_) {}
     }
+    if (had) await _setKeepOpen(true);
   }
 
   @override
@@ -456,7 +462,7 @@ class MediaKitPlayback extends KotvPlayback {
     return _skipToQueued(q);
   }
 
-  /// 切入已 append 的下一集。
+  /// 切入已 append 的下一集（手动下一集 / completed 竞态兜底）。
   ///
   /// 禁止 [Player.next] / [Player.jump] / [Player.play]：media_kit 在
   /// `completed==true` 时会先把 `playlist-pos` 置 0，等于重开本集。
@@ -493,9 +499,15 @@ class MediaKitPlayback extends KotvPlayback {
     return -1;
   }
 
+  /// 有排队 → `keep-open=no`；否则 → `yes`（契约见 [KotvPlayback.queueNext]）。
+  Future<void> _setKeepOpen(bool keep) async {
+    await _mpvSet('keep-open', keep ? 'yes' : 'no');
+  }
+
   void _enterQueued(({String id, String url, Media media}) q) {
     if (_queued == null || _queued!.id != q.id) return;
     _queued = null;
+    unawaited(_setKeepOpen(true));
     _url = q.url;
     _engineLive = false;
     _openGen++;
@@ -745,6 +757,7 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Future<void> setRepeatOne(bool on) async {
     _repeatOne = on;
+    if (on) await clearNext();
     await player.setPlaylistMode(on ? PlaylistMode.single : PlaylistMode.none);
   }
 

@@ -94,6 +94,16 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 把下一集排进播放器自己的播放列表，本集播完无缝接上；播到它时 [queuedStartStream] 发出 [id]。
   /// [startAt]>0：切入该集时的起播定位（片头跳过），与 [open] 的 startAt 同语义，须写进列表项本身，勿等切入后再 seek。
   /// Exo、全部 MPV（安卓原生 + 桌面/iOS media_kit）支持；FVP / 网页返回 false，换集仍走 [open]。
+  /// 单集循环开启时各引擎应拒绝排队（由 [setRepeatOne]/[clearNext] 撤掉已排项）。
+  ///
+  /// MPV keep-open 契约（桌面 media_kit + 安卓原生共用；Exo 不走 keep-open）：
+  /// - 无排队 / 单集：`keep-open=yes`，末项结束 pause，`eof-reached`→completed，供硬切下一集或再播回起点；
+  /// - [queueNext] 成功：`keep-open=no`，本集 EOF 由 mpv 自然进已 append 项，不经片尾 pause；
+  /// - 切入排队项 / [clearNext]：恢复 `yes`，新当前集仍能报 completed（media_kit 依赖 eof-reached）；
+  /// - 官方语义：`yes` 仅卡在播放列表**最后一项**；有下一项时应前进。排队时显式 `no`，避免 media_kit
+  ///   在 eof-reached 上把 playing 打成 false 造成可见顿挫。
+  /// 手动 [skipToNext]：写 `playlist-pos`（或 playlist-next）+ `pause=no`；勿用 media_kit 的
+  /// `Player.next`/`play`（completed 时会把 playlist-pos 置 0）。
   Future<bool> queueNext({
     required String id,
     required String url,
@@ -107,7 +117,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 立刻跳到排好的下一集（片尾跳过、下一集按钮）；没排上返回 false。
   Future<bool> skipToNext() async => false;
 
-  /// 撤掉排好的下一集（如打开单集循环）。
+  /// 撤掉排好的下一集（如打开单集循环）；MPV 同时恢复 `keep-open=yes`。
   Future<void> clearNext() async {}
 
   Stream<String> get queuedStartStream => const Stream<String>.empty();

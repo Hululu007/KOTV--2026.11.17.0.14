@@ -707,6 +707,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "setRepeatOne" -> {
         repeatOne = call.argument<Boolean>("on") == true
         main.post {
+          if (repeatOne) clearQueuedNext()
           player?.repeatMode = repeatMode()
           result.success(true)
         }
@@ -1206,7 +1207,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
    */
   private fun queueNext(next: KotvQueuedNext): Boolean {
     val p = player ?: return false
-    if (next.id.isEmpty() || next.url.isEmpty() || p.mediaItemCount == 0) return false
+    if (next.id.isEmpty() || next.url.isEmpty() || p.mediaItemCount == 0 || repeatOne) return false
     if (livePlayback || buildDrmConfig(currentDrm) != null || next.headers != currentHeaders) {
       clearQueuedNext()
       return false

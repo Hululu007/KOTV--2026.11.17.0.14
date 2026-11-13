@@ -8,7 +8,7 @@
 - 远程 OPENWEB：Go 统一代理（会话戳记、`/node/<pkg>/`、根别名反代 + Cookie）；本机不改写；Flutter 原样打开下发 URL。
 - 下载列表已完成任务可点开播放（本机直读路径，远端 play 换成 `/file/`）。
 - Node 切站：修复 watch 休眠后误杀新进程；未登记 api 时保留已起源包，避免 Win7 长时间转圈。
-- 桌面 MPV 无缝换集：排队下一集时关掉 media_kit 的 `keep-open`，否则 EOF 不前进播放列表。
+- MPV 无缝换集（桌面 media_kit + 安卓原生）：有排队时 `keep-open=no` 让列表自然前进（消片尾 pause）；无排队恢复 `yes` 以 `eof-reached` 报 completed；单集循环拒 queue；手动下一集仍走 playlist-pos/next。
 - Win7 系统全屏：子窗按客户区对齐，未对齐延后重试（去掉固定毫秒盲踢）；详情/直播进全屏时序收拢。
 - Win7 MPV：关直出=`hwdec=auto`（MPV 自选）；开直出=`dxva2`（ANGLE D3D9），拒互通后干净软解（D3D11 ANGLE 重建，去掉 `dxva2-copy`）；FVP/MPV 按 DXGI HEVC 能力选适配器。
 - 本机站点/网盘凭证落 `/TV/`；远端 `/TV/s_u_<用户名>/`（跟登录名，不跟账号 UUID）；不建 `s_c_*`。目录名收拢到 `Util.tvDirName` / `paths.TVDirName`。子 goroutine 用 `Bind(Snapshot())` 带上 username。全部清理：`ui/` 只留 `client.json`；TV 删 `s_c_*` 与旧 `s_u_<uuid>`。
