@@ -1,6 +1,7 @@
 // Header-only: pick a DXGI adapter that can HEVC-decode when one exists.
 // Used by FVP (D3D11 device) and media_kit ANGLE (D3D11 texture device).
 // Prefer capability, not vendor name. Skip Microsoft Basic Render Driver.
+// Probe once per process — D3D11CreateDevice + video-profile enum is heavy on Win7.
 #pragma once
 
 #include <d3d11.h>
@@ -62,7 +63,17 @@ inline bool IsBasicRender(const DXGI_ADAPTER_DESC& desc) {
 }  // namespace detail
 
 // Returns AddRef'd adapter (caller Release), or nullptr if none.
+// First call probes; later calls reuse the same adapter (including nullptr).
 inline IDXGIAdapter* PickAdapterPreferHevc() {
+  static Microsoft::WRL::ComPtr<IDXGIAdapter> cached;
+  static bool probed = false;
+  if (probed) {
+    IDXGIAdapter* out = cached.Get();
+    if (out) out->AddRef();
+    return out;
+  }
+  probed = true;
+
   Microsoft::WRL::ComPtr<IDXGIFactory> factory;
   if (FAILED(CreateDXGIFactory(__uuidof(IDXGIFactory), &factory)) || !factory) {
     return nullptr;
@@ -79,7 +90,8 @@ inline IDXGIAdapter* PickAdapterPreferHevc() {
     if (!first_hw) first_hw = adapter;
     if (!hevc && detail::AdapterSupportsHevc(adapter.Get())) hevc = adapter;
   }
-  IDXGIAdapter* out = hevc ? hevc.Get() : first_hw.Get();
+  cached = hevc ? hevc : first_hw;
+  IDXGIAdapter* out = cached.Get();
   if (out) out->AddRef();
   return out;
 }

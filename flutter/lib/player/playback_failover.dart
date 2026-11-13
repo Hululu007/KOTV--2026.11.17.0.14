@@ -5,9 +5,8 @@ import 'kotv_platform.dart';
 import 'player_normalize.dart';
 
 /// 开播黑屏/超时后的会话内回退（各平台同一套，不写死某一引擎）：
-/// 1. 硬解失败改「自动」再试一次（自动 = 交给播放器自己选硬解或软解）。
-///    MPV 硬解建不起来时自己会落到软解，无画面不是硬解造成的，跳过这一步。
-/// 2. 再按 [innieRing] 换下一个内置播放器，并恢复用户设置的解码
+/// 1. 硬解无画面时先改「自动」再试一次（含桌面 MPV；自动 = 播放器自选硬解或软解）。
+/// 2. 再按 [innieRing] 换下一个内置播放器，并恢复用户设置的解码。
 /// 不写回设置里的 `player` / `playerLive` / `playerDecode`。
 class KotvPlaybackFailover {
   KotvPlaybackFailover({

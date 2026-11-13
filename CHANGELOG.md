@@ -2,6 +2,9 @@
 
 ## v0.3.1
 
+- Win7 MPV 硬解直出落后到软解：`MaybeRewriteAngleForSoft` 事务式重建 D3D11 ANGLE，并 `Resize` 重挂 Flutter DXGI 纹理（同尺寸也重挂，避免黑屏）；DXGI HEVC 选卡进程内只探测一次。
+- Android CI：打包后清 `flutter/build` 等中间产物再上传；APK `compression-level: 0`；按 ABI 拆 `android-aarch64` / `android-armv7` artifact。
+- 开播 failover 注释与实现一致：含桌面 MPV 在硬解无画面时先改自动再试。
 - RK/旧安卓退全屏：详情与直播共用 HWC park 守卫（先卸面、缩槽后再挂回）；native enable 无层则重建，去掉盲等与散落 unpark。
 - Node 首页：`homeVod` 失败/空体再试 `homeVideo`，真实错误上抛；空推荐不钉死 home 缓存；去掉误导性「没有返回推荐」横幅。
 - Win7 全屏：子窗对齐失败继续重试；对齐后再确认踢一次（ANGLE/纹理晚落稳）。
@@ -35,7 +38,7 @@
 - Windows MPV：硬解交给 mpv 官方的自动选择；Win10 及以上的 libmpv 不再按 Win7 目标编译，也不再打 Win7 补丁。
 - Win7 MPV：「硬解直出」默认关：`hwdec=auto`，ANGLE D3D11；打开后 ANGLE D3D9 + `dxva2`，10 位 / Intel 四五代 H265 拒绝互通后直接软解（不经 `dxva2-copy`）。开关在设置、详情页播放器、直播与回看（软解时不显示）。
 - iOS 系统播放器：地址不带 .m3u8 后缀的 HLS 也按 HLS 打开。
-- 开播无画面时：Exo、FVP 硬解改「自动」重试一次（只对这次播放；MPV 硬解不成自己会落到软解，不重试），其余直接换下一个内置播放器，不再软硬互换；Exo 不再自己软解重建，选「硬」时视频只用硬件解码器。播放信息里的解码器名一律大写。
+- 开播无画面时：各内置引擎（含桌面 MPV）硬解无画面先改「自动」再试一次（只对这次播放），再换下一个内置播放器，不再软硬互换；Exo 不再自己软解重建，选「硬」时视频只用硬件解码器。播放信息里的解码器名一律大写。
 - 「循环播放视频」由详情页统一保存，各平台各播放器换集、换播放器后仍生效；Exo 改用自带的单集循环，不再播完重开。
 
 ## v0.2.2

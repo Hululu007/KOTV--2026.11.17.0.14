@@ -624,13 +624,28 @@ jobs:
           ./scripts/verify-android-mpv-apk.sh dist/KO影视-*-aarch64.apk
           ls -lh dist/KO影视-*.apk
 
+      # Upload 只需 dist/*.apk；清中间产物降盘压，避免 runner 在 archive 阶段失联。
+      - name: Free disk before Android upload
+        run: |
+          df -h /
+          du -sh dist flutter/build .tmp/fongmi-media ~/.gradle 2>/dev/null || true
+          rm -rf flutter/build .tmp/fongmi-media
+          df -h /
+
       - uses: actions/upload-artifact@v4
         with:
           retention-days: 1
-          name: android
-          path: |
-            dist/KO影视-*-aarch64.apk
-            dist/KO影视-*-armv7.apk
+          compression-level: 0
+          name: android-aarch64
+          path: dist/KO影视-*-aarch64.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          compression-level: 0
+          name: android-armv7
+          path: dist/KO影视-*-armv7.apk
           if-no-files-found: error
 
   # Web 包 = 引擎 + webapp（同端口放出，不进 PC/安卓/iOS）
