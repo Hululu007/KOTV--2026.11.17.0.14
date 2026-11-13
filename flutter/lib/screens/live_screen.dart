@@ -2479,21 +2479,26 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _exitImmersive() async {
     if (!_immersive) return;
-    final park = await kotvShouldParkSurfaceForImmersiveExit();
-    if (park) await kotvParkSurfaceForImmersiveExit(_playback);
-    if (mounted) {
-      setState(() {
-        _immersive = false;
-        _leftOpen = false;
-        _rightOpen = false;
-        _chromeVisible = false;
-      });
-      ref.read(liveImmersiveFullscreenProvider.notifier).state = false;
-    }
-    await kotvExitSystemFullscreen(
-      wasDisplayFullscreen: _desktopFs == KotvDesktopFullscreenKind.display,
+    await kotvRunImmersiveExitGuardingHwcSurface(
+      playback: _playback,
+      exitBody: () async {
+        if (mounted) {
+          setState(() {
+            _immersive = false;
+            _leftOpen = false;
+            _rightOpen = false;
+            _chromeVisible = false;
+          });
+          ref.read(liveImmersiveFullscreenProvider.notifier).state = false;
+        }
+        await kotvExitSystemFullscreen(
+          wasDisplayFullscreen: _desktopFs == KotvDesktopFullscreenKind.display,
+        );
+        try {
+          await WidgetsBinding.instance.endOfFrame;
+        } catch (_) {}
+      },
     );
-    if (park) await kotvUnparkSurfaceAfterImmersiveExit(_playback);
     if (!mounted) return;
     // 竖屏列表重建后直接停在当前分组、频道和节目。
     _scheduleScrollToCurrent();

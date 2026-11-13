@@ -2063,23 +2063,20 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     value.replace("\\", "\\\\").replace(",", "\\,")
 
   private fun setSurfaceLayerEnabled(enabled: Boolean) {
-    if (surfaceLayerEnabled == enabled) {
-      if (enabled) {
-        tryAttachSurface()
-        maybeLoadPending()
-      }
-      return
-    }
-    surfaceLayerEnabled = enabled
-    val host = surfaceHost
     if (!enabled) {
+      if (!surfaceLayerEnabled) return
+      surfaceLayerEnabled = false
       parkSurfaceTransient()
-      host?.clearVideoLayer()
+      surfaceHost?.clearVideoLayer()
       surfaceReady = false
       return
     }
-    if (host == null) return
-    host.setRender(renderTexture)
+    surfaceLayerEnabled = true
+    val host = surfaceHost ?: return
+    // 无有效 Surface（含 HWC park 卸层后）：重建；有则只挂接。surfaceCreated 再异步 attach。
+    if (host.currentSurface() == null) {
+      host.setRender(renderTexture)
+    }
     if (host.currentSurface() != null) {
       surfaceReady = true
       tryAttachSurface()

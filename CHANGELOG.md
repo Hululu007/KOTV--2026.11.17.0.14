@@ -2,6 +2,7 @@
 
 ## v0.3.1
 
+- RK/旧安卓退全屏：详情与直播共用 HWC park 守卫（先卸面、缩槽后再挂回）；native enable 无层则重建，去掉盲等与散落 unpark。
 - Node 首页：`homeVod` 失败/空体再试 `homeVideo`，真实错误上抛；空推荐不钉死 home 缓存；去掉误导性「没有返回推荐」横幅。
 - Win7 全屏：子窗对齐失败继续重试；对齐后再确认踢一次（ANGLE/纹理晚落稳）。
 - Node 切站：启动失败清掉 `stopping`，避免 Ensure/watch 空转无限转圈。

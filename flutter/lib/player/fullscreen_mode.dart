@@ -181,22 +181,41 @@ Future<bool> kotvShouldParkSurfaceForImmersiveExit() async {
   }
 }
 
-/// 卸掉视频 Surface（及 OSD 挖空层），等一两帧让 HWC 消化。
+Future<void> _awaitFrames(int n) async {
+  for (var i = 0; i < n; i++) {
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+    } catch (_) {}
+  }
+}
+
+/// 卸掉视频 Surface（及 OSD 挖空层），再等两帧让合成器消化。
 Future<void> kotvParkSurfaceForImmersiveExit(KotvPlayback playback) async {
   try {
     await playback.setVideoOutputEnabled(false);
   } catch (_) {}
-  try {
-    await WidgetsBinding.instance.endOfFrame;
-  } catch (_) {}
-  await Future<void>.delayed(const Duration(milliseconds: 120));
-  try {
-    await WidgetsBinding.instance.endOfFrame;
-  } catch (_) {}
+  await _awaitFrames(2);
 }
 
+/// 几何已缩回详情/列表槽后再调用：挂回画面并等一帧 rebuild。
+/// 缩槽前 unpark 会使新建 SurfaceView 随 Positioned 立刻 surfaceDestroyed。
 Future<void> kotvUnparkSurfaceAfterImmersiveExit(KotvPlayback playback) async {
   try {
     await playback.setVideoOutputEnabled(true);
   } catch (_) {}
+  await _awaitFrames(1);
+}
+
+/// 详情 / 直播退沉浸唯一入口：需 HWC park 时先卸面，[exitBody] 改图层后再挂回。
+Future<void> kotvRunImmersiveExitGuardingHwcSurface({
+  required KotvPlayback playback,
+  required Future<void> Function() exitBody,
+}) async {
+  final park = await kotvShouldParkSurfaceForImmersiveExit();
+  if (park) await kotvParkSurfaceForImmersiveExit(playback);
+  try {
+    await exitBody();
+  } finally {
+    if (park) await kotvUnparkSurfaceAfterImmersiveExit(playback);
+  }
 }
