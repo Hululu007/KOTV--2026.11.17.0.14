@@ -847,41 +847,96 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   // #region agent log
+  /// 详情 vs 直播会话差：cache-pause / media-live / 缓冲，不是 HEVC 硬解本身。
+  Future<Map<String, String>> _debugSessionProps() async {
+    Future<String> one(String name) async {
+      try {
+        final v = await _mpvProp(name)
+            .timeout(const Duration(milliseconds: 500), onTimeout: () => 'timeout');
+        return '$v';
+      } catch (e) {
+        return 'err:$e';
+      }
+    }
+
+    final keys = <String>[
+      'hwdec-current',
+      'hwdec',
+      'video-codec',
+      'video-format',
+      'media-live',
+      'duration',
+      'duration/full',
+      'cache-pause',
+      'cache-on-disk',
+      'cache',
+      'demuxer-max-bytes',
+      'demuxer-max-back-bytes',
+      'cache-pause-initial',
+      'framedrop',
+    ];
+    final out = <String, String>{};
+    for (final k in keys) {
+      out[k] = await one(k);
+    }
+    return out;
+  }
+
   Future<void> _debugProbeCodecAfterHwdec(String hwdecCurrent) async {
     try {
-      final codec = await _mpvProp('video-codec')
-          .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
-      final fmt = await _mpvProp('video-format')
-          .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
+      final props = await _debugSessionProps();
       kotvDebugNdjson(
-        hypothesisId: 'H5,H8',
+        hypothesisId: 'D1,D2,H8',
         location: 'media_kit_playback.dart:hwdec-current',
-        message: 'codec after hwdec',
+        message: 'session after hwdec',
         data: {
           'hwdecCurrent': hwdecCurrent,
-          'videoCodec': '$codec',
-          'videoFormat': '$fmt',
           'direct': _opts.direct,
           'markedLive': _live,
+          'engineLive': _engineLive,
+          ...props,
         },
       );
     } catch (e) {
       kotvDebugNdjson(
-        hypothesisId: 'H5,H8',
+        hypothesisId: 'D1,D2,H8',
         location: 'media_kit_playback.dart:hwdec-current',
-        message: 'codec after hwdec failed',
+        message: 'session after hwdec failed',
         data: {'hwdecCurrent': hwdecCurrent, 'err': '$e'},
       );
     }
   }
 
   Future<void> _debugPostOpenProbes(int gen) async {
+    // 开播当帧先打一份会话快照（详情/直播对照用）。
+    try {
+      final props = await _debugSessionProps();
+      kotvDebugNdjson(
+        hypothesisId: 'D1,D2,D3',
+        location: 'media_kit_playback.dart:post-open',
+        message: 'session at open end',
+        data: {
+          'markedLive': _live,
+          'engineLive': _engineLive,
+          'direct': _opts.direct,
+          'diskCacheOpt': _opts.diskCache,
+          ...props,
+        },
+      );
+    } catch (e) {
+      kotvDebugNdjson(
+        hypothesisId: 'D1,D2,D3',
+        location: 'media_kit_playback.dart:post-open',
+        message: 'session at open end failed',
+        data: {'err': '$e'},
+      );
+    }
     for (var i = 1; i <= 8; i++) {
       await Future<void>.delayed(const Duration(seconds: 1));
       if (gen != _openGen || _url.isEmpty) return;
       // 先打心跳（不碰 mpv）：若卡 UI 后仍有心跳 → Dart isolate 活着。
       kotvDebugNdjson(
-        hypothesisId: 'H5',
+        hypothesisId: 'H5,D3',
         location: 'media_kit_playback.dart:post-open',
         message: 'heartbeat',
         data: {
@@ -896,28 +951,12 @@ class MediaKitPlayback extends KotvPlayback {
         },
       );
       try {
-        final mediaLive = await _mpvProp('media-live')
-            .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
-        final dur = await _mpvProp('duration')
-            .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
-        final durFull = await _mpvProp('duration/full')
-            .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
-        final hw = await _mpvProp('hwdec-current')
-            .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
-        final codec = await _mpvProp('video-codec')
-            .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
+        final props = await _debugSessionProps();
         kotvDebugNdjson(
-          hypothesisId: 'E1,H5,H8',
+          hypothesisId: 'D1,D2,E1,H5',
           location: 'media_kit_playback.dart:post-open',
           message: 'mpv probe',
-          data: {
-            'i': i,
-            'mediaLive': '$mediaLive',
-            'duration': '$dur',
-            'durationFull': '$durFull',
-            'hwdecCurrent': '$hw',
-            'videoCodec': '$codec',
-          },
+          data: {'i': i, ...props},
         );
       } catch (e) {
         kotvDebugNdjson(
