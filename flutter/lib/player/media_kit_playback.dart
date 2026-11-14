@@ -448,8 +448,9 @@ class MediaKitPlayback extends KotvPlayback {
     }
     final q = _queued;
     if (q != null && await _skipToQueued(q)) return;
-    // 标定直播且无排队：时间轴抖动勿当片尾硬切；点播仍报 completed。
-    if (_live) return;
+    // 标定直播，或引擎已 media-live：时间轴/EOF 抖动勿当片尾硬切。
+    // 详情虎牙等 open(live:false)，靠 _engineLive 挡「网慢播完切集」；勿把 _live 改真（会挡 queueNext）。
+    if (_live || _engineLive) return;
     // 无排队或切入失败：清掉排队态，交给详情硬切下一集。
     _queued = null;
     await _setKeepOpen(true);
