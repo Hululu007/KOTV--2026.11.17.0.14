@@ -2213,11 +2213,12 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
 """
 
 # Upgrade / install instrumented method (replace if rate-limit marker missing).
+# IMPORTANT: use lambda replacement — re.sub treats \ in the template (eats \" → broken C strings).
 import re as _re
 if "skip_not_soft_n" not in text_vo:
     text_vo2, n_sub = _re.subn(
         r"bool VideoOutput::MaybeRewriteAngleForSoft\(\) \{.*?\n\}\n\n",
-        method_def,
+        lambda _m: method_def,
         text_vo,
         count=1,
         flags=_re.S,
