@@ -2,7 +2,7 @@
 
 ## v0.3.1
 
-- Win7 MPV：关直出与 Win10 同为 `hwdec=auto`；开直出仍 `dxva2`，不能直出时会话退回关直出（新建 D3D11 Player）。libmpv 对 Intel 四五代 H265 拒绝裸 `d3d11va`/`dxva2` 零拷贝互通，让 `auto` 落到拷贝/软解，避免卡死 UI。「硬解直出」仅 Win7 显示。撤回 ANGLE/FVP 的 DXGI HEVC 选卡。
+- Win7 MPV：关直出与 Win10 同为 `hwdec=auto`（官方自选，无额外拒互通）；开直出仍 `dxva2`，不能直出时会话退回关直出（新建 D3D11 Player）。「硬解直出」仅 Win7 显示。撤回 ANGLE/FVP 的 DXGI HEVC 选卡。
 - 撤回 RK/旧安卓退全屏 HWC park（接受旧机退全屏崩溃风险）；`setSurfaceLayerEnabled` 恢复 park 前逻辑。
 - Android CI：打包后清 `flutter/build` 等中间产物再上传；APK `compression-level: 0`；按 ABI 拆 `android-aarch64` / `android-armv7` artifact。
 - 开播 failover 注释与实现一致：含桌面 MPV 在硬解无画面时先改自动再试。

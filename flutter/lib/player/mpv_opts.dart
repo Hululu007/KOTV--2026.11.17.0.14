@@ -317,12 +317,10 @@ class KotvMpvOpts {
 
   /// Win7 / Win10+ 的 hwdec 列表（收拢在此，避免详情/直播各写一份）。
   ///
-  /// Win7 开「硬解直出」：只试 `dxva2`（须 ANGLE D3D9 + dxva2-egl）。mpv 补丁对
-  /// 10 位 / Haswell·Broadwell 的 H265 拒绝互通以免绿/蓝屏；下一档不走 `dxva2-copy`。
-  /// 落到软解后 Dart 会话内关直出并新建 Player（与关直出相同：`auto` + D3D11 ANGLE）。
+  /// Win7 开「硬解直出」：只试 `dxva2`（须 ANGLE D3D9 + dxva2-egl）；不行则软解，
+  /// Dart 会话内关直出并新建 Player（与关直出相同：`auto` + D3D11 ANGLE）。
   ///
-  /// Win7 关直出 / Win10+：一律 `hwdec=auto`，由 MPV 自选硬解/拷贝/软解。Intel 四五代
-  /// 裸 `d3d11va` 互通卡死由 libmpv 补丁拒互通后落到下一档（见 mpv-win7-desktop.patch）。
+  /// Win7 关直出 / Win10+：一律 `hwdec=auto`（官方自选硬解/拷贝/软解，无额外拒互通）。
   String _windowsHwdec({required bool hard}) {
     if (kotvIsWindows7() && direct) {
       return hard ? 'dxva2' : 'dxva2,no';
@@ -375,6 +373,16 @@ class KotvMpvOpts {
       try {
         await set('hwdec', hw);
       } catch (_) {}
+      // #region agent log
+      if (live && kotvIsWindows7()) {
+        kotvDebugNdjson(
+          hypothesisId: 'L3',
+          location: 'mpv_opts.dart:applyAfterAttach',
+          message: 'after set hwdec',
+          data: {'hwdec': hw, 'live': true},
+        );
+      }
+      // #endregion
 
       // 分片后缀不按名单拦截；不设 protocol_whitelist（名单外的 RTSP/RTMP 会被拒）。
       try {
@@ -413,6 +421,16 @@ class KotvMpvOpts {
           }
         }
       } catch (_) {}
+      // #region agent log
+      if (live && kotvIsWindows7()) {
+        kotvDebugNdjson(
+          hypothesisId: 'L2',
+          location: 'mpv_opts.dart:applyAfterAttach',
+          message: 'after cache props',
+          data: {'live': true, 'diskCache': diskCache},
+        );
+      }
+      // #endregion
       try {
         if (preferredTextLangs.trim().isNotEmpty) {
           final slang = preferredTextLangs.replaceAll(';', ',').replaceAll(RegExp(r'\s+'), '');
@@ -448,6 +466,16 @@ class KotvMpvOpts {
       try {
         await set('sub-scale', kotvClampSubtitleFontScale(subtitleFontScale).toStringAsFixed(2));
       } catch (_) {}
+      // #region agent log
+      if (live && kotvIsWindows7()) {
+        kotvDebugNdjson(
+          hypothesisId: 'L2',
+          location: 'mpv_opts.dart:applyAfterAttach',
+          message: 'applyAfterAttach done',
+          data: {'live': true, 'hwdec': hw},
+        );
+      }
+      // #endregion
     } catch (_) {}
   }
 

@@ -665,8 +665,28 @@ class MediaKitPlayback extends KotvPlayback {
     }
     _drmSession = clearKeyHex != null;
     _clearKeyHex = clearKeyHex;
+    // #region agent log
+    if (live && kotvIsWindows7()) {
+      kotvDebugNdjson(
+        hypothesisId: 'L1',
+        location: 'media_kit_playback.dart:open',
+        message: 'open begin',
+        data: {'live': live, 'waitReady': waitReady, 'urlLen': url.length},
+      );
+    }
+    // #endregion
     await _optsReady;
     await _opts.applyAfterAttach(player, live: live);
+    // #region agent log
+    if (live && kotvIsWindows7()) {
+      kotvDebugNdjson(
+        hypothesisId: 'L1,L2',
+        location: 'media_kit_playback.dart:open',
+        message: 'after applyAfterAttach',
+        data: {'live': live},
+      );
+    }
+    // #endregion
     await _ensureMpvTimelineObservers();
     if (_extraOpenProps.isNotEmpty) {
       for (final e in _extraOpenProps.entries) {
@@ -693,7 +713,27 @@ class MediaKitPlayback extends KotvPlayback {
       if (gen != _openGen || _url.isEmpty) return;
       await _applyMpvHeaderProps();
       if (gen != _openGen || _url.isEmpty) return;
+      // #region agent log
+      if (live && kotvIsWindows7()) {
+        kotvDebugNdjson(
+          hypothesisId: 'L1',
+          location: 'media_kit_playback.dart:open',
+          message: 'before openThenUnpause',
+          data: {'live': live, 'gen': gen},
+        );
+      }
+      // #endregion
       await _openThenUnpause(media);
+      // #region agent log
+      if (live && kotvIsWindows7()) {
+        kotvDebugNdjson(
+          hypothesisId: 'L1',
+          location: 'media_kit_playback.dart:open',
+          message: 'after openThenUnpause',
+          data: {'live': live, 'gen': gen},
+        );
+      }
+      // #endregion
     }();
     await job;
     // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
@@ -705,8 +745,38 @@ class MediaKitPlayback extends KotvPlayback {
     // 看到「不缓冲且已死」而退出，否则 open() 永远不返回。
     _openSerial++;
     if (waitReady) {
+      // #region agent log
+      if (live && kotvIsWindows7()) {
+        kotvDebugNdjson(
+          hypothesisId: 'L4',
+          location: 'media_kit_playback.dart:open',
+          message: 'before awaitReadyAfterOpen',
+          data: {'live': live, 'w': width, 'h': height},
+        );
+      }
+      // #endregion
       await awaitReadyAfterOpen();
+      // #region agent log
+      if (live && kotvIsWindows7()) {
+        kotvDebugNdjson(
+          hypothesisId: 'L4',
+          location: 'media_kit_playback.dart:open',
+          message: 'after awaitReadyAfterOpen',
+          data: {'live': live, 'w': width, 'h': height},
+        );
+      }
+      // #endregion
     }
+    // #region agent log
+    if (live && kotvIsWindows7()) {
+      kotvDebugNdjson(
+        hypothesisId: 'L1',
+        location: 'media_kit_playback.dart:open',
+        message: 'open end',
+        data: {'live': live},
+      );
+    }
+    // #endregion
   }
 
   @override

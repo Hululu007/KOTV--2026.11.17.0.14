@@ -2126,10 +2126,15 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
     return false;
   }
   if (surface_manager_ == nullptr || !surface_manager_->prefer_d3d9() || !render_context_) {
-    kotv_dbg_a027de("A", "skip_gate",
-                    surface_manager_ == nullptr ? "{\\"reason\\":\\"no_surface\\"}"
-                    : !surface_manager_->prefer_d3d9() ? "{\\"reason\\":\\"not_d3d9\\"}"
-                                                       : "{\\"reason\\":\\"no_rc\\"}");
+    // Rate-limit: CheckAndResize 会狂调；满盘写日志本身也会拖 UI。
+    static int skip_gate_n = 0;
+    if (skip_gate_n < 3) {
+      ++skip_gate_n;
+      kotv_dbg_a027de("A", "skip_gate",
+                      surface_manager_ == nullptr ? "{\\"reason\\":\\"no_surface\\"}"
+                      : !surface_manager_->prefer_d3d9() ? "{\\"reason\\":\\"not_d3d9\\"}"
+                                                         : "{\\"reason\\":\\"no_rc\\"}");
+    }
     return false;
   }
   auto cur = mpv_get_property_string(handle_, "hwdec-current");
