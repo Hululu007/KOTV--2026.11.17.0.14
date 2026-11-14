@@ -2139,15 +2139,24 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
   }
   auto cur = mpv_get_property_string(handle_, "hwdec-current");
   if (!cur) {
-    kotv_dbg_a027de("A", "skip_no_hwdec_current", "{}");
+    static int skip_no_cur_n = 0;
+    if (skip_no_cur_n < 2) {
+      ++skip_no_cur_n;
+      kotv_dbg_a027de("A", "skip_no_hwdec_current", "{}");
+    }
     return false;
   }
   const std::string s(cur);
   mpv_free(cur);
   if (s != "no") {
-    char buf[128];
-    snprintf(buf, sizeof(buf), "{\\"hwdecCurrent\\":\\"%s\\"}", s.c_str());
-    kotv_dbg_a027de("A", "skip_not_soft", buf);
+    // dxva2/d3d11va 正常时 CheckAndResize 每帧都会进这里；逐帧 fopen 会卡死 UI。
+    static int skip_not_soft_n = 0;
+    if (skip_not_soft_n < 2) {
+      ++skip_not_soft_n;
+      char buf[128];
+      snprintf(buf, sizeof(buf), "{\\"hwdecCurrent\\":\\"%s\\"}", s.c_str());
+      kotv_dbg_a027de("A", "skip_not_soft", buf);
+    }
     return false;
   }
   const int32_t w = surface_manager_->width();
@@ -2203,9 +2212,9 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
 
 """
 
-# Upgrade / install instrumented method (replace if latch marker missing).
+# Upgrade / install instrumented method (replace if rate-limit marker missing).
 import re as _re
-if "soft_rebuild_latched" not in text_vo:
+if "skip_not_soft_n" not in text_vo:
     text_vo2, n_sub = _re.subn(
         r"bool VideoOutput::MaybeRewriteAngleForSoft\(\) \{.*?\n\}\n\n",
         method_def,

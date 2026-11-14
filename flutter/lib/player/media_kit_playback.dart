@@ -289,8 +289,28 @@ class MediaKitPlayback extends KotvPlayback {
         final live = raw.trim() == 'yes' || raw.trim() == 'true' || raw.trim() == '1';
         if (!live || _engineLive) return;
         _engineLive = true;
+        // #region agent log
+        if (kotvIsWindows7()) {
+          kotvDebugNdjson(
+            hypothesisId: 'H2',
+            location: 'media_kit_playback.dart:media-live',
+            message: 'engine live elevated',
+            data: {'raw': raw.trim(), 'markedLive': _live},
+          );
+        }
+        // #endregion
         // 只升缓冲策略；点播会话保持 !_live，否则 queueNext / 片尾连播会被挡掉。
         await _opts.applyAfterAttach(player, live: true);
+        // #region agent log
+        if (kotvIsWindows7()) {
+          kotvDebugNdjson(
+            hypothesisId: 'H2',
+            location: 'media_kit_playback.dart:media-live',
+            message: 'after live applyAfterAttach',
+            data: {'markedLive': _live},
+          );
+        }
+        // #endregion
         notifyListeners();
       });
       // #region agent log
@@ -666,19 +686,26 @@ class MediaKitPlayback extends KotvPlayback {
     _drmSession = clearKeyHex != null;
     _clearKeyHex = clearKeyHex;
     // #region agent log
-    if (live && kotvIsWindows7()) {
+    // 详情页虎牙等也是 live:false 起播，靠 media-live 提升；Win7 一律打点。
+    if (kotvIsWindows7()) {
       kotvDebugNdjson(
-        hypothesisId: 'L1',
+        hypothesisId: 'L1,H3',
         location: 'media_kit_playback.dart:open',
         message: 'open begin',
-        data: {'live': live, 'waitReady': waitReady, 'urlLen': url.length},
+        data: {
+          'live': live,
+          'waitReady': waitReady,
+          'urlLen': url.length,
+          'direct': _opts.direct,
+          'hwdec': _opts.hwdecValue(),
+        },
       );
     }
     // #endregion
     await _optsReady;
     await _opts.applyAfterAttach(player, live: live);
     // #region agent log
-    if (live && kotvIsWindows7()) {
+    if (kotvIsWindows7()) {
       kotvDebugNdjson(
         hypothesisId: 'L1,L2',
         location: 'media_kit_playback.dart:open',
@@ -714,9 +741,9 @@ class MediaKitPlayback extends KotvPlayback {
       await _applyMpvHeaderProps();
       if (gen != _openGen || _url.isEmpty) return;
       // #region agent log
-      if (live && kotvIsWindows7()) {
+      if (kotvIsWindows7()) {
         kotvDebugNdjson(
-          hypothesisId: 'L1',
+          hypothesisId: 'L1,H3',
           location: 'media_kit_playback.dart:open',
           message: 'before openThenUnpause',
           data: {'live': live, 'gen': gen},
@@ -725,9 +752,9 @@ class MediaKitPlayback extends KotvPlayback {
       // #endregion
       await _openThenUnpause(media);
       // #region agent log
-      if (live && kotvIsWindows7()) {
+      if (kotvIsWindows7()) {
         kotvDebugNdjson(
-          hypothesisId: 'L1',
+          hypothesisId: 'L1,H3',
           location: 'media_kit_playback.dart:open',
           message: 'after openThenUnpause',
           data: {'live': live, 'gen': gen},
@@ -746,7 +773,7 @@ class MediaKitPlayback extends KotvPlayback {
     _openSerial++;
     if (waitReady) {
       // #region agent log
-      if (live && kotvIsWindows7()) {
+      if (kotvIsWindows7()) {
         kotvDebugNdjson(
           hypothesisId: 'L4',
           location: 'media_kit_playback.dart:open',
@@ -757,7 +784,7 @@ class MediaKitPlayback extends KotvPlayback {
       // #endregion
       await awaitReadyAfterOpen();
       // #region agent log
-      if (live && kotvIsWindows7()) {
+      if (kotvIsWindows7()) {
         kotvDebugNdjson(
           hypothesisId: 'L4',
           location: 'media_kit_playback.dart:open',
@@ -768,12 +795,12 @@ class MediaKitPlayback extends KotvPlayback {
       // #endregion
     }
     // #region agent log
-    if (live && kotvIsWindows7()) {
+    if (kotvIsWindows7()) {
       kotvDebugNdjson(
         hypothesisId: 'L1',
         location: 'media_kit_playback.dart:open',
         message: 'open end',
-        data: {'live': live},
+        data: {'live': live, 'engineLive': _engineLive},
       );
     }
     // #endregion

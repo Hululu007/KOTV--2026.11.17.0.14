@@ -374,12 +374,12 @@ class KotvMpvOpts {
         await set('hwdec', hw);
       } catch (_) {}
       // #region agent log
-      if (live && kotvIsWindows7()) {
+      if (kotvIsWindows7()) {
         kotvDebugNdjson(
           hypothesisId: 'L3',
           location: 'mpv_opts.dart:applyAfterAttach',
           message: 'after set hwdec',
-          data: {'hwdec': hw, 'live': true},
+          data: {'hwdec': hw, 'live': live},
         );
       }
       // #endregion
@@ -422,12 +422,12 @@ class KotvMpvOpts {
         }
       } catch (_) {}
       // #region agent log
-      if (live && kotvIsWindows7()) {
+      if (kotvIsWindows7()) {
         kotvDebugNdjson(
           hypothesisId: 'L2',
           location: 'mpv_opts.dart:applyAfterAttach',
           message: 'after cache props',
-          data: {'live': true, 'diskCache': diskCache},
+          data: {'live': live, 'diskCache': diskCache},
         );
       }
       // #endregion
@@ -467,12 +467,12 @@ class KotvMpvOpts {
         await set('sub-scale', kotvClampSubtitleFontScale(subtitleFontScale).toStringAsFixed(2));
       } catch (_) {}
       // #region agent log
-      if (live && kotvIsWindows7()) {
+      if (kotvIsWindows7()) {
         kotvDebugNdjson(
           hypothesisId: 'L2',
           location: 'mpv_opts.dart:applyAfterAttach',
           message: 'applyAfterAttach done',
-          data: {'live': true, 'hwdec': hw},
+          data: {'live': live, 'hwdec': hw},
         );
       }
       // #endregion
