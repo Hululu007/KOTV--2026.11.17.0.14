@@ -286,7 +286,24 @@ class MediaKitPlayback extends KotvPlayback {
         notifyListeners();
       });
       await (platform as dynamic).observeProperty('media-live', (String raw) async {
-        final live = raw.trim() == 'yes' || raw.trim() == 'true' || raw.trim() == '1';
+        final rawTrim = raw.trim();
+        final live = rawTrim == 'yes' || rawTrim == 'true' || rawTrim == '1';
+        // #region agent log
+        // 详情页「不提升」：也要看见 media-live=no / 空，才能对照 FongMi demux live_state。
+        if (kotvIsWindows7()) {
+          kotvDebugNdjson(
+            hypothesisId: 'E1',
+            location: 'media_kit_playback.dart:media-live',
+            message: 'media-live changed',
+            data: {
+              'raw': rawTrim,
+              'liveYes': live,
+              'markedLive': _live,
+              'engineLive': _engineLive,
+            },
+          );
+        }
+        // #endregion
         if (!live || _engineLive) return;
         _engineLive = true;
         // #region agent log
@@ -295,7 +312,7 @@ class MediaKitPlayback extends KotvPlayback {
             hypothesisId: 'H2',
             location: 'media_kit_playback.dart:media-live',
             message: 'engine live elevated',
-            data: {'raw': raw.trim(), 'markedLive': _live},
+            data: {'raw': rawTrim, 'markedLive': _live},
           );
         }
         // #endregion
@@ -345,6 +362,8 @@ class MediaKitPlayback extends KotvPlayback {
               'live': _live || _engineLive,
             },
           );
+          // H5/H8：卡死若在 d3d11va-copy 之后，补 codec 快照（带超时，避免 getProperty 堵死回调）。
+          unawaited(_debugProbeCodecAfterHwdec(cur));
           if (!kotvWin7SoftOnDirectNeedsNewPlayer(direct: _opts.direct, hwdecCurrent: cur)) {
             return;
           }
@@ -820,9 +839,97 @@ class MediaKitPlayback extends KotvPlayback {
         message: 'open end',
         data: {'live': live, 'engineLive': _engineLive},
       );
+      // H5：纯 Dart 心跳 vs 带超时的 mpv 探针，区分 UI isolate 冻死 / libmpv 堵死。
+      // E1：详情不升 live 时持续采样 media-live + duration。
+      unawaited(_debugPostOpenProbes(gen));
     }
     // #endregion
   }
+
+  // #region agent log
+  Future<void> _debugProbeCodecAfterHwdec(String hwdecCurrent) async {
+    try {
+      final codec = await _mpvProp('video-codec')
+          .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
+      final fmt = await _mpvProp('video-format')
+          .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
+      kotvDebugNdjson(
+        hypothesisId: 'H5,H8',
+        location: 'media_kit_playback.dart:hwdec-current',
+        message: 'codec after hwdec',
+        data: {
+          'hwdecCurrent': hwdecCurrent,
+          'videoCodec': '$codec',
+          'videoFormat': '$fmt',
+          'direct': _opts.direct,
+          'markedLive': _live,
+        },
+      );
+    } catch (e) {
+      kotvDebugNdjson(
+        hypothesisId: 'H5,H8',
+        location: 'media_kit_playback.dart:hwdec-current',
+        message: 'codec after hwdec failed',
+        data: {'hwdecCurrent': hwdecCurrent, 'err': '$e'},
+      );
+    }
+  }
+
+  Future<void> _debugPostOpenProbes(int gen) async {
+    for (var i = 1; i <= 8; i++) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      if (gen != _openGen || _url.isEmpty) return;
+      // 先打心跳（不碰 mpv）：若卡 UI 后仍有心跳 → Dart isolate 活着。
+      kotvDebugNdjson(
+        hypothesisId: 'H5',
+        location: 'media_kit_playback.dart:post-open',
+        message: 'heartbeat',
+        data: {
+          'i': i,
+          'playing': playing,
+          'buffering': buffering,
+          'w': width,
+          'h': height,
+          'engineLive': _engineLive,
+          'markedLive': _live,
+          'direct': _opts.direct,
+        },
+      );
+      try {
+        final mediaLive = await _mpvProp('media-live')
+            .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
+        final dur = await _mpvProp('duration')
+            .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
+        final durFull = await _mpvProp('duration/full')
+            .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
+        final hw = await _mpvProp('hwdec-current')
+            .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
+        final codec = await _mpvProp('video-codec')
+            .timeout(const Duration(milliseconds: 800), onTimeout: () => 'timeout');
+        kotvDebugNdjson(
+          hypothesisId: 'E1,H5,H8',
+          location: 'media_kit_playback.dart:post-open',
+          message: 'mpv probe',
+          data: {
+            'i': i,
+            'mediaLive': '$mediaLive',
+            'duration': '$dur',
+            'durationFull': '$durFull',
+            'hwdecCurrent': '$hw',
+            'videoCodec': '$codec',
+          },
+        );
+      } catch (e) {
+        kotvDebugNdjson(
+          hypothesisId: 'H5',
+          location: 'media_kit_playback.dart:post-open',
+          message: 'mpv probe failed',
+          data: {'i': i, 'err': '$e'},
+        );
+      }
+    }
+  }
+  // #endregion
 
   @override
   Future<void> awaitReadyAfterOpen() async {
