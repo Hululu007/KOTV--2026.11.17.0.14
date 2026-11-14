@@ -2105,8 +2105,8 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
     const DWORD n = GetTempPathA(MAX_PATH, path);
     if (!n || n + 22 >= MAX_PATH) return;
     memcpy(path + n, "kotv-debug-a027de.log", 22);
-    FILE* f = fopen(path, "a");
-    if (!f) return;
+    FILE* f = nullptr;
+    if (fopen_s(&f, path, "a") != 0 || !f) return;
     fprintf(f,
             "{\\"sessionId\\":\\"a027de\\",\\"hypothesisId\\":\\"%s\\",\\"location\\":\\"MaybeRewriteAngleForSoft\\","
             "\\"message\\":\\"%s\\",\\"data\\":%s,\\"timestamp\\":%lu}\\n",
