@@ -189,8 +189,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _mkPlayer!,
       opts: _mpvOpts.copyWith(decodeMode: _decodeMode),
       live: true,
+      onWin7SoftOnDirect: _onWin7SoftOnDirect,
     );
     return _mk!;
+  }
+
+  /// Win7 直出已软解：会话内关直出并换 D3D11 Player（不落盘）。
+  void _onWin7SoftOnDirect() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_mpvOpts.direct) return;
+      setState(() => _mpvOpts = _mpvOpts.copyWith(direct: false));
+      unawaited(() async {
+        final pos = _playUrl.isNotEmpty ? _playback.position : Duration.zero;
+        await _releaseMpv();
+        await _reopenCurrent(pos);
+      }());
+    });
   }
 
   /// 拆掉 MPV（Android 原生或桌面 media_kit Player）；下次 [_playback] 按当前设置新建。

@@ -530,7 +530,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     final player = kotvCreateMpvPlayer();
     _mkPlayer = player;
-    _mk = MediaKitPlayback(player, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
+    _mk = MediaKitPlayback(
+      player,
+      opts: _mpvOpts.copyWith(decodeMode: _decodeMode),
+      onWin7SoftOnDirect: _onWin7SoftOnDirect,
+    );
     _playingSub?.cancel();
     _bufferingSub?.cancel();
     _playingSub = player.stream.playing.listen((_) {
@@ -927,6 +931,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (!mounted) return;
     _danmakuItems.value = kotvAppendLiveDanmaku(_danmakuItems.value, item, _playback.position);
     if (!_danmakuOn) setState(() => _danmakuOn = true);
+  }
+
+  /// Win7 直出已软解：会话内关直出并换 D3D11 Player（不落盘；in-place MaybeRewrite 会蓝屏）。
+  void _onWin7SoftOnDirect() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_mpvOpts.direct) return;
+      setState(() => _mpvOpts = _mpvOpts.copyWith(direct: false));
+      unawaited(_reopenWithNewMpvPlayer());
+    });
   }
 
   /// 换一个 media_kit Player（见 [kotvMediaKitNeedsNewPlayer]）；正在播就按当前进度重开本集。

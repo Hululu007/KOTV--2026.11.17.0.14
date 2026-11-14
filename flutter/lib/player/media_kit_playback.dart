@@ -9,6 +9,7 @@ import 'drm_opts.dart';
 import 'kotv_debug_ndjson.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
+import 'kotv_win7_direct.dart';
 import 'mpv_opts.dart';
 import 'play_format.dart';
 import 'play_headers.dart';
@@ -64,12 +65,15 @@ KotvTrack _kotvTrackFromMediaKit(dynamic t) {
 /// media_kit / libmpv（桌面 / iOS 等非 Android 原生插件路径）。
 class MediaKitPlayback extends KotvPlayback {
   /// [live]=true：构造期就关 cache-pause，并且不打开磁盘缓存。字节上限与点播相同。
+  /// [onWin7SoftOnDirect]：直出 Player 已落到软解时回调（须换 D3D11 Player；勿在回调里同步 dispose 本实例）。
   MediaKitPlayback(
     this.player, {
     KotvMpvOpts? opts,
     bool live = false,
+    void Function()? onWin7SoftOnDirect,
   })  : _opts = opts ?? const KotvMpvOpts(),
         _live = live,
+        _onWin7SoftOnDirect = onWin7SoftOnDirect,
         controller = VideoController(
           player,
           configuration: (opts ?? const KotvMpvOpts()).videoControllerConfiguration(),
@@ -135,6 +139,8 @@ class MediaKitPlayback extends KotvPlayback {
 
   final Player player;
   final VideoController controller;
+  final void Function()? _onWin7SoftOnDirect;
+  bool _softOnDirectRecoveryQueued = false;
   KotvMpvOpts _opts;
   bool _previewVideoOriginal = false;
   bool _previewAudioOriginal = false;
@@ -290,17 +296,30 @@ class MediaKitPlayback extends KotvPlayback {
       // #region agent log
       if (kotvIsWindows7()) {
         await (platform as dynamic).observeProperty('hwdec-current', (String raw) async {
+          final cur = raw.trim();
           kotvDebugNdjson(
             hypothesisId: 'A,B,E',
             location: 'media_kit_playback.dart:hwdec-current',
             message: 'hwdec-current changed',
             data: {
-              'hwdecCurrent': raw.trim(),
+              'hwdecCurrent': cur,
               'hwdecAsked': _opts.hwdecValue(),
               'direct': _opts.direct,
               'live': _live || _engineLive,
             },
           );
+          if (!kotvWin7SoftOnDirectNeedsNewPlayer(direct: _opts.direct, hwdecCurrent: cur)) {
+            return;
+          }
+          if (_softOnDirectRecoveryQueued) return;
+          _softOnDirectRecoveryQueued = true;
+          kotvDebugNdjson(
+            hypothesisId: 'B',
+            location: 'media_kit_playback.dart:soft_on_direct',
+            message: 'queue D3D11 Player recreate',
+            data: {'hwdecCurrent': cur, 'direct': true},
+          );
+          _onWin7SoftOnDirect?.call();
         });
       }
       // #endregion

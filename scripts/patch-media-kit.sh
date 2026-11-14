@@ -2099,7 +2099,12 @@ if legacy_start in text_vo and "bool VideoOutput::MaybeRewriteAngleForSoft()" no
 method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
   // KOTV: dxva2 used D3D9 ANGLE; soft fallback on that path is blue/black — rebuild on D3D11
   // and always Resize so Flutter re-registers the DXGI shared handle (same size still needed).
+  // Win7: in-place create often fails; latch after one failure so CheckAndResize stops hammering
+  // (Dart recreates a D3D11 Player instead).
   // kotv_dbg_a027de: debug NDJSON → %TEMP%\\\\kotv-debug-a027de.log
+  // soft_rebuild_latched: marker for patch upgrade
+  static bool soft_rebuild_latched = false;
+  static bool soft_rebuild_latched_logged = false;
   auto kotv_dbg_a027de = [](const char* hyp, const char* msg, const char* extra) {
     char path[MAX_PATH] = {};
     const DWORD n = GetTempPathA(MAX_PATH, path);
@@ -2113,6 +2118,13 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
             hyp, msg, extra ? extra : "{}", (unsigned long)GetTickCount());
     fclose(f);
   };
+  if (soft_rebuild_latched) {
+    if (!soft_rebuild_latched_logged) {
+      soft_rebuild_latched_logged = true;
+      kotv_dbg_a027de("B", "skip_latched", "{}");
+    }
+    return false;
+  }
   if (surface_manager_ == nullptr || !surface_manager_->prefer_d3d9() || !render_context_) {
     kotv_dbg_a027de("A", "skip_gate",
                     surface_manager_ == nullptr ? "{\\"reason\\":\\"no_surface\\"}"
@@ -2155,6 +2167,7 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
     if (mpv_render_context_create(&fresh_rc, handle_, params) != 0) {
       fresh_rc = nullptr;
       fresh.reset();
+      soft_rebuild_latched = true;
       kotv_dbg_a027de("B", "rebuild_create_failed", "{}");
       return false;
     }
@@ -2164,6 +2177,7 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
       fresh_rc = nullptr;
     }
     fresh.reset();
+    soft_rebuild_latched = true;
     kotv_dbg_a027de("B", "rebuild_exception", "{}");
     return false;
   }
@@ -2184,9 +2198,9 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
 
 """
 
-# Upgrade / install instrumented method (replace body if older copy lacks dbg marker).
-if "kotv_dbg_a027de" not in text_vo:
-    import re as _re
+# Upgrade / install instrumented method (replace if latch marker missing).
+import re as _re
+if "soft_rebuild_latched" not in text_vo:
     text_vo2, n_sub = _re.subn(
         r"bool VideoOutput::MaybeRewriteAngleForSoft\(\) \{.*?\n\}\n\n",
         method_def,
@@ -2196,7 +2210,7 @@ if "kotv_dbg_a027de" not in text_vo:
     )
     if n_sub == 1:
         text_vo = text_vo2
-        print(f"patched media_kit_video ({root.name}): upgraded MaybeRewriteAngleForSoft with dbg")
+        print(f"patched media_kit_video ({root.name}): upgraded MaybeRewriteAngleForSoft with latch+dbg")
     elif "bool VideoOutput::MaybeRewriteAngleForSoft()" not in text_vo:
         anchor = "void VideoOutput::CheckAndResize() {\n"
         if text_vo.count(anchor) != 1:
