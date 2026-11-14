@@ -299,14 +299,15 @@ class MediaKitPlayback extends KotvPlayback {
           );
         }
         // #endregion
-        // 只升缓冲策略；点播会话保持 !_live，否则 queueNext / 片尾连播会被挡掉。
-        await _opts.applyAfterAttach(player, live: true);
+        // 只升缓冲策略（cache-pause 等）；勿再 set hwdec——播放中重设会在 Win7 卡死。
+        // 点播会话保持 !_live，否则 queueNext / 片尾连播会被挡掉。
+        await _opts.applyLiveBufferOnly(player);
         // #region agent log
         if (kotvIsWindows7()) {
           kotvDebugNdjson(
             hypothesisId: 'H2',
             location: 'media_kit_playback.dart:media-live',
-            message: 'after live applyAfterAttach',
+            message: 'after live buffer only',
             data: {'markedLive': _live},
           );
         }

@@ -344,6 +344,40 @@ class KotvMpvOpts {
     );
   }
 
+  /// 引擎 `media-live` 提升时只改直播缓冲，**不要**再 set hwdec。
+  /// Win7 上播放中重设 `hwdec=auto` 会卡死（日志：set hwdec 后无 after set hwdec）。
+  Future<void> applyLiveBufferOnly(Player player) async {
+    try {
+      final platform = player.platform;
+      if (platform == null) return;
+      Future<void> set(String k, String v) async {
+        await (platform as dynamic).setProperty(k, v);
+      }
+      // #region agent log
+      if (kotvIsWindows7()) {
+        kotvDebugNdjson(
+          hypothesisId: 'H2',
+          location: 'mpv_opts.dart:applyLiveBufferOnly',
+          message: 'live buffer only (no hwdec)',
+          data: {},
+        );
+      }
+      // #endregion
+      await set('cache-pause', 'no');
+      await set('cache-on-disk', 'no');
+      // #region agent log
+      if (kotvIsWindows7()) {
+        kotvDebugNdjson(
+          hypothesisId: 'H2',
+          location: 'mpv_opts.dart:applyLiveBufferOnly',
+          message: 'live buffer only done',
+          data: {},
+        );
+      }
+      // #endregion
+    } catch (_) {}
+  }
+
   /// 在 VideoController 已附着之后调用：缓冲预算 + conf（media_kit 路径）。
   Future<void> applyAfterAttach(Player player, {bool live = false}) async {
     try {
