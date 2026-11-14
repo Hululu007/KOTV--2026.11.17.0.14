@@ -6,6 +6,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import 'buffer_budget.dart';
 import 'drm_opts.dart';
+import 'kotv_debug_ndjson.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 import 'mpv_opts.dart';
@@ -286,6 +287,23 @@ class MediaKitPlayback extends KotvPlayback {
         await _opts.applyAfterAttach(player, live: true);
         notifyListeners();
       });
+      // #region agent log
+      if (kotvIsWindows7()) {
+        await (platform as dynamic).observeProperty('hwdec-current', (String raw) async {
+          kotvDebugNdjson(
+            hypothesisId: 'A,B,E',
+            location: 'media_kit_playback.dart:hwdec-current',
+            message: 'hwdec-current changed',
+            data: {
+              'hwdecCurrent': raw.trim(),
+              'hwdecAsked': _opts.hwdecValue(),
+              'direct': _opts.direct,
+              'live': _live || _engineLive,
+            },
+          );
+        });
+      }
+      // #endregion
       _observedMpvProps = true;
     } catch (_) {}
   }
@@ -887,8 +905,26 @@ class MediaKitPlayback extends KotvPlayback {
   bool get supportsDiscNav => true;
 
   @override
-  Future<String?> activeDecoderLabel() async =>
-      kotvMpvHwdecLabel('${await _mpvProp('hwdec-current') ?? ''}');
+  Future<String?> activeDecoderLabel() async {
+    final cur = '${await _mpvProp('hwdec-current') ?? ''}';
+    final asked = '${await _mpvProp('hwdec') ?? ''}';
+    // #region agent log
+    kotvDebugNdjson(
+      hypothesisId: 'A,B,C,E',
+      location: 'media_kit_playback.dart:activeDecoderLabel',
+      message: 'hwdec snapshot',
+      data: {
+        'hwdec': asked,
+        'hwdecCurrent': cur,
+        'direct': _opts.direct,
+        'live': _live || _engineLive,
+        'win7': kotvIsWindows7(),
+        'label': kotvMpvHwdecLabel(cur),
+      },
+    );
+    // #endregion
+    return kotvMpvHwdecLabel(cur);
+  }
 
   Future<dynamic> _mpvProp(String name) async {
     try {

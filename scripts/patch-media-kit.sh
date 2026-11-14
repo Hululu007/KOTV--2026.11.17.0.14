@@ -2099,20 +2099,43 @@ if legacy_start in text_vo and "bool VideoOutput::MaybeRewriteAngleForSoft()" no
 method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
   // KOTV: dxva2 used D3D9 ANGLE; soft fallback on that path is blue/black — rebuild on D3D11
   // and always Resize so Flutter re-registers the DXGI shared handle (same size still needed).
+  // kotv_dbg_a027de: debug NDJSON → %TEMP%\\\\kotv-debug-a027de.log
+  auto kotv_dbg_a027de = [](const char* hyp, const char* msg, const char* extra) {
+    char path[MAX_PATH] = {};
+    const DWORD n = GetTempPathA(MAX_PATH, path);
+    if (!n || n + 22 >= MAX_PATH) return;
+    memcpy(path + n, "kotv-debug-a027de.log", 22);
+    FILE* f = fopen(path, "a");
+    if (!f) return;
+    fprintf(f,
+            "{\\"sessionId\\":\\"a027de\\",\\"hypothesisId\\":\\"%s\\",\\"location\\":\\"MaybeRewriteAngleForSoft\\","
+            "\\"message\\":\\"%s\\",\\"data\\":%s,\\"timestamp\\":%lu}\\n",
+            hyp, msg, extra ? extra : "{}", (unsigned long)GetTickCount());
+    fclose(f);
+  };
   if (surface_manager_ == nullptr || !surface_manager_->prefer_d3d9() || !render_context_) {
+    kotv_dbg_a027de("A", "skip_gate",
+                    surface_manager_ == nullptr ? "{\\"reason\\":\\"no_surface\\"}"
+                    : !surface_manager_->prefer_d3d9() ? "{\\"reason\\":\\"not_d3d9\\"}"
+                                                       : "{\\"reason\\":\\"no_rc\\"}");
     return false;
   }
   auto cur = mpv_get_property_string(handle_, "hwdec-current");
   if (!cur) {
+    kotv_dbg_a027de("A", "skip_no_hwdec_current", "{}");
     return false;
   }
   const std::string s(cur);
   mpv_free(cur);
   if (s != "no") {
+    char buf[128];
+    snprintf(buf, sizeof(buf), "{\\"hwdecCurrent\\":\\"%s\\"}", s.c_str());
+    kotv_dbg_a027de("A", "skip_not_soft", buf);
     return false;
   }
   const int32_t w = surface_manager_->width();
   const int32_t h = surface_manager_->height();
+  kotv_dbg_a027de("B", "rebuild_begin", "{\\"prefer_d3d9\\":true,\\"hwdecCurrent\\":\\"no\\"}");
   std::unique_ptr<ANGLESurfaceManager> fresh;
   mpv_render_context* fresh_rc = nullptr;
   try {
@@ -2132,6 +2155,7 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
     if (mpv_render_context_create(&fresh_rc, handle_, params) != 0) {
       fresh_rc = nullptr;
       fresh.reset();
+      kotv_dbg_a027de("B", "rebuild_create_failed", "{}");
       return false;
     }
   } catch (...) {
@@ -2140,6 +2164,7 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
       fresh_rc = nullptr;
     }
     fresh.reset();
+    kotv_dbg_a027de("B", "rebuild_exception", "{}");
     return false;
   }
   mpv_render_context_set_update_callback(
@@ -2153,24 +2178,41 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
   render_context_ = fresh_rc;
   surface_manager_ = std::move(fresh);
   Resize(w, h);
+  kotv_dbg_a027de("C", "rebuild_ok_resized", "{}");
   return true;
 }
 
 """
 
-if "bool VideoOutput::MaybeRewriteAngleForSoft()" not in text_vo:
-    anchor = "void VideoOutput::CheckAndResize() {\n"
-    if text_vo.count(anchor) != 1:
-        print("ERROR: CheckAndResize anchor missing/ambiguous", file=sys.stderr)
-        sys.exit(1)
-    text_vo = text_vo.replace(
-        anchor,
-        method_def + "void VideoOutput::CheckAndResize() {\n  MaybeRewriteAngleForSoft();\n",
-        1,
+# Upgrade / install instrumented method (replace body if older copy lacks dbg marker).
+if "kotv_dbg_a027de" not in text_vo:
+    import re as _re
+    text_vo2, n_sub = _re.subn(
+        r"bool VideoOutput::MaybeRewriteAngleForSoft\(\) \{.*?\n\}\n\n",
+        method_def,
+        text_vo,
+        count=1,
+        flags=_re.S,
     )
-    vo.write_text(text_vo, encoding="utf-8")
-    print(f"patched media_kit_video ({root.name}): MaybeRewriteAngleForSoft + CheckAndResize call")
-elif "MaybeRewriteAngleForSoft();" not in text_vo:
+    if n_sub == 1:
+        text_vo = text_vo2
+        print(f"patched media_kit_video ({root.name}): upgraded MaybeRewriteAngleForSoft with dbg")
+    elif "bool VideoOutput::MaybeRewriteAngleForSoft()" not in text_vo:
+        anchor = "void VideoOutput::CheckAndResize() {\n"
+        if text_vo.count(anchor) != 1:
+            print("ERROR: CheckAndResize anchor missing/ambiguous", file=sys.stderr)
+            sys.exit(1)
+        text_vo = text_vo.replace(
+            anchor,
+            method_def + "void VideoOutput::CheckAndResize() {\n  MaybeRewriteAngleForSoft();\n",
+            1,
+        )
+        print(f"patched media_kit_video ({root.name}): MaybeRewriteAngleForSoft + CheckAndResize call")
+    else:
+        print("ERROR: MaybeRewriteAngleForSoft present but upgrade regex missed", file=sys.stderr)
+        sys.exit(1)
+
+if "MaybeRewriteAngleForSoft();" not in text_vo:
     anchor = "void VideoOutput::CheckAndResize() {\n"
     if text_vo.count(anchor) != 1:
         print("ERROR: CheckAndResize call-site anchor missing", file=sys.stderr)
@@ -2180,11 +2222,13 @@ elif "MaybeRewriteAngleForSoft();" not in text_vo:
         "void VideoOutput::CheckAndResize() {\n  MaybeRewriteAngleForSoft();\n",
         1,
     )
-    vo.write_text(text_vo, encoding="utf-8")
     print(f"patched media_kit_video ({root.name}): CheckAndResize calls MaybeRewriteAngleForSoft")
-else:
-    vo.write_text(text_vo, encoding="utf-8")
-    print(f"ok media_kit_video ({root.name}): MaybeRewriteAngleForSoft already patched")
+
+vo.write_text(text_vo, encoding="utf-8")
+if "kotv_dbg_a027de" not in text_vo:
+    print(f"ERROR: media_kit_video ({root.name}) missing dbg marker after patch", file=sys.stderr)
+    sys.exit(1)
+print(f"ok media_kit_video ({root.name}): MaybeRewriteAngleForSoft dbg ready")
 
 cc.write_text(text_cc, encoding="utf-8")
 PY

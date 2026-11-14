@@ -6,6 +6,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../util/kotv_app_dirs.dart';
 import 'buffer_budget.dart';
+import 'kotv_debug_ndjson.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_format.dart';
@@ -357,8 +358,25 @@ class KotvMpvOpts {
         await (platform as dynamic).setProperty(k, v);
       }
 
+      final hw = hwdecValue();
+      // #region agent log
+      kotvDebugNdjson(
+        hypothesisId: 'A,E',
+        location: 'mpv_opts.dart:applyAfterAttach',
+        message: 'set hwdec',
+        data: {
+          'hwdec': hw,
+          'direct': direct,
+          'soft': soft,
+          'hard': hard,
+          'live': live,
+          'win7': kotvIsWindows7(),
+          'decodeMode': decodeMode,
+        },
+      );
+      // #endregion
       try {
-        await set('hwdec', hwdecValue());
+        await set('hwdec', hw);
       } catch (_) {}
 
       // 分片后缀不按名单拦截；不设 protocol_whitelist（名单外的 RTSP/RTMP 会被拒）。
