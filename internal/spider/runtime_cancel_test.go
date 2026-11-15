@@ -17,6 +17,11 @@ func TestSoftCancelForClient_EmptyNoop(t *testing.T) {
 	SoftCancelForClient("") // 无 Scope 时不得打断全部会话
 }
 
+func TestSoftCancelAll_DoesNotPanic(t *testing.T) {
+	// 全局软取消须可空跑（清缓存路径）；与 SoftCancelForClient("") 的 no-op 不同。
+	SoftCancelAll()
+}
+
 func TestNodePostJSON_InterruptCancelsAndStops(t *testing.T) {
 	started := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

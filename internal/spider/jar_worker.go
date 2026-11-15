@@ -366,7 +366,8 @@ func callJavaBridge(payload []byte) (string, error) {
 }
 
 // InterruptJavaBridgeForClient 取消进行中的 JAR HTTP（OkHttp + Go 客户端）。
-// 本函数不直接杀 JVM；被取消的 callCtx 返回时会 stopLocked 回收共享/用户 bridge。
+// 包外请用 SoftCancelForClient / SoftCancelAll。不直接杀 JVM；
+// 被取消的 callCtx 返回时会 stopLocked 回收共享/用户 bridge。
 func InterruptJavaBridgeForClient(clientID string) {
 	cancelJarCalls(clientID)
 	softCancelJavaBridge(clientID)

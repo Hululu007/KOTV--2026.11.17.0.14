@@ -73,17 +73,16 @@ rm -rf "$DIST"
 mkdir -p "$DIST/runtime" "$DIST/webapp"
 
 ENGINE_NOTE="CGO 动态链系统库"
+VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
 if [[ "$GOOS" == "linux" ]]; then
-  # 避开 glibc 版本地狱：musl 全静态（runtime/ 仍外置）
+  # 避开 glibc 版本地狱：musl 全静态（runtime/ 仍外置；脚本内同源注入版本）
   chmod +x "$ROOT/scripts/build-engine-static-linux.sh"
   "$ROOT/scripts/build-engine-static-linux.sh" "$DIST/$BIN" "$GOARCH"
   ENGINE_NOTE="musl 全静态（不依赖宿主 glibc）"
 elif [[ "$GOOS" == "windows" ]]; then
-  VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
   (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w ${VER_LD}" -o "$DIST/$BIN" ./cmd/engine)
 else
   # macOS：无法真正全静态，接受系统库
-  VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
   (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w ${VER_LD}" -o "$DIST/$BIN" ./cmd/engine)
 fi
 chmod +x "$DIST/$BIN" 2>/dev/null || true

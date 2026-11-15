@@ -216,7 +216,8 @@ func beginNodeCall(clientID, ownerUID, pkgID string) (context.Context, func()) {
 	}
 }
 
-// InterruptNodeForClient 取消匹配 Scope 的 Node in-flight，并 Stop 被放弃调用所属**用户桶**内源包。
+// InterruptNodeForClient 取消匹配 Scope 的 Node in-flight，并 Stop 被放弃调用所属用户桶内源包。
+// 包外请用 SoftCancelForClient / SoftCancelAll。
 func InterruptNodeForClient(clientID string) {
 	type stopKey struct{ uid, pkg string }
 	toStop := map[stopKey]struct{}{}

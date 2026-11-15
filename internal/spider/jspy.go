@@ -260,12 +260,8 @@ func recentPyKeyFor(uid string) string {
 	return s
 }
 
-// InterruptScriptSpiders 打断正在运行的全部 Python/JavaScript 调用。
-func InterruptScriptSpiders() {
-	InterruptScriptSpidersForClient("")
-}
-
-// InterruptScriptSpidersForClient 仅打断属于指定 clientId 的进行中脚本调用；空串表示全部。
+// InterruptScriptSpidersForClient 仅打断属于指定 clientId 的进行中 Python/QuickJS 调用；
+// 空串表示全部。包外请用 SoftCancelForClient / SoftCancelAll。
 // 进程池按 slot 的 activeClient 过滤，避免软取消误伤同站其它会话。
 func InterruptScriptSpidersForClient(clientID string) {
 	jsPyMu.Lock()

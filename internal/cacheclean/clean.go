@@ -50,8 +50,7 @@ func Run(opt Options) Result {
 	}
 
 	if opt.Script {
-		spider.InterruptScriptSpiders()
-		spider.InterruptNodeForClient("") // 清空全部 Node in-flight
+		spider.SoftCancelAll()
 		spider.ResetScriptSpiders()
 		n, err := wipeDirKeepRoot(paths.JsCache())
 		add("JS", paths.JsCache(), n, err)

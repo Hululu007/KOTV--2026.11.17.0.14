@@ -100,13 +100,13 @@ func (s *SiteService) DropContentCache() {
 	s.mu.Unlock()
 }
 
-// InvalidateHomeOnly 仅切换首页站点：清内容缓存 + 软取消当前会话（Java/Py·JS/Node）。
+// InvalidateHomeOnly 仅切换首页站点：清内容缓存 + 软取消当前会话。
 func (s *SiteService) InvalidateHomeOnly() {
 	s.loadEpoch.Add(1)
 	s.mu.Lock()
 	s.invalidateContentCache()
 	s.mu.Unlock()
-	spider.SoftCancelForClient(hostclient.ScopeID())
+	s.SoftCancelPending()
 }
 
 // HomeLoadEpoch 返回当前加载世代，供 UI 丢弃过期结果。
@@ -114,12 +114,12 @@ func (s *SiteService) HomeLoadEpoch() uint64 {
 	return s.loadEpoch.Load()
 }
 
-// SoftCancelPending 软取消当前 Scope 的 Java / Python·JS / Node 进行中请求。
+// SoftCancelPending 软取消当前 Scope 的 JVM / Python / QuickJS / Node 进行中请求。
 func (s *SiteService) SoftCancelPending() {
 	spider.SoftCancelForClient(hostclient.ScopeID())
 }
 
-// CancelPendingContent 硬杀当前所属 JVM / Py·JS / Node（离开详情/卡死恢复）。
+// CancelPendingContent 硬重启当前所属运行时（JVM / Python / QuickJS / Node；离开详情/卡死恢复）。
 func (s *SiteService) CancelPendingContent() {
 	spider.RestartCallerRuntime()
 }
