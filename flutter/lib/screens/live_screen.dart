@@ -1767,6 +1767,34 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await pb.awaitReadyAfterOpen().timeout(Duration(seconds: _livePlayTimeoutSec));
     } on TimeoutException {
       if (stale() || _liveHasPicture(pb)) return;
+      // 对齐 FongMi 起播超时：先走 failover（auto→soft→换引擎），勿直接放弃。
+      final retry = await _recoverAfterSilentVideo(
+        pb: pb,
+        failover: failover,
+        serial: serial,
+      );
+      if (retry == null) {
+        await _onLiveNotReady(serial);
+        return;
+      }
+      if (retry) {
+        _prefPlayerVal = _playerVal;
+        _prefDecodeMode = _decodeMode;
+        try {
+          await _openLiveUrl(
+            url,
+            serial: serial,
+            directUrl: directUrl,
+            headers: headers,
+            drm: drm,
+            format: format,
+            live: live,
+            startAt: startAt,
+            externalSubs: externalSubs,
+          );
+        } catch (_) {}
+        return;
+      }
       await _onLiveNotReady(serial);
     } on KotvSilentVideoException {
       if (stale()) return;

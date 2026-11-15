@@ -12,6 +12,11 @@ void main() {
     expect(step.decodeMode, 'auto');
     expect(f.decodeMode, 'auto');
 
+    final soft = f.nextStep();
+    expect(soft, isNotNull);
+    expect(soft!.kind, KotvFailoverKind.autoDecode);
+    expect(soft.decodeMode, 'soft');
+
     final next = f.nextStep();
     expect(next, isNotNull);
     expect(next!.kind, KotvFailoverKind.nextPlayer);
@@ -29,9 +34,15 @@ void main() {
     expect(f.decodeMode, 'auto');
   });
 
-  test('auto goes straight to the next player', () {
+  test('auto falls back to soft then next player', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'auto');
     f.markAttempt();
+    final soft = f.nextStep();
+    expect(soft, isNotNull);
+    expect(soft!.kind, KotvFailoverKind.autoDecode);
+    expect(soft.decodeMode, 'soft');
+    expect(f.decodeMode, 'soft');
+
     final next = f.nextStep();
     expect(next, isNotNull);
     expect(next!.kind, KotvFailoverKind.nextPlayer);
@@ -109,13 +120,14 @@ void main() {
     expect(plan.action, KotvSilentRecoverAction.keepSession);
   });
 
-  test('plan: on + next player applies step', () {
+  test('plan: on + auto applies soft decode step', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'auto');
     f.markAttempt();
     final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: true);
     expect(plan.action, KotvSilentRecoverAction.applyStep);
-    expect(plan.step!.playerVal, 'innie#fvp');
-    expect(f.playerVal, 'innie#fvp');
+    expect(plan.step!.decodeMode, 'soft');
+    expect(plan.step!.playerVal, 'innie#mpv');
+    expect(f.playerVal, 'innie#mpv');
   });
 
   test('plan: on + exhausted ring recreates desktop mpv', () {

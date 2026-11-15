@@ -154,7 +154,7 @@ class MediaKitPlayback extends KotvPlayback {
   bool _repeatOne = false;
   /// 开播标定的直播会话（详情 live / 直播页）；点播勿被引擎 media-live 改写。
   bool _live;
-  /// 引擎 `media-live`（仅缓冲策略 / 守卫；不挡 queueNext 与片尾连播）。
+  /// 引擎 `media-live`（只读守卫 / EOF；不改缓冲、不挡 queueNext；对齐 FongMi）。
   bool _engineLive = false;
   /// 当前会话挂了 ClearKey（demuxer-lavf-o）；无缝排队不复用该会话。
   bool _drmSession = false;
@@ -289,7 +289,7 @@ class MediaKitPlayback extends KotvPlayback {
         final rawTrim = raw.trim();
         final live = rawTrim == 'yes' || rawTrim == 'true' || rawTrim == '1';
         // #region agent log
-        // 详情页「不提升」：也要看见 media-live=no / 空，才能对照 FongMi demux live_state。
+        // 对齐 FongMi：只读引擎 live，不改缓冲/hwdec。
         if (kotvIsWindows7()) {
           kotvDebugNdjson(
             hypothesisId: 'E1',
@@ -305,43 +305,15 @@ class MediaKitPlayback extends KotvPlayback {
         }
         // #endregion
         if (!live || _engineLive) return;
+        // 仅记 _engineLive 供守卫/EOF；勿 applyLiveBufferOnly / 勿改 _live（FongMi 同）。
         _engineLive = true;
         // #region agent log
         if (kotvIsWindows7()) {
           kotvDebugNdjson(
             hypothesisId: 'H2',
             location: 'media_kit_playback.dart:media-live',
-            message: 'engine live elevated',
+            message: 'engine live noted (no prop rewrite)',
             data: {'raw': rawTrim, 'markedLive': _live},
-          );
-        }
-        // #endregion
-        // 点播会话保持 !_live，否则 queueNext / 片尾连播会被挡掉。
-        // 直播页起播已 live=true（缓冲/hwdec 写过）：勿再 setProperty——Win7 播放中
-        // 重跑 applyAfterAttach 会卡死（日志：after set hwdec 后无 after cache props）。
-        if (_live) {
-          // #region agent log
-          if (kotvIsWindows7()) {
-            kotvDebugNdjson(
-              hypothesisId: 'H2',
-              location: 'media_kit_playback.dart:media-live',
-              message: 'skip props already live session',
-              data: {'markedLive': true},
-            );
-          }
-          // #endregion
-          notifyListeners();
-          return;
-        }
-        // 详情等点播起播后引擎才报 live：只补缓冲，仍不碰 hwdec。
-        await _opts.applyLiveBufferOnly(player);
-        // #region agent log
-        if (kotvIsWindows7()) {
-          kotvDebugNdjson(
-            hypothesisId: 'H2',
-            location: 'media_kit_playback.dart:media-live',
-            message: 'after live buffer only',
-            data: {'markedLive': _live},
           );
         }
         // #endregion
@@ -386,7 +358,8 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> applyOpts(KotvMpvOpts opts) async {
     // Win7 建控制器时已按 hwdec 选定 ANGLE 后端，直出与否不能再改，改它要换 Player（见 [kotvMediaKitNeedsNewPlayer]）。
     _opts = kotvIsWindows7() ? opts.copyWith(direct: _opts.direct) : opts;
-    await _opts.applyAfterAttach(player, live: _live || _engineLive);
+    // 缓冲只跟开播标定 _live；引擎 media-live 不改写属性（对齐 FongMi）。
+    await _opts.applyAfterAttach(player, live: _live);
     notifyListeners();
   }
 
@@ -723,7 +696,7 @@ class MediaKitPlayback extends KotvPlayback {
     _drmSession = clearKeyHex != null;
     _clearKeyHex = clearKeyHex;
     // #region agent log
-    // 详情页虎牙等也是 live:false 起播，靠 media-live 提升；Win7 一律打点。
+    // 详情 live:false；引擎 media-live 只记 _engineLive。Win7 打点。
     if (kotvIsWindows7()) {
       kotvDebugNdjson(
         hypothesisId: 'L1,H3',

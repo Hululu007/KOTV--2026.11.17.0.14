@@ -67,7 +67,8 @@ class KotvPlaybackFailover {
     if (lockExoForDrm) return null;
     if (!_playerVal.startsWith('innie#')) return null;
 
-    // 各内置引擎（含桌面 MPV）硬解失败先改自动再开一次；安卓原生 MPV 插件内也会 soft↔hard。
+    // 对齐 FongMi DECODE 回退：硬解→自动→软解（显式重开），再换引擎。
+    // 自动档引擎内硬解若挂起不返回，须靠超时后走到这里的 soft 重试。
     if (_decodeMode == 'hard') {
       _decodeMode = 'auto';
       return KotvFailoverStep(
@@ -75,6 +76,15 @@ class KotvPlaybackFailover {
         playerVal: _playerVal,
         decodeMode: _decodeMode,
         status: '硬解无画面，已改自动解码重试',
+      );
+    }
+    if (_decodeMode == 'auto') {
+      _decodeMode = 'soft';
+      return KotvFailoverStep(
+        kind: KotvFailoverKind.autoDecode,
+        playerVal: _playerVal,
+        decodeMode: _decodeMode,
+        status: '自动解码无画面，已改软解码重试',
       );
     }
 

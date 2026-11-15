@@ -344,41 +344,9 @@ class KotvMpvOpts {
     );
   }
 
-  /// 引擎 `media-live` 提升时只改直播缓冲，**不要**再 set hwdec。
-  /// Win7 上播放中重设 `hwdec=auto` 会卡死（日志：set hwdec 后无 after set hwdec）。
-  Future<void> applyLiveBufferOnly(Player player) async {
-    try {
-      final platform = player.platform;
-      if (platform == null) return;
-      Future<void> set(String k, String v) async {
-        await (platform as dynamic).setProperty(k, v);
-      }
-      // #region agent log
-      if (kotvIsWindows7()) {
-        kotvDebugNdjson(
-          hypothesisId: 'H2',
-          location: 'mpv_opts.dart:applyLiveBufferOnly',
-          message: 'live buffer only (no hwdec)',
-          data: {},
-        );
-      }
-      // #endregion
-      await set('cache-pause', 'no');
-      await set('cache-on-disk', 'no');
-      // #region agent log
-      if (kotvIsWindows7()) {
-        kotvDebugNdjson(
-          hypothesisId: 'H2',
-          location: 'mpv_opts.dart:applyLiveBufferOnly',
-          message: 'live buffer only done',
-          data: {},
-        );
-      }
-      // #endregion
-    } catch (_) {}
-  }
-
   /// 在 VideoController 已附着之后调用：缓冲预算 + conf（media_kit 路径）。
+  ///
+  /// [live] 仅表示开播标定（直播页）；对齐 FongMi：不因引擎 `media-live` 中途改属性。
   Future<void> applyAfterAttach(Player player, {bool live = false}) async {
     try {
       final platform = player.platform;
@@ -442,17 +410,12 @@ class KotvMpvOpts {
         for (final e in props.entries) {
           await set(e.key, e.value);
         }
-        if (live) {
-          // 直播不写 cache-secs；关掉 cache-pause / 磁盘缓存，避免播几秒就 paused-for-cache。
-          await set('cache-pause', 'no');
-          await set('cache-on-disk', 'no');
-        } else {
-          await set('cache-on-disk', diskCache ? 'yes' : 'no');
-          // 桌面须定点 demuxer-cache-dir；安卓原生插件另写 cacheDir/mpv-cache。
-          if (diskCache && !kotvIsAndroid()) {
-            final dir = await kotvMpvDemuxerCacheDir();
-            await set('demuxer-cache-dir', dir.path);
-          }
+        // 对齐 FongMi：不因 live 强关 cache-pause（旧 cache-pause=no 在硬解挂起时持续喂包更难回落）。
+        // 直播仍关磁盘缓存；点播跟 diskCache 设置。
+        await set('cache-on-disk', (!live && diskCache) ? 'yes' : 'no');
+        if (!live && diskCache && !kotvIsAndroid()) {
+          final dir = await kotvMpvDemuxerCacheDir();
+          await set('demuxer-cache-dir', dir.path);
         }
       } catch (_) {}
       // #region agent log
