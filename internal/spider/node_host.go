@@ -20,8 +20,10 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/playproxy"
@@ -30,6 +32,9 @@ import (
 
 	_ "embed"
 )
+
+// ErrNodeInterrupted 表示 Node 调用被软取消或超时放弃。
+var ErrNodeInterrupted = errors.New("node 调用已中断")
 
 //go:embed noderunner.js
 var nodeRunnerSrc string
@@ -65,8 +70,54 @@ type nodePkg struct {
 	port     int
 	stopping bool
 	backoff  time.Duration
-	cancel   context.CancelFunc
 	caller   callerSnap
+}
+
+// 进行中的 Node HTTP 调用，按 ScopeID 软取消；取消/超时后回收源包进程。
+type nodeInflight struct {
+	id       uint64
+	clientID string
+	pkgID    string
+	cancel   context.CancelFunc
+}
+
+var (
+	nodeInflightMu sync.Mutex
+	nodeInflightQ  = map[uint64]*nodeInflight{}
+	nodeCallSeq    atomic.Uint64
+)
+
+func beginNodeCall(clientID, pkgID string) (context.Context, func()) {
+	ctx, cancel := context.WithTimeout(context.Background(), nodeCallTimeout)
+	id := nodeCallSeq.Add(1)
+	nodeInflightMu.Lock()
+	nodeInflightQ[id] = &nodeInflight{id: id, clientID: clientID, pkgID: pkgID, cancel: cancel}
+	nodeInflightMu.Unlock()
+	return ctx, func() {
+		cancel()
+		nodeInflightMu.Lock()
+		delete(nodeInflightQ, id)
+		nodeInflightMu.Unlock()
+	}
+}
+
+// InterruptNodeForClient 取消匹配 Scope 的 Node in-flight，并 Stop 被放弃调用所属源包。
+func InterruptNodeForClient(clientID string) {
+	nodeInflightMu.Lock()
+	pkgs := map[string]struct{}{}
+	for _, g := range nodeInflightQ {
+		if clientID == "" || g.clientID == clientID {
+			g.cancel()
+			if g.pkgID != "" {
+				pkgs[g.pkgID] = struct{}{}
+			}
+		}
+	}
+	nodeInflightMu.Unlock()
+	h := DefaultNodeHost()
+	for id := range pkgs {
+		h.Stop(id)
+	}
 }
 
 // DefaultNodeHost 进程内单例。
@@ -418,10 +469,6 @@ func (p *nodePkg) watch(h *NodeHost) {
 
 func (p *nodePkg) stopLocked() {
 	p.stopping = true
-	if p.cancel != nil {
-		p.cancel()
-		p.cancel = nil
-	}
 	if p.cmd != nil && p.cmd.Process != nil {
 		killProcessTree(p.cmd.Process)
 	}
@@ -685,7 +732,7 @@ func (p *nodePkg) FetchConfig() (string, error) {
 	return string(b), nil
 }
 
-// PostJSON POST 路径，返回响应正文。
+// PostJSON POST 路径，返回响应正文。可被 SoftCancel 取消；超时或取消后 Stop 本源包进程。
 func (p *nodePkg) PostJSON(path string, body any) (string, error) {
 	base := p.baseURL()
 	if base == "" {
@@ -695,9 +742,22 @@ func (p *nodePkg) PostJSON(path string, body any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	client := &http.Client{Timeout: nodeCallTimeout}
-	resp, err := client.Post(base+path, "application/json; charset=utf-8", bytes.NewReader(payload))
+	ctx, end := beginNodeCall(hostclient.ScopeID(), p.id)
+	defer end()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+path, bytes.NewReader(payload))
 	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.Stop()
+			if errors.Is(err, context.DeadlineExceeded) {
+				return "", fmt.Errorf("node 调用超过 %s", nodeCallTimeout)
+			}
+			return "", ErrNodeInterrupted
+		}
 		return "", err
 	}
 	defer resp.Body.Close()

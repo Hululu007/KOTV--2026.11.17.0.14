@@ -100,18 +100,13 @@ func (s *SiteService) DropContentCache() {
 	s.mu.Unlock()
 }
 
-// InvalidateHomeOnly 仅切换首页站点：清内容缓存 + 软取消当前会话，保留运行时进程。
+// InvalidateHomeOnly 仅切换首页站点：清内容缓存 + 软取消当前会话（Java/Py·JS/Node）。
 func (s *SiteService) InvalidateHomeOnly() {
 	s.loadEpoch.Add(1)
 	s.mu.Lock()
 	s.invalidateContentCache()
 	s.mu.Unlock()
-	cid := hostclient.ScopeID()
-	if cid == "" {
-		return
-	}
-	spider.InterruptJavaBridgeForClient(cid)
-	spider.InterruptScriptSpidersForClient(cid)
+	spider.SoftCancelForClient(hostclient.ScopeID())
 }
 
 // HomeLoadEpoch 返回当前加载世代，供 UI 丢弃过期结果。
@@ -119,18 +114,12 @@ func (s *SiteService) HomeLoadEpoch() uint64 {
 	return s.loadEpoch.Load()
 }
 
-// SoftCancelPending 软取消当前 Scope 的 JAR/脚本请求（不杀进程）。
+// SoftCancelPending 软取消当前 Scope 的 Java / Python·JS / Node 进行中请求。
 func (s *SiteService) SoftCancelPending() {
-	cid := hostclient.ScopeID()
-	if cid == "" {
-		// 无会话键时 Interrupt*( "" ) 会打断全部脚本，易误杀其它窗口的 play。
-		return
-	}
-	spider.InterruptJavaBridgeForClient(cid)
-	spider.InterruptScriptSpidersForClient(cid)
+	spider.SoftCancelForClient(hostclient.ScopeID())
 }
 
-// CancelPendingContent 硬杀当前所属 JVM/Py/JS（离开详情/卡死恢复）。
+// CancelPendingContent 硬杀当前所属 JVM / Py·JS / Node（离开详情/卡死恢复）。
 func (s *SiteService) CancelPendingContent() {
 	spider.RestartCallerRuntime()
 }

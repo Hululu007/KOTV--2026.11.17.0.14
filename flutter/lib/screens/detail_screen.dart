@@ -2300,8 +2300,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await _stopAllBackends();
     await _disposeDesktopMpvOwned();
     if (serial != _playAtSerial || !mounted) return;
-    // 先 await 软取消上一集，再 play。unawaited 会与本次 play 竞态，
-    // 软取消未结束就开新解析时，JS/JAR 可能报「脚本调用已中断」。
+    // 先 await 软取消上一集（Java / Python·JS / Node），再 play。
+    // unawaited 会与本次 play 竞态；软取消未结束就开新解析时，脚本可能报「已中断」。
     await ref.read(apiProvider).cancelPending(
           hard: false,
           thunder: !canDirect && _detailMagnet,

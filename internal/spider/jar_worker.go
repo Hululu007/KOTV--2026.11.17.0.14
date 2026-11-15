@@ -76,7 +76,7 @@ func bridgeForCurrent() *javaBridgeClient {
 	return bridgeForUser(hostclient.RuntimeUserID())
 }
 
-// KillUserRuntime 杀掉指定用户的 JAR-JVM，并销毁其 Py/JS 池。
+// KillUserRuntime 杀掉指定用户的 JAR-JVM、Py/JS 池，并停掉共享 Node 源包（一源包一进程，无法按用户隔离）。
 func KillUserRuntime(userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -89,13 +89,13 @@ func KillUserRuntime(userID string) {
 	b := userBridges[userID]
 	delete(userBridges, userID)
 	userBridgesMu.Unlock()
-	if b == nil {
-		return
+	if b != nil {
+		b.epoch.Add(1)
+		b.mu.Lock()
+		b.stopLocked()
+		b.mu.Unlock()
 	}
-	b.epoch.Add(1)
-	b.mu.Lock()
-	b.stopLocked()
-	b.mu.Unlock()
+	DefaultNodeHost().StopAll()
 }
 
 // HostSpiderReady 远端主机爬虫面是否可用（安卓=本机 9979；桌面=捆绑 runtime 可用即可）。
@@ -115,13 +115,13 @@ func HostSpiderReady() (ok bool, errMsg string) {
 	return true, ""
 }
 
-// RestartCallerRuntime 卡死恢复时硬重启当前请求所属运行时。切仓不走这里。
+// RestartCallerRuntime 卡死恢复时硬重启当前请求所属运行时（JVM / Py·JS / Node）。切仓不走这里。
 func RestartCallerRuntime() {
 	if uid := hostclient.RuntimeUserID(); uid != "" {
 		KillUserRuntime(uid)
 		return
 	}
-	RestartSharedRuntime()
+	HardRestartSharedRuntimes()
 }
 
 // 点播配置的网络参数（headers/proxy/hosts/doh），在每个新 worker 启动时重放。
@@ -372,7 +372,7 @@ func InterruptJavaBridgeForClient(clientID string) {
 	softCancelJavaBridge(clientID)
 }
 
-// RestartSharedRuntime 硬重启本机共享 JVM/Py/JS（不动远端各用户独立运行时，不删脚本磁盘缓存）。
+// RestartSharedRuntime 硬重启本机共享 JVM/Py/JS/Node（不动远端各用户独立运行时，不删脚本磁盘缓存）。
 func RestartSharedRuntime() {
 	forgetJarRecent("")
 	cancelJarCalls("")
@@ -389,12 +389,13 @@ func RestartSharedRuntime() {
 		}
 	} else {
 		javaBridge.epoch.Add(1)
-		if p := javaBridge.proc.Load(); p != nil {
-			killProcessTree(p)
-		}
+		javaBridge.mu.Lock()
+		javaBridge.stopLocked()
+		javaBridge.mu.Unlock()
 	}
 	clearSharedJsPy()
 	clearSharedJarSpiders()
+	DefaultNodeHost().StopAll()
 }
 
 func softCancelSharedBridgeOnly() {
@@ -519,6 +520,10 @@ func (w *javaBridgeClient) callCtx(ctx context.Context, payload []byte) (string,
 		}
 		transportErr = err
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// 超时或软取消放弃：回收 JVM，下次 ensureStarted 重建（与传输失败同路）。
+			w.mu.Lock()
+			w.stopLocked()
+			w.mu.Unlock()
 			return "", ErrJavaBridgeInterrupted
 		}
 		if w.epoch.Load() != startEpoch {

@@ -224,6 +224,7 @@ func InterruptScriptSpiders() {
 }
 
 // InterruptScriptSpidersForClient 仅打断属于指定 clientId 的进行中脚本调用；空串表示全部。
+// 进程池按 slot 的 activeClient 过滤，避免软取消误伤同站其它会话。
 func InterruptScriptSpidersForClient(clientID string) {
 	jsPyMu.Lock()
 	spiders := make([]Spider, 0, len(jsPy))
@@ -232,8 +233,23 @@ func InterruptScriptSpidersForClient(clientID string) {
 	}
 	jsPyMu.Unlock()
 	for _, spider := range spiders {
-		if s, ok := spider.(scriptInterrupt); ok && s.matchesClient(clientID) {
-			s.interrupt()
+		switch s := spider.(type) {
+		case *pyPool:
+			for _, slot := range s.snapshot() {
+				if slot.matchesClient(clientID) {
+					slot.interrupt()
+				}
+			}
+		case *jsPool:
+			for _, slot := range s.snapshot() {
+				if slot.matchesClient(clientID) {
+					slot.interrupt()
+				}
+			}
+		case scriptInterrupt:
+			if s.matchesClient(clientID) {
+				s.interrupt()
+			}
 		}
 	}
 }
@@ -464,6 +480,8 @@ func (s *pySpider) callLocked(startEpoch uint64, method string, args map[string]
 	select {
 	case result := <-exchange:
 		if s.epoch.Load() != startEpoch {
+			// 软取消可能已 Kill 进程；此处回收 slot，避免脏 stdin/stdout。
+			s.stopLocked()
 			return "", ErrScriptInterrupted
 		}
 		if result.err != nil {
@@ -588,9 +606,9 @@ func (s *pySpider) stopLocked() {
 
 func (s *pySpider) interrupt() {
 	s.epoch.Add(1)
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if goruntime.GOOS == "android" {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 		// 清 Chaquopy 进程内 session，避免换源后复用旧 Spider
 		client := &http.Client{Timeout: 2 * time.Second}
 		req, err := http.NewRequest(http.MethodPost, localproxy.DefaultBridgeBaseURL()+"/py/interrupt", bytes.NewReader([]byte("{}")))
@@ -603,6 +621,14 @@ func (s *pySpider) interrupt() {
 		}
 		s.inited = false
 		return
+	}
+	// 桌面：run/callLocked 持有 mu 等待 IPC；此处不可 Lock。
+	// 有进行中调用时 Kill 进程（与超时路径同构），callLocked 在 epoch 变化后 stopLocked。
+	if strings.TrimSpace(s.activeClientID()) == "" {
+		return
+	}
+	if p := s.proc.Load(); p != nil {
+		killProcessTree(p)
 	}
 }
 

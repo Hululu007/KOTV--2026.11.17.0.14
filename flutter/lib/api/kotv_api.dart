@@ -615,8 +615,8 @@ class KotvApi {
       _post('/library', body, timeout: const Duration(seconds: 30));
 
   /// 打断进行中的详情/分类等爬虫请求。
-  /// [hard] 硬杀所属 JVM/Py/JS；换集默认 false（软取消）。
-  /// [thunder] 停磁力 Fetch / 专用源；默认 false（离开详情不停；磁力起播显式 true）。
+  /// [hard] false：软取消当前会话的 Java / Python·JS / Node；true：硬杀所属 JVM / Py·JS / Node。
+  /// 换集默认 soft。 [thunder] 停磁力 Fetch / 专用源；默认 false（离开详情不停；磁力起播显式 true）。
   Future<Map<String, dynamic>> cancelPending({bool hard = false, bool thunder = false}) async {
     try {
       return await _post(
