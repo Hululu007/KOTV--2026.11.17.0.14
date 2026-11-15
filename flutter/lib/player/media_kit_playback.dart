@@ -606,6 +606,7 @@ class MediaKitPlayback extends KotvPlayback {
     unawaited(_setKeepOpen(true));
     _url = q.url;
     _engineLive = false;
+    _durationGrowthCount = 0;
     _openGen++;
     _openSerial++;
     // 无缝换集：勿清成 0x0。同分辨率时 width/height 流可能不重发，清掉会一直显示 0x0。
@@ -1007,6 +1008,7 @@ class MediaKitPlayback extends KotvPlayback {
     _openFormat = null;
     _formatRetried = false;
     _engineLive = false;
+    _durationGrowthCount = 0;
     _durationFull = Duration.zero;
     _completedGate = null;
     _clearVideoSize();
