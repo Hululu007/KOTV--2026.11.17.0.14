@@ -147,8 +147,8 @@ func ReleaseOtherScripts(api string) {
 	nodeHostForCurrent().ReleaseOther(api)
 }
 
-// DestroyUserScripts 销毁指定用户的全部 Py/JS 池。
-func DestroyUserScripts(userID string) {
+// destroyUserScripts 销毁指定用户的全部 Py/JS 池（仅 KillUserRuntime）。
+func destroyUserScripts(userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return

@@ -145,6 +145,28 @@ func cancelJarCalls(clientID string) {
 	}
 }
 
+// clearNetConfigForUser 删掉该远端用户 Scope 下的点播网络/代理配置桶，避免离开后仍被新 JVM 重放。
+func clearNetConfigForUser(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	netConfigMu.Lock()
+	defer netConfigMu.Unlock()
+	purge := func(m map[string][]byte) {
+		if m == nil {
+			return
+		}
+		for cid := range m {
+			if hostclient.UserIDFromScope(cid) == userID {
+				delete(m, cid)
+			}
+		}
+	}
+	purge(netConfigByClient)
+	purge(userProxyByClient)
+}
+
 // SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp（按当前 ScopeID）。
 // 各用户当前源可不同，故 net 按 Scope 分桶；空 Scope 写默认桶。
 func SetNetConfig(headers, proxy, hosts, doh []byte) {

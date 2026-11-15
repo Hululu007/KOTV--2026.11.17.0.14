@@ -79,7 +79,8 @@ chmod +x bridge/build.sh scripts/*.sh
 ./bridge/build.sh
 # 下载当前平台捆绑运行时（体积大，耐心等待）
 ./scripts/prepare-runtime.sh
-CGO_ENABLED=1 go run .
+# 开发直跑引擎（版本用 update.go 默认值；正式包请走 scripts/package-*.sh，会注入 CurrentVersion）
+CGO_ENABLED=1 go run ./cmd/engine
 # 另开终端启动 Flutter UI（引擎由 EngineLauncher 托管）
 cd flutter && flutter pub get && flutter run -d macos
 ```

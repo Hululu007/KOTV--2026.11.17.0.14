@@ -51,10 +51,12 @@ func KillUserRuntime(userID string) {
 	if userID == "" {
 		return
 	}
+	SoftCancelForClient("u:" + userID)
 	forgetJarRecent(userID)
 	jarPathByUser.Delete(userID)
 	clearJSRedirectsForUser(userID)
-	DestroyUserScripts(userID)
+	clearNetConfigForUser(userID)
+	destroyUserScripts(userID)
 	clearJarForUser(userID)
 	userBridgesMu.Lock()
 	b := userBridges[userID]

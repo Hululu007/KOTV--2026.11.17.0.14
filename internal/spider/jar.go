@@ -102,6 +102,10 @@ func clearJarForUser(userID string) {
 
 // ApplyConfigJars 切仓成功后：清掉当前 JVM 里已加载的全部 jar，再装新仓库的根 jar。不杀 JVM。
 func ApplyConfigJars(nextURL, nextRoot string) error {
+	// 刷新/换源可能未先 SoftCancelPending；先打断当前 Scope，再卸 ClassLoader。
+	if sid := hostclient.ScopeID(); sid != "" {
+		SoftCancelForClient(sid)
+	}
 	clearRuntimeJars()
 	releaseConfigScripts()
 	nextRoot = strings.TrimSpace(nextRoot)

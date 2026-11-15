@@ -37,13 +37,26 @@ if (-not (Test-Path (Join-Path $SourceDir $ExeName))) {
     throw "missing package dir or ${ExeName}: ${SourceDir}"
 }
 
+function Get-KotvPubspecVersion {
+    $pubspec = Join-Path $Root "flutter\pubspec.yaml"
+    if (-not (Test-Path $pubspec)) { throw "missing pubspec: $pubspec" }
+    foreach ($line in Get-Content -LiteralPath $pubspec) {
+        if ($line -match '^version:\s*([0-9]+\.[0-9]+\.[0-9]+)') {
+            return $Matches[1]
+        }
+    }
+    throw "cannot parse version from $pubspec"
+}
+
 if ([string]::IsNullOrWhiteSpace($Tag)) {
-    $Tag = if ($env:KOTV_VERSION) { $env:KOTV_VERSION } else { "v0.1.0" }
+    $Tag = if ($env:KOTV_VERSION) { $env:KOTV_VERSION } else { "v$(Get-KotvPubspecVersion)" }
 }
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = $Tag.TrimStart("v")
 }
-if ([string]::IsNullOrWhiteSpace($Version)) { $Version = "0.1.0" }
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = Get-KotvPubspecVersion
+}
 
 # Inno MyArch 仍用 x64|arm64；发行文件名与 Android 一致：x86_64 / aarch64
 $arch = if ($Plat -eq "windows-arm64") { "arm64" } else { "x64" }
