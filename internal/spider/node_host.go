@@ -263,7 +263,7 @@ func (h *NodeHost) Ensure(pkgURL string) (*nodePkg, error) {
 	h.mu.Lock()
 	pkg, ok := h.pkgs[id]
 	if !ok {
-		// 包文件全局共享 NodeCache/<id>/；可写 data 进 UserNodeDataDir。
+		// 包体全局共享 JsCache/pkg/<id>/（与 QuickJS 同属 js 缓存）；可写 data 进 UserNodeDataDir。
 		dir := filepath.Join(paths.NodeCache(), id)
 		dataDir := paths.UserNodeDataDir(h.ownerUID, id)
 		migrateLegacyNodeDataDir(h.ownerUID, id, dataDir)
@@ -286,7 +286,7 @@ func (h *NodeHost) Ensure(pkgURL string) (*nodePkg, error) {
 	}
 	h.mu.Unlock()
 
-	// 包体目录（NodeCache/<id>/）与可写 dataDir 分开建：清缓存后根目录还在，子目录常被抹掉。
+	// 包体目录（js/pkg/<id>/）与可写 dataDir 分开建：清缓存后根目录还在，子目录常被抹掉。
 	if err := os.MkdirAll(pkg.dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -324,11 +324,13 @@ func migrateLegacyNodeDataDir(ownerUID, pkgID, dataDir string) {
 	if ents, err := os.ReadDir(dataDir); err == nil && len(ents) > 0 {
 		return
 	}
+	// 旧版曾把 data 塞进 cache/node/…（包体目录现已迁到 js/pkg）。
+	root := paths.CacheRoot()
 	var legacy string
 	if ownerUID == "" {
-		legacy = filepath.Join(paths.NodeCache(), pkgID, "data")
+		legacy = filepath.Join(root, "node", pkgID, "data")
 	} else {
-		legacy = filepath.Join(paths.NodeCache(), "run", ownerUID, pkgID, "data")
+		legacy = filepath.Join(root, "node", "run", ownerUID, pkgID, "data")
 	}
 	if st, err := os.Stat(legacy); err != nil || !st.IsDir() {
 		return
@@ -651,7 +653,7 @@ func (h *NodeHost) StopAll() {
 	}
 }
 
-// ClearAll 停本桶进程并清空索引（不删全局 NodeCache；全量清理由 clearScriptCaches 负责）。
+// ClearAll 停本桶进程并清空索引（不删全局 js/pkg 包体；全量清理由 clearScriptCaches 负责）。
 func (h *NodeHost) ClearAll() {
 	h.StopAll()
 	h.mu.Lock()

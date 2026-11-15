@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 const appName = "KOTV"
@@ -56,8 +57,20 @@ func JarCache() string { return ensure(filepath.Join(CacheRoot(), "jar")) }
 func PyCache() string  { return ensure(filepath.Join(CacheRoot(), "py")) }
 func PicCache() string { return ensure(filepath.Join(CacheRoot(), "pic")) }
 func LogDir() string   { return ensure(filepath.Join(Data(), "log")) }
-func JsCache() string   { return ensure(filepath.Join(CacheRoot(), "js")) }
-func NodeCache() string { return ensure(filepath.Join(CacheRoot(), "node")) }
+func JsCache() string { return ensure(filepath.Join(CacheRoot(), "js")) }
+
+// NodeCache 猫爪 Node 源包包体目录（index.js / index.config.js）。
+// 与 QuickJS 模块同属 JsCache（猫爪/CatVodOpen 内置配置也在 asset/js/ 下）：
+//
+//	cache/js/mod/<md5>.js     QuickJS 远程模块
+//	cache/js/pkg/<id>/…       猫爪 Node 源包
+//
+// 旧版 cache/node/ 在首次访问时迁入 pkg/。
+func NodeCache() string {
+	dst := ensure(filepath.Join(JsCache(), "pkg"))
+	migrateLegacyNodePkgCache(dst)
+	return dst
+}
 func EpgCache() string  { return ensure(filepath.Join(CacheRoot(), "epg")) }
 func HttpCache() string {
 	return ensure(filepath.Join(CacheRoot(), "http"))
@@ -121,4 +134,34 @@ func ensureHomeDownloads() string {
 func ensure(p string) string {
 	_ = os.MkdirAll(p, 0o755)
 	return p
+}
+
+var migrateLegacyNodePkgOnce sync.Once
+
+// migrateLegacyNodePkgCache 把旧版 cache/node/* 迁到 cache/js/pkg/*（只迁尚未存在的项）。
+func migrateLegacyNodePkgCache(dst string) {
+	migrateLegacyNodePkgOnce.Do(func() {
+		legacy := filepath.Join(CacheRoot(), "node")
+		st, err := os.Stat(legacy)
+		if err != nil || !st.IsDir() {
+			return
+		}
+		ents, err := os.ReadDir(legacy)
+		if err != nil {
+			return
+		}
+		for _, e := range ents {
+			src := filepath.Join(legacy, e.Name())
+			target := filepath.Join(dst, e.Name())
+			if _, err := os.Stat(target); err == nil {
+				continue
+			}
+			if err := os.Rename(src, target); err != nil {
+				continue
+			}
+		}
+		if left, err := os.ReadDir(legacy); err == nil && len(left) == 0 {
+			_ = os.Remove(legacy)
+		}
+	})
 }

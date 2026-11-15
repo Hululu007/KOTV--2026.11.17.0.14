@@ -2,6 +2,7 @@ package spider
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/bobo/KOTV/internal/paths"
@@ -130,10 +131,13 @@ func ResetScriptSpiders() {
 // Node 进程/索引由 stopAllNodeHosts 负责。
 func clearScriptCaches() {
 	clearJSMemoryCaches()
-	for _, dir := range []string{paths.JsCache(), paths.PyCache(), paths.NodeCache()} {
+	// Node 包体已在 JsCache/pkg/：先迁旧 cache/node，再整清 Js；勿再单独 RemoveAll。
+	_ = paths.NodeCache()
+	for _, dir := range []string{paths.JsCache(), paths.PyCache()} {
 		_ = os.RemoveAll(dir)
 		_ = os.MkdirAll(dir, 0o755)
 	}
+	_ = os.RemoveAll(filepath.Join(paths.CacheRoot(), "node"))
 	_, _ = paths.WipeUserRuntimeSubdirs("js-local", "node", "py")
 }
 

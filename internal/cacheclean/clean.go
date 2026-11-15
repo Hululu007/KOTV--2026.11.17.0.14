@@ -56,13 +56,16 @@ func Run(opt Options) Result {
 
 	if opt.Script {
 		spider.ResetScriptSpiders()
-		// 全局共享包体
+		// 全局共享包体：JsCache 含 QuickJS mod + 猫爪 Node pkg（同属 js）。
+		_ = paths.NodeCache() // 先把旧 cache/node 迁入 js/pkg，再整清
 		n, err := wipeDirKeepRoot(paths.JsCache())
 		add("JS", paths.JsCache(), n, err)
 		n, err = wipeDirKeepRoot(paths.PyCache())
 		add("Python", paths.PyCache(), n, err)
-		n, err = wipeDirKeepRoot(paths.NodeCache())
-		add("Node", paths.NodeCache(), n, err)
+		// 迁失败或半残留时再擦旧顶栏目录。
+		if n2, err2 := wipeDirRemove(filepath.Join(paths.CacheRoot(), "node")); n2 > 0 || err2 != nil {
+			add("Node遗留", filepath.Join(paths.CacheRoot(), "node"), n2, err2)
+		}
 		// 每用户可变态（js-local / node data / py work）
 		n, err = paths.WipeUserRuntimeSubdirs("js-local", "node", "py")
 		if n > 0 || err != nil {

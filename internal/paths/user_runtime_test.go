@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -40,6 +41,33 @@ func TestUserRuntimeDirs(t *testing.T) {
 	if !strings.HasSuffix(JsModuleCache(), filepath.Join("js", "mod")) &&
 		!strings.Contains(JsModuleCache(), filepath.Join("js", "mod")) {
 		t.Fatalf("js module cache=%s", JsModuleCache())
+	}
+}
+
+func TestMigrateLegacyNodePkgCache(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KOTV_DATA_DIR", root)
+	// 重置 Once：换临时根后需能再迁（测试专用；生产进程只迁一次）。
+	migrateLegacyNodePkgOnce = sync.Once{}
+
+	legacyDir := filepath.Join(root, "cache", "node", "abc123def456")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(legacyDir, "index.js")
+	if err := os.WriteFile(marker, []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := NodeCache()
+	want := filepath.Join(root, "cache", "js", "pkg")
+	if got != want {
+		t.Fatalf("NodeCache=%s want %s", got, want)
+	}
+	migrated := filepath.Join(want, "abc123def456", "index.js")
+	b, err := os.ReadFile(migrated)
+	if err != nil || string(b) != "ok" {
+		t.Fatalf("migrated content: %v %q", err, b)
 	}
 }
 
