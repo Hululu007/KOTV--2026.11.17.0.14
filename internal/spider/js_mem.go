@@ -142,7 +142,6 @@ func moduleFetchStore(name string) {
 			} else {
 				content = data
 				via = "http"
-				_ = os.MkdirAll(filepath.Dir(disk), 0o755)
 				_ = writeFileAtomic(disk, []byte(content))
 			}
 		}

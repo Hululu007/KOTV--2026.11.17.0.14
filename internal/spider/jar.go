@@ -646,11 +646,7 @@ func writeJarFile(rawURL, dest string) error {
 		}
 		return fmt.Errorf("spider 不是 jar/dex（下载到了网页?）: %q", head)
 	}
-	tmp := dest + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, dest)
+	return writeFileAtomic(dest, b)
 }
 
 type bridgeRequest struct {

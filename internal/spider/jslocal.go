@@ -41,9 +41,7 @@ func LocalGet(rule, key string) string {
 func LocalSet(rule, key, value string) {
 	jsLocalMu.Lock()
 	defer jsLocalMu.Unlock()
-	path := jsLocalPath(rule, key)
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	_ = writeFileAtomic(path, []byte(value))
+	_ = writeFileAtomic(jsLocalPath(rule, key), []byte(value))
 }
 
 func LocalDelete(rule, key string) {

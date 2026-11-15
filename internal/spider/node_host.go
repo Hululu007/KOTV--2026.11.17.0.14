@@ -286,6 +286,10 @@ func (h *NodeHost) Ensure(pkgURL string) (*nodePkg, error) {
 	}
 	h.mu.Unlock()
 
+	// 包体目录（NodeCache/<id>/）与可写 dataDir 分开建：清缓存后根目录还在，子目录常被抹掉。
+	if err := os.MkdirAll(pkg.dir, 0o755); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(pkg.dataDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -307,7 +311,7 @@ func (h *NodeHost) ensureRunner() error {
 	dest := filepath.Join(paths.NodeCache(), "_kotv_noderunner.js")
 	cur, _ := os.ReadFile(dest)
 	if !bytes.Equal(cur, []byte(nodeRunnerSrc)) {
-		if err := os.WriteFile(dest, []byte(nodeRunnerSrc), 0o644); err != nil {
+		if err := writeFileAtomic(dest, []byte(nodeRunnerSrc)); err != nil {
 			return err
 		}
 	}
