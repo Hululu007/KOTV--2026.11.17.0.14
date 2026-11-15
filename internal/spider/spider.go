@@ -123,18 +123,9 @@ func ResetScriptSpiders() {
 }
 
 // clearScriptCaches 清空 JS 内存缓存，并清理本地 js/py/node 目录（含历史落盘残留）。
+// Node 进程/索引由 stopAllNodeHosts 负责；此处只擦磁盘。
 func clearScriptCaches() {
 	clearJSMemoryCaches()
-	sharedNodeHost.ClearAll()
-	userNodeHostsMu.Lock()
-	hosts := make([]*NodeHost, 0, len(userNodeHosts))
-	for _, h := range userNodeHosts {
-		hosts = append(hosts, h)
-	}
-	userNodeHostsMu.Unlock()
-	for _, h := range hosts {
-		h.ClearAll()
-	}
 	for _, dir := range []string{paths.JsCache(), paths.PyCache(), paths.NodeCache()} {
 		_ = os.RemoveAll(dir)
 		_ = os.MkdirAll(dir, 0o755)

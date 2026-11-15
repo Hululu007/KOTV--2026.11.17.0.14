@@ -51,11 +51,14 @@ func Run(opt Options) Result {
 
 	if opt.Script {
 		spider.InterruptScriptSpiders()
+		spider.InterruptNodeForClient("") // 清空全部 Node in-flight
 		spider.ResetScriptSpiders()
 		n, err := wipeDirKeepRoot(paths.JsCache())
 		add("JS", paths.JsCache(), n, err)
 		n, err = wipeDirKeepRoot(paths.PyCache())
 		add("Python", paths.PyCache(), n, err)
+		n, err = wipeDirKeepRoot(paths.NodeCache())
+		add("Node", paths.NodeCache(), n, err)
 		// bridge 侧脚本落盘目录
 		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "js"))
 		if n > 0 || err == nil {

@@ -34,7 +34,16 @@ func TestNodePostJSON_InterruptCancelsAndStops(t *testing.T) {
 	if err != nil || port <= 0 {
 		t.Fatalf("bad port: %v", u.Port())
 	}
-	pkg := &nodePkg{id: "inflight-cancel-test", port: port}
+	h := sharedNodeHost
+	pkg := &nodePkg{id: "inflight-cancel-test", port: port, ownerUID: "", host: h}
+	h.mu.Lock()
+	h.pkgs[pkg.id] = pkg
+	h.mu.Unlock()
+	t.Cleanup(func() {
+		h.mu.Lock()
+		delete(h.pkgs, pkg.id)
+		h.mu.Unlock()
+	})
 
 	leave := hostclient.Enter("test-client-node")
 	defer leave()

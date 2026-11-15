@@ -19,7 +19,8 @@ func requestToken(r *http.Request) string {
 	}
 	path := r.URL.Path
 	underNode := strings.HasPrefix(path, "/node/")
-	alias := spider.DefaultNodeHost().MatchNodeRootAlias(path)
+	// Bind 前探测：扫全部 Node 桶（与 gate.NodeRootAliasKnown 一致）。
+	alias := spider.NodeRootAliasKnown(path)
 	if path == "/ui" || underNode || alias {
 		if t := strings.TrimSpace(r.URL.Query().Get("token")); t != "" {
 			return t
@@ -40,6 +41,7 @@ func wrapNodeRootAuthCookies(w http.ResponseWriter, r *http.Request, token strin
 		return w
 	}
 	path := r.URL.Path
+	// 此处已 Bind：用当前用户桶判别名；探测阶段用 NodeRootAliasKnown。
 	if !strings.HasPrefix(path, "/node/") && !spider.DefaultNodeHost().MatchNodeRootAlias(path) {
 		return w
 	}
@@ -51,6 +53,7 @@ func wrapNodeRootAuthCookies(w http.ResponseWriter, r *http.Request, token strin
 }
 
 func nodeRootAuthCookies(token string) []*http.Cookie {
+	// Bind 后只种当前用户桶的别名，避免跨用户 Path Cookie 互相覆盖。
 	aliases := spider.DefaultNodeHost().RootAliases()
 	out := make([]*http.Cookie, 0, len(aliases))
 	for _, a := range aliases {

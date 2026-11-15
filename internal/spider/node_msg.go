@@ -5,6 +5,8 @@ import (
 	"log"
 	"strings"
 	"sync"
+
+	"github.com/bobo/KOTV/internal/hostclient"
 )
 
 // NodePlayInfo 当前点播起播信息，供 getPlayInfo 回调。
@@ -154,33 +156,53 @@ func HandleNodeMsg(body []byte) any {
 }
 
 // resolveNodePkg 按 api prefix 选包；prefix 空则取任一已起端口的包。
+// /msg 等无 Bind 回调时扫全部用户桶（与 findNodePkgByLocalPort 同构）。
 func resolveNodePkg(prefix string) *nodePkg {
-	h := DefaultNodeHost()
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	var pkg *nodePkg
-	for _, p := range h.pkgs {
-		if p.Port() > 0 {
-			pkg = p
-		}
-	}
 	prefix = strings.TrimSpace(prefix)
-	if prefix == "" {
-		return pkg
-	}
-	if id := h.apiIndex[strings.TrimSuffix(prefix, "/")]; id != "" {
-		if p := h.pkgs[id]; p != nil {
-			return p
+	want := strings.TrimSuffix(prefix, "/")
+
+	resolveIn := func(h *NodeHost) *nodePkg {
+		if h == nil {
+			return nil
 		}
-	}
-	for api, id := range h.apiIndex {
-		if strings.HasPrefix(prefix, api) || strings.HasPrefix(api, prefix) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		var anyReady *nodePkg
+		for _, p := range h.pkgs {
+			if p.Port() > 0 {
+				anyReady = p
+			}
+		}
+		if want == "" {
+			return anyReady
+		}
+		if id := h.apiIndex[want]; id != "" {
 			if p := h.pkgs[id]; p != nil {
 				return p
 			}
 		}
+		for api, id := range h.apiIndex {
+			if strings.HasPrefix(want, api) || strings.HasPrefix(api, want) {
+				if p := h.pkgs[id]; p != nil {
+					return p
+				}
+			}
+		}
+		return nil
 	}
-	return pkg
+
+	// 有 Bind 时优先当前桶，避免跨用户误命中。
+	if hostclient.RuntimeUserID() != "" || hostclient.ScopeID() != "" {
+		if p := resolveIn(nodeHostForCurrent()); p != nil {
+			return p
+		}
+	}
+	for _, h := range snapshotNodeHosts() {
+		if p := resolveIn(h); p != nil {
+			return p
+		}
+	}
+	return nil
 }
 
 // resolveNodePkgByLocalPort 按 URL 里 127.0.0.1|localhost:端口 匹配已起的包（跨用户桶，端口全局唯一）。

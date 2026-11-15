@@ -102,7 +102,7 @@ func newNodeHost(ownerUID string) *NodeHost {
 	}
 }
 
-// nodeHostForUser 指定 RuntimeUserID 的 Node 桶；空串为本机共享（对齐 bridgeForUser）。
+// nodeHostForUser 指定 RuntimeUserID 的 Node 桶；空串为本机共享（与 bridgeForUser 同构）。
 func nodeHostForUser(userID string) *NodeHost {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -118,17 +118,17 @@ func nodeHostForUser(userID string) *NodeHost {
 	return h
 }
 
-// nodeHostForCurrent 当前请求所属 Node 桶（对齐 bridgeForCurrent）。
+// nodeHostForCurrent 当前请求所属 Node 桶（与 bridgeForCurrent 同构）。
 func nodeHostForCurrent() *NodeHost {
 	return nodeHostForUser(hostclient.RuntimeUserID())
 }
 
-// DefaultNodeHost 当前请求所属 Node 桶（本机共享或远端用户独立）。
+// DefaultNodeHost 当前请求所属 Node 桶（本机共享或远端用户独立；须在 Bind 之后使用）。
 func DefaultNodeHost() *NodeHost {
 	return nodeHostForCurrent()
 }
 
-// destroyUserNodeHost 销毁指定远端用户的 Node 桶（对齐删 userBridges）。
+// destroyUserNodeHost 销毁指定远端用户的 Node 桶（与删 userBridges 同构）。
 func destroyUserNodeHost(userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -139,18 +139,18 @@ func destroyUserNodeHost(userID string) {
 	delete(userNodeHosts, userID)
 	userNodeHostsMu.Unlock()
 	if h != nil {
-		h.StopAll()
+		h.ClearAll()
 	}
 }
 
-// clearSharedNodeHost 只停本机共享 Node（对齐 clearSharedJsPy，不碰远端用户桶）。
+// clearSharedNodeHost 清空本机共享 Node 桶（与 clearSharedJsPy 同构，不碰远端用户桶）。
 func clearSharedNodeHost() {
-	sharedNodeHost.StopAll()
+	sharedNodeHost.ClearAll()
 }
 
-// stopAllNodeHosts 停共享 + 全部用户桶（Clear / Reset / Shutdown）。
+// stopAllNodeHosts 清空共享 + 全部用户桶（Clear / Reset / Shutdown）。
 func stopAllNodeHosts() {
-	sharedNodeHost.StopAll()
+	sharedNodeHost.ClearAll()
 	userNodeHostsMu.Lock()
 	all := make([]*NodeHost, 0, len(userNodeHosts))
 	for id, h := range userNodeHosts {
@@ -159,22 +159,25 @@ func stopAllNodeHosts() {
 	}
 	userNodeHostsMu.Unlock()
 	for _, h := range all {
-		h.StopAll()
+		h.ClearAll()
 	}
 }
 
-// NodeRootAliasKnown 任一 Node 桶是否登记了该根别名（gate Bind 前探测用）。
-func NodeRootAliasKnown(path string) bool {
-	if sharedNodeHost.MatchNodeRootAlias(path) {
-		return true
-	}
+// snapshotNodeHosts 返回共享桶 + 当前全部用户桶（只读快照）。
+func snapshotNodeHosts() []*NodeHost {
 	userNodeHostsMu.Lock()
-	hosts := make([]*NodeHost, 0, len(userNodeHosts))
+	hosts := make([]*NodeHost, 0, 1+len(userNodeHosts))
+	hosts = append(hosts, sharedNodeHost)
 	for _, h := range userNodeHosts {
 		hosts = append(hosts, h)
 	}
 	userNodeHostsMu.Unlock()
-	for _, h := range hosts {
+	return hosts
+}
+
+// NodeRootAliasKnown 任一 Node 桶是否登记了该根别名（gate Bind 前探测用）。
+func NodeRootAliasKnown(path string) bool {
+	for _, h := range snapshotNodeHosts() {
 		if h.MatchNodeRootAlias(path) {
 			return true
 		}
@@ -184,32 +187,15 @@ func NodeRootAliasKnown(path string) bool {
 
 // findNodePkgByLocalPort 按本机端口在所有桶中找包（端口全局唯一）。
 func findNodePkgByLocalPort(portStr string) *nodePkg {
-	find := func(h *NodeHost) *nodePkg {
-		if h == nil {
-			return nil
-		}
+	for _, h := range snapshotNodeHosts() {
 		h.mu.Lock()
-		defer h.mu.Unlock()
 		for _, p := range h.pkgs {
 			if p.Port() > 0 && fmt.Sprintf("%d", p.Port()) == portStr {
+				h.mu.Unlock()
 				return p
 			}
 		}
-		return nil
-	}
-	if p := find(sharedNodeHost); p != nil {
-		return p
-	}
-	userNodeHostsMu.Lock()
-	hosts := make([]*NodeHost, 0, len(userNodeHosts))
-	for _, h := range userNodeHosts {
-		hosts = append(hosts, h)
-	}
-	userNodeHostsMu.Unlock()
-	for _, h := range hosts {
-		if p := find(h); p != nil {
-			return p
-		}
+		h.mu.Unlock()
 	}
 	return nil
 }
@@ -853,11 +839,11 @@ func (p *nodePkg) FetchConfig() (string, error) {
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("GET /config http %d", resp.StatusCode)
 	}
-	if p.host != nil {
-		p.host.RegisterPackageAPIs(p.id, string(b))
-	} else {
-		nodeHostForCurrent().RegisterPackageAPIs(p.id, string(b))
+	h := p.host
+	if h == nil {
+		h = nodeHostForCurrent()
 	}
+	h.RegisterPackageAPIs(p.id, string(b))
 	return string(b), nil
 }
 
