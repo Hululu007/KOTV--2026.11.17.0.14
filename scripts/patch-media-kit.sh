@@ -1830,8 +1830,93 @@ print(f"patched avfoundation mime hint ({swift})")
 PY
 fi
 
-# media_kit_video（Win7 线，只出 Windows 包）
-[[ "${KOTV_WIN7:-}" == "1" ]] || exit 0
+# media_kit_video（Windows 源在共享 pub-cache）：先洗掉残留的内联 soft-rebuild / cout；
+# 仅 KOTV_WIN7=1 再装 ANGLE prefer_d3d9 + latch 版 MaybeRewriteAngleForSoft。
+_kotv_patch_py <<'PY'
+import os
+root = pkg_or_skip("media_kit_video")
+vo = root / "windows" / "video_output.cc"
+if not vo.is_file():
+    print(f"ok media_kit_video ({root.name}): no windows/video_output.cc")
+    raise SystemExit(0)
+text_vo = vo.read_text(encoding="utf-8")
+legacy_start = (
+    "void VideoOutput::CheckAndResize() {\n"
+    "  // KOTV: dxva2 asked for D3D9; if decode fell to soft, D3D9+D3D11-share is blue — rebuild on D3D11.\n"
+)
+changed = False
+if legacy_start in text_vo and "bool VideoOutput::MaybeRewriteAngleForSoft()" not in text_vo:
+    idx = text_vo.find(legacy_start)
+    body_mark = "\n  // Check if a new texture with different dimensions is needed.\n"
+    body_at = text_vo.find(body_mark, idx)
+    if body_at < 0:
+        print("ERROR: leftover soft-rebuild strip: stock CheckAndResize body missing", file=sys.stderr)
+        sys.exit(1)
+    text_vo = text_vo[:idx] + "void VideoOutput::CheckAndResize() {" + text_vo[body_at:]
+    changed = True
+    print(f"patched media_kit_video ({root.name}): stripped leftover inline soft-rebuild")
+# 非 Win7：若曾装过 MaybeRewrite，去掉调用与方法，避免共享缓存在主线包里仍走软解重建。
+win7 = os.environ.get("KOTV_WIN7", "") == "1"
+if not win7:
+    import re as _re
+    if "MaybeRewriteAngleForSoft();" in text_vo:
+        text_vo2, n = _re.subn(
+            r"\n  MaybeRewriteAngleForSoft\(\);\n",
+            "\n",
+            text_vo,
+            count=1,
+        )
+        if n:
+            text_vo = text_vo2
+            changed = True
+            print(f"patched media_kit_video ({root.name}): removed MaybeRewrite call (non-Win7)")
+    if "bool VideoOutput::MaybeRewriteAngleForSoft()" in text_vo:
+        text_vo2, n = _re.subn(
+            r"bool VideoOutput::MaybeRewriteAngleForSoft\(\) \{.*?\n\}\n\n",
+            "",
+            text_vo,
+            count=1,
+            flags=_re.S,
+        )
+        if n != 1:
+            print("ERROR: MaybeRewrite method strip failed (non-Win7)", file=sys.stderr)
+            sys.exit(1)
+        text_vo = text_vo2
+        changed = True
+        print(f"patched media_kit_video ({root.name}): removed MaybeRewrite method (non-Win7)")
+    vo_h = root / "windows" / "video_output.h"
+    if vo_h.is_file():
+        th = vo_h.read_text(encoding="utf-8")
+        if "MaybeRewriteAngleForSoft" in th:
+            th2 = th.replace(
+                "\n  // KOTV: after dxva2→soft, rebuild D3D11 ANGLE and re-register texture.\n"
+                "  bool MaybeRewriteAngleForSoft();\n",
+                "\n",
+            )
+            if th2 == th:
+                th2 = _re.sub(
+                    r"\n  // KOTV:[^\n]*\n  bool MaybeRewriteAngleForSoft\(\);\n",
+                    "\n",
+                    th,
+                    count=1,
+                )
+            if "MaybeRewriteAngleForSoft" in th2:
+                print("ERROR: video_output.h still declares MaybeRewriteAngleForSoft", file=sys.stderr)
+                sys.exit(1)
+            vo_h.write_text(th2, encoding="utf-8")
+            print(f"patched media_kit_video ({root.name}): removed MaybeRewrite decl (non-Win7)")
+if changed:
+    vo.write_text(text_vo, encoding="utf-8")
+if "rebuilt ANGLE on D3D11 after soft fallback" in text_vo or "kotv_dbg_a027de" in text_vo:
+    print(
+        f"ERROR: media_kit_video ({root.name}) still has soft-rebuild dbg/cout after sanitize",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+print(f"ok media_kit_video ({root.name}): soft-rebuild sanitize done (win7={win7})")
+PY
+
+[[ "${KOTV_WIN7:-}" == "1" ]] || { echo "ok media_kit_video: skip Win7 ANGLE/MaybeRewrite install"; exit 0; }
 
 _kotv_patch_py <<'PY'
 root = pkg_or_fail("media_kit_video")
