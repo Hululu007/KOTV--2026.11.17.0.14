@@ -48,17 +48,13 @@
 # video_player 的 formatHint 只在 Android 生效。iOS 打开时若判断为 HLS，Dart 写入
 # X-KOTV-Asset-Mime，这里把它从 HTTP 头里拿掉，改成 AVURLAsset 的 MIME。
 #
-# Win7 线（KOTV_WIN7=1）：media_kit_video 的 ANGLE 依次试 D3D11 → D3D11 9_3 → D3D9 → WARP。
-# 关「硬解直出」：hwdec=auto（MPV 自选），ANGLE 用 D3D11 优先。
-# 开「硬解直出」：dxva2 经 dxva2-egl 零拷贝，须 ANGLE D3D9Ex；被拒则软解。软解若仍停在 D3D9
-# （与 D3D11 共享纹理）会蓝/黑屏：MaybeRewriteAngleForSoft 在 hwdec-current=no 时事务式重建
-# 为 D3D11，并 Resize 重挂 Flutter DXGI 纹理（同尺寸也要重挂，否则仍黑屏）。
-# 补丁在建播放器时读 hwdec：含 dxva2（直出）则 D3D9 优先，否则 D3D11 优先。
-# ANGLE/FVP 的 D3D11 纹理设备用 stock 首适配器（EnumAdapters(0) / Flutter graphics adapter），
-# 不按 HEVC 解码能力选卡（显示卡≠解码卡时会黑屏；同步探测还会拖死非 NVIDIA 机）。
+# media_kit_video（共享 pub-cache）：任何平台先洗掉残留的内联 soft-rebuild / cout / 会话 dbg。
+# 仅 KOTV_WIN7=1 再装：ANGLE 按 hwdec 选 D3D9（dxva2 直出）或 D3D11；软解后
+# MaybeRewriteAngleForSoft 事务式重建 D3D11 + Resize 重挂纹理，失败 latch 防狂打。
+# D3D11 纹理设备用 stock 首适配器（不按 HEVC 选卡）。
 #
 # 按平台：Dart 部分各平台共用，总是打；原生部分（fvp 的 Windows / 安卓、window_manager、
-# avfoundation、Win7 的 media_kit_video）只在 KOTV_FLUTTER_TARGET 对应的平台打。
+# avfoundation）只在 KOTV_FLUTTER_TARGET 对应的平台打。
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：KOTV_FLUTTER_TARGET=<平台> scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
 set -euo pipefail
