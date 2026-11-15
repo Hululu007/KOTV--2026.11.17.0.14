@@ -107,10 +107,7 @@ func New() (*App, error) {
 		mediaState:    "idle",
 	}
 	a.presence = clientsession.NewPresence(func(userID string) {
-		a.dropReposForUser(userID)
-		spider.KillUserRuntime(userID)
-		parse.CancelUserSniffs(userID)
-		a.sessions.RemoveByUser(userID)
+		a.releaseUserRuntime(userID)
 	})
 
 	a.Server = server.New()
@@ -343,6 +340,20 @@ func (a *App) dropReposForUser(userID string) {
 	})
 	for _, s := range list {
 		a.dropSessionRepos(s)
+	}
+}
+
+// releaseUserRuntime 释放该用户的会话仓、爬虫运行时与嗅探（不删库 / TV 目录）。
+func (a *App) releaseUserRuntime(userID string) {
+	userID = strings.TrimSpace(userID)
+	if a == nil || userID == "" {
+		return
+	}
+	a.dropReposForUser(userID)
+	spider.KillUserRuntime(userID)
+	parse.CancelUserSniffs(userID)
+	if a.sessions != nil {
+		a.sessions.RemoveByUser(userID)
 	}
 }
 

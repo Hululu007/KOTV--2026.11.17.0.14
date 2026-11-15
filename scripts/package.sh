@@ -27,6 +27,7 @@ if [[ -z "${KOTV_VERSION:-}" && -n "${VERSION:-}" ]]; then
   KOTV_VERSION="$VERSION"
 fi
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
+kotv_check_version_literals "$VERSION"
 
 echo "platform=$PLAT"
 echo "dist=$DIST"

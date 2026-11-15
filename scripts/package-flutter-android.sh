@@ -17,6 +17,7 @@ else
 fi
 
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
+kotv_check_version_literals "$VERSION"
 echo "==> version=$VERSION"
 
 # 钉死 targetSdk：潇洒哥 go 多线程依赖 ≤28；勿落到 Flutter 默认 36。

@@ -22,6 +22,7 @@ detect_platform() {
 
 PLAT="${1:-$(detect_platform)}"
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
+kotv_check_version_literals "$VERSION"
 DIST="$ROOT/dist/KOTV-web-$PLAT"
 FLUTTER_BIN="${FLUTTER_BIN:-$(command -v flutter || true)}"
 if [[ -z "$FLUTTER_BIN" && -x "$HOME/flutter/bin/flutter" ]]; then

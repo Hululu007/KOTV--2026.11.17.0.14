@@ -76,28 +76,6 @@ func bridgeForCurrent() *javaBridgeClient {
 	return bridgeForUser(hostclient.RuntimeUserID())
 }
 
-// KillUserRuntime 杀掉指定用户的 JVM、Python、QuickJS 与 Node（不动本机共享与其它用户）。
-func KillUserRuntime(userID string) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return
-	}
-	forgetJarRecent(userID)
-	DestroyUserScripts(userID)
-	clearJarForUser(userID)
-	userBridgesMu.Lock()
-	b := userBridges[userID]
-	delete(userBridges, userID)
-	userBridgesMu.Unlock()
-	if b != nil {
-		b.epoch.Add(1)
-		b.mu.Lock()
-		b.stopLocked()
-		b.mu.Unlock()
-	}
-	destroyUserNodeHost(userID)
-}
-
 // HostSpiderReady 远端主机爬虫面是否可用（安卓=本机 9979；桌面=捆绑 runtime 可用即可）。
 func HostSpiderReady() (ok bool, errMsg string) {
 	if runtime.GOOS == "android" {
@@ -113,15 +91,6 @@ func HostSpiderReady() (ok bool, errMsg string) {
 		return true, ""
 	}
 	return true, ""
-}
-
-// RestartCallerRuntime 卡死恢复时硬重启当前请求所属运行时（JVM / Python / QuickJS / Node）。切仓不走这里。
-func RestartCallerRuntime() {
-	if uid := hostclient.RuntimeUserID(); uid != "" {
-		KillUserRuntime(uid)
-		return
-	}
-	HardRestartSharedRuntimes()
 }
 
 // 点播配置的网络参数（headers/proxy/hosts/doh），在每个新 worker 启动时重放。
@@ -365,10 +334,9 @@ func callJavaBridge(payload []byte) (string, error) {
 	return bridgeForCurrent().callCtx(ctx, payload)
 }
 
-// InterruptJavaBridgeForClient 取消进行中的 JAR HTTP（OkHttp + Go 客户端）。
-// 包外请用 SoftCancelForClient / SoftCancelAll。不直接杀 JVM；
-// 被取消的 callCtx 返回时会 stopLocked 回收共享/用户 bridge。
-func InterruptJavaBridgeForClient(clientID string) {
+// interruptJavaBridgeForClient 取消进行中的 JAR HTTP（OkHttp + Go 客户端）。
+// 不直接杀 JVM；被取消的 callCtx 返回时会 stopLocked 回收共享/用户 bridge。
+func interruptJavaBridgeForClient(clientID string) {
 	cancelJarCalls(clientID)
 	softCancelJavaBridge(clientID)
 }

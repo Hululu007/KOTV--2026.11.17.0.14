@@ -6,9 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/bobo/KOTV/internal/parse"
 	"github.com/bobo/KOTV/internal/paths"
-	"github.com/bobo/KOTV/internal/spider"
 )
 
 // PurgeUserData 删除远端用户的全部用户态（owner 为空即本机，不可调用）。
@@ -31,12 +29,7 @@ func (a *App) PurgeUserData(userID, username string) {
 		}
 		_ = a.DB.DeleteAuthTokensForUser(userID)
 	}
-	a.dropReposForUser(userID)
-	if a.sessions != nil {
-		a.sessions.RemoveByUser(userID)
-	}
-	spider.KillUserRuntime(userID)
-	parse.CancelUserSniffs(userID)
+	a.releaseUserRuntime(userID)
 	paths.RemoveTVUserDirs(username)
 	// 旧版曾按账号 UUID 建 s_u_<id>；删用户时一并清掉。
 	if userID != username {

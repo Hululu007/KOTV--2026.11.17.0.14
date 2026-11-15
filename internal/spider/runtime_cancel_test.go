@@ -67,7 +67,7 @@ func TestNodePostJSON_InterruptCancelsAndStops(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("handler not started")
 	}
-	InterruptNodeForClient(scope)
+	interruptNodeForClient(scope)
 	select {
 	case err := <-errCh:
 		if !errors.Is(err, ErrNodeInterrupted) {
@@ -189,7 +189,7 @@ func TestInterruptScriptSpiders_PerSlotClient(t *testing.T) {
 	jsPy["pool"] = pool
 	jsPyMu.Unlock()
 
-	InterruptScriptSpidersForClient("c-a")
+	interruptScriptSpidersForClient("c-a")
 	if a.epoch.Load() == 1 {
 		t.Fatal("slot a should be interrupted")
 	}

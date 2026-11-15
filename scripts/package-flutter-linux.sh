@@ -8,6 +8,7 @@ source "$ROOT/scripts/kotv-release-name.sh"
 export PATH="${HOME}/flutter/bin:${PATH}"
 
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
+kotv_check_version_literals "$VERSION"
 OUT_ZIP="$ROOT/dist/KO影视-${VERSION}-linux-x86_64.zip"
 ENGINE_OUT="$ROOT/flutter/assets/engine/kotv-engine"
 BUNDLE="$ROOT/flutter/build/linux/x64/release/bundle"

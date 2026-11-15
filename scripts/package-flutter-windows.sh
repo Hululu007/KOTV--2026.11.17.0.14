@@ -12,6 +12,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/kotv-release-name.sh"
 
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
+kotv_check_version_literals "$VERSION"
 ARCH="$(kotv_release_arch windows-x64)"
 SUFFIX="${KOTV_OUT_SUFFIX:-}"
 OUT_ZIP="${ROOT}/KO影视-${VERSION}-${ARCH}${SUFFIX}.zip"

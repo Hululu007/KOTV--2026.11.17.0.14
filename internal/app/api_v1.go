@@ -483,12 +483,9 @@ func (a *App) APISessionLeave() map[string]any {
 		a.sessions.Remove(sid)
 	}
 	if a.presence != nil && uid != "" {
-		a.presence.Leave(uid) // KillUserRuntime + CancelUserSniffs + RemoveByUser
+		a.presence.Leave(uid) // → releaseUserRuntime
 	} else if uid != "" {
-		a.dropReposForUser(uid)
-		spider.KillUserRuntime(uid)
-		parse.CancelUserSniffs(uid)
-		a.sessions.RemoveByUser(uid)
+		a.releaseUserRuntime(uid)
 	}
 	return map[string]any{"ok": true}
 }

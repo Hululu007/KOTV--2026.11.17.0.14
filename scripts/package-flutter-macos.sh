@@ -38,6 +38,7 @@ else
   WANT_ENGINE_ARCH=x86_64
 fi
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
+kotv_check_version_literals "$VERSION"
 REL_ARCH="$(kotv_release_arch "$PLAT")"
 echo "==> version=$VERSION arch=$REL_ARCH ($PLAT) GOARCH=$GOARCH (uname=$(uname -m) force=${KOTV_MACOS_FORCE_ARCH:-})"
 
