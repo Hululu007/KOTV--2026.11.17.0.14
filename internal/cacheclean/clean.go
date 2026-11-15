@@ -56,8 +56,8 @@ func Run(opt Options) Result {
 
 	if opt.Script {
 		spider.ResetScriptSpiders()
-		// 全局共享包体：与 jar 同级 cache/{js,py,node}。
-		_ = paths.NodeCache() // 先把误嵌 js/pkg 迁回 cache/node
+		// 公共包体 cache/{js,py,node}（CacheRoot 会先收拢历史误放）。
+		_ = paths.CacheRoot()
 		if n2, err2 := wipeDirRemove(filepath.Join(paths.CacheRoot(), "js", "pkg")); n2 > 0 || err2 != nil {
 			add("Node误嵌残留", filepath.Join(paths.CacheRoot(), "js", "pkg"), n2, err2)
 		}
@@ -72,34 +72,23 @@ func Run(opt Options) Result {
 		if n > 0 || err != nil {
 			add("脚本运行时", filepath.Join(paths.CacheRoot(), "run"), n, err)
 		}
-		// bridge 侧脚本落盘目录（可能不存在，有释放量或出错才记）
-		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "js"))
-		if n > 0 || err != nil {
-			add("JS(bridge)", filepath.Join(paths.Root(), "cache", "js"), n, err)
-		}
-		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "py"))
-		if n > 0 || err != nil {
-			add("Python(bridge)", filepath.Join(paths.Root(), "cache", "py"), n, err)
-		}
 	}
 
 	if opt.Jar {
 		spider.ClearJarDisk()
 		n, err := wipeDirKeepRoot(paths.JarCache())
 		add("JAR", paths.JarCache(), n, err)
-		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "jar"))
-		add("JAR(bridge)", filepath.Join(paths.Root(), "cache", "jar"), n, err)
 		n, err = paths.WipeUserRuntimeSubdirs("jvm")
 		if n > 0 || err != nil {
 			add("JVM运行时", filepath.Join(paths.CacheRoot(), "run"), n, err)
 		}
-		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "jpa"))
+		n, err = wipeDirKeepRoot(filepath.Join(paths.CacheRoot(), "jpa"))
 		if n > 0 || err != nil {
-			add("JPA", filepath.Join(paths.Root(), "cache", "jpa"), n, err)
+			add("JPA", filepath.Join(paths.CacheRoot(), "jpa"), n, err)
 		}
-		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "proxy"))
+		n, err = wipeDirKeepRoot(filepath.Join(paths.CacheRoot(), "proxy"))
 		if n > 0 || err != nil {
-			add("代理溢写", filepath.Join(paths.Root(), "cache", "proxy"), n, err)
+			add("代理溢写", filepath.Join(paths.CacheRoot(), "proxy"), n, err)
 		}
 	}
 

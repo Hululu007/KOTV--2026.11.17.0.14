@@ -47,7 +47,7 @@ func TestUserRuntimeDirs(t *testing.T) {
 func TestNodeCache_SiblingOfJarPy(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KOTV_DATA_DIR", root)
-	migrateMisplacedNodePkgOnce = sync.Once{}
+	reconcilePackageCacheOnce = sync.Once{}
 
 	got := NodeCache()
 	want := filepath.Join(root, "cache", "node")
@@ -62,29 +62,61 @@ func TestNodeCache_SiblingOfJarPy(t *testing.T) {
 	}
 }
 
-func TestMigrateMisplacedNodePkgCache(t *testing.T) {
+func TestPackageCaches_PublicNoUID(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KOTV_DATA_DIR", root)
-	migrateMisplacedNodePkgOnce = sync.Once{}
+	reconcilePackageCacheOnce = sync.Once{}
 
-	misDir := filepath.Join(root, "cache", "js", "pkg", "abc123def456")
-	if err := os.MkdirAll(misDir, 0o755); err != nil {
+	cache := CacheRoot()
+	for _, p := range []string{JarCache(), PyCache(), JsCache(), NodeCache()} {
+		if filepath.Dir(p) != cache {
+			t.Fatalf("package body must be under CacheRoot: %s (cache=%s)", p, cache)
+		}
+		if strings.Contains(p, filepath.Join("run", "alice")) || strings.Contains(p, filepath.Join("run", "shared")) {
+			t.Fatalf("package body must not use run/<uid>: %s", p)
+		}
+	}
+	jvm := UserJVMDir("alice")
+	if !strings.Contains(jvm, filepath.Join("run", "alice", "jvm")) {
+		t.Fatalf("UserJVMDir is prefs/files only: %s", jvm)
+	}
+	if jvm == cache || strings.HasPrefix(JarCache(), jvm+string(filepath.Separator)) {
+		t.Fatal("JarCache must not live under UserJVMDir")
+	}
+}
+
+func TestReconcilePackageCacheLayout(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KOTV_DATA_DIR", root)
+	reconcilePackageCacheOnce = sync.Once{}
+
+	nodeMis := filepath.Join(root, "cache", "js", "pkg", "abc123def456")
+	if err := os.MkdirAll(nodeMis, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	marker := filepath.Join(misDir, "index.js")
-	if err := os.WriteFile(marker, []byte("ok"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(nodeMis, "index.js"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jarMis := filepath.Join(root, "cache", "run", "alice", "jvm", "cache", "jar")
+	if err := os.MkdirAll(jarMis, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jarMis, "deadbeef.jar"), []byte("jar"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	got := NodeCache()
-	want := filepath.Join(root, "cache", "node")
-	if got != want {
-		t.Fatalf("NodeCache=%s want %s", got, want)
+	_ = CacheRoot()
+
+	migratedNode := filepath.Join(root, "cache", "node", "abc123def456", "index.js")
+	if b, err := os.ReadFile(migratedNode); err != nil || string(b) != "ok" {
+		t.Fatalf("node migrate: %v %q", err, b)
 	}
-	migrated := filepath.Join(want, "abc123def456", "index.js")
-	b, err := os.ReadFile(migrated)
-	if err != nil || string(b) != "ok" {
-		t.Fatalf("migrated content: %v %q", err, b)
+	migratedJar := filepath.Join(root, "cache", "jar", "deadbeef.jar")
+	if b, err := os.ReadFile(migratedJar); err != nil || string(b) != "jar" {
+		t.Fatalf("jar migrate: %v %q", err, b)
+	}
+	if _, err := os.Stat(filepath.Join(root, "cache", "run", "alice", "jvm", "cache", "jar")); !os.IsNotExist(err) {
+		t.Fatalf("legacy jvm/cache/jar should be gone: %v", err)
 	}
 }
 

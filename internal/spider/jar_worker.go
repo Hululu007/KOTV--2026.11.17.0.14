@@ -52,8 +52,9 @@ var javaBridge javaBridgeClient // ownerUID 空=共享
 var androidJarReachable atomic.Bool
 
 // 远端已登录用户：每人独立 JVM；空 userId 走共享 javaBridge（本机）。
-// 不能把多租户塞进同一 JVM：bridge 内 Prefers（kotv.cache.dir）、spiders 缓存键、
+// 不能把多租户塞进同一 JVM：bridge 内 Prefers（kotv.user.dir）、spiders 缓存键、
 // recentJar 均未按 userId 隔离；共用会串 Prefers / 爬虫实例 / proxy 解析。
+// 包体仍公共：kotv.cache.dir=CacheRoot，Path.jar/js/py 与 Go 侧 cache/{jar,py,js} 一致。
 // 同一 JVM 内已可装多份 jar（loaders 按路径）；缺的是「多用户」隔离，不是「多 jar」。
 var (
 	userBridgesMu sync.Mutex
@@ -611,13 +612,15 @@ func (w *javaBridgeClient) startLocked() error {
 	}
 
 	proxyPort := localproxy.Port()
-	// data.dir=应用根（TV 凭证仍按用户名分目录）；cache.dir=每用户 JVM 可变态（Prefers 等）。
+	// data.dir=应用根（TV 凭证）；cache.dir=公共包体根 Path.jar/js/py；user.dir=每用户 Prefers/files。
 	dataDir := paths.Root()
-	cacheDir := paths.UserJVMDir(w.ownerUID)
+	cacheDir := paths.CacheRoot()
+	userDir := paths.UserJVMDir(w.ownerUID)
 	cmd := exec.Command(java,
 		"-Djava.awt.headless=true",
 		fmt.Sprintf("-Dkotv.data.dir=%s", dataDir),
 		fmt.Sprintf("-Dkotv.cache.dir=%s", cacheDir),
+		fmt.Sprintf("-Dkotv.user.dir=%s", userDir),
 		fmt.Sprintf("-Dkotv.bridge.port=%d", port),
 		"-Djava.net.useSystemProxies=false",
 		"-DsocksProxyHost=",

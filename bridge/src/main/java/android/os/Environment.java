@@ -14,7 +14,7 @@ public final class Environment {
         // 桌面 stub：模拟 Android 外部存储根目录。cookie 等具体路径仍由 jar 的 Path.tv(...) 决定。
         String root = System.getProperty("kotv.data.dir");
         if (root == null || root.isEmpty()) root = System.getenv("KOTV_DATA_DIR");
-        // 与 Context 使用的 kotv.cache.dir 一致，避免 stub 根目录漂移
+        // 回落：旧进程可能只注了 cache.dir；包体公共根不是外部存储根，仅作兼容。
         if (root == null || root.isEmpty()) root = System.getProperty("kotv.cache.dir");
         if (root == null || root.isEmpty()) root = System.getenv("KOTV_CACHE_DIR");
         if (root == null || root.isEmpty()) root = new File(System.getProperty("user.home"), ".kotv").getPath();
