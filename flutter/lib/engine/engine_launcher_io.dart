@@ -630,11 +630,17 @@ class EngineLauncher {
     }
   }
 
-  /// 引擎死后可能残留的捆绑运行时命令行特征（勿用系统 chrome / python 通用名）。
+  /// 引擎死后可能残留的捆绑运行时命令行特征。
+  /// 勿匹配裸 `chrome.exe` / `Google\Chrome`（会误杀用户浏览器）；
+  /// Windows 捆绑在 `runtime/chromium/chrome.exe`，用路径片段区分。
   static const List<String> _strayRuntimeCmdPatterns = <String>[
     'spider-bridge.jar --serve',
     '_kotv_runner.py',
     'chrome-headless-shell',
+    r'chromium\chrome.exe',
+    'chromium/chrome.exe',
+    'chromium/chrome',
+    'Google Chrome for Testing',
   ];
 
   /// WMI VBScript（Win7 可用）按命令行特征结束捆绑 Java/Python/Chromium，无 PowerShell。
@@ -723,7 +729,7 @@ class EngineLauncher {
     await _killStrayRuntimes();
   }
 
-  /// 清掉引擎死后残留的捆绑 Java / Python / chrome-headless-shell（按命令行特征，避免误杀系统浏览器）。
+  /// 清掉引擎死后残留的捆绑 Java / Python / 嗅探浏览器（按命令行特征，避免误杀系统浏览器）。
   Future<void> _killStrayRuntimes() async {
     if (Platform.isAndroid) return;
     if (Platform.isWindows) {
@@ -845,7 +851,7 @@ class EngineLauncher {
           '    CreateObject("WScript.Shell").Run "taskkill /F /T /PID " & eng, 0, True\n'
           '    For Each p In wmi.ExecQuery("Select ProcessId,CommandLine from Win32_Process")\n'
           '      cl = LCase("" & p.CommandLine)\n'
-          '      If InStr(cl, "spider-bridge.jar --serve") > 0 Or InStr(cl, "_kotv_runner.py") > 0 Or InStr(cl, "chrome-headless-shell") > 0 Then\n'
+          '      If InStr(cl, "spider-bridge.jar --serve") > 0 Or InStr(cl, "_kotv_runner.py") > 0 Or InStr(cl, "chrome-headless-shell") > 0 Or InStr(cl, "chromium\\chrome.exe") > 0 Or InStr(cl, "chromium/chrome.exe") > 0 Or InStr(cl, "google chrome for testing") > 0 Then\n'
           '        p.Terminate\n'
           '      End If\n'
           '    Next\n'
@@ -876,7 +882,9 @@ class EngineLauncher {
               'kill -TERM "\$ENG" 2>/dev/null; sleep 1; kill -KILL "\$ENG" 2>/dev/null; '
               'pkill -f "spider-bridge.jar --serve" 2>/dev/null; '
               'pkill -f "_kotv_runner.py" 2>/dev/null; '
-              'pkill -f "chrome-headless-shell" 2>/dev/null; true',
+              'pkill -f "chrome-headless-shell" 2>/dev/null; '
+              'pkill -f "chromium/chrome" 2>/dev/null; '
+              'pkill -f "Google Chrome for Testing" 2>/dev/null; true',
         ],
         mode: ProcessStartMode.detached,
       );

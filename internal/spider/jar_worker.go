@@ -52,6 +52,9 @@ var javaBridge javaBridgeClient // ownerUID 空=共享
 var androidJarReachable atomic.Bool
 
 // 远端已登录用户：每人独立 JVM；空 userId 走共享 javaBridge（本机）。
+// 不能把多租户塞进同一 JVM：bridge 内 Prefers（kotv.cache.dir）、spiders 缓存键、
+// recentJar 均未按 userId 隔离；共用会串 Prefers / 爬虫实例 / proxy 解析。
+// 同一 JVM 内已可装多份 jar（loaders 按路径）；缺的是「多用户」隔离，不是「多 jar」。
 var (
 	userBridgesMu sync.Mutex
 	userBridges   = map[string]*javaBridgeClient{}

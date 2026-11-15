@@ -12,6 +12,12 @@ import (
 //     JarCache / PyCache / JsModuleCache / NodeCache/<pkgId>/
 //  2. 可变运行时态（按 RuntimeUserID 隔离，空=shared）：
 //     UserRuntimeDir = cache/run/<uid|shared>/{jvm,py,chromium,node,js-local}
+//
+// 进程是否也按用户拆开（与落盘配合）：
+//   - JVM：远端每用户一进程（Prefers/spider 实例/recentJar 在 bridge 内未按 user 隔离）
+//   - Python / Node：每用户独立进程与 workDir/dataDir
+//   - QuickJS：同引擎进程内分槽（jsPyKey 含 RuntimeUserID），无第二 OS 进程
+//   - 嗅探浏览器：每用户独立进程 + user-data-dir（Android 为 WebView，不走本目录）
 
 // RuntimeOwnerLabel 运行时落盘子目录名：远端用户用 uid，本机共享用 shared。
 func RuntimeOwnerLabel(userID string) string {

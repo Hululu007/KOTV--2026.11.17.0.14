@@ -47,8 +47,10 @@ const (
 	sniffUAIOS    = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
 )
 
-// 桌面嗅探浏览器：捆绑 chrome-headless-shell（路径见 runtime.Chromium）。
-// 按 RuntimeUserID 分进程（空=本机共享）；每桶最多 2 个并发 tab。
+// 桌面嗅探浏览器（路径见 runtime.Chromium；Android 走 WebView，不进本桶）：
+//   捆绑优先 chrome-headless-shell；Windows Win7 包等为 chromium/chrome.exe；
+//   无捆绑时回落系统 Chrome / Chromium / Edge。进程名随二进制，不是固定 "chromium"。
+// 按 RuntimeUserID 分进程（空=本机共享）；每桶最多 2 个并发 tab（独立 user-data-dir）。
 //
 // 关闭时机：
 //   - SoftCancel（Scope / All）：只取消 tab，保留浏览器进程以便复用
