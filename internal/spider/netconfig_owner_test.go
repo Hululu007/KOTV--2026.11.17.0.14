@@ -39,8 +39,8 @@ func TestCurrentNetConfigFor_FiltersByOwner(t *testing.T) {
 	for _, b := range shared {
 		got[string(b)] = true
 	}
-	if !got[`{"def":1}`] || !got[`{"proxy":"def"}`] || !got[`{"localProxy":1}`] {
-		t.Fatalf("shared missing defaults: %v", got)
+	if !got[`{"def":1}`] || !got[`{"proxy":"def"}`] || !got[`{"localProxy":1}`] || !got[`{"local":1}`] {
+		t.Fatalf("shared missing defaults/local c: : %v", got)
 	}
 	if got[`{"alice":1}`] || got[`{"bob":1}`] {
 		t.Fatalf("shared must not include tenant net: %v", got)

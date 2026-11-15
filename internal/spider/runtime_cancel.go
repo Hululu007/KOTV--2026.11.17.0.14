@@ -2,12 +2,13 @@ package spider
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/bobo/KOTV/internal/hostclient"
 )
 
 // 爬虫运行时取消 / 重启门面（JVM · Python · QuickJS · Node · Chromium）。
-// 包外请只走本文件导出符号；底层 interrupt* / sniff 钩子不导出。
+// 包外请只走本文件导出符号；底层 interrupt* 与嗅探钩子不导出。
 
 // SoftCancelForClient 取消指定 Scope 下全部引擎进行中的调用。
 // 立刻结束 Go 侧等待；被放弃的单元随后回收
@@ -20,7 +21,7 @@ func SoftCancelForClient(clientID string) {
 	softCancelEngines(clientID)
 }
 
-// SoftCancelAll 打断全部 Scope 的进行中调用（清缓存等全局操作）。
+// SoftCancelAll 打断全部 Scope 的进行中调用（清缓存等全局操作；不毁 Chromium 进程）。
 // 与 SoftCancelForClient("") 的 no-op 不同。
 func SoftCancelAll() {
 	softCancelEngines("")
@@ -84,4 +85,80 @@ func ShutdownAllRuntimes() {
 	ResetScriptSpiders()
 	ShutdownJavaBridge()
 	runExtraShutdown()
+}
+
+// --- 跨包附加钩子（Chromium 等，避免 spider↔parse 循环依赖）---
+
+var (
+	runtimeExtraMu  sync.Mutex
+	extraSoftScope  func(scopeID string)
+	extraSoftAll    func()
+	extraKillUser   func(userID string)
+	extraHardShared func()
+	extraShutdown   func()
+)
+
+// RuntimeExtraHooks SoftCancel / Kill / HardRestart / Shutdown 的附加钩子。
+type RuntimeExtraHooks struct {
+	SoftCancelScope   func(scopeID string)
+	SoftCancelAll     func()
+	KillUser          func(userID string)
+	HardRestartShared func()
+	Shutdown          func()
+}
+
+// SetRuntimeExtraHooks 由 app 启动时注册（通常接 parse 嗅探）。
+func SetRuntimeExtraHooks(h RuntimeExtraHooks) {
+	runtimeExtraMu.Lock()
+	defer runtimeExtraMu.Unlock()
+	extraSoftScope = h.SoftCancelScope
+	extraSoftAll = h.SoftCancelAll
+	extraKillUser = h.KillUser
+	extraHardShared = h.HardRestartShared
+	extraShutdown = h.Shutdown
+}
+
+func runExtraSoftScope(scopeID string) {
+	runtimeExtraMu.Lock()
+	fn := extraSoftScope
+	runtimeExtraMu.Unlock()
+	if fn != nil {
+		fn(scopeID)
+	}
+}
+
+func runExtraSoftAll() {
+	runtimeExtraMu.Lock()
+	fn := extraSoftAll
+	runtimeExtraMu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+func runExtraKillUser(userID string) {
+	runtimeExtraMu.Lock()
+	fn := extraKillUser
+	runtimeExtraMu.Unlock()
+	if fn != nil {
+		fn(userID)
+	}
+}
+
+func runExtraHardShared() {
+	runtimeExtraMu.Lock()
+	fn := extraHardShared
+	runtimeExtraMu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+func runExtraShutdown() {
+	runtimeExtraMu.Lock()
+	fn := extraShutdown
+	runtimeExtraMu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }

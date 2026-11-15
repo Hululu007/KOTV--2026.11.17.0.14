@@ -64,19 +64,6 @@ type chromeBucket struct {
 	sem      chan struct{}
 }
 
-func sniffSemFor(uid string) chan struct{} {
-	chromeMu.Lock()
-	defer chromeMu.Unlock()
-	b := chromeByUser[uid]
-	if b == nil {
-		b = &chromeBucket{sem: make(chan struct{}, 2)}
-		chromeByUser[uid] = b
-	} else if b.sem == nil {
-		b.sem = make(chan struct{}, 2)
-	}
-	return b.sem
-}
-
 func trackSniff(userID, scopeID string, cancel context.CancelFunc) func() {
 	if cancel == nil {
 		return func() {}
@@ -142,6 +129,11 @@ func CancelUserSniffs(userID string) {
 	sniffTrackMu.Lock()
 	list := userSniffs[userID]
 	delete(userSniffs, userID)
+	for sid := range scopeSniffs {
+		if hostclient.UserIDFromScope(sid) == userID {
+			delete(scopeSniffs, sid)
+		}
+	}
 	sniffTrackMu.Unlock()
 	cancelSniffList(list)
 	destroyChromiumBucket(userID)
@@ -160,8 +152,8 @@ func CancelSniffsForScope(scopeID string) {
 	cancelSniffList(list)
 }
 
-// CancelAllSniffs 取消全部嗅探并销毁所有 Chromium 桶。
-func CancelAllSniffs() {
+// SoftCancelAllSniffs 取消全部进行中嗅探 tab，不毁浏览器进程（与 SoftCancel 语义一致）。
+func SoftCancelAllSniffs() {
 	sniffTrackMu.Lock()
 	users := userSniffs
 	scopes := scopeSniffs
@@ -174,6 +166,11 @@ func CancelAllSniffs() {
 	for _, list := range scopes {
 		cancelSniffList(list)
 	}
+}
+
+// ShutdownAllChromium 取消全部嗅探并销毁所有 Chromium 桶（进程退出 / 全量硬清）。
+func ShutdownAllChromium() {
+	SoftCancelAllSniffs()
 	destroyAllChromiumBuckets()
 }
 
@@ -204,21 +201,24 @@ func destroyAllChromiumBuckets() {
 	}
 }
 
-func ensureChromiumForUser(userID string) (context.Context, error) {
+// ensureChromiumForUser 返回该用户桶的 allocator 与并发信号量（同一把锁，避免半初始化桶）。
+func ensureChromiumForUser(userID string) (allocCtx context.Context, sem chan struct{}, err error) {
 	userID = strings.TrimSpace(userID)
 	chromeMu.Lock()
 	defer chromeMu.Unlock()
-	if b := chromeByUser[userID]; b != nil && b.allocCtx != nil {
-		return b.allocCtx, b.err
-	}
-	if b := chromeByUser[userID]; b != nil && b.err != nil && b.allocCtx == nil {
-		return nil, b.err
+	if b := chromeByUser[userID]; b != nil {
+		if b.allocCtx != nil {
+			return b.allocCtx, b.sem, b.err
+		}
+		if b.err != nil {
+			return nil, nil, b.err
+		}
 	}
 	chrome := appruntime.Chromium()
 	if chrome == "" {
 		err := fmt.Errorf("未找到 Chromium：网页嗅探不可用（请检查 runtime/chromium）")
 		chromeByUser[userID] = &chromeBucket{err: err, sem: make(chan struct{}, 2)}
-		return nil, err
+		return nil, nil, err
 	}
 	dataDir := paths.UserChromiumDir(userID)
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -251,7 +251,7 @@ func ensureChromiumForUser(userID string) (context.Context, error) {
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	b := &chromeBucket{allocCtx: allocCtx, cancel: cancel, sem: make(chan struct{}, 2)}
 	chromeByUser[userID] = b
-	return allocCtx, nil
+	return allocCtx, b.sem, nil
 }
 
 // BrowserSniff 用无头 Chromium 拦截网络请求嗅探媒体地址。
@@ -307,7 +307,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	}
 
 	ownerUID := hostclient.RuntimeUserID()
-	allocCtx, e := ensureChromiumForUser(ownerUID)
+	allocCtx, sem, e := ensureChromiumForUser(ownerUID)
 	if e != nil {
 		parseLog("[sniff] chromium missing err=%v", e)
 		return "", nil, e
@@ -315,7 +315,6 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 
 	// 仅顶层占该用户桶信号量；嵌套跟进不再抢，避免父子互相堵死。
 	if depth == 0 {
-		sem := sniffSemFor(ownerUID)
 		select {
 		case sem <- struct{}{}:
 			defer func() { <-sem }()

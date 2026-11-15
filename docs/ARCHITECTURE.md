@@ -83,7 +83,7 @@ Go Engine（单进程，:9978）
 | JAR | `api` 前缀 `csp_` | **Java bridge**（JVM），本机共享 / 远端每用户独立；桌面 HTTP 多路、可并发、按 Scope 软取消 |
 
 - `getClientId()` 返回当前 ScopeID，`postMsg` 据此路由回正确前端。
-- 取消/重启门面（`runtime_cancel.go`）：`SoftCancelForClient`（按 Scope）、`SoftCancelAll`（清缓存）、`HardRestartSharedRuntimes` / `KillUserRuntime` / `RestartCallerRuntime`、`ShutdownAllRuntimes`（进程退出）。覆盖 JVM / Python / QuickJS / Node / Chromium；底层 interrupt* 与嗅探钩子不导出。
+- 取消/重启门面（`runtime_cancel.go`）：`SoftCancelForClient`（按 Scope）、`SoftCancelAll`（清缓存，只断 in-flight）、`HardRestartSharedRuntimes` / `KillUserRuntime` / `RestartCallerRuntime`、`ShutdownAllRuntimes`（进程退出）。覆盖 JVM / Python / QuickJS / Node / Chromium；底层 interrupt* 与嗅探钩子不导出。
 - 远端 `RuntimeUserID` 分桶：进程/池按用户；可变态落 `cache/run/<uid|shared>/{jvm,py,chromium,node…}`；包体内容寻址缓存仍可全局共享。本机空 uid 共用 `shared` 桶。
 - 换源时 `ResetScriptSpiders()` 销毁 JS/Python/Node 爬虫，避免旧进程状态污染新站；设置页「清理缓存」经 `SoftCancelAll` 后清 JAR 磁盘 + JS/Py/Node 内存与落盘目录。
 - 配置地址以 `index.js` / `index.js.md5` 结尾时视为猫爪源包：下载校验后起 Node，`GET /config` 取 `video.sites`（忽略 read/comic/music/pan）；播放/弹幕改写为 `/node/<pkg>/…`。OPENWEB（`node_openweb.go`）：本机原样；远端 `/node/<pkg>/…?token=`（无媒体钥匙）并按调用方定向投递；路径首段登记根别名，`node_root_auth.go` 种 Cookie，页内绝对路径 API 反代 ActivePkg。Flutter 原样打开下发 URL。`messageToDart` → 本机 `/msg`。

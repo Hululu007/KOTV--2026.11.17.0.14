@@ -112,10 +112,10 @@ func New() (*App, error) {
 	// Chromium 挂到统一取消/Kill 门面（避免 spider↔parse 循环依赖）。
 	spider.SetRuntimeExtraHooks(spider.RuntimeExtraHooks{
 		SoftCancelScope:   parse.CancelSniffsForScope,
-		SoftCancelAll:     parse.CancelAllSniffs,
+		SoftCancelAll:     parse.SoftCancelAllSniffs,
 		KillUser:          parse.CancelUserSniffs,
 		HardRestartShared: parse.HardRestartSharedChromium,
-		Shutdown:          parse.CancelAllSniffs,
+		Shutdown:          parse.ShutdownAllChromium,
 	})
 
 	a.Server = server.New()

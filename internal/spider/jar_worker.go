@@ -252,19 +252,26 @@ func currentNetConfigFor(ownerUID string) [][]byte {
 		seen[key] = struct{}{}
 		out = append(out, payload)
 	}
+	scopeOwned := func(cid string) bool {
+		uid := hostclient.UserIDFromScope(cid)
+		if ownerUID == "" {
+			// 本机共享 JVM：默认桶 + 本机 c: 窗口；不含远端 u: 租户。
+			return uid == ""
+		}
+		return uid == ownerUID
+	}
 	if ownerUID == "" {
 		add(netConfigJSON)
 		add(userProxyJSON)
-	} else {
-		for cid, payload := range netConfigByClient {
-			if hostclient.UserIDFromScope(cid) == ownerUID || cid == "u:"+ownerUID {
-				add(payload)
-			}
+	}
+	for cid, payload := range netConfigByClient {
+		if scopeOwned(cid) {
+			add(payload)
 		}
-		for cid, payload := range userProxyByClient {
-			if hostclient.UserIDFromScope(cid) == ownerUID || cid == "u:"+ownerUID {
-				add(payload)
-			}
+	}
+	for cid, payload := range userProxyByClient {
+		if scopeOwned(cid) {
+			add(payload)
 		}
 	}
 	add(localProxyJSON)
