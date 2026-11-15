@@ -45,12 +45,22 @@ func Root() string {
 
 func Data() string { return ensure(filepath.Join(Root(), "data")) }
 
-// CacheRoot 所有可再生缓存的统一根：{Root}/cache。
-// 首次访问时把历史误放的爬虫包体收拢到公共目录（无 uid）。
+// CacheRoot 爬虫包体与可再生缓存的公共根（无 uid）：
+//   - 若注入了 KOTV_CACHE_DIR（安卓 = Context.getCacheDir），直接用它，
+//     与宿主 Path.jar/js/py 同根，避免 Go 与 JVM 各下一份；
+//   - 否则 {Root}/cache（桌面）。
+// 首次访问时收拢历史误放的包体。
 func CacheRoot() string {
-	p := ensure(filepath.Join(Root(), "cache"))
+	p := ensure(cacheRootPath())
 	reconcilePackageCacheLayout(p)
 	return p
+}
+
+func cacheRootPath() string {
+	if v := strings.TrimSpace(os.Getenv("KOTV_CACHE_DIR")); v != "" {
+		return v
+	}
+	return filepath.Join(Root(), "cache")
 }
 
 // Assets 返回本地 assets 资源根，对应 bridge AssetManager 的 {root}/assets（供 assets:// 使用）。
@@ -134,9 +144,11 @@ func ensure(p string) string {
 var reconcilePackageCacheOnce sync.Once
 
 // reconcilePackageCacheLayout 一次性收拢历史误放的爬虫包体到公共 CacheRoot/{jar,py,js,node}：
-//  1. cache/js/pkg/* → cache/node/*（曾误嵌在 js 下）
-//  2. cache/run/<uid|shared>/jvm/cache/{jar,js,py}/* → cache/{jar,js,py}/*
-//     （旧桌面 stub 把 kotv.cache.dir 指到 UserJVMDir，Path.jar 落进了每用户目录）
+//  1. js/pkg/* → node/*（曾误嵌在 js 下）
+//  2. run/<uid|shared>/jvm/cache/{jar,js,py}/* → {jar,js,py}/*
+//     （旧桌面 stub 把 kotv.cache.dir 指到 UserJVMDir）
+//  3. 若 CacheRoot=KOTV_CACHE_DIR：把 DATA/cache/{jar,py,js,node} 迁过来
+//     （安卓曾 Go 落 files/KOTV/cache、Path 落 cacheDir，双根各一份）
 func reconcilePackageCacheLayout(cacheRoot string) {
 	reconcilePackageCacheOnce.Do(func() {
 		moveChildrenIfAbsent(
@@ -144,26 +156,34 @@ func reconcilePackageCacheLayout(cacheRoot string) {
 			filepath.Join(cacheRoot, "node"),
 		)
 		runRoot := filepath.Join(cacheRoot, "run")
-		ents, err := os.ReadDir(runRoot)
-		if err != nil {
-			return
+		if ents, err := os.ReadDir(runRoot); err == nil {
+			for _, e := range ents {
+				if !e.IsDir() {
+					continue
+				}
+				legacy := filepath.Join(runRoot, e.Name(), "jvm", "cache")
+				for _, name := range []string{"jar", "js", "py"} {
+					moveChildrenIfAbsent(
+						filepath.Join(legacy, name),
+						filepath.Join(cacheRoot, name),
+					)
+				}
+				removeDirIfEmpty(filepath.Join(legacy, "jar"))
+				removeDirIfEmpty(filepath.Join(legacy, "js"))
+				removeDirIfEmpty(filepath.Join(legacy, "py"))
+				removeDirIfEmpty(legacy)
+			}
 		}
-		for _, e := range ents {
-			if !e.IsDir() {
-				continue
+		if data := strings.TrimSpace(os.Getenv("KOTV_DATA_DIR")); data != "" {
+			legacyDataCache := filepath.Join(data, "cache")
+			if filepath.Clean(legacyDataCache) != filepath.Clean(cacheRoot) {
+				for _, name := range []string{"jar", "py", "js", "node"} {
+					moveChildrenIfAbsent(
+						filepath.Join(legacyDataCache, name),
+						filepath.Join(cacheRoot, name),
+					)
+				}
 			}
-			legacy := filepath.Join(runRoot, e.Name(), "jvm", "cache")
-			for _, name := range []string{"jar", "js", "py"} {
-				moveChildrenIfAbsent(
-					filepath.Join(legacy, name),
-					filepath.Join(cacheRoot, name),
-				)
-			}
-			// 旧 Path 溢写目录（exo/mpv/…）一并丢掉空壳；有内容则整棵 cache 子树可在清缓存时擦。
-			removeDirIfEmpty(filepath.Join(legacy, "jar"))
-			removeDirIfEmpty(filepath.Join(legacy, "js"))
-			removeDirIfEmpty(filepath.Join(legacy, "py"))
-			removeDirIfEmpty(legacy)
 		}
 	})
 }

@@ -188,7 +188,7 @@ class MainActivity : FlutterActivity() {
             result.error("exo_cache", e.message, null)
           }
         }
-        // cacheDir 爬虫/杂项 + 全部时外置 /TV/s_c_*（Go 只扫 filesDir/KOTV）。
+        // cacheDir=包体+run 可变态；全部时外置 /TV/s_c_*（Go 另扫 filesDir/KOTV）。
         "clearCaches" -> {
           try {
             val script = call.argument<Boolean>("script") ?: false

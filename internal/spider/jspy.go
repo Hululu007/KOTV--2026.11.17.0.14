@@ -366,22 +366,6 @@ func (s *pySpider) ensureScript() (string, error) {
 	return dest, nil
 }
 
-// writeFileAtomic 先确保父目录存在，再 .tmp → rename，避免 Node/JS/Py 缓存子目录未建时 WriteFile 报 no such file。
-func writeFileAtomic(dest string, data []byte) error {
-	dest = strings.TrimSpace(dest)
-	if dest == "" {
-		return fmt.Errorf("empty dest")
-	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return err
-	}
-	tmp := dest + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, dest)
-}
-
 // isInlinePySource 判断 api 是否为内联源码：不带协议、不是路径，且含换行或语句特征。
 func isInlinePySource(api string) bool {
 	if api == "" || strings.Contains(api, "://") {

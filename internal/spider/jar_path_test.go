@@ -7,7 +7,9 @@ import (
 	"github.com/bobo/KOTV/internal/hostclient"
 )
 
-func TestJarPathIsolatedByUser(t *testing.T) {
+// TestCurrentJarPathPointerByUser：仅测「当前根 jar 路径指针」按用户分桶；
+// 磁盘包体仍是公共 JarCache（见 TestPackageCaches_PublicNoUID）。
+func TestCurrentJarPathPointerByUser(t *testing.T) {
 	t.Cleanup(func() {
 		jarPathByUser.Delete("")
 		jarPathByUser.Delete("user-jar")

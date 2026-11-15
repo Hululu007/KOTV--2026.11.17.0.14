@@ -9,10 +9,12 @@ import (
 // 缓存分两类（勿混用）：
 //
 //  1. 爬虫包体（公共，无 uid；多用户只下一份）：
-//     CacheRoot/{jar,py,js,node} — JVM 侧 Path.jar/js/py 也必须指向这里（kotv.cache.dir=CacheRoot）
+//     CacheRoot/{jar,py,js,node}
+//     桌面 JVM：kotv.cache.dir=CacheRoot → Path.jar/js/py
+//     安卓：KOTV_CACHE_DIR=Context.getCacheDir() → CacheRoot 与 Path 同根
 //  2. 可变运行时态（按 RuntimeUserID 隔离，空=shared）：
-//     cache/run/<uid|shared>/{jvm,py,chromium,node,js-local}
-//     JVM Prefers/files → kotv.user.dir=UserJVMDir（不得再当 Path.jar 根）
+//     CacheRoot/run/<uid|shared>/{jvm,py,chromium,node,js-local}
+//     桌面 JVM Prefers/files → kotv.user.dir=UserJVMDir（不得再当 Path.jar 根）
 //
 // 进程是否也按用户拆开（与落盘配合）：
 //   - JVM：远端每用户一进程（Prefers/spider 实例在 bridge 内未按 user 隔离）

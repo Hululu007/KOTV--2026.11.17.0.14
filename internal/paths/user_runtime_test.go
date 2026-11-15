@@ -65,6 +65,7 @@ func TestNodeCache_SiblingOfJarPy(t *testing.T) {
 func TestPackageCaches_PublicNoUID(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KOTV_DATA_DIR", root)
+	t.Setenv("KOTV_CACHE_DIR", "")
 	reconcilePackageCacheOnce = sync.Once{}
 
 	cache := CacheRoot()
@@ -82,6 +83,35 @@ func TestPackageCaches_PublicNoUID(t *testing.T) {
 	}
 	if jvm == cache || strings.HasPrefix(JarCache(), jvm+string(filepath.Separator)) {
 		t.Fatal("JarCache must not live under UserJVMDir")
+	}
+}
+
+func TestCacheRoot_PrefersKOTVCacheDir(t *testing.T) {
+	root := t.TempDir()
+	osCache := filepath.Join(root, "os-cache")
+	data := filepath.Join(root, "data")
+	t.Setenv("KOTV_CACHE_DIR", osCache)
+	t.Setenv("KOTV_DATA_DIR", data)
+	reconcilePackageCacheOnce = sync.Once{}
+
+	legacyJar := filepath.Join(data, "cache", "jar")
+	if err := os.MkdirAll(legacyJar, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyJar, "shared.jar"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := CacheRoot()
+	if filepath.Clean(got) != filepath.Clean(osCache) {
+		t.Fatalf("CacheRoot=%s want %s (must match Path/getCacheDir)", got, osCache)
+	}
+	if filepath.Dir(JarCache()) != filepath.Clean(osCache) {
+		t.Fatalf("JarCache under %s", JarCache())
+	}
+	migrated := filepath.Join(osCache, "jar", "shared.jar")
+	if b, err := os.ReadFile(migrated); err != nil || string(b) != "x" {
+		t.Fatalf("legacy DATA/cache/jar migrate: %v %q", err, b)
 	}
 }
 
