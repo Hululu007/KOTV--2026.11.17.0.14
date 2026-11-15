@@ -912,7 +912,6 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Future<String?> activeDecoderLabel() async {
     final cur = '${await _mpvProp('hwdec-current') ?? ''}';
-    final asked = '${await _mpvProp('hwdec') ?? ''}';
     return kotvMpvHwdecLabel(cur);
   }
 

@@ -62,7 +62,6 @@ class FvpPlayback extends KotvPlayback {
   double _volume = 100;
   double _rate = 1;
   String _decodeMode = 'auto';
-  String? _lastUrl;
   String _videoScale = 'default';
   /// 仅尺寸/比例/错误变化时递增，供 buildView 重建（勿绑 position/buffering）。
   final ValueNotifier<int> _viewGen = ValueNotifier<int>(0);
@@ -276,7 +275,6 @@ class FvpPlayback extends KotvPlayback {
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty && clearKeyHex == null) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
-    _lastUrl = url;
     _hookFvpDecoderLog();
     _fvpLastVideoDecoder = null;
     // 已知 HLS 锁 avformat.input=hls；否则不写 input，靠 probesize 内容探测。

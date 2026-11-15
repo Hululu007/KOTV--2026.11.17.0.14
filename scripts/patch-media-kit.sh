@@ -2167,7 +2167,7 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
 
 """
 
-# Upgrade / install method (replace if latch missing or old dbg still present).
+# Upgrade / install method (replace if latch missing, or strip leftover session dbg).
 # IMPORTANT: use lambda replacement — re.sub treats \ in the template (eats \" → broken C strings).
 import re as _re
 if ("soft_rebuild_latched" not in text_vo) or ("kotv_dbg_a027de" in text_vo):
