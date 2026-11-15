@@ -10,9 +10,9 @@ import (
 
 const appName = "KOTV"
 
-// Root 返回用户数据根目录。
-// Android：优先 KOTV_DATA_DIR / KOTV_CACHE_DIR（由 Flutter launcher 注入应用可写目录）。
-// Windows：%APPDATA%/KOTV。缓存统一落在 Root()/cache/...。
+// Root 返回用户数据根目录（DB / assets / TV 等）。
+// Android：优先 KOTV_DATA_DIR，缺省再回落 KOTV_CACHE_DIR（由 Flutter / Service 注入）。
+// 爬虫包体与可再生缓存见 CacheRoot（可与 Root 分离）。
 func Root() string {
 	if v := strings.TrimSpace(os.Getenv("KOTV_DATA_DIR")); v != "" {
 		return ensure(v)

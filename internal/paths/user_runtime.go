@@ -111,6 +111,30 @@ func WipeUserRuntimeSubdirs(names ...string) (freed int64, err error) {
 	return freed, err
 }
 
+// WipeDirKeepRoot 删除目录后重建空目录，返回释放字节数（目录不存在视为 0）。
+// 爬虫包体 / 可再生缓存清理共用，避免 spider 与 cacheclean 各写一套。
+func WipeDirKeepRoot(dir string) (int64, error) {
+	n, err := dirSize(dir)
+	if err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+	_ = os.RemoveAll(dir)
+	_ = os.MkdirAll(dir, 0o755)
+	return n, nil
+}
+
+// WipeDirRemove 删除整个目录（不重建），返回释放字节数。
+func WipeDirRemove(dir string) (int64, error) {
+	n, err := dirSize(dir)
+	if err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+		return n, err
+	}
+	return n, nil
+}
+
 // wipeDirContents 删除目录内全部子项，保留目录本身；目录不存在视为 0。
 func wipeDirContents(dir string) (int64, error) {
 	st, err := os.Stat(dir)

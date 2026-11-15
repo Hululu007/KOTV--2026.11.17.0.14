@@ -58,14 +58,14 @@ func Run(opt Options) Result {
 		spider.ResetScriptSpiders()
 		// 公共包体 cache/{js,py,node}（CacheRoot 会先收拢历史误放）。
 		_ = paths.CacheRoot()
-		if n2, err2 := wipeDirRemove(filepath.Join(paths.CacheRoot(), "js", "pkg")); n2 > 0 || err2 != nil {
+		if n2, err2 := paths.WipeDirRemove(filepath.Join(paths.CacheRoot(), "js", "pkg")); n2 > 0 || err2 != nil {
 			add("Node误嵌残留", filepath.Join(paths.CacheRoot(), "js", "pkg"), n2, err2)
 		}
-		n, err := wipeDirKeepRoot(paths.JsCache())
+		n, err := paths.WipeDirKeepRoot(paths.JsCache())
 		add("JS", paths.JsCache(), n, err)
-		n, err = wipeDirKeepRoot(paths.PyCache())
+		n, err = paths.WipeDirKeepRoot(paths.PyCache())
 		add("Python", paths.PyCache(), n, err)
-		n, err = wipeDirKeepRoot(paths.NodeCache())
+		n, err = paths.WipeDirKeepRoot(paths.NodeCache())
 		add("Node", paths.NodeCache(), n, err)
 		// 每用户可变态（js-local / node data / py work）
 		n, err = paths.WipeUserRuntimeSubdirs("js-local", "node", "py")
@@ -76,17 +76,17 @@ func Run(opt Options) Result {
 
 	if opt.Jar {
 		spider.ClearJarDisk()
-		n, err := wipeDirKeepRoot(paths.JarCache())
+		n, err := paths.WipeDirKeepRoot(paths.JarCache())
 		add("JAR", paths.JarCache(), n, err)
 		n, err = paths.WipeUserRuntimeSubdirs("jvm")
 		if n > 0 || err != nil {
 			add("JVM运行时", filepath.Join(paths.CacheRoot(), "run"), n, err)
 		}
-		n, err = wipeDirKeepRoot(filepath.Join(paths.CacheRoot(), "jpa"))
+		n, err = paths.WipeDirKeepRoot(filepath.Join(paths.CacheRoot(), "jpa"))
 		if n > 0 || err != nil {
 			add("JPA", filepath.Join(paths.CacheRoot(), "jpa"), n, err)
 		}
-		n, err = wipeDirKeepRoot(filepath.Join(paths.CacheRoot(), "proxy"))
+		n, err = paths.WipeDirKeepRoot(filepath.Join(paths.CacheRoot(), "proxy"))
 		if n > 0 || err != nil {
 			add("代理溢写", filepath.Join(paths.CacheRoot(), "proxy"), n, err)
 		}
@@ -95,7 +95,7 @@ func Run(opt Options) Result {
 	if opt.Magnet {
 		n, err := thunder.ClearStorage()
 		add("磁力下载", thunder.DataDir(), n, err)
-		n2, err2 := wipeDirRemove(filepath.Join(paths.Root(), "bt"))
+		n2, err2 := paths.WipeDirRemove(filepath.Join(paths.Root(), "bt"))
 		if n2 > 0 || (err2 == nil && dirExists(filepath.Join(paths.Root(), "bt"))) {
 			add("BT遗留", filepath.Join(paths.Root(), "bt"), n2, err2)
 		}
@@ -104,7 +104,7 @@ func Run(opt Options) Result {
 			filepath.Join(paths.Root(), "thunder"),
 			filepath.Join(paths.Root(), "cache", "thunder"),
 		} {
-			n3, err3 := wipeDirKeepRoot(legacy)
+			n3, err3 := paths.WipeDirKeepRoot(legacy)
 			if n3 > 0 {
 				add("磁力遗留", legacy, n3, err3)
 			}
@@ -132,7 +132,7 @@ func Run(opt Options) Result {
 			{"旧JAR", filepath.Join(paths.Data(), "cache", "jar")},
 			{"旧PY", filepath.Join(paths.Data(), "cache", "py")},
 		} {
-			n, err := wipeDirKeepRoot(item.path)
+			n, err := paths.WipeDirKeepRoot(item.path)
 			if n > 0 || err != nil {
 				add(item.label, item.path, n, err)
 			}
@@ -190,7 +190,7 @@ func sweepRootKeepConfigAndDB(root string) (int64, error) {
 			continue
 		}
 		if e.IsDir() {
-			n, err := wipeDirRemove(p)
+			n, err := paths.WipeDirRemove(p)
 			freed += n
 			if err != nil {
 				return freed, err
@@ -229,7 +229,7 @@ func scrubDirKeepFileNames(dir string, keep ...string) (int64, error) {
 		}
 		p := filepath.Join(dir, e.Name())
 		if e.IsDir() {
-			n, err := wipeDirRemove(p)
+			n, err := paths.WipeDirRemove(p)
 			freed += n
 			if err != nil {
 				return freed, err
@@ -266,7 +266,7 @@ func removeLegacyClientTVDirs(tvRoot string) (int64, error) {
 		if !paths.IsLegacyTVDir(name) {
 			continue
 		}
-		n, err := wipeDirRemove(filepath.Join(tvRoot, name))
+		n, err := paths.WipeDirRemove(filepath.Join(tvRoot, name))
 		freed += n
 		if err != nil {
 			return freed, err
@@ -298,7 +298,7 @@ func clearLogs(dir string) (int64, error) {
 			continue
 		}
 		if e.IsDir() {
-			n, _ := wipeDirRemove(p)
+			n, _ := paths.WipeDirRemove(p)
 			freed += n
 			continue
 		}
@@ -315,41 +315,6 @@ func truncateFile(p string) error {
 		return err
 	}
 	return f.Close()
-}
-
-func wipeDirKeepRoot(dir string) (int64, error) {
-	n, err := dirSize(dir)
-	if err != nil && !os.IsNotExist(err) {
-		return 0, err
-	}
-	_ = os.RemoveAll(dir)
-	_ = os.MkdirAll(dir, 0o755)
-	return n, nil
-}
-
-func wipeDirRemove(dir string) (int64, error) {
-	n, err := dirSize(dir)
-	if err != nil && !os.IsNotExist(err) {
-		return 0, err
-	}
-	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
-		return n, err
-	}
-	return n, nil
-}
-
-func dirSize(root string) (int64, error) {
-	var total int64
-	err := filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !info.IsDir() {
-			total += info.Size()
-		}
-		return nil
-	})
-	return total, err
 }
 
 func dirExists(p string) bool {

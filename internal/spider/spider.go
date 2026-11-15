@@ -1,7 +1,6 @@
 package spider
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -131,12 +130,11 @@ func ResetScriptSpiders() {
 // Node 进程/索引由 stopAllNodeHosts 负责。
 func clearScriptCaches() {
 	clearJSMemoryCaches()
-	// 公共包体 cache/{js,py,node}（CacheRoot 先收拢历史误放）。
+	// 公共包体 CacheRoot/{js,py,node}（CacheRoot 先收拢历史误放）。
 	_ = paths.CacheRoot()
-	_ = os.RemoveAll(filepath.Join(paths.CacheRoot(), "js", "pkg"))
+	_, _ = paths.WipeDirRemove(filepath.Join(paths.CacheRoot(), "js", "pkg"))
 	for _, dir := range []string{paths.JsCache(), paths.PyCache(), paths.NodeCache()} {
-		_ = os.RemoveAll(dir)
-		_ = os.MkdirAll(dir, 0o755)
+		_, _ = paths.WipeDirKeepRoot(dir)
 	}
 	_, _ = paths.WipeUserRuntimeSubdirs("js-local", "node", "py")
 }
