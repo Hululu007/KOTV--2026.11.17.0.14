@@ -71,7 +71,7 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * 软硬解（DecodeTrackSelector + 扩展渲染）：
  * - auto：MediaCodec 硬解优先，软件 MediaCodec 与 FFmpeg 兜底；解码器建不起来时由 Exo 自带的回退换下一个
- * - hard：视频只用硬件 MediaCodec、不挂 FFmpeg 视频；没有可用硬解就出不了画，由页面改 auto 重试
+ * - hard：视频只用硬件 MediaCodec、不挂 FFmpeg 视频；解码失败由插件改 soft 再试一次，仍失败再上抛换引擎
  * - soft：按 softAudioPrefer / softVideoPrefer 决定 nextlib FFmpeg 音/视轨是否优先
  *
  * Media3 完整 AAR 见 scripts/build-fongmi-media3.sh（覆盖残缺包）。
@@ -1157,13 +1157,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     emit(mapOf("event" to "live", "live" to true, "engineOnly" to true))
   }
 
-  /** 解码失败：在 soft/hard 间切换一次并保留 mime/进度再开。 */
-  private fun retryOpenWithDecodeFallback() {
+  /** 解码失败：非 soft → soft 再开一次；已 soft 返回 false（上抛给页面换引擎）。 */
+  private fun retryOpenWithDecodeFallback(): Boolean {
     val url = currentUrl
-    if (url.isBlank()) return
+    if (url.isBlank()) return false
+    val next = KotvAndroidPlayback.nextDecodeMode(decodeMode) ?: return false
     retriedDecodeFallback = true
     val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
-    decodeMode = KotvAndroidPlayback.nextDecodeMode(decodeMode)
+    decodeMode = next
     try {
       player?.stop()
     } catch (_: Throwable) {
@@ -1177,6 +1178,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       startPositionMs = pos,
       resetRecovery = false,
     )
+    return true
   }
 
   /** open 时刷新 PreferAAC / 首选字幕语言（无需整机重建）。 */
@@ -1535,8 +1537,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
           if (!retriedDecodeFallback && KotvAndroidPlayback.isDecodeError(error)) {
             Log.i(TAG, "retry open with decode fallback after ${error.errorCodeName}")
-            retryOpenWithDecodeFallback()
-            return
+            if (retryOpenWithDecodeFallback()) return
           }
           emit(mapOf("event" to "error", "message" to (error.message ?: error.errorCodeName)))
         }

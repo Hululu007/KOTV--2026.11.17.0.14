@@ -252,7 +252,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   String _playUrl = '';
   Map<String, String> _playHeaders = const {};
   String _decodeMode = 'auto';
-  /// 设置/用户所选解码；failover 硬解失败临时改自动，只改 [_decodeMode]。
+  /// 设置/用户所选解码；failover 无画面时临时改软解，只改 [_decodeMode]。
   String _prefDecodeMode = 'auto';
   String _renderMode = 'surface';
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();

@@ -5,16 +5,19 @@ import 'kotv_platform.dart';
 import 'player_normalize.dart';
 
 /// 开播黑屏/超时后的会话内回退（各平台同一套，不写死某一引擎）：
-/// 1. 硬解无画面时先改「自动」再试一次（含桌面 MPV；自动 = 播放器自选硬解或软解）。
-/// 2. 再按 [innieRing] 换下一个内置播放器，并恢复用户设置的解码。
+/// 1. 当前不是软解 → 显式软解再试（自动档由引擎内部自选；挂死无 error 时须靠这一步）。
+/// 2. 已是软解 → 按 [innieRing] 换下一个内置播放器，并恢复用户设置的解码。
 /// 不写回设置里的 `player` / `playerLive` / `playerDecode`。
 class KotvPlaybackFailover {
   KotvPlaybackFailover({
     required String playerVal,
     required String decodeMode,
+    /// 用户偏好解码；换引擎时恢复。默认与 [decodeMode] 相同。
+    /// 会话内临时 soft 重试时须显式传入偏好，避免把 soft 当成设置。
+    String? settingsDecodeMode,
     this.lockExoForDrm = false,
     this.enabled = true,
-  })  : settingsDecodeMode = normDecode(decodeMode),
+  })  : settingsDecodeMode = normDecode(settingsDecodeMode ?? decodeMode),
         _playerVal = playerVal.trim(),
         _decodeMode = normDecode(decodeMode);
 
@@ -67,24 +70,15 @@ class KotvPlaybackFailover {
     if (lockExoForDrm) return null;
     if (!_playerVal.startsWith('innie#')) return null;
 
-    // 解码回退：硬解→自动→软解（显式重开），再换引擎。
-    // 自动档引擎内硬解若挂起不返回错误，须靠超时后走到这里的 soft 重试。
-    if (_decodeMode == 'hard') {
-      _decodeMode = 'auto';
-      return KotvFailoverStep(
-        kind: KotvFailoverKind.autoDecode,
-        playerVal: _playerVal,
-        decodeMode: _decodeMode,
-        status: '硬解无画面，已改自动解码重试',
-      );
-    }
-    if (_decodeMode == 'auto') {
+    // 自动 = 引擎内部自选；无画面时直接显式软解（勿再插中间档）。
+    if (_decodeMode != 'soft') {
+      final from = _decodeMode;
       _decodeMode = 'soft';
       return KotvFailoverStep(
-        kind: KotvFailoverKind.autoDecode,
+        kind: KotvFailoverKind.softDecode,
         playerVal: _playerVal,
         decodeMode: _decodeMode,
-        status: '自动解码无画面，已改软解码重试',
+        status: from == 'hard' ? '硬解无画面，已改软解码重试' : '自动解码无画面，已改软解码重试',
       );
     }
 
@@ -157,7 +151,7 @@ class KotvPlaybackFailover {
   }
 }
 
-enum KotvFailoverKind { autoDecode, nextPlayer }
+enum KotvFailoverKind { softDecode, nextPlayer }
 
 class KotvFailoverStep {
   const KotvFailoverStep({

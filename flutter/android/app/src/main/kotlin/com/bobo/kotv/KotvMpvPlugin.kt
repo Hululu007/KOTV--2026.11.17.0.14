@@ -2443,16 +2443,19 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       return
     }
     if (!retriedDecodeFallback && KotvAndroidPlayback.isDecodeErrorText(msg)) {
-      Log.i(TAG, "retry load with decode fallback after: $msg")
-      retriedDecodeFallback = true
-      decodeMode = KotvAndroidPlayback.nextDecodeMode(decodeMode)
-      retrySeekSec = positionSec.coerceAtLeast(0.0)
-      try {
-        ensurePlayerAndReload()
-      } catch (t: Throwable) {
-        emitLoadFailure(t)
+      val next = KotvAndroidPlayback.nextDecodeMode(decodeMode)
+      if (next != null) {
+        Log.i(TAG, "retry load with decode fallback after: $msg")
+        retriedDecodeFallback = true
+        decodeMode = next
+        retrySeekSec = positionSec.coerceAtLeast(0.0)
+        try {
+          ensurePlayerAndReload()
+        } catch (t: Throwable) {
+          emitLoadFailure(t)
+        }
+        return
       }
-      return
     }
     emit(mapOf("event" to "error", "message" to msg))
   }

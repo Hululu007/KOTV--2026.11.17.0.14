@@ -177,13 +177,12 @@ internal object KotvAndroidPlayback {
       t.contains("codec not supported")
   }
 
-  /** soft ↔ hard；auto 先试 soft。 */
-  fun nextDecodeMode(current: String): String =
-    when (KotvPlayerNormalize.decodeModeLabel(current)) {
-      "soft" -> "hard"
-      "hard" -> "soft"
-      else -> "soft"
-    }
+  /**
+   * 引擎本地解码回退一步（与 Dart [KotvPlaybackFailover] 同策略）：
+   * 非 soft → soft；已 soft 返回 null（勿再切硬解，交给页面换引擎）。
+   */
+  fun nextDecodeMode(current: String): String? =
+    if (KotvPlayerNormalize.decodeModeLabel(current) == "soft") null else "soft"
 
   /**
    * 静止图/封面类「视频」编码（与 Dart [kotvIsImageMediaCodec] 同语义）。

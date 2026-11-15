@@ -1557,6 +1557,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     String? format,
     Duration startAt = Duration.zero,
     List<Map<String, dynamic>>? externalSubs,
+    /// 超时/无画面恢复：沿用当前会话引擎，勿改写用户偏好。
+    String? startPlayerOverride,
+    /// 超时/无画面恢复：沿用当前会话解码（常为 soft），勿改写 [_prefDecodeMode]。
+    String? startDecodeOverride,
   }) async {
     // 热缓存同步 peek，避免每台换台多一次 async。
     var playSettings = KotvSettingsCache.peek();
@@ -1580,7 +1584,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
     final renderMode = kotvNormalizePlayerRender(_renderMode);
     final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
-    final startPlayer = (hasDrm && kotvIsAndroid()) ? 'innie#exo' : _prefPlayerVal;
+    final startPlayer = (hasDrm && kotvIsAndroid())
+        ? 'innie#exo'
+        : (startPlayerOverride ?? _prefPlayerVal);
     if (kotvIsExternalPlayer(startPlayer)) {
       if (!mounted || serial != _playSerial) return;
       await _playback.pause();
@@ -1611,7 +1617,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
     final failover = KotvPlaybackFailover(
       playerVal: startPlayer,
-      decodeMode: _prefDecodeMode,
+      decodeMode: startDecodeOverride ?? _prefDecodeMode,
+      settingsDecodeMode: _prefDecodeMode,
       lockExoForDrm: hasDrm && kotvIsAndroid(),
       enabled: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover) && !hasDrm,
     );
@@ -1767,7 +1774,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await pb.awaitReadyAfterOpen().timeout(Duration(seconds: _livePlayTimeoutSec));
     } on TimeoutException {
       if (stale() || _liveHasPicture(pb)) return;
-      // 起播超时：先走 failover（auto→soft→换引擎），勿直接放弃。
+      // 起播超时：先走 failover（非 soft→soft→换引擎），勿直接放弃。
       final retry = await _recoverAfterSilentVideo(
         pb: pb,
         failover: failover,
@@ -1778,8 +1785,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         return;
       }
       if (retry) {
+        // 记住本台可用引擎；解码用 override 传入，勿污染用户偏好。
         _prefPlayerVal = _playerVal;
-        _prefDecodeMode = _decodeMode;
         try {
           await _openLiveUrl(
             url,
@@ -1791,6 +1798,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
             live: live,
             startAt: startAt,
             externalSubs: externalSubs,
+            startPlayerOverride: _playerVal,
+            startDecodeOverride: _decodeMode,
           );
         } catch (_) {}
         return;
@@ -1811,7 +1820,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (retry) {
         // applyStep 已写入 _playerVal；retrySameEngine 同引擎再建。
         _prefPlayerVal = _playerVal;
-        _prefDecodeMode = _decodeMode;
         try {
           await _openLiveUrl(
             url,
@@ -1823,6 +1831,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
             live: live,
             startAt: startAt,
             externalSubs: externalSubs,
+            startPlayerOverride: _playerVal,
+            startDecodeOverride: _decodeMode,
           );
         } catch (_) {}
         return;

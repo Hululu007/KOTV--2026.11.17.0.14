@@ -5,7 +5,7 @@
 - Win7 MPV：关直出与 Win10 同为 `hwdec=auto`（官方自选，无额外拒互通）；开直出仍 `dxva2`，不能直出时会话退回关直出（新建 D3D11 Player）。「硬解直出」仅 Win7 显示。撤回 ANGLE/FVP 的 DXGI HEVC 选卡。
 - 撤回 RK/旧安卓退全屏 HWC park（接受旧机退全屏崩溃风险）；`setSurfaceLayerEnabled` 恢复 park 前逻辑。
 - Android CI：打包后清 `flutter/build` 等中间产物再上传；APK `compression-level: 0`；按 ABI 拆 `android-aarch64` / `android-armv7` artifact。
-- 开播 failover 注释与实现一致：含桌面 MPV 在硬解无画面时先改自动再试。
+- 开播 failover：非 soft → soft → 换引擎（自动档由引擎自选；挂死靠显式软解）。
 - Node 首页：`homeVod` 失败/空体再试 `homeVideo`，真实错误上抛；空推荐不钉死 home 缓存；去掉误导性「没有返回推荐」横幅。
 - Win7 全屏：子窗对齐失败继续重试；对齐后再确认踢一次（ANGLE/纹理晚落稳）。
 - Node 切站：启动失败清掉 `stopping`，避免 Ensure/watch 空转无限转圈。

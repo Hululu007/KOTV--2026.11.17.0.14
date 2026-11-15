@@ -3,19 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kotv/player/playback_failover.dart';
 
 void main() {
-  test('hard falls back to auto then next player restores settings decode', () {
+  test('hard falls back to soft then next player restores settings decode', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#fvp', decodeMode: 'hard');
     f.markAttempt();
-    final step = f.nextStep();
-    expect(step, isNotNull);
-    expect(step!.kind, KotvFailoverKind.autoDecode);
-    expect(step.decodeMode, 'auto');
-    expect(f.decodeMode, 'auto');
-
     final soft = f.nextStep();
     expect(soft, isNotNull);
-    expect(soft!.kind, KotvFailoverKind.autoDecode);
+    expect(soft!.kind, KotvFailoverKind.softDecode);
     expect(soft.decodeMode, 'soft');
+    expect(f.decodeMode, 'soft');
 
     final next = f.nextStep();
     expect(next, isNotNull);
@@ -24,14 +19,14 @@ void main() {
     expect(next.decodeMode, 'hard');
   });
 
-  test('mpv hard falls back to auto like other engines', () {
+  test('mpv hard falls back to soft like other engines', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'hard');
     f.markAttempt();
     final step = f.nextStep();
     expect(step, isNotNull);
-    expect(step!.kind, KotvFailoverKind.autoDecode);
-    expect(step.decodeMode, 'auto');
-    expect(f.decodeMode, 'auto');
+    expect(step!.kind, KotvFailoverKind.softDecode);
+    expect(step.decodeMode, 'soft');
+    expect(f.decodeMode, 'soft');
   });
 
   test('auto falls back to soft then next player', () {
@@ -39,7 +34,7 @@ void main() {
     f.markAttempt();
     final soft = f.nextStep();
     expect(soft, isNotNull);
-    expect(soft!.kind, KotvFailoverKind.autoDecode);
+    expect(soft!.kind, KotvFailoverKind.softDecode);
     expect(soft.decodeMode, 'soft');
     expect(f.decodeMode, 'soft');
 
@@ -66,6 +61,20 @@ void main() {
     final next = f.nextStep();
     expect(next!.playerVal, 'innie#mpv');
     expect(next.decodeMode, 'soft');
+  });
+
+  test('session soft keeps settings decode when switching player', () {
+    final f = KotvPlaybackFailover(
+      playerVal: 'innie#mpv',
+      decodeMode: 'soft',
+      settingsDecodeMode: 'auto',
+    );
+    f.markAttempt();
+    final next = f.nextStep();
+    expect(next, isNotNull);
+    expect(next!.kind, KotvFailoverKind.nextPlayer);
+    expect(next.decodeMode, 'auto');
+    expect(f.decodeMode, 'auto');
   });
 
   test('disabled failover gives up', () {
