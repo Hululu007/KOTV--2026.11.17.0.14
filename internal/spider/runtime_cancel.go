@@ -90,12 +90,8 @@ func ShutdownAllRuntimes() {
 // --- 跨包附加钩子（Chromium 等，避免 spider↔parse 循环依赖）---
 
 var (
-	runtimeExtraMu  sync.Mutex
-	extraSoftScope  func(scopeID string)
-	extraSoftAll    func()
-	extraKillUser   func(userID string)
-	extraHardShared func()
-	extraShutdown   func()
+	runtimeExtraMu sync.Mutex
+	runtimeExtra   RuntimeExtraHooks
 )
 
 // RuntimeExtraHooks SoftCancel / Kill / HardRestart / Shutdown 的附加钩子。
@@ -111,16 +107,12 @@ type RuntimeExtraHooks struct {
 func SetRuntimeExtraHooks(h RuntimeExtraHooks) {
 	runtimeExtraMu.Lock()
 	defer runtimeExtraMu.Unlock()
-	extraSoftScope = h.SoftCancelScope
-	extraSoftAll = h.SoftCancelAll
-	extraKillUser = h.KillUser
-	extraHardShared = h.HardRestartShared
-	extraShutdown = h.Shutdown
+	runtimeExtra = h
 }
 
 func runExtraSoftScope(scopeID string) {
 	runtimeExtraMu.Lock()
-	fn := extraSoftScope
+	fn := runtimeExtra.SoftCancelScope
 	runtimeExtraMu.Unlock()
 	if fn != nil {
 		fn(scopeID)
@@ -129,7 +121,7 @@ func runExtraSoftScope(scopeID string) {
 
 func runExtraSoftAll() {
 	runtimeExtraMu.Lock()
-	fn := extraSoftAll
+	fn := runtimeExtra.SoftCancelAll
 	runtimeExtraMu.Unlock()
 	if fn != nil {
 		fn()
@@ -138,7 +130,7 @@ func runExtraSoftAll() {
 
 func runExtraKillUser(userID string) {
 	runtimeExtraMu.Lock()
-	fn := extraKillUser
+	fn := runtimeExtra.KillUser
 	runtimeExtraMu.Unlock()
 	if fn != nil {
 		fn(userID)
@@ -147,7 +139,7 @@ func runExtraKillUser(userID string) {
 
 func runExtraHardShared() {
 	runtimeExtraMu.Lock()
-	fn := extraHardShared
+	fn := runtimeExtra.HardRestartShared
 	runtimeExtraMu.Unlock()
 	if fn != nil {
 		fn()
@@ -156,7 +148,7 @@ func runExtraHardShared() {
 
 func runExtraShutdown() {
 	runtimeExtraMu.Lock()
-	fn := extraShutdown
+	fn := runtimeExtra.Shutdown
 	runtimeExtraMu.Unlock()
 	if fn != nil {
 		fn()

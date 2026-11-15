@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
@@ -162,7 +163,8 @@ func clearJar() {
 	configBase = ""
 	jarMu.Unlock()
 	bumpJarRefreshGen()
-	sendBridgeClear()
+	// 全局清 jar：共享 + 全部远端用户 JVM 都要卸 ClassLoader（不能只打当前 Bind 桶）。
+	sendBridgeClearAll()
 }
 
 func dropJarSpiders(prefix string, all bool) {
@@ -181,6 +183,30 @@ func dropJarSpiders(prefix string, all bool) {
 
 func sendBridgeClear() {
 	forgetJarRecent(hostclient.RuntimeUserID())
+	postBridgeClear(bridgeForCurrent())
+}
+
+// sendBridgeClearAll 向共享与全部用户 JVM 下发 clear（Clear / ClearJarDisk）。
+func sendBridgeClearAll() {
+	jarWireGen.Add(1)
+	req := bridgeRequest{Method: "clear"}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		log.Printf("jar 卸载失败: %v", err)
+		return
+	}
+	if runtime.GOOS == "android" {
+		if _, err := androidPostJarShort(payload); err != nil {
+			log.Printf("jar 卸载失败: %v", err)
+		}
+		return
+	}
+	for _, br := range snapshotJavaBridges() {
+		postBridgeClearPayload(br, payload)
+	}
+}
+
+func postBridgeClear(br *javaBridgeClient) {
 	jarWireGen.Add(1)
 	req := bridgeRequest{Method: "clear"}
 	fillBridgeClient(&req)
@@ -189,7 +215,26 @@ func sendBridgeClear() {
 		log.Printf("jar 卸载失败: %v", err)
 		return
 	}
-	if _, err := callJavaBridge(payload); err != nil {
+	postBridgeClearPayload(br, payload)
+}
+
+func postBridgeClearPayload(br *javaBridgeClient, payload []byte) {
+	if br == nil {
+		return
+	}
+	if runtime.GOOS == "android" {
+		if _, err := androidPostJarShort(payload); err != nil {
+			log.Printf("jar 卸载失败: %v", err)
+		}
+		return
+	}
+	base := br.currentBaseURL()
+	if base == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := br.httpPostCtx(ctx, payload); err != nil {
 		log.Printf("jar 卸载失败: %v", err)
 	}
 }

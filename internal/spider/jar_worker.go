@@ -386,31 +386,43 @@ func restartSharedRuntime() {
 }
 
 func softCancelSharedBridgeOnly() {
-	body, _ := json.Marshal(map[string]string{"clientId": ""})
-	payload, _ := json.Marshal(map[string]interface{}{
-		"method":   "cancelClient",
-		"args":     map[string]string{"clientId": ""},
-		"clientId": "",
-	})
-	if runtime.GOOS == "android" {
-		_, _ = androidPostJarShort(payload)
-		return
-	}
-	base := javaBridge.currentBaseURL()
-	if base == "" {
-		return
-	}
-	_ = postJarPath(base, "/jar/cancel", body, 2*time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	_, _ = javaBridge.httpPostCtx(ctx, payload)
-	cancel()
+	postJavaBridgeCancel([]*javaBridgeClient{&javaBridge}, "")
 }
 
 func clearSharedJarSpiders() {
 	dropJarSpiders("\x01", false)
 }
 
+// javaBridgesForCancel 选 SoftCancel 应通知的 JVM：
+//   - clientID 空（SoftCancelAll）：共享 + 全部用户桶（与当前 Bind 无关）
+//   - u:<uid>：仅该用户桶（尚未创建则空，绝不回落共享）
+//   - c:… / 其它：本机共享桶
+func javaBridgesForCancel(clientID string) []*javaBridgeClient {
+	clientID = strings.TrimSpace(clientID)
+	userBridgesMu.Lock()
+	defer userBridgesMu.Unlock()
+	if clientID == "" {
+		out := make([]*javaBridgeClient, 0, 1+len(userBridges))
+		out = append(out, &javaBridge)
+		for _, b := range userBridges {
+			out = append(out, b)
+		}
+		return out
+	}
+	if uid := hostclient.UserIDFromScope(clientID); uid != "" {
+		if b := userBridges[uid]; b != nil {
+			return []*javaBridgeClient{b}
+		}
+		return nil
+	}
+	return []*javaBridgeClient{&javaBridge}
+}
+
 func softCancelJavaBridge(clientID string) {
+	postJavaBridgeCancel(javaBridgesForCancel(clientID), clientID)
+}
+
+func postJavaBridgeCancel(targets []*javaBridgeClient, clientID string) {
 	body, _ := json.Marshal(map[string]string{"clientId": clientID})
 	payload, _ := json.Marshal(map[string]interface{}{
 		"method":   "cancelClient",
@@ -421,19 +433,10 @@ func softCancelJavaBridge(clientID string) {
 		_, _ = androidPostJarShort(payload)
 		return
 	}
-	targets := []*javaBridgeClient{&javaBridge}
-	userBridgesMu.Lock()
-	if rid := hostclient.RuntimeUserID(); rid != "" {
-		if b := userBridges[rid]; b != nil {
-			targets = []*javaBridgeClient{b}
-		}
-	} else if clientID == "" {
-		for _, b := range userBridges {
-			targets = append(targets, b)
-		}
-	}
-	userBridgesMu.Unlock()
 	for _, br := range targets {
+		if br == nil {
+			continue
+		}
 		base := br.currentBaseURL()
 		if base == "" {
 			continue
@@ -443,6 +446,18 @@ func softCancelJavaBridge(clientID string) {
 		_, _ = br.httpPostCtx(ctx, payload)
 		cancel()
 	}
+}
+
+// snapshotJavaBridges 共享 + 全部用户 JVM（只读快照）。
+func snapshotJavaBridges() []*javaBridgeClient {
+	userBridgesMu.Lock()
+	defer userBridgesMu.Unlock()
+	out := make([]*javaBridgeClient, 0, 1+len(userBridges))
+	out = append(out, &javaBridge)
+	for _, b := range userBridges {
+		out = append(out, b)
+	}
+	return out
 }
 
 // ShutdownJavaBridge 引擎退出时杀掉共享与所有用户 JVM。

@@ -22,6 +22,52 @@ func TestSoftCancelAll_DoesNotPanic(t *testing.T) {
 	SoftCancelAll()
 }
 
+func TestJavaBridgesForCancel_LocalVsRemote(t *testing.T) {
+	userBridgesMu.Lock()
+	saved := userBridges
+	alice := &javaBridgeClient{ownerUID: "alice"}
+	bob := &javaBridgeClient{ownerUID: "bob"}
+	userBridges = map[string]*javaBridgeClient{"alice": alice, "bob": bob}
+	userBridgesMu.Unlock()
+	t.Cleanup(func() {
+		userBridgesMu.Lock()
+		userBridges = saved
+		userBridgesMu.Unlock()
+	})
+
+	all := javaBridgesForCancel("")
+	if len(all) != 3 || all[0] != &javaBridge {
+		t.Fatalf("SoftCancelAll targets=%d want shared+alice+bob", len(all))
+	}
+	got := map[*javaBridgeClient]bool{}
+	for _, b := range all {
+		got[b] = true
+	}
+	if !got[alice] || !got[bob] {
+		t.Fatal("SoftCancelAll must include every user bridge")
+	}
+
+	onlyAlice := javaBridgesForCancel("u:alice")
+	if len(onlyAlice) != 1 || onlyAlice[0] != alice {
+		t.Fatalf("u:alice targets=%v", onlyAlice)
+	}
+	if targets := javaBridgesForCancel("u:missing"); len(targets) != 0 {
+		t.Fatalf("missing user must not fall back to shared, got %d", len(targets))
+	}
+	local := javaBridgesForCancel("c:window-1")
+	if len(local) != 1 || local[0] != &javaBridge {
+		t.Fatalf("local c: scope must hit shared only")
+	}
+
+	// SoftCancelAll 不得受当前 Bind 影响（即便绑在远端用户上）。
+	leave := hostclient.Bind(hostclient.Request{UserID: "alice", Dedicated: true})
+	defer leave()
+	allUnderBind := javaBridgesForCancel("")
+	if len(allUnderBind) != 3 {
+		t.Fatalf("SoftCancelAll under dedicated Bind got %d want 3", len(allUnderBind))
+	}
+}
+
 func TestNodePostJSON_InterruptCancelsAndStops(t *testing.T) {
 	started := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

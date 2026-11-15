@@ -152,7 +152,7 @@ func CancelSniffsForScope(scopeID string) {
 	cancelSniffList(list)
 }
 
-// SoftCancelAllSniffs 取消全部进行中嗅探 tab，不毁浏览器进程（与 SoftCancel 语义一致）。
+// SoftCancelAllSniffs 取消全部进行中嗅探 tab，不毁浏览器进程。
 func SoftCancelAllSniffs() {
 	sniffTrackMu.Lock()
 	users := userSniffs
