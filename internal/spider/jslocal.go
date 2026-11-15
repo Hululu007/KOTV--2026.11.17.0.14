@@ -11,7 +11,7 @@ import (
 )
 
 // Local：Prefers key = cache_{rule}_{key}（rule 空则 cache_{key}）。
-// 落盘按 RuntimeUserID 分目录（空=shared），与 Node run/<uid>/ 同构。
+// 可变态按用户落 UserJsLocalDir；JS 模块包体走全局 JsModuleCache。
 var jsLocalMu sync.Mutex
 
 // LocalPrefersKey — Cache.getKey / Local.getKey。
@@ -22,17 +22,10 @@ func LocalPrefersKey(rule, key string) string {
 	return "cache_" + rule + "_" + key
 }
 
-func jsLocalOwnerDir() string {
-	if uid := hostclient.RuntimeUserID(); uid != "" {
-		return uid
-	}
-	return "shared"
-}
-
 func jsLocalPath(rule, key string) string {
 	// Prefers 键名按原文语义；落盘用 base64url，避免非法文件名且不碰撞。
 	enc := base64.RawURLEncoding.EncodeToString([]byte(LocalPrefersKey(rule, key)))
-	return filepath.Join(paths.JsCache(), "local", jsLocalOwnerDir(), enc+".dat")
+	return filepath.Join(paths.UserJsLocalDir(hostclient.RuntimeUserID()), enc+".dat")
 }
 
 func LocalGet(rule, key string) string {

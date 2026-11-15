@@ -30,4 +30,14 @@ func TestUserRuntimeDirs(t *testing.T) {
 	if UserChromiumDir("alice") != filepath.Join(user, "chromium") {
 		t.Fatalf("chromium subdir")
 	}
+	if UserJsLocalDir("alice") != filepath.Join(user, "js-local") {
+		t.Fatalf("js-local subdir")
+	}
+	if UserNodeDataDir("alice", "pkg1") != filepath.Join(user, "node", "pkg1", "data") {
+		t.Fatalf("node data subdir")
+	}
+	if !strings.HasSuffix(JsModuleCache(), filepath.Join("js", "mod")) &&
+		!strings.Contains(JsModuleCache(), filepath.Join("js", "mod")) {
+		t.Fatalf("js module cache=%s", JsModuleCache())
+	}
 }

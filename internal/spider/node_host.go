@@ -263,12 +263,10 @@ func (h *NodeHost) Ensure(pkgURL string) (*nodePkg, error) {
 	h.mu.Lock()
 	pkg, ok := h.pkgs[id]
 	if !ok {
-		// 包文件共享：NodeCache/<id>/；本机 data 仍落同目录以兼容旧缓存。
+		// 包文件全局共享 NodeCache/<id>/；可写 data 进 UserNodeDataDir（与 JVM/Py 同布局）。
 		dir := filepath.Join(paths.NodeCache(), id)
-		dataDir := filepath.Join(dir, "data")
-		if h.ownerUID != "" {
-			dataDir = filepath.Join(paths.NodeCache(), "run", h.ownerUID, id, "data")
-		}
+		dataDir := paths.UserNodeDataDir(h.ownerUID, id)
+		migrateLegacyNodeDataDir(h.ownerUID, id, dataDir)
 		pkg = &nodePkg{
 			id:       id,
 			pkgURL:   pkgURL,
@@ -317,6 +315,28 @@ func (h *NodeHost) ensureRunner() error {
 	return nil
 }
 
+// migrateLegacyNodeDataDir 把旧布局迁到 cache/run/…/node/<id>/data（仅当新目录为空）。
+func migrateLegacyNodeDataDir(ownerUID, pkgID, dataDir string) {
+	if ents, err := os.ReadDir(dataDir); err == nil && len(ents) > 0 {
+		return
+	}
+	var legacy string
+	if ownerUID == "" {
+		legacy = filepath.Join(paths.NodeCache(), pkgID, "data")
+	} else {
+		legacy = filepath.Join(paths.NodeCache(), "run", ownerUID, pkgID, "data")
+	}
+	if st, err := os.Stat(legacy); err != nil || !st.IsDir() {
+		return
+	}
+	_ = os.Remove(dataDir) // 空目标，便于 Rename
+	_ = os.MkdirAll(filepath.Dir(dataDir), 0o755)
+	if err := os.Rename(legacy, dataDir); err != nil {
+		log.Printf("node data migrate skip owner=%q pkg=%s: %v", ownerUID, pkgID, err)
+		_ = os.MkdirAll(dataDir, 0o755)
+	}
+}
+
 func nodePkgID(pkgURL string) string {
 	u, err := url.Parse(strings.TrimSpace(pkgURL))
 	if err == nil {
@@ -334,6 +354,13 @@ func nodePkgID(pkgURL string) string {
 }
 
 func (p *nodePkg) download(pkgURL string) error {
+	// 包体全局共享：多用户并发 Ensure 合并为一次下载。
+	return doOnce("node-pkg:"+p.id, func() error {
+		return p.downloadFiles(pkgURL)
+	})
+}
+
+func (p *nodePkg) downloadFiles(pkgURL string) error {
 	base := util.NodePackageBaseURL(pkgURL)
 	files := []struct {
 		name string

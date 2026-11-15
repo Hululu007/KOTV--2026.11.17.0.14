@@ -10,6 +10,7 @@ import (
 
 	qjs "github.com/buke/quickjs-go"
 
+	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/util"
 )
 
@@ -97,7 +98,7 @@ func readAssetLib(name string) string {
 	return ""
 }
 
-// moduleFetch Module.fetch（仅内存 LruCache，无磁盘缓存）。
+// moduleFetch Module.fetch：内存 LRU + 远程模块磁盘内容寻址（全局共享，避免多用户重复下载）。
 func moduleFetch(name string) string {
 	if name == "" {
 		return ""
@@ -116,22 +117,34 @@ func moduleFetch(name string) string {
 	return cached
 }
 
+func jsModuleDiskPath(name string) string {
+	return filepath.Join(paths.JsModuleCache(), util.MD5(name)+".js")
+}
+
 func moduleFetchStore(name string) {
 	start := time.Now()
 	var content string
 	var via string
 	switch {
 	case strings.HasPrefix(name, "http://") || strings.HasPrefix(name, "https://"):
-		data, err := util.HTTPGetParamsInsecure(name, nil, nil)
-		if err != nil {
-			jsLog("[js-mod] http fail name=%s err=%v", name, err)
-		} else if data == "" {
-			jsLog("[js-mod] http empty name=%s", name)
-		} else if looksLikeNonJS(data) {
-			jsLog("[js-mod] http non-js name=%s preview=%q", name, jsPreview(data, 120))
+		disk := jsModuleDiskPath(name)
+		if b, err := os.ReadFile(disk); err == nil && len(b) > 0 && !looksLikeNonJS(string(b)) {
+			content = string(b)
+			via = "disk"
 		} else {
-			content = data
-			via = "http"
+			data, err := util.HTTPGetParamsInsecure(name, nil, nil)
+			if err != nil {
+				jsLog("[js-mod] http fail name=%s err=%v", name, err)
+			} else if data == "" {
+				jsLog("[js-mod] http empty name=%s", name)
+			} else if looksLikeNonJS(data) {
+				jsLog("[js-mod] http non-js name=%s preview=%q", name, jsPreview(data, 120))
+			} else {
+				content = data
+				via = "http"
+				_ = os.MkdirAll(filepath.Dir(disk), 0o755)
+				_ = os.WriteFile(disk, []byte(content), 0o644)
+			}
 		}
 		if content == "" {
 			if lib := toLibAssetPath(name); lib != "" {

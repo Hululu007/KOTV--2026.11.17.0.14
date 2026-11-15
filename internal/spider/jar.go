@@ -80,7 +80,7 @@ type jarSpider struct {
 func newJarSpider(key, api, ext, jar string) Spider {
 	jarMu.Lock()
 	defer jarMu.Unlock()
-	// 运行时分桶用 RuntimeUserID；jar 文件路径仍由 cacheJar 全局共享。
+	// 进程/指针按 RuntimeUserID 分桶；jar 包体经 cacheJar 全局共享（JarCache/md5）。
 	uid := hostclient.RuntimeUserID()
 	cacheKey := uid + "\x01" + strings.Join([]string{key, api, ext, jar}, "\x00")
 	if s, ok := jarSpiders[cacheKey]; ok {
