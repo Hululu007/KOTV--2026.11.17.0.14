@@ -414,11 +414,11 @@ class ExoPlayback extends KotvPlayback {
         notifyListeners();
         break;
       case 'live':
-        // 引擎升 live 缓冲：只记 _engineLive，不改开播标定的 _live。
-        if (m['live'] == true && !_engineLive) {
-          _engineLive = true;
-          notifyListeners();
+        if (!kotvAcceptEngineLive(already: _engineLive, reported: m['live'] == true)) {
+          break;
         }
+        _engineLive = true;
+        notifyListeners();
         break;
       case 'error':
         _lastError = '${m['message'] ?? 'Source error'}';

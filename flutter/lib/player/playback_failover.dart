@@ -67,8 +67,8 @@ class KotvPlaybackFailover {
     if (lockExoForDrm) return null;
     if (!_playerVal.startsWith('innie#')) return null;
 
-    // 对齐 FongMi DECODE 回退：硬解→自动→软解（显式重开），再换引擎。
-    // 自动档引擎内硬解若挂起不返回，须靠超时后走到这里的 soft 重试。
+    // 解码回退：硬解→自动→软解（显式重开），再换引擎。
+    // 自动档引擎内硬解若挂起不返回错误，须靠超时后走到这里的 soft 重试。
     if (_decodeMode == 'hard') {
       _decodeMode = 'auto';
       return KotvFailoverStep(

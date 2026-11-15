@@ -6,7 +6,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../util/kotv_app_dirs.dart';
 import 'buffer_budget.dart';
-import 'kotv_debug_ndjson.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_format.dart';
@@ -346,7 +345,7 @@ class KotvMpvOpts {
 
   /// 在 VideoController 已附着之后调用：缓冲预算 + conf（media_kit 路径）。
   ///
-  /// [live] 仅表示开播标定（直播页）；对齐 FongMi：不因引擎 `media-live` 中途改属性。
+  /// [live] 仅表示开播标定（直播页）；不因引擎 `media-live` 中途改属性。
   Future<void> applyAfterAttach(Player player, {bool live = false}) async {
     try {
       final platform = player.platform;
@@ -356,35 +355,9 @@ class KotvMpvOpts {
       }
 
       final hw = hwdecValue();
-      // #region agent log
-      kotvDebugNdjson(
-        hypothesisId: 'A,E',
-        location: 'mpv_opts.dart:applyAfterAttach',
-        message: 'set hwdec',
-        data: {
-          'hwdec': hw,
-          'direct': direct,
-          'soft': soft,
-          'hard': hard,
-          'live': live,
-          'win7': kotvIsWindows7(),
-          'decodeMode': decodeMode,
-        },
-      );
-      // #endregion
       try {
         await set('hwdec', hw);
       } catch (_) {}
-      // #region agent log
-      if (kotvIsWindows7()) {
-        kotvDebugNdjson(
-          hypothesisId: 'L3',
-          location: 'mpv_opts.dart:applyAfterAttach',
-          message: 'after set hwdec',
-          data: {'hwdec': hw, 'live': live},
-        );
-      }
-      // #endregion
 
       // 分片后缀不按名单拦截；不设 protocol_whitelist（名单外的 RTSP/RTMP 会被拒）。
       try {
@@ -410,7 +383,7 @@ class KotvMpvOpts {
         for (final e in props.entries) {
           await set(e.key, e.value);
         }
-        // 对齐 FongMi：不因 live 强关 cache-pause（旧 cache-pause=no 在硬解挂起时持续喂包更难回落）。
+        // 不因 live 强关 cache-pause（旧 cache-pause=no 在硬解挂起时持续喂包更难回落）。
         // 直播仍关磁盘缓存；点播跟 diskCache 设置。
         await set('cache-on-disk', (!live && diskCache) ? 'yes' : 'no');
         if (!live && diskCache && !kotvIsAndroid()) {
@@ -418,16 +391,6 @@ class KotvMpvOpts {
           await set('demuxer-cache-dir', dir.path);
         }
       } catch (_) {}
-      // #region agent log
-      if (kotvIsWindows7()) {
-        kotvDebugNdjson(
-          hypothesisId: 'L2',
-          location: 'mpv_opts.dart:applyAfterAttach',
-          message: 'after cache props',
-          data: {'live': live, 'diskCache': diskCache},
-        );
-      }
-      // #endregion
       try {
         if (preferredTextLangs.trim().isNotEmpty) {
           final slang = preferredTextLangs.replaceAll(';', ',').replaceAll(RegExp(r'\s+'), '');
@@ -463,16 +426,6 @@ class KotvMpvOpts {
       try {
         await set('sub-scale', kotvClampSubtitleFontScale(subtitleFontScale).toStringAsFixed(2));
       } catch (_) {}
-      // #region agent log
-      if (kotvIsWindows7()) {
-        kotvDebugNdjson(
-          hypothesisId: 'L2',
-          location: 'mpv_opts.dart:applyAfterAttach',
-          message: 'applyAfterAttach done',
-          data: {'live': live, 'hwdec': hw},
-        );
-      }
-      // #endregion
     } catch (_) {}
   }
 

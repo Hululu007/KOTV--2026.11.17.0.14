@@ -2101,67 +2101,25 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
   // and always Resize so Flutter re-registers the DXGI shared handle (same size still needed).
   // Win7: in-place create often fails; latch after one failure so CheckAndResize stops hammering
   // (Dart recreates a D3D11 Player instead).
-  // kotv_dbg_a027de: debug NDJSON → %TEMP%\\\\kotv-debug-a027de.log
   // soft_rebuild_latched: marker for patch upgrade
   static bool soft_rebuild_latched = false;
-  static bool soft_rebuild_latched_logged = false;
-  auto kotv_dbg_a027de = [](const char* hyp, const char* msg, const char* extra) {
-    char path[MAX_PATH] = {};
-    const DWORD n = GetTempPathA(MAX_PATH, path);
-    if (!n || n + 22 >= MAX_PATH) return;
-    memcpy(path + n, "kotv-debug-a027de.log", 22);
-    FILE* f = nullptr;
-    if (fopen_s(&f, path, "a") != 0 || !f) return;
-    fprintf(f,
-            "{\\"sessionId\\":\\"a027de\\",\\"hypothesisId\\":\\"%s\\",\\"location\\":\\"MaybeRewriteAngleForSoft\\","
-            "\\"message\\":\\"%s\\",\\"data\\":%s,\\"timestamp\\":%lu}\\n",
-            hyp, msg, extra ? extra : "{}", (unsigned long)GetTickCount());
-    fclose(f);
-  };
   if (soft_rebuild_latched) {
-    if (!soft_rebuild_latched_logged) {
-      soft_rebuild_latched_logged = true;
-      kotv_dbg_a027de("B", "skip_latched", "{}");
-    }
     return false;
   }
   if (surface_manager_ == nullptr || !surface_manager_->prefer_d3d9() || !render_context_) {
-    // Rate-limit: CheckAndResize 会狂调；满盘写日志本身也会拖 UI。
-    static int skip_gate_n = 0;
-    if (skip_gate_n < 3) {
-      ++skip_gate_n;
-      kotv_dbg_a027de("A", "skip_gate",
-                      surface_manager_ == nullptr ? "{\\"reason\\":\\"no_surface\\"}"
-                      : !surface_manager_->prefer_d3d9() ? "{\\"reason\\":\\"not_d3d9\\"}"
-                                                         : "{\\"reason\\":\\"no_rc\\"}");
-    }
     return false;
   }
   auto cur = mpv_get_property_string(handle_, "hwdec-current");
   if (!cur) {
-    static int skip_no_cur_n = 0;
-    if (skip_no_cur_n < 2) {
-      ++skip_no_cur_n;
-      kotv_dbg_a027de("A", "skip_no_hwdec_current", "{}");
-    }
     return false;
   }
   const std::string s(cur);
   mpv_free(cur);
   if (s != "no") {
-    // dxva2/d3d11va 正常时 CheckAndResize 每帧都会进这里；逐帧 fopen 会卡死 UI。
-    static int skip_not_soft_n = 0;
-    if (skip_not_soft_n < 2) {
-      ++skip_not_soft_n;
-      char buf[128];
-      snprintf(buf, sizeof(buf), "{\\"hwdecCurrent\\":\\"%s\\"}", s.c_str());
-      kotv_dbg_a027de("A", "skip_not_soft", buf);
-    }
     return false;
   }
   const int32_t w = surface_manager_->width();
   const int32_t h = surface_manager_->height();
-  kotv_dbg_a027de("B", "rebuild_begin", "{\\"prefer_d3d9\\":true,\\"hwdecCurrent\\":\\"no\\"}");
   std::unique_ptr<ANGLESurfaceManager> fresh;
   mpv_render_context* fresh_rc = nullptr;
   try {
@@ -2182,7 +2140,6 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
       fresh_rc = nullptr;
       fresh.reset();
       soft_rebuild_latched = true;
-      kotv_dbg_a027de("B", "rebuild_create_failed", "{}");
       return false;
     }
   } catch (...) {
@@ -2192,7 +2149,6 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
     }
     fresh.reset();
     soft_rebuild_latched = true;
-    kotv_dbg_a027de("B", "rebuild_exception", "{}");
     return false;
   }
   mpv_render_context_set_update_callback(
@@ -2206,16 +2162,15 @@ method_def = """bool VideoOutput::MaybeRewriteAngleForSoft() {
   render_context_ = fresh_rc;
   surface_manager_ = std::move(fresh);
   Resize(w, h);
-  kotv_dbg_a027de("C", "rebuild_ok_resized", "{}");
   return true;
 }
 
 """
 
-# Upgrade / install instrumented method (replace if rate-limit marker missing).
+# Upgrade / install method (replace if latch missing or old dbg still present).
 # IMPORTANT: use lambda replacement — re.sub treats \ in the template (eats \" → broken C strings).
 import re as _re
-if "skip_not_soft_n" not in text_vo:
+if ("soft_rebuild_latched" not in text_vo) or ("kotv_dbg_a027de" in text_vo):
     text_vo2, n_sub = _re.subn(
         r"bool VideoOutput::MaybeRewriteAngleForSoft\(\) \{.*?\n\}\n\n",
         lambda _m: method_def,
@@ -2225,7 +2180,7 @@ if "skip_not_soft_n" not in text_vo:
     )
     if n_sub == 1:
         text_vo = text_vo2
-        print(f"patched media_kit_video ({root.name}): upgraded MaybeRewriteAngleForSoft with latch+dbg")
+        print(f"patched media_kit_video ({root.name}): upgraded MaybeRewriteAngleForSoft with latch")
     elif "bool VideoOutput::MaybeRewriteAngleForSoft()" not in text_vo:
         anchor = "void VideoOutput::CheckAndResize() {\n"
         if text_vo.count(anchor) != 1:
@@ -2254,10 +2209,10 @@ if "MaybeRewriteAngleForSoft();" not in text_vo:
     print(f"patched media_kit_video ({root.name}): CheckAndResize calls MaybeRewriteAngleForSoft")
 
 vo.write_text(text_vo, encoding="utf-8")
-if "kotv_dbg_a027de" not in text_vo:
-    print(f"ERROR: media_kit_video ({root.name}) missing dbg marker after patch", file=sys.stderr)
+if "soft_rebuild_latched" not in text_vo or "kotv_dbg_a027de" in text_vo:
+    print(f"ERROR: media_kit_video ({root.name}) MaybeRewriteAngleForSoft latch missing or dbg left", file=sys.stderr)
     sys.exit(1)
-print(f"ok media_kit_video ({root.name}): MaybeRewriteAngleForSoft dbg ready")
+print(f"ok media_kit_video ({root.name}): MaybeRewriteAngleForSoft ready")
 
 cc.write_text(text_cc, encoding="utf-8")
 PY

@@ -437,11 +437,11 @@ class NativeMpvPlayback extends KotvPlayback {
         notifyListeners();
         break;
       case 'live':
-        // 引擎 media-live：只记 _engineLive，不改开播标定的 _live / _createdAsLive。
-        if (m['live'] == true && !_engineLive) {
-          _engineLive = true;
-          notifyListeners();
+        if (!kotvAcceptEngineLive(already: _engineLive, reported: m['live'] == true)) {
+          break;
         }
+        _engineLive = true;
+        notifyListeners();
         break;
       case 'error':
         _lastError = '${m['message'] ?? 'MPV error'}';

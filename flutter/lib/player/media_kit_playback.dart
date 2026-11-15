@@ -6,7 +6,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import 'buffer_budget.dart';
 import 'drm_opts.dart';
-import 'kotv_debug_ndjson.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 import 'kotv_win7_direct.dart';
@@ -154,7 +153,7 @@ class MediaKitPlayback extends KotvPlayback {
   bool _repeatOne = false;
   /// 开播标定的直播会话（详情 live / 直播页）；点播勿被引擎 media-live 改写。
   bool _live;
-  /// 引擎 `media-live`（只读守卫 / EOF；不改缓冲、不挡 queueNext；对齐 FongMi）。
+  /// 引擎 `media-live`（只读守卫；不改缓冲、不挡 queueNext、不抑制片尾 completed）。
   bool _engineLive = false;
   /// 当前会话挂了 ClearKey（demuxer-lavf-o）；无缝排队不复用该会话。
   bool _drmSession = false;
@@ -170,8 +169,6 @@ class MediaKitPlayback extends KotvPlayback {
   Map<String, String> _extraOpenProps = const {};
   /// mpv `duration/full`；无则回落 player.state.duration。
   Duration _durationFull = Duration.zero;
-  /// 本次 open 内 duration 有效增长次数（media-live=no 的「假点播真直播」守卫）。
-  int _durationGrowthCount = 0;
   bool _observedMpvProps = false;
 
   void setExtraOpenProps(Map<String, String> props) {
@@ -284,102 +281,31 @@ class MediaKitPlayback extends KotvPlayback {
             ? Duration(milliseconds: (sec * 1000).round())
             : Duration.zero;
         if (next == _durationFull) return;
-        final prev = _durationFull;
-        // media-live=no 但片长持续变长：只升 _engineLive 守卫，不改缓冲（FongMi 也不改属性）。
-        if (!_engineLive && !_live && prev > Duration.zero && next > prev) {
-          final noted = kotvNoteGrowingDuration(
-            previous: prev,
-            next: next,
-            growthCount: _durationGrowthCount,
-          );
-          _durationGrowthCount = noted.growthCount;
-          if (noted.markLive) {
-            _engineLive = true;
-            // #region agent log
-            if (kotvIsWindows7()) {
-              kotvDebugNdjson(
-                hypothesisId: 'E2',
-                location: 'media_kit_playback.dart:duration/full',
-                message: 'growing duration → engineLive guard',
-                data: {
-                  'prevMs': prev.inMilliseconds,
-                  'nextMs': next.inMilliseconds,
-                  'growthCount': _durationGrowthCount,
-                },
-              );
-            }
-            // #endregion
-          }
-        }
         _durationFull = next;
         notifyListeners();
       });
       await (platform as dynamic).observeProperty('media-live', (String raw) async {
-        final rawTrim = raw.trim();
-        final live = rawTrim == 'yes' || rawTrim == 'true' || rawTrim == '1';
-        // #region agent log
-        // 对齐 FongMi：只读引擎 live，不改缓冲/hwdec。
-        if (kotvIsWindows7()) {
-          kotvDebugNdjson(
-            hypothesisId: 'E1',
-            location: 'media_kit_playback.dart:media-live',
-            message: 'media-live changed',
-            data: {
-              'raw': rawTrim,
-              'liveYes': live,
-              'markedLive': _live,
-              'engineLive': _engineLive,
-            },
-          );
+        if (!kotvAcceptEngineLive(
+          already: _engineLive,
+          reported: kotvParseMediaLiveFlag(raw),
+        )) {
+          return;
         }
-        // #endregion
-        if (!live || _engineLive) return;
-        // 仅记 _engineLive 供守卫/EOF；勿 applyLiveBufferOnly / 勿改 _live（FongMi 同）。
         _engineLive = true;
-        // #region agent log
-        if (kotvIsWindows7()) {
-          kotvDebugNdjson(
-            hypothesisId: 'H2',
-            location: 'media_kit_playback.dart:media-live',
-            message: 'engine live noted (no prop rewrite)',
-            data: {'raw': rawTrim, 'markedLive': _live},
-          );
-        }
-        // #endregion
         notifyListeners();
       });
-      // #region agent log
+      // Win7 直出落到软解：须换 D3D11 Player（见 [kotvWin7SoftOnDirectNeedsNewPlayer]）。
       if (kotvIsWindows7()) {
         await (platform as dynamic).observeProperty('hwdec-current', (String raw) async {
           final cur = raw.trim();
-          kotvDebugNdjson(
-            hypothesisId: 'A,B,E',
-            location: 'media_kit_playback.dart:hwdec-current',
-            message: 'hwdec-current changed',
-            data: {
-              'hwdecCurrent': cur,
-              'hwdecAsked': _opts.hwdecValue(),
-              'direct': _opts.direct,
-              'live': _live || _engineLive,
-            },
-          );
-          // H5/H8：卡死若在 d3d11va-copy 之后，补 codec 快照（带超时，避免 getProperty 堵死回调）。
-          unawaited(_debugProbeCodecAfterHwdec(cur));
           if (!kotvWin7SoftOnDirectNeedsNewPlayer(direct: _opts.direct, hwdecCurrent: cur)) {
             return;
           }
           if (_softOnDirectRecoveryQueued) return;
           _softOnDirectRecoveryQueued = true;
-          kotvDebugNdjson(
-            hypothesisId: 'B',
-            location: 'media_kit_playback.dart:soft_on_direct',
-            message: 'queue D3D11 Player recreate',
-            data: {'hwdecCurrent': cur, 'direct': true},
-          );
           _onWin7SoftOnDirect?.call();
         });
       }
-      // #endregion
       _observedMpvProps = true;
     } catch (_) {}
   }
@@ -387,7 +313,7 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> applyOpts(KotvMpvOpts opts) async {
     // Win7 建控制器时已按 hwdec 选定 ANGLE 后端，直出与否不能再改，改它要换 Player（见 [kotvMediaKitNeedsNewPlayer]）。
     _opts = kotvIsWindows7() ? opts.copyWith(direct: _opts.direct) : opts;
-    // 缓冲只跟开播标定 _live；引擎 media-live 不改写属性（对齐 FongMi）。
+    // 缓冲只跟开播标定 _live；引擎 media-live 不改写属性。
     await _opts.applyAfterAttach(player, live: _live);
     notifyListeners();
   }
@@ -469,9 +395,8 @@ class MediaKitPlayback extends KotvPlayback {
     }
     final q = _queued;
     if (q != null && await _skipToQueued(q)) return;
-    // 标定直播，或引擎已 media-live：时间轴/EOF 抖动勿当片尾硬切。
-    // 详情虎牙等 open(live:false)，靠 _engineLive 挡「网慢播完切集」；勿把 _live 改真（会挡 queueNext）。
-    if (_live || _engineLive) return;
+    // 开播标定直播：时间轴/EOF 抖动勿当片尾硬切。引擎 media-live 不抑制 completed（点播仍可连播）。
+    if (_live) return;
     // 无排队或切入失败：清掉排队态，交给详情硬切下一集。
     _queued = null;
     await _setKeepOpen(true);
@@ -606,7 +531,6 @@ class MediaKitPlayback extends KotvPlayback {
     unawaited(_setKeepOpen(true));
     _url = q.url;
     _engineLive = false;
-    _durationGrowthCount = 0;
     _openGen++;
     _openSerial++;
     // 无缝换集：勿清成 0x0。同分辨率时 width/height 流可能不重发，清掉会一直显示 0x0。
@@ -711,7 +635,7 @@ class MediaKitPlayback extends KotvPlayback {
     _url = url;
     _live = live;
     _engineLive = false;
-    _durationGrowthCount = 0;
+    _softOnDirectRecoveryQueued = false;
     _openFormat = format;
     _formatRetried = false;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
@@ -726,35 +650,8 @@ class MediaKitPlayback extends KotvPlayback {
     }
     _drmSession = clearKeyHex != null;
     _clearKeyHex = clearKeyHex;
-    // #region agent log
-    // 详情 live:false；引擎 media-live 只记 _engineLive。Win7 打点。
-    if (kotvIsWindows7()) {
-      kotvDebugNdjson(
-        hypothesisId: 'L1,H3',
-        location: 'media_kit_playback.dart:open',
-        message: 'open begin',
-        data: {
-          'live': live,
-          'waitReady': waitReady,
-          'urlLen': url.length,
-          'direct': _opts.direct,
-          'hwdec': _opts.hwdecValue(),
-        },
-      );
-    }
-    // #endregion
     await _optsReady;
     await _opts.applyAfterAttach(player, live: live);
-    // #region agent log
-    if (kotvIsWindows7()) {
-      kotvDebugNdjson(
-        hypothesisId: 'L1,L2',
-        location: 'media_kit_playback.dart:open',
-        message: 'after applyAfterAttach',
-        data: {'live': live},
-      );
-    }
-    // #endregion
     await _ensureMpvTimelineObservers();
     if (_extraOpenProps.isNotEmpty) {
       for (final e in _extraOpenProps.entries) {
@@ -781,27 +678,7 @@ class MediaKitPlayback extends KotvPlayback {
       if (gen != _openGen || _url.isEmpty) return;
       await _applyMpvHeaderProps();
       if (gen != _openGen || _url.isEmpty) return;
-      // #region agent log
-      if (kotvIsWindows7()) {
-        kotvDebugNdjson(
-          hypothesisId: 'L1,H3',
-          location: 'media_kit_playback.dart:open',
-          message: 'before openThenUnpause',
-          data: {'live': live, 'gen': gen},
-        );
-      }
-      // #endregion
       await _openThenUnpause(media);
-      // #region agent log
-      if (kotvIsWindows7()) {
-        kotvDebugNdjson(
-          hypothesisId: 'L1,H3',
-          location: 'media_kit_playback.dart:open',
-          message: 'after openThenUnpause',
-          data: {'live': live, 'gen': gen},
-        );
-      }
-      // #endregion
     }();
     await job;
     // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
@@ -813,166 +690,10 @@ class MediaKitPlayback extends KotvPlayback {
     // 看到「不缓冲且已死」而退出，否则 open() 永远不返回。
     _openSerial++;
     if (waitReady) {
-      // #region agent log
-      if (kotvIsWindows7()) {
-        kotvDebugNdjson(
-          hypothesisId: 'L4',
-          location: 'media_kit_playback.dart:open',
-          message: 'before awaitReadyAfterOpen',
-          data: {'live': live, 'w': width, 'h': height},
-        );
-      }
-      // #endregion
       await awaitReadyAfterOpen();
-      // #region agent log
-      if (kotvIsWindows7()) {
-        kotvDebugNdjson(
-          hypothesisId: 'L4',
-          location: 'media_kit_playback.dart:open',
-          message: 'after awaitReadyAfterOpen',
-          data: {'live': live, 'w': width, 'h': height},
-        );
-      }
-      // #endregion
-    }
-    // #region agent log
-    if (kotvIsWindows7()) {
-      kotvDebugNdjson(
-        hypothesisId: 'L1',
-        location: 'media_kit_playback.dart:open',
-        message: 'open end',
-        data: {'live': live, 'engineLive': _engineLive},
-      );
-      // H5：纯 Dart 心跳 vs 带超时的 mpv 探针，区分 UI isolate 冻死 / libmpv 堵死。
-      // E1：详情不升 live 时持续采样 media-live + duration。
-      unawaited(_debugPostOpenProbes(gen));
-    }
-    // #endregion
-  }
-
-  // #region agent log
-  /// 详情 vs 直播会话差：cache-pause / media-live / 缓冲，不是 HEVC 硬解本身。
-  Future<Map<String, String>> _debugSessionProps() async {
-    Future<String> one(String name) async {
-      try {
-        final v = await _mpvProp(name)
-            .timeout(const Duration(milliseconds: 500), onTimeout: () => 'timeout');
-        return '$v';
-      } catch (e) {
-        return 'err:$e';
-      }
-    }
-
-    final keys = <String>[
-      'hwdec-current',
-      'hwdec',
-      'video-codec',
-      'video-format',
-      'media-live',
-      'duration',
-      'duration/full',
-      'cache-pause',
-      'cache-on-disk',
-      'cache',
-      'demuxer-max-bytes',
-      'demuxer-max-back-bytes',
-      'cache-pause-initial',
-      'framedrop',
-    ];
-    final out = <String, String>{};
-    for (final k in keys) {
-      out[k] = await one(k);
-    }
-    return out;
-  }
-
-  Future<void> _debugProbeCodecAfterHwdec(String hwdecCurrent) async {
-    try {
-      final props = await _debugSessionProps();
-      kotvDebugNdjson(
-        hypothesisId: 'D1,D2,H8',
-        location: 'media_kit_playback.dart:hwdec-current',
-        message: 'session after hwdec',
-        data: {
-          'hwdecCurrent': hwdecCurrent,
-          'direct': _opts.direct,
-          'markedLive': _live,
-          'engineLive': _engineLive,
-          ...props,
-        },
-      );
-    } catch (e) {
-      kotvDebugNdjson(
-        hypothesisId: 'D1,D2,H8',
-        location: 'media_kit_playback.dart:hwdec-current',
-        message: 'session after hwdec failed',
-        data: {'hwdecCurrent': hwdecCurrent, 'err': '$e'},
-      );
     }
   }
 
-  Future<void> _debugPostOpenProbes(int gen) async {
-    // 开播当帧先打一份会话快照（详情/直播对照用）。
-    try {
-      final props = await _debugSessionProps();
-      kotvDebugNdjson(
-        hypothesisId: 'D1,D2,D3',
-        location: 'media_kit_playback.dart:post-open',
-        message: 'session at open end',
-        data: {
-          'markedLive': _live,
-          'engineLive': _engineLive,
-          'direct': _opts.direct,
-          'diskCacheOpt': _opts.diskCache,
-          ...props,
-        },
-      );
-    } catch (e) {
-      kotvDebugNdjson(
-        hypothesisId: 'D1,D2,D3',
-        location: 'media_kit_playback.dart:post-open',
-        message: 'session at open end failed',
-        data: {'err': '$e'},
-      );
-    }
-    for (var i = 1; i <= 8; i++) {
-      await Future<void>.delayed(const Duration(seconds: 1));
-      if (gen != _openGen || _url.isEmpty) return;
-      // 先打心跳（不碰 mpv）：若卡 UI 后仍有心跳 → Dart isolate 活着。
-      kotvDebugNdjson(
-        hypothesisId: 'H5,D3',
-        location: 'media_kit_playback.dart:post-open',
-        message: 'heartbeat',
-        data: {
-          'i': i,
-          'playing': playing,
-          'buffering': buffering,
-          'w': width,
-          'h': height,
-          'engineLive': _engineLive,
-          'markedLive': _live,
-          'direct': _opts.direct,
-        },
-      );
-      try {
-        final props = await _debugSessionProps();
-        kotvDebugNdjson(
-          hypothesisId: 'D1,D2,E1,H5',
-          location: 'media_kit_playback.dart:post-open',
-          message: 'mpv probe',
-          data: {'i': i, ...props},
-        );
-      } catch (e) {
-        kotvDebugNdjson(
-          hypothesisId: 'H5',
-          location: 'media_kit_playback.dart:post-open',
-          message: 'mpv probe failed',
-          data: {'i': i, 'err': '$e'},
-        );
-      }
-    }
-  }
-  // #endregion
 
   @override
   Future<void> awaitReadyAfterOpen() async {
@@ -1008,7 +729,6 @@ class MediaKitPlayback extends KotvPlayback {
     _openFormat = null;
     _formatRetried = false;
     _engineLive = false;
-    _durationGrowthCount = 0;
     _durationFull = Duration.zero;
     _completedGate = null;
     _clearVideoSize();
@@ -1193,21 +913,6 @@ class MediaKitPlayback extends KotvPlayback {
   Future<String?> activeDecoderLabel() async {
     final cur = '${await _mpvProp('hwdec-current') ?? ''}';
     final asked = '${await _mpvProp('hwdec') ?? ''}';
-    // #region agent log
-    kotvDebugNdjson(
-      hypothesisId: 'A,B,C,E',
-      location: 'media_kit_playback.dart:activeDecoderLabel',
-      message: 'hwdec snapshot',
-      data: {
-        'hwdec': asked,
-        'hwdecCurrent': cur,
-        'direct': _opts.direct,
-        'live': _live || _engineLive,
-        'win7': kotvIsWindows7(),
-        'label': kotvMpvHwdecLabel(cur),
-      },
-    );
-    // #endregion
     return kotvMpvHwdecLabel(cur);
   }
 

@@ -59,26 +59,20 @@ String? kotvPlayMime(String url, String? format) {
   return null;
 }
 
-/// 起播守卫：只信标定 live 或引擎 live 信号，勿用 duration==0 启发式。
+/// 起播守卫：只信开播标定或引擎 live 信号，勿用 duration==0 / 片长增长等启发式。
 bool kotvIsLiveForGuard({required bool markedLive, bool engineLive = false}) =>
     markedLive || engineLive;
 
-/// 片长多次明显变长：demux 已有 duration → `media-live=no`，但仍是边播边涨的直播态。
-/// 仅供守卫（EOF / 起播），**不**改缓冲、**不**改开播 `_live`。
-///
-/// [previous]/[next] 为前后 `duration/full`；[growthCount] 为本次 open 已累计的有效增长次数。
-({int growthCount, bool markLive}) kotvNoteGrowingDuration({
-  required Duration previous,
-  required Duration next,
-  required int growthCount,
-  Duration minStep = const Duration(milliseconds: 500),
-  int markAfterGrowths = 2,
-}) {
-  if (next <= previous) return (growthCount: growthCount, markLive: false);
-  if (next - previous < minStep) return (growthCount: growthCount, markLive: false);
-  final n = growthCount + 1;
-  return (growthCount: n, markLive: n >= markAfterGrowths);
+/// 解析 mpv `media-live` 属性文本（yes/true/1）。
+bool kotvParseMediaLiveFlag(String raw) {
+  final t = raw.trim().toLowerCase();
+  return t == 'yes' || t == 'true' || t == '1';
 }
+
+/// 引擎上报 live 时置位一次；返回是否新置位（调用方再 notify / 刷新守卫）。
+/// 不改开播标定、不改缓冲属性。
+bool kotvAcceptEngineLive({required bool already, required bool reported}) =>
+    reported && !already;
 
 /// 桌面 / 安卓 MPV：尚未按 HLS 处理，且错误文案指向网络/IO 失败时，锁 HLS 再开一次。
 /// 安卓同判定在 KotvAndroidPlayback.shouldRetryMpvHlsAfterError。

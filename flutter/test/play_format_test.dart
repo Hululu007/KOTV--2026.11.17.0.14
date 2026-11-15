@@ -107,31 +107,17 @@ void main() {
     expect(kotvIsLiveForGuard(markedLive: false, engineLive: false), isFalse);
   });
 
-  test('growing duration marks live after two steps', () {
-    var g = 0;
-    final a = kotvNoteGrowingDuration(
-      previous: const Duration(seconds: 8),
-      next: const Duration(seconds: 10),
-      growthCount: g,
-    );
-    expect(a.markLive, isFalse);
-    g = a.growthCount;
-    final b = kotvNoteGrowingDuration(
-      previous: const Duration(seconds: 10),
-      next: const Duration(seconds: 12),
-      growthCount: g,
-    );
-    expect(b.markLive, isTrue);
-    expect(b.growthCount, 2);
+  test('parse media-live flag', () {
+    expect(kotvParseMediaLiveFlag('yes'), isTrue);
+    expect(kotvParseMediaLiveFlag(' TRUE '), isTrue);
+    expect(kotvParseMediaLiveFlag('1'), isTrue);
+    expect(kotvParseMediaLiveFlag('no'), isFalse);
+    expect(kotvParseMediaLiveFlag(''), isFalse);
   });
 
-  test('tiny duration jitter does not count as growth', () {
-    final r = kotvNoteGrowingDuration(
-      previous: const Duration(milliseconds: 10000),
-      next: const Duration(milliseconds: 10200),
-      growthCount: 1,
-    );
-    expect(r.markLive, isFalse);
-    expect(r.growthCount, 1);
+  test('accept engine live once', () {
+    expect(kotvAcceptEngineLive(already: false, reported: true), isTrue);
+    expect(kotvAcceptEngineLive(already: true, reported: true), isFalse);
+    expect(kotvAcceptEngineLive(already: false, reported: false), isFalse);
   });
 }

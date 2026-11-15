@@ -2606,7 +2606,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (_skipOpeningEnding || startMs > 0) {
             _openingSeekDone = true;
           }
-          // live 由引擎内容态提升（桌面 media-live / 安卓 isCurrentMediaItemLive），不预拉节目单。
+          // 开播标定 live；引擎 media-live / isLive 仅供守卫，不预拉节目单。
           await pb.open(
             openUrl,
             headers: openHeaders,

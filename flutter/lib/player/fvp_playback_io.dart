@@ -55,6 +55,8 @@ class FvpPlayback extends KotvPlayback {
   bool _completed = false;
   bool _opening = false;
   bool _live = false;
+  /// 引擎 isLive（只读守卫；不改开播标定、不改缓冲）。
+  bool _engineLive = false;
   bool _repeatOne = false;
   String? _lastError;
   double _volume = 100;
@@ -286,6 +288,7 @@ class FvpPlayback extends KotvPlayback {
     );
     _opening = true;
     _live = live;
+    _engineLive = false;
     _vodBufferSet = false;
     _lastError = null;
     _completed = false;
@@ -356,7 +359,7 @@ class FvpPlayback extends KotvPlayback {
           _refreshTracksQuiet();
         }
         if (v.isInitialized) {
-          _maybeUpgradeLiveFromContent(c);
+          _maybeMarkEngineLive(c);
         }
         if (v.isInitialized && !_vodBufferSet &&
             (lastInit != v.isInitialized || lastBuffering != v.isBuffering)) {
@@ -473,11 +476,14 @@ class FvpPlayback extends KotvPlayback {
       position: () => c.value.position,
       duration: () => c.value.duration,
       isLiveContent: () {
-        var engineLive = false;
+        var reported = false;
         try {
-          engineLive = identical(_c, c) && c.isLive();
+          reported = identical(_c, c) && c.isLive();
         } catch (_) {}
-        return kotvIsLiveForGuard(markedLive: _live, engineLive: engineLive);
+        return kotvIsLiveForGuard(
+          markedLive: _live,
+          engineLive: _engineLive || reported,
+        );
       },
       hasVideoSource: () {
         if (!identical(_c, c)) return true;
@@ -846,17 +852,17 @@ class FvpPlayback extends KotvPlayback {
     return sum;
   }
 
-  /// 内容态升 live：引擎 `isLive()` 为真时切短队列缓冲。
-  void _maybeUpgradeLiveFromContent(VideoPlayerController c) {
+  /// 引擎 `isLive()`：只记 [_engineLive] 供守卫；不改 [_live]、不改缓冲。
+  void _maybeMarkEngineLive(VideoPlayerController c) {
     if (_live || !identical(_c, c)) return;
+    var reported = false;
     try {
-      if (!c.isLive()) return;
+      reported = c.isLive();
     } catch (_) {
       return;
     }
-    _live = true;
-    _vodBufferSet = false;
-    _applyBufferRange(c);
+    if (!kotvAcceptEngineLive(already: _engineLive, reported: reported)) return;
+    _engineLive = true;
     notifyListeners();
   }
 

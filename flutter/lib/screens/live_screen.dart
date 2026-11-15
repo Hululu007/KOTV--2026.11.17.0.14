@@ -1767,7 +1767,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await pb.awaitReadyAfterOpen().timeout(Duration(seconds: _livePlayTimeoutSec));
     } on TimeoutException {
       if (stale() || _liveHasPicture(pb)) return;
-      // 对齐 FongMi 起播超时：先走 failover（auto→soft→换引擎），勿直接放弃。
+      // 起播超时：先走 failover（auto→soft→换引擎），勿直接放弃。
       final retry = await _recoverAfterSilentVideo(
         pb: pb,
         failover: failover,
