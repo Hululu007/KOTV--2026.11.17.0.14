@@ -67,7 +67,7 @@ func (s *Server) gate(next http.Handler) http.Handler {
 		}
 		local := isLoopbackRequest(r) && !isWebClient(r)
 		need := s.routeNeed(r)
-		rootAlias := spider.DefaultNodeHost().MatchNodeRootAlias(r.URL.Path)
+		rootAlias := spider.NodeRootAliasKnown(r.URL.Path)
 		if rootAlias {
 			need = needUser
 		}

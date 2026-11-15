@@ -111,21 +111,30 @@ func SetRecent(key, api, ext, jar string) {
 func Clear() {
 	clearJar()
 	clearJsPy()
-	DefaultNodeHost().StopAll()
+	stopAllNodeHosts()
 	clearScriptCaches()
 }
 
-// ResetScriptSpiders 换源时销毁 JS/Python/Node 爬虫，避免旧进程状态污染新站。
+// ResetScriptSpiders 换源/清缓存时销毁全部 JS/Python/Node 爬虫，避免旧进程状态污染。
 func ResetScriptSpiders() {
 	clearJsPy()
 	clearJSMemoryCaches()
-	DefaultNodeHost().StopAll()
+	stopAllNodeHosts()
 }
 
 // clearScriptCaches 清空 JS 内存缓存，并清理本地 js/py/node 目录（含历史落盘残留）。
 func clearScriptCaches() {
 	clearJSMemoryCaches()
-	DefaultNodeHost().ClearAll()
+	sharedNodeHost.ClearAll()
+	userNodeHostsMu.Lock()
+	hosts := make([]*NodeHost, 0, len(userNodeHosts))
+	for _, h := range userNodeHosts {
+		hosts = append(hosts, h)
+	}
+	userNodeHostsMu.Unlock()
+	for _, h := range hosts {
+		h.ClearAll()
+	}
 	for _, dir := range []string{paths.JsCache(), paths.PyCache(), paths.NodeCache()} {
 		_ = os.RemoveAll(dir)
 		_ = os.MkdirAll(dir, 0o755)

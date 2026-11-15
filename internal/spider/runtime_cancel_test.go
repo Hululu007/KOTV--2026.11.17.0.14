@@ -67,20 +67,63 @@ func TestNodePostJSON_InterruptCancelsAndStops(t *testing.T) {
 	}
 }
 
-func TestRestartSharedRuntime_StopsNode(t *testing.T) {
-	h := DefaultNodeHost()
-	pkg := &nodePkg{id: "restart-shared-node", port: 8888}
-	h.mu.Lock()
-	h.pkgs[pkg.id] = pkg
-	h.mu.Unlock()
+func TestRestartSharedRuntime_StopsSharedNodeOnly(t *testing.T) {
+	shared := sharedNodeHost
+	sharedPkg := &nodePkg{id: "restart-shared-node", port: 8888, ownerUID: ""}
+	shared.mu.Lock()
+	shared.pkgs[sharedPkg.id] = sharedPkg
+	shared.mu.Unlock()
+
+	user := nodeHostForUser("user-keep-node")
+	userPkg := &nodePkg{id: "restart-user-node", port: 7777, ownerUID: "user-keep-node", host: user}
+	user.mu.Lock()
+	user.pkgs[userPkg.id] = userPkg
+	user.mu.Unlock()
+
 	t.Cleanup(func() {
-		h.mu.Lock()
-		delete(h.pkgs, pkg.id)
-		h.mu.Unlock()
+		shared.mu.Lock()
+		delete(shared.pkgs, sharedPkg.id)
+		shared.mu.Unlock()
+		destroyUserNodeHost("user-keep-node")
 	})
+
 	HardRestartSharedRuntimes()
-	if pkg.Port() != 0 {
-		t.Fatalf("node port=%d after hard restart", pkg.Port())
+	if sharedPkg.Port() != 0 {
+		t.Fatalf("shared node port=%d after hard restart", sharedPkg.Port())
+	}
+	if userPkg.Port() != 7777 {
+		t.Fatalf("user node should survive shared restart, port=%d", userPkg.Port())
+	}
+}
+
+func TestNodeHostPerUserIsolation(t *testing.T) {
+	u1 := nodeHostForUser("iso-u1")
+	u2 := nodeHostForUser("iso-u2")
+	if u1 == u2 || u1 == sharedNodeHost || u2 == sharedNodeHost {
+		t.Fatal("dedicated users must get distinct hosts")
+	}
+	p1 := &nodePkg{id: "same-pkg", port: 1001, ownerUID: "iso-u1", host: u1}
+	p2 := &nodePkg{id: "same-pkg", port: 1002, ownerUID: "iso-u2", host: u2}
+	u1.mu.Lock()
+	u1.pkgs[p1.id] = p1
+	u1.mu.Unlock()
+	u2.mu.Lock()
+	u2.pkgs[p2.id] = p2
+	u2.mu.Unlock()
+	t.Cleanup(func() {
+		destroyUserNodeHost("iso-u1")
+		destroyUserNodeHost("iso-u2")
+	})
+
+	destroyUserNodeHost("iso-u1")
+	if p1.Port() != 0 {
+		t.Fatal("KillUser-equivalent should stop only u1 pkg")
+	}
+	if p2.Port() != 1002 {
+		t.Fatal("u2 pkg must remain after destroying u1")
+	}
+	if nodeHostForUser("iso-u1") == u1 {
+		t.Fatal("destroyed user host should be recreated on next access")
 	}
 }
 

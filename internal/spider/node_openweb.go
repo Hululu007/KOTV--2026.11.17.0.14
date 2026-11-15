@@ -154,7 +154,11 @@ func (p *nodePkg) RewriteOpenWebURL(raw string) string {
 		path = "/"
 	}
 	if seg := firstPathSegment(path); seg != "" {
-		DefaultNodeHost().RememberNodeRootAlias(seg)
+		h := p.host
+		if h == nil {
+			h = nodeHostForCurrent()
+		}
+		h.RememberNodeRootAlias(seg)
 	}
 	if hostclient.PublicBase() == "" {
 		return raw

@@ -76,7 +76,7 @@ func bridgeForCurrent() *javaBridgeClient {
 	return bridgeForUser(hostclient.RuntimeUserID())
 }
 
-// KillUserRuntime 杀掉指定用户的 JAR-JVM、Py/JS 池，并停掉共享 Node 源包（一源包一进程，无法按用户隔离）。
+// KillUserRuntime 杀掉指定用户的 JAR-JVM、Py/JS 池与 Node 桶（不动本机共享与其它用户）。
 func KillUserRuntime(userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -95,7 +95,7 @@ func KillUserRuntime(userID string) {
 		b.stopLocked()
 		b.mu.Unlock()
 	}
-	DefaultNodeHost().StopAll()
+	destroyUserNodeHost(userID)
 }
 
 // HostSpiderReady 远端主机爬虫面是否可用（安卓=本机 9979；桌面=捆绑 runtime 可用即可）。
@@ -395,7 +395,7 @@ func RestartSharedRuntime() {
 	}
 	clearSharedJsPy()
 	clearSharedJarSpiders()
-	DefaultNodeHost().StopAll()
+	clearSharedNodeHost()
 }
 
 func softCancelSharedBridgeOnly() {

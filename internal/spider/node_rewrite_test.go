@@ -80,7 +80,7 @@ func TestRewriteOpenWebURLLocalKeep(t *testing.T) {
 	h.mu.Lock()
 	h.rootAliases = map[string]struct{}{}
 	h.mu.Unlock()
-	p := &nodePkg{id: "pkg1", port: 9999}
+	p := &nodePkg{id: "pkg1", port: 9999, host: h}
 	raw := "http://127.0.0.1:9999/website"
 	got := p.RewriteOpenWebURL(raw)
 	if got != raw {
@@ -95,10 +95,6 @@ func TestRewriteOpenWebURLRemoteNodeProxy(t *testing.T) {
 	localproxy.SetPort(9978)
 	playproxy.SetEngineRoutes([]string{"/node/"})
 	t.Cleanup(func() { playproxy.SetEngineRoutes(nil) })
-	h := DefaultNodeHost()
-	h.mu.Lock()
-	h.rootAliases = map[string]struct{}{}
-	h.mu.Unlock()
 	defer hostclient.Bind(hostclient.Request{
 		ClientID:   "ow",
 		UserID:     "u1",
@@ -106,7 +102,11 @@ func TestRewriteOpenWebURLRemoteNodeProxy(t *testing.T) {
 		PublicBase: "https://tv.example.com/k/KEY",
 		AuthToken:  "tok123",
 	})()
-	p := &nodePkg{id: "pkg1", port: 9999}
+	h := DefaultNodeHost() // Bind 后为 u1 独立桶
+	h.mu.Lock()
+	h.rootAliases = map[string]struct{}{}
+	h.mu.Unlock()
+	p := &nodePkg{id: "pkg1", port: 9999, ownerUID: "u1", host: h}
 	got := p.RewriteOpenWebURL("http://127.0.0.1:9999/website")
 	// 浏览器页不加 /k/<钥匙>，便于 ?token= 走用户会话并种根别名 Cookie。
 	want := "https://tv.example.com/node/pkg1/website?token=tok123"
@@ -168,7 +168,7 @@ func TestHandleNodeMsgOpenWebUsesCaller(t *testing.T) {
 	t.Cleanup(func() { playproxy.SetEngineRoutes(nil) })
 
 	h := DefaultNodeHost()
-	p := &nodePkg{id: "pkg1", port: 9999, pkgURL: "http://example/index.js"}
+	p := &nodePkg{id: "pkg1", port: 9999, pkgURL: "http://example/index.js", host: h}
 	h.mu.Lock()
 	h.pkgs["pkg1"] = p
 	h.rootAliases = map[string]struct{}{}

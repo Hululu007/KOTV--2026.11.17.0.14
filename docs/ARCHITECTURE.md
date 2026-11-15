@@ -79,8 +79,8 @@ Go Engine（单进程，:9978）
 | CMS（内置） | 非 `.py`/`.js`/`csp_` | 引擎内置解析（type 0/1/4） |
 | JS | `api` 含 `.js`（非猫爪源包） | 内嵌 **QuickJS**（CGO），worker 池，同站可并行 |
 | Python | `api` 含 `.py` | 捆绑 `runtime/python` 进程池，同站可并行 |
-| Node | `api` 以 `/spider/` 开头（来自猫爪 `/config`） | 捆绑 `runtime/node`（安卓 `libkotv_node.so` + `libnode.so` 同进 jniLibs），一源包一进程 |
-| JAR | `api` 前缀 `csp_` | **Java bridge**（JVM），桌面 HTTP 多路、可并发、按 client 软取消 |
+| Node | `api` 以 `/spider/` 开头（来自猫爪 `/config`） | 捆绑 `runtime/node`（安卓 `libkotv_node.so` + `libnode.so` 同进 jniLibs）；本机共享桶、远端按 `RuntimeUserID` 独立桶，桶内一源包一进程 |
+| JAR | `api` 前缀 `csp_` | **Java bridge**（JVM），本机共享 / 远端每用户独立；桌面 HTTP 多路、可并发、按 Scope 软取消 |
 
 - `getClientId()` 返回当前 ScopeID，`postMsg` 据此路由回正确前端。
 - 换源时 `ResetScriptSpiders()` 销毁 JS/Python/Node 爬虫，避免旧进程状态污染新站；设置页「清理缓存」清 JAR 磁盘 + JS/Py/Node 内存与落盘目录。

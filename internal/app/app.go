@@ -692,9 +692,9 @@ func (a *App) Shutdown() {
 	if a.presence != nil {
 		a.presence.Stop()
 	}
-	// 关停：打断脚本/JAR 并关 bridge，勿再拉起 JVM。
+	// 关停：打断脚本/JAR/Node 并关全部 bridge，勿再拉起。
 	spider.InterruptScriptSpiders()
-	spider.RestartSharedRuntime()
+	spider.HardRestartSharedRuntimes()
 	spider.ResetScriptSpiders()
 	spider.ShutdownJavaBridge()
 	dlna.StopRenderer()

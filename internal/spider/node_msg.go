@@ -2,7 +2,6 @@ package spider
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -184,21 +183,12 @@ func resolveNodePkg(prefix string) *nodePkg {
 	return pkg
 }
 
-// resolveNodePkgByLocalPort 按 URL 里 127.0.0.1|localhost:端口 匹配已起的包。
+// resolveNodePkgByLocalPort 按 URL 里 127.0.0.1|localhost:端口 匹配已起的包（跨用户桶，端口全局唯一）。
 func resolveNodePkgByLocalPort(raw string) *nodePkg {
 	sub := reLocalNodeURL.FindStringSubmatch(raw)
 	if len(sub) != 2 {
 		return nil
 	}
-	portStr := sub[1]
-	h := DefaultNodeHost()
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for _, p := range h.pkgs {
-		if p.Port() > 0 && fmt.Sprintf("%d", p.Port()) == portStr {
-			return p
-		}
-	}
-	return nil
+	return findNodePkgByLocalPort(sub[1])
 }
 

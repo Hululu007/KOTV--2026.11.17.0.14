@@ -135,13 +135,13 @@ func jsPyKey(kind, api string) string {
 	return hostclient.RuntimeUserID() + "\x01" + kind + ":" + api
 }
 
-// ReleaseOtherScripts 切站后关掉当前站用不到的 Py/JS 池与其它 Node 源包。正在搜索的其它脚本不走这里。
+// ReleaseOtherScripts 切站后关掉当前用户桶内用不到的 Py/JS 池与其它 Node 源包。正在搜索的其它脚本不走这里。
 func ReleaseOtherScripts(api string) {
 	keepPy := jsPyKey("py", api)
 	keepJs := jsPyKey("js", api)
 	prefix := hostclient.RuntimeUserID() + "\x01"
 	destroyScripts(prefix, false, keepPy, keepJs)
-	DefaultNodeHost().ReleaseOther(api)
+	nodeHostForCurrent().ReleaseOther(api)
 }
 
 // DestroyUserScripts 销毁指定用户的全部 Py/JS 池。

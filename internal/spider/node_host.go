@@ -47,13 +47,10 @@ const (
 	nodeMaxBackoff     = 30 * time.Second
 )
 
-var (
-	defaultNodeHost     *NodeHost
-	defaultNodeHostOnce sync.Once
-)
-
 // NodeHost 管理猫爪 Node 源包：下载、启动、反代与消息回调。
+// 与 javaBridge / userBridges 同构：本机共享一份；远端租户按 RuntimeUserID 独立桶。
 type NodeHost struct {
+	ownerUID    string // RuntimeUserID；空串=本机共享
 	mu          sync.Mutex
 	pkgs        map[string]*nodePkg // id → pkg
 	apiIndex    map[string]string   // /spider/... → pkgID
@@ -64,6 +61,8 @@ type NodeHost struct {
 type nodePkg struct {
 	id, pkgURL, dir, dataDir string
 	indexJS, configJS        string
+	ownerUID                 string
+	host                     *NodeHost
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -73,25 +72,155 @@ type nodePkg struct {
 	caller   callerSnap
 }
 
-// 进行中的 Node HTTP 调用，按 ScopeID 软取消；取消/超时后回收源包进程。
+// 进行中的 Node HTTP 调用，按 ScopeID 软取消；取消/超时后回收**该用户桶**内源包进程。
 type nodeInflight struct {
 	id       uint64
-	clientID string
+	clientID string // ScopeID
+	ownerUID string // RuntimeUserID（空=共享桶）
 	pkgID    string
 	cancel   context.CancelFunc
 }
 
 var (
+	sharedNodeHost = &NodeHost{
+		pkgs:     map[string]*nodePkg{},
+		apiIndex: map[string]string{},
+	}
+	userNodeHostsMu sync.Mutex
+	userNodeHosts   = map[string]*NodeHost{}
+
 	nodeInflightMu sync.Mutex
 	nodeInflightQ  = map[uint64]*nodeInflight{}
 	nodeCallSeq    atomic.Uint64
 )
 
-func beginNodeCall(clientID, pkgID string) (context.Context, func()) {
+func newNodeHost(ownerUID string) *NodeHost {
+	return &NodeHost{
+		ownerUID: ownerUID,
+		pkgs:     map[string]*nodePkg{},
+		apiIndex: map[string]string{},
+	}
+}
+
+// nodeHostForUser 指定 RuntimeUserID 的 Node 桶；空串为本机共享（对齐 bridgeForUser）。
+func nodeHostForUser(userID string) *NodeHost {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return sharedNodeHost
+	}
+	userNodeHostsMu.Lock()
+	defer userNodeHostsMu.Unlock()
+	if h, ok := userNodeHosts[userID]; ok {
+		return h
+	}
+	h := newNodeHost(userID)
+	userNodeHosts[userID] = h
+	return h
+}
+
+// nodeHostForCurrent 当前请求所属 Node 桶（对齐 bridgeForCurrent）。
+func nodeHostForCurrent() *NodeHost {
+	return nodeHostForUser(hostclient.RuntimeUserID())
+}
+
+// DefaultNodeHost 当前请求所属 Node 桶（本机共享或远端用户独立）。
+func DefaultNodeHost() *NodeHost {
+	return nodeHostForCurrent()
+}
+
+// destroyUserNodeHost 销毁指定远端用户的 Node 桶（对齐删 userBridges）。
+func destroyUserNodeHost(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	userNodeHostsMu.Lock()
+	h := userNodeHosts[userID]
+	delete(userNodeHosts, userID)
+	userNodeHostsMu.Unlock()
+	if h != nil {
+		h.StopAll()
+	}
+}
+
+// clearSharedNodeHost 只停本机共享 Node（对齐 clearSharedJsPy，不碰远端用户桶）。
+func clearSharedNodeHost() {
+	sharedNodeHost.StopAll()
+}
+
+// stopAllNodeHosts 停共享 + 全部用户桶（Clear / Reset / Shutdown）。
+func stopAllNodeHosts() {
+	sharedNodeHost.StopAll()
+	userNodeHostsMu.Lock()
+	all := make([]*NodeHost, 0, len(userNodeHosts))
+	for id, h := range userNodeHosts {
+		all = append(all, h)
+		delete(userNodeHosts, id)
+	}
+	userNodeHostsMu.Unlock()
+	for _, h := range all {
+		h.StopAll()
+	}
+}
+
+// NodeRootAliasKnown 任一 Node 桶是否登记了该根别名（gate Bind 前探测用）。
+func NodeRootAliasKnown(path string) bool {
+	if sharedNodeHost.MatchNodeRootAlias(path) {
+		return true
+	}
+	userNodeHostsMu.Lock()
+	hosts := make([]*NodeHost, 0, len(userNodeHosts))
+	for _, h := range userNodeHosts {
+		hosts = append(hosts, h)
+	}
+	userNodeHostsMu.Unlock()
+	for _, h := range hosts {
+		if h.MatchNodeRootAlias(path) {
+			return true
+		}
+	}
+	return false
+}
+
+// findNodePkgByLocalPort 按本机端口在所有桶中找包（端口全局唯一）。
+func findNodePkgByLocalPort(portStr string) *nodePkg {
+	find := func(h *NodeHost) *nodePkg {
+		if h == nil {
+			return nil
+		}
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		for _, p := range h.pkgs {
+			if p.Port() > 0 && fmt.Sprintf("%d", p.Port()) == portStr {
+				return p
+			}
+		}
+		return nil
+	}
+	if p := find(sharedNodeHost); p != nil {
+		return p
+	}
+	userNodeHostsMu.Lock()
+	hosts := make([]*NodeHost, 0, len(userNodeHosts))
+	for _, h := range userNodeHosts {
+		hosts = append(hosts, h)
+	}
+	userNodeHostsMu.Unlock()
+	for _, h := range hosts {
+		if p := find(h); p != nil {
+			return p
+		}
+	}
+	return nil
+}
+
+func beginNodeCall(clientID, ownerUID, pkgID string) (context.Context, func()) {
 	ctx, cancel := context.WithTimeout(context.Background(), nodeCallTimeout)
 	id := nodeCallSeq.Add(1)
 	nodeInflightMu.Lock()
-	nodeInflightQ[id] = &nodeInflight{id: id, clientID: clientID, pkgID: pkgID, cancel: cancel}
+	nodeInflightQ[id] = &nodeInflight{
+		id: id, clientID: clientID, ownerUID: ownerUID, pkgID: pkgID, cancel: cancel,
+	}
 	nodeInflightMu.Unlock()
 	return ctx, func() {
 		cancel()
@@ -101,34 +230,23 @@ func beginNodeCall(clientID, pkgID string) (context.Context, func()) {
 	}
 }
 
-// InterruptNodeForClient 取消匹配 Scope 的 Node in-flight，并 Stop 被放弃调用所属源包。
+// InterruptNodeForClient 取消匹配 Scope 的 Node in-flight，并 Stop 被放弃调用所属**用户桶**内源包。
 func InterruptNodeForClient(clientID string) {
+	type stopKey struct{ uid, pkg string }
+	toStop := map[stopKey]struct{}{}
 	nodeInflightMu.Lock()
-	pkgs := map[string]struct{}{}
 	for _, g := range nodeInflightQ {
 		if clientID == "" || g.clientID == clientID {
 			g.cancel()
 			if g.pkgID != "" {
-				pkgs[g.pkgID] = struct{}{}
+				toStop[stopKey{uid: g.ownerUID, pkg: g.pkgID}] = struct{}{}
 			}
 		}
 	}
 	nodeInflightMu.Unlock()
-	h := DefaultNodeHost()
-	for id := range pkgs {
-		h.Stop(id)
+	for k := range toStop {
+		nodeHostForUser(k.uid).Stop(k.pkg)
 	}
-}
-
-// DefaultNodeHost 进程内单例。
-func DefaultNodeHost() *NodeHost {
-	defaultNodeHostOnce.Do(func() {
-		defaultNodeHost = &NodeHost{
-			pkgs:     map[string]*nodePkg{},
-			apiIndex: map[string]string{},
-		}
-	})
-	return defaultNodeHost
 }
 
 // MsgPort 引擎本机端口，供 node 回调 /msg。
@@ -153,24 +271,34 @@ func (h *NodeHost) LoadPackage(pkgURL string) (string, error) {
 }
 
 // Ensure 确保源包已下载并有进程在跑。
+// 包文件（index.js）按 URL 全局共享；进程与 dataDir 按本桶 ownerUID 隔离。
 func (h *NodeHost) Ensure(pkgURL string) (*nodePkg, error) {
 	id := nodePkgID(pkgURL)
 	h.mu.Lock()
 	pkg, ok := h.pkgs[id]
 	if !ok {
+		// 包文件共享：NodeCache/<id>/；本机 data 仍落同目录以兼容旧缓存。
 		dir := filepath.Join(paths.NodeCache(), id)
+		dataDir := filepath.Join(dir, "data")
+		if h.ownerUID != "" {
+			dataDir = filepath.Join(paths.NodeCache(), "run", h.ownerUID, id, "data")
+		}
 		pkg = &nodePkg{
-			id:      id,
-			pkgURL:  pkgURL,
-			dir:     dir,
-			dataDir: filepath.Join(dir, "data"),
-			indexJS: filepath.Join(dir, "index.js"),
+			id:       id,
+			pkgURL:   pkgURL,
+			dir:      dir,
+			dataDir:  dataDir,
+			indexJS:  filepath.Join(dir, "index.js"),
 			configJS: filepath.Join(dir, "index.config.js"),
-			backoff: nodeRestartBackoff,
+			ownerUID: h.ownerUID,
+			host:     h,
+			backoff:  nodeRestartBackoff,
 		}
 		h.pkgs[id] = pkg
 	} else {
 		pkg.pkgURL = pkgURL
+		pkg.host = h
+		pkg.ownerUID = h.ownerUID
 	}
 	h.mu.Unlock()
 
@@ -506,7 +634,7 @@ func (h *NodeHost) StopAll() {
 	}
 }
 
-// ClearAll 停进程并清空缓存目录与索引。
+// ClearAll 停本桶进程并清空索引（不删全局 NodeCache；全量清理由 clearScriptCaches 负责）。
 func (h *NodeHost) ClearAll() {
 	h.StopAll()
 	h.mu.Lock()
@@ -514,9 +642,6 @@ func (h *NodeHost) ClearAll() {
 	h.apiIndex = map[string]string{}
 	h.rootAliases = map[string]struct{}{}
 	h.mu.Unlock()
-	dir := paths.NodeCache()
-	_ = os.RemoveAll(dir)
-	_ = os.MkdirAll(dir, 0o755)
 }
 
 // RegisterPackageAPIs 把 /config 里 video.sites 的 api 全部挂到该包。
@@ -728,7 +853,11 @@ func (p *nodePkg) FetchConfig() (string, error) {
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("GET /config http %d", resp.StatusCode)
 	}
-	DefaultNodeHost().RegisterPackageAPIs(p.id, string(b))
+	if p.host != nil {
+		p.host.RegisterPackageAPIs(p.id, string(b))
+	} else {
+		nodeHostForCurrent().RegisterPackageAPIs(p.id, string(b))
+	}
 	return string(b), nil
 }
 
@@ -742,7 +871,7 @@ func (p *nodePkg) PostJSON(path string, body any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ctx, end := beginNodeCall(hostclient.ScopeID(), p.id)
+	ctx, end := beginNodeCall(hostclient.ScopeID(), p.ownerUID, p.id)
 	defer end()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+path, bytes.NewReader(payload))
 	if err != nil {

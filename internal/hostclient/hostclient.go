@@ -249,7 +249,7 @@ func ClientIDFromScope(scope string) string {
 	return idFromScope(scope, "c:")
 }
 
-// RuntimeUserID 用于 JVM/Py/JS 引擎分桶：仅远端租户返回 userId，本机共享返回空。
+// RuntimeUserID 用于 JVM/Py/JS/Node 引擎分桶：仅远端租户返回 userId，本机共享返回空。
 func RuntimeUserID() string {
 	v, ok := byG.Load(goid())
 	if !ok {
@@ -269,7 +269,7 @@ func DataOwner() string {
 	return strings.TrimSpace(CurrentUserID())
 }
 
-// DedicatedRuntime 当前请求是否走独立 JVM/Py/JS（远端租户）；Go 引擎始终只有一个。
+// DedicatedRuntime 当前请求是否走独立 JVM/Py/JS/Node（远端租户）；Go 引擎始终只有一个。
 func DedicatedRuntime() bool {
 	return RuntimeUserID() != ""
 }
