@@ -170,6 +170,8 @@ class MediaKitPlayback extends KotvPlayback {
   Map<String, String> _extraOpenProps = const {};
   /// mpv `duration/full`；无则回落 player.state.duration。
   Duration _durationFull = Duration.zero;
+  /// 本次 open 内 duration 有效增长次数（media-live=no 的「假点播真直播」守卫）。
+  int _durationGrowthCount = 0;
   bool _observedMpvProps = false;
 
   void setExtraOpenProps(Map<String, String> props) {
@@ -282,6 +284,33 @@ class MediaKitPlayback extends KotvPlayback {
             ? Duration(milliseconds: (sec * 1000).round())
             : Duration.zero;
         if (next == _durationFull) return;
+        final prev = _durationFull;
+        // media-live=no 但片长持续变长：只升 _engineLive 守卫，不改缓冲（FongMi 也不改属性）。
+        if (!_engineLive && !_live && prev > Duration.zero && next > prev) {
+          final noted = kotvNoteGrowingDuration(
+            previous: prev,
+            next: next,
+            growthCount: _durationGrowthCount,
+          );
+          _durationGrowthCount = noted.growthCount;
+          if (noted.markLive) {
+            _engineLive = true;
+            // #region agent log
+            if (kotvIsWindows7()) {
+              kotvDebugNdjson(
+                hypothesisId: 'E2',
+                location: 'media_kit_playback.dart:duration/full',
+                message: 'growing duration → engineLive guard',
+                data: {
+                  'prevMs': prev.inMilliseconds,
+                  'nextMs': next.inMilliseconds,
+                  'growthCount': _durationGrowthCount,
+                },
+              );
+            }
+            // #endregion
+          }
+        }
         _durationFull = next;
         notifyListeners();
       });
@@ -681,6 +710,7 @@ class MediaKitPlayback extends KotvPlayback {
     _url = url;
     _live = live;
     _engineLive = false;
+    _durationGrowthCount = 0;
     _openFormat = format;
     _formatRetried = false;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
