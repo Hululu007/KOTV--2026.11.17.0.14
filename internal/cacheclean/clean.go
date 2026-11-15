@@ -140,6 +140,8 @@ func Run(opt Options) Result {
 				add(item.label, item.path, n, err)
 			}
 		}
+		// 先关全部嗅探浏览器，再擦 user-data-dir（进程仍占目录时删不干净）。
+		spider.ShutdownSniffBrowsers()
 		n, err := paths.WipeUserRuntimeSubdirs("chromium")
 		if n > 0 || err != nil {
 			add("Chromium运行时", filepath.Join(paths.CacheRoot(), "run"), n, err)

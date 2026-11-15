@@ -47,17 +47,21 @@ const (
 	sniffUAIOS    = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
 )
 
-// 桌面 Chromium 按 RuntimeUserID 分进程（空=本机共享）；每桶最多 2 个并发 tab。
-// cancel 同时按 userID / ScopeID 登记，供 KillUserRuntime 与 SoftCancel 回收。
+// 桌面嗅探浏览器：捆绑 chrome-headless-shell（路径见 runtime.Chromium）。
+// 按 RuntimeUserID 分进程（空=本机共享）；每桶最多 2 个并发 tab。
+//
+// 关闭时机：
+//   - SoftCancel（Scope / All）：只取消 tab，保留浏览器进程以便复用
+//   - KillUser / HardRestartShared / 清缓存擦盘 / 引擎退出：取消 tab 并销毁对应桶（杀进程）
 var (
-	chromeMu      sync.Mutex
-	chromeByUser  = map[string]*chromeBucket{} // key=RuntimeUserID（空=共享）
-	sniffTrackMu  sync.Mutex
-	userSniffs    = map[string][]context.CancelFunc{} // userID -> cancels（空键不登记用户桶）
-	scopeSniffs   = map[string][]context.CancelFunc{} // ScopeID -> cancels
+	chromiumMu     sync.Mutex
+	chromiumByUser = map[string]*chromiumBucket{} // key=RuntimeUserID（空=共享）
+	sniffTrackMu   sync.Mutex
+	userSniffs     = map[string][]context.CancelFunc{} // userID -> cancels（空键不登记用户桶）
+	scopeSniffs    = map[string][]context.CancelFunc{} // ScopeID -> cancels
 )
 
-type chromeBucket struct {
+type chromiumBucket struct {
 	allocCtx context.Context
 	cancel   context.CancelFunc
 	err      error
@@ -120,22 +124,13 @@ func cancelSniffList(list []context.CancelFunc) {
 	}
 }
 
-// CancelUserSniffs 取消该用户全部进行中的 Chromium 嗅探并销毁其浏览器桶。
+// CancelUserSniffs 取消该用户全部嗅探 tab 并销毁其 Chromium 桶。
 func CancelUserSniffs(userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return
 	}
-	sniffTrackMu.Lock()
-	list := userSniffs[userID]
-	delete(userSniffs, userID)
-	for sid := range scopeSniffs {
-		if hostclient.UserIDFromScope(sid) == userID {
-			delete(scopeSniffs, sid)
-		}
-	}
-	sniffTrackMu.Unlock()
-	cancelSniffList(list)
+	cancelSniffList(takeUserSniffs(userID))
 	destroyChromiumBucket(userID)
 }
 
@@ -154,46 +149,81 @@ func CancelSniffsForScope(scopeID string) {
 
 // SoftCancelAllSniffs 取消全部进行中嗅探 tab，不毁浏览器进程。
 func SoftCancelAllSniffs() {
+	cancelSniffList(takeAllSniffs())
+}
+
+// ShutdownAllChromium 取消全部嗅探并销毁所有 Chromium 桶（引擎退出 / 清缓存擦盘前）。
+func ShutdownAllChromium() {
+	SoftCancelAllSniffs()
+	destroyAllChromiumBuckets()
+}
+
+// HardRestartSharedChromium 取消本机（非 u:）嗅探 tab，并销毁共享 Chromium 桶（不动远端用户桶）。
+func HardRestartSharedChromium() {
+	cancelSniffList(takeSharedScopeSniffs())
+	destroyChromiumBucket("")
+}
+
+func takeUserSniffs(userID string) []context.CancelFunc {
+	sniffTrackMu.Lock()
+	defer sniffTrackMu.Unlock()
+	list := userSniffs[userID]
+	delete(userSniffs, userID)
+	for sid := range scopeSniffs {
+		if hostclient.UserIDFromScope(sid) == userID {
+			delete(scopeSniffs, sid)
+		}
+	}
+	return list
+}
+
+func takeAllSniffs() []context.CancelFunc {
 	sniffTrackMu.Lock()
 	users := userSniffs
 	scopes := scopeSniffs
 	userSniffs = map[string][]context.CancelFunc{}
 	scopeSniffs = map[string][]context.CancelFunc{}
 	sniffTrackMu.Unlock()
+	var out []context.CancelFunc
 	for _, list := range users {
-		cancelSniffList(list)
+		out = append(out, list...)
 	}
 	for _, list := range scopes {
-		cancelSniffList(list)
+		out = append(out, list...)
 	}
+	return out
 }
 
-// ShutdownAllChromium 取消全部嗅探并销毁所有 Chromium 桶（进程退出 / 全量硬清）。
-func ShutdownAllChromium() {
-	SoftCancelAllSniffs()
-	destroyAllChromiumBuckets()
-}
-
-// HardRestartSharedChromium 只销毁本机共享 Chromium 桶（不动远端用户桶）。
-func HardRestartSharedChromium() {
-	destroyChromiumBucket("")
+// takeSharedScopeSniffs 取出本机共享侧登记的 Scope 嗅探（非 u: 租户）。
+func takeSharedScopeSniffs() []context.CancelFunc {
+	sniffTrackMu.Lock()
+	defer sniffTrackMu.Unlock()
+	var out []context.CancelFunc
+	for sid, list := range scopeSniffs {
+		if hostclient.UserIDFromScope(sid) != "" {
+			continue
+		}
+		out = append(out, list...)
+		delete(scopeSniffs, sid)
+	}
+	return out
 }
 
 func destroyChromiumBucket(userID string) {
-	chromeMu.Lock()
-	b := chromeByUser[userID]
-	delete(chromeByUser, userID)
-	chromeMu.Unlock()
+	chromiumMu.Lock()
+	b := chromiumByUser[userID]
+	delete(chromiumByUser, userID)
+	chromiumMu.Unlock()
 	if b != nil && b.cancel != nil {
 		b.cancel()
 	}
 }
 
 func destroyAllChromiumBuckets() {
-	chromeMu.Lock()
-	all := chromeByUser
-	chromeByUser = map[string]*chromeBucket{}
-	chromeMu.Unlock()
+	chromiumMu.Lock()
+	all := chromiumByUser
+	chromiumByUser = map[string]*chromiumBucket{}
+	chromiumMu.Unlock()
 	for _, b := range all {
 		if b != nil && b.cancel != nil {
 			b.cancel()
@@ -204,9 +234,9 @@ func destroyAllChromiumBuckets() {
 // ensureChromiumForUser 返回该用户桶的 allocator 与并发信号量（同一把锁，避免半初始化桶）。
 func ensureChromiumForUser(userID string) (allocCtx context.Context, sem chan struct{}, err error) {
 	userID = strings.TrimSpace(userID)
-	chromeMu.Lock()
-	defer chromeMu.Unlock()
-	if b := chromeByUser[userID]; b != nil {
+	chromiumMu.Lock()
+	defer chromiumMu.Unlock()
+	if b := chromiumByUser[userID]; b != nil {
 		if b.allocCtx != nil {
 			return b.allocCtx, b.sem, b.err
 		}
@@ -214,10 +244,10 @@ func ensureChromiumForUser(userID string) (allocCtx context.Context, sem chan st
 			return nil, nil, b.err
 		}
 	}
-	chrome := appruntime.Chromium()
-	if chrome == "" {
+	bin := appruntime.Chromium()
+	if bin == "" {
 		err := fmt.Errorf("未找到 Chromium：网页嗅探不可用（请检查 runtime/chromium）")
-		chromeByUser[userID] = &chromeBucket{err: err, sem: make(chan struct{}, 2)}
+		chromiumByUser[userID] = &chromiumBucket{err: err, sem: make(chan struct{}, 2)}
 		return nil, nil, err
 	}
 	dataDir := paths.UserChromiumDir(userID)
@@ -235,7 +265,7 @@ func ensureChromiumForUser(userID string) (allocCtx context.Context, sem chan st
 		// 让跨站 iframe 网络事件落到同一 target，父页才能直接嗅到媒体。
 		chromedp.Flag("disable-features", "TranslateUI,BlinkGenPropertyTrees,IsolateOrigins,site-per-process"),
 		chromedp.UserDataDir(dataDir),
-		chromedp.ExecPath(chrome),
+		chromedp.ExecPath(bin),
 	)
 	if runtime.GOOS == "windows" {
 		opts = append(opts,
@@ -249,8 +279,8 @@ func ensureChromiumForUser(userID string) (allocCtx context.Context, sem chan st
 		)
 	}
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	b := &chromeBucket{allocCtx: allocCtx, cancel: cancel, sem: make(chan struct{}, 2)}
-	chromeByUser[userID] = b
+	b := &chromiumBucket{allocCtx: allocCtx, cancel: cancel, sem: make(chan struct{}, 2)}
+	chromiumByUser[userID] = b
 	return allocCtx, b.sem, nil
 }
 

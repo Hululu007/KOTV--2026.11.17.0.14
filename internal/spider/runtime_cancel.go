@@ -79,12 +79,17 @@ func RestartCallerRuntime() {
 	HardRestartSharedRuntimes()
 }
 
-// ShutdownAllRuntimes 进程退出：硬清共享 + 销毁全部脚本/Node（含用户桶）+ 关 JVM + Chromium。
+// ShutdownSniffBrowsers 关掉全部嗅探 Chromium（清缓存擦盘前；不碰 JVM/脚本）。
+func ShutdownSniffBrowsers() {
+	runExtraShutdown()
+}
+
+// ShutdownAllRuntimes 进程退出：硬清共享 + 销毁全部脚本/Node（含用户桶）+ 关 JVM + 全部 Chromium。
 func ShutdownAllRuntimes() {
 	HardRestartSharedRuntimes()
 	ResetScriptSpiders()
 	ShutdownJavaBridge()
-	runExtraShutdown()
+	ShutdownSniffBrowsers()
 }
 
 // --- 跨包附加钩子（Chromium 等，避免 spider↔parse 循环依赖）---

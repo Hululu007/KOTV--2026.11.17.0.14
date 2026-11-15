@@ -630,16 +630,27 @@ class EngineLauncher {
     }
   }
 
-  /// WMI VBScript（Win7 可用）按命令行特征结束捆绑 Java/Python，无 PowerShell。
-  static const _winKillStrayRuntimesVbs =
-      'On Error Resume Next\n'
-      'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")\n'
-      'For Each p In wmi.ExecQuery("Select ProcessId,CommandLine from Win32_Process")\n'
-      '  cl = LCase("" & p.CommandLine)\n'
-      '  If InStr(cl, "spider-bridge.jar --serve") > 0 Or InStr(cl, "_kotv_runner.py") > 0 Then\n'
-      '    p.Terminate\n'
-      '  End If\n'
-      'Next\n';
+  /// 引擎死后可能残留的捆绑运行时命令行特征（勿用系统 chrome / python 通用名）。
+  static const List<String> _strayRuntimeCmdPatterns = <String>[
+    'spider-bridge.jar --serve',
+    '_kotv_runner.py',
+    'chrome-headless-shell',
+  ];
+
+  /// WMI VBScript（Win7 可用）按命令行特征结束捆绑 Java/Python/Chromium，无 PowerShell。
+  static String get _winKillStrayRuntimesVbs {
+    final cond = _strayRuntimeCmdPatterns
+        .map((p) => 'InStr(cl, "${p.toLowerCase()}") > 0')
+        .join(' Or ');
+    return 'On Error Resume Next\n'
+        'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")\n'
+        'For Each p In wmi.ExecQuery("Select ProcessId,CommandLine from Win32_Process")\n'
+        '  cl = LCase("" & p.CommandLine)\n'
+        '  If $cond Then\n'
+        '    p.Terminate\n'
+        '  End If\n'
+        'Next\n';
+  }
 
   Future<void> _winKillStrayRuntimes() async {
     Directory dir;
@@ -712,14 +723,14 @@ class EngineLauncher {
     await _killStrayRuntimes();
   }
 
-  /// 清掉引擎死后残留的捆绑 Java bridge / Python runner（按命令行特征，避免误杀系统解释器）。
+  /// 清掉引擎死后残留的捆绑 Java / Python / chrome-headless-shell（按命令行特征，避免误杀系统浏览器）。
   Future<void> _killStrayRuntimes() async {
     if (Platform.isAndroid) return;
     if (Platform.isWindows) {
       await _winKillStrayRuntimes();
       return;
     }
-    for (final pat in <String>['spider-bridge.jar --serve', '_kotv_runner.py']) {
+    for (final pat in _strayRuntimeCmdPatterns) {
       try {
         await Process.run('pkill', ['-f', pat]);
       } catch (_) {}
@@ -834,7 +845,7 @@ class EngineLauncher {
           '    CreateObject("WScript.Shell").Run "taskkill /F /T /PID " & eng, 0, True\n'
           '    For Each p In wmi.ExecQuery("Select ProcessId,CommandLine from Win32_Process")\n'
           '      cl = LCase("" & p.CommandLine)\n'
-          '      If InStr(cl, "spider-bridge.jar --serve") > 0 Or InStr(cl, "_kotv_runner.py") > 0 Then\n'
+          '      If InStr(cl, "spider-bridge.jar --serve") > 0 Or InStr(cl, "_kotv_runner.py") > 0 Or InStr(cl, "chrome-headless-shell") > 0 Then\n'
           '        p.Terminate\n'
           '      End If\n'
           '    Next\n'
@@ -864,7 +875,8 @@ class EngineLauncher {
               'while kill -0 "\$UI" 2>/dev/null; do sleep 0.5; done; '
               'kill -TERM "\$ENG" 2>/dev/null; sleep 1; kill -KILL "\$ENG" 2>/dev/null; '
               'pkill -f "spider-bridge.jar --serve" 2>/dev/null; '
-              'pkill -f "_kotv_runner.py" 2>/dev/null; true',
+              'pkill -f "_kotv_runner.py" 2>/dev/null; '
+              'pkill -f "chrome-headless-shell" 2>/dev/null; true',
         ],
         mode: ProcessStartMode.detached,
       );
@@ -879,7 +891,7 @@ class EngineLauncher {
     return u.contains('127.0.0.1') || u.contains('localhost');
   }
 
-  /// 窗口关闭 / 应用退出时调用：优雅停引擎（杀 Java/Python），超时再杀树。
+  /// 窗口关闭 / 应用退出时调用：优雅停引擎（HTTP shutdown → JVM/Py/JS/Node/Chromium），超时再杀树。
   Future<void> shutdown() async {
     _shuttingDown = true;
     final proc = _proc;
@@ -950,7 +962,7 @@ class EngineLauncher {
       _winKillStrayRuntimesSync();
       return;
     }
-    for (final pat in <String>['spider-bridge.jar --serve', '_kotv_runner.py']) {
+    for (final pat in _strayRuntimeCmdPatterns) {
       try {
         Process.runSync('pkill', ['-f', pat]);
       } catch (_) {}

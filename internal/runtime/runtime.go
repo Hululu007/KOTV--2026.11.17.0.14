@@ -218,7 +218,7 @@ func RequireNode() (string, error) {
 	return bin, nil
 }
 
-// Chromium 返回 Chrome / chrome-headless-shell 路径（捆绑优先）。
+// Chromium 返回嗅探用浏览器路径（捆绑 chrome-headless-shell 优先，其次系统 Chrome/Chromium）。
 func Chromium() string {
 	cands := underRoots(
 		filepath.Join("chromium", "chrome-headless-shell"),
