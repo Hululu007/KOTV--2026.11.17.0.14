@@ -115,47 +115,49 @@ func SetRuntimeExtraHooks(h RuntimeExtraHooks) {
 	runtimeExtra = h
 }
 
-func runExtraSoftScope(scopeID string) {
+func withRuntimeExtra(fn func(RuntimeExtraHooks)) {
 	runtimeExtraMu.Lock()
-	fn := runtimeExtra.SoftCancelScope
+	h := runtimeExtra
 	runtimeExtraMu.Unlock()
-	if fn != nil {
-		fn(scopeID)
-	}
+	fn(h)
+}
+
+func runExtraSoftScope(scopeID string) {
+	withRuntimeExtra(func(h RuntimeExtraHooks) {
+		if h.SoftCancelScope != nil {
+			h.SoftCancelScope(scopeID)
+		}
+	})
 }
 
 func runExtraSoftAll() {
-	runtimeExtraMu.Lock()
-	fn := runtimeExtra.SoftCancelAll
-	runtimeExtraMu.Unlock()
-	if fn != nil {
-		fn()
-	}
+	withRuntimeExtra(func(h RuntimeExtraHooks) {
+		if h.SoftCancelAll != nil {
+			h.SoftCancelAll()
+		}
+	})
 }
 
 func runExtraKillUser(userID string) {
-	runtimeExtraMu.Lock()
-	fn := runtimeExtra.KillUser
-	runtimeExtraMu.Unlock()
-	if fn != nil {
-		fn(userID)
-	}
+	withRuntimeExtra(func(h RuntimeExtraHooks) {
+		if h.KillUser != nil {
+			h.KillUser(userID)
+		}
+	})
 }
 
 func runExtraHardShared() {
-	runtimeExtraMu.Lock()
-	fn := runtimeExtra.HardRestartShared
-	runtimeExtraMu.Unlock()
-	if fn != nil {
-		fn()
-	}
+	withRuntimeExtra(func(h RuntimeExtraHooks) {
+		if h.HardRestartShared != nil {
+			h.HardRestartShared()
+		}
+	})
 }
 
 func runExtraShutdown() {
-	runtimeExtraMu.Lock()
-	fn := runtimeExtra.Shutdown
-	runtimeExtraMu.Unlock()
-	if fn != nil {
-		fn()
-	}
+	withRuntimeExtra(func(h RuntimeExtraHooks) {
+		if h.Shutdown != nil {
+			h.Shutdown()
+		}
+	})
 }

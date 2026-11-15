@@ -630,7 +630,7 @@ class EngineLauncher {
     }
   }
 
-  /// 引擎死后可能残留的捆绑运行时命令行特征。
+  /// 引擎死后可能残留的捆绑运行时命令行特征（杀进程 / 孤儿看门狗共用）。
   /// 勿匹配裸 `chrome.exe` / `Google\Chrome`（会误杀用户浏览器）；
   /// Windows 捆绑在 `runtime/chromium/chrome.exe`，用路径片段区分。
   static const List<String> _strayRuntimeCmdPatterns = <String>[
@@ -643,20 +643,27 @@ class EngineLauncher {
     'Google Chrome for Testing',
   ];
 
-  /// WMI VBScript（Win7 可用）按命令行特征结束捆绑 Java/Python/Chromium，无 PowerShell。
-  static String get _winKillStrayRuntimesVbs {
-    final cond = _strayRuntimeCmdPatterns
-        .map((p) => 'InStr(cl, "${p.toLowerCase()}") > 0')
-        .join(' Or ');
-    return 'On Error Resume Next\n'
-        'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")\n'
-        'For Each p In wmi.ExecQuery("Select ProcessId,CommandLine from Win32_Process")\n'
-        '  cl = LCase("" & p.CommandLine)\n'
-        '  If $cond Then\n'
-        '    p.Terminate\n'
-        '  End If\n'
-        'Next\n';
-  }
+  /// Unix pkill：跳过仅 Windows 反斜杠路径。
+  static Iterable<String> get _unixStrayRuntimePatterns =>
+      _strayRuntimeCmdPatterns.where((p) => !p.contains(r'\'));
+
+  static String get _winStrayRuntimeMatchCond => _strayRuntimeCmdPatterns
+      .map((p) => 'InStr(cl, "${p.toLowerCase()}") > 0')
+      .join(' Or ');
+
+  /// WMI：按命令行特征结束捆绑运行时（Win7 可用，无 PowerShell）。
+  static String get _winKillStrayRuntimesVbs =>
+      'On Error Resume Next\n'
+      'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")\n'
+      'For Each p In wmi.ExecQuery("Select ProcessId,CommandLine from Win32_Process")\n'
+      '  cl = LCase("" & p.CommandLine)\n'
+      '  If ${_winStrayRuntimeMatchCond} Then\n'
+      '    p.Terminate\n'
+      '  End If\n'
+      'Next\n';
+
+  static String get _unixStrayPkillCmds =>
+      '${_unixStrayRuntimePatterns.map((p) => 'pkill -f "${p.replaceAll('"', r'\"')}" 2>/dev/null; ').join()}true';
 
   Future<void> _winKillStrayRuntimes() async {
     Directory dir;
@@ -736,7 +743,7 @@ class EngineLauncher {
       await _winKillStrayRuntimes();
       return;
     }
-    for (final pat in _strayRuntimeCmdPatterns) {
+    for (final pat in _unixStrayRuntimePatterns) {
       try {
         await Process.run('pkill', ['-f', pat]);
       } catch (_) {}
@@ -840,6 +847,7 @@ class EngineLauncher {
           }
         }
         final vbsPath = p.join(ui.path, 'kotv-orphan-$enginePid.vbs');
+        final stray = _winStrayRuntimeMatchCond;
         await File(vbsPath).writeAsString(
           'On Error Resume Next\n'
           'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")\n'
@@ -851,7 +859,7 @@ class EngineLauncher {
           '    CreateObject("WScript.Shell").Run "taskkill /F /T /PID " & eng, 0, True\n'
           '    For Each p In wmi.ExecQuery("Select ProcessId,CommandLine from Win32_Process")\n'
           '      cl = LCase("" & p.CommandLine)\n'
-          '      If InStr(cl, "spider-bridge.jar --serve") > 0 Or InStr(cl, "_kotv_runner.py") > 0 Or InStr(cl, "chrome-headless-shell") > 0 Or InStr(cl, "chromium\\chrome.exe") > 0 Or InStr(cl, "chromium/chrome.exe") > 0 Or InStr(cl, "google chrome for testing") > 0 Then\n'
+          '      If $stray Then\n'
           '        p.Terminate\n'
           '      End If\n'
           '    Next\n'
@@ -880,11 +888,7 @@ class EngineLauncher {
           'UI=$uiPid; ENG=$enginePid; '
               'while kill -0 "\$UI" 2>/dev/null; do sleep 0.5; done; '
               'kill -TERM "\$ENG" 2>/dev/null; sleep 1; kill -KILL "\$ENG" 2>/dev/null; '
-              'pkill -f "spider-bridge.jar --serve" 2>/dev/null; '
-              'pkill -f "_kotv_runner.py" 2>/dev/null; '
-              'pkill -f "chrome-headless-shell" 2>/dev/null; '
-              'pkill -f "chromium/chrome" 2>/dev/null; '
-              'pkill -f "Google Chrome for Testing" 2>/dev/null; true',
+              '$_unixStrayPkillCmds',
         ],
         mode: ProcessStartMode.detached,
       );
@@ -970,7 +974,7 @@ class EngineLauncher {
       _winKillStrayRuntimesSync();
       return;
     }
-    for (final pat in _strayRuntimeCmdPatterns) {
+    for (final pat in _unixStrayRuntimePatterns) {
       try {
         Process.runSync('pkill', ['-f', pat]);
       } catch (_) {}

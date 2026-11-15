@@ -183,22 +183,25 @@ func dropJarSpiders(prefix string, all bool) {
 
 func sendBridgeClear() {
 	forgetJarRecent(hostclient.RuntimeUserID())
-	postBridgeClear(bridgeForCurrent())
+	jarWireGen.Add(1)
+	payload, err := marshalBridgeClear(true)
+	if err != nil {
+		log.Printf("jar 卸载失败: %v", err)
+		return
+	}
+	postBridgeClearPayload(bridgeForCurrent(), payload)
 }
 
 // sendBridgeClearAll 向共享与全部用户 JVM 下发 clear（Clear / ClearJarDisk）。
 func sendBridgeClearAll() {
 	jarWireGen.Add(1)
-	req := bridgeRequest{Method: "clear"}
-	payload, err := json.Marshal(req)
+	payload, err := marshalBridgeClear(false)
 	if err != nil {
 		log.Printf("jar 卸载失败: %v", err)
 		return
 	}
 	if runtime.GOOS == "android" {
-		if _, err := androidPostJarShort(payload); err != nil {
-			log.Printf("jar 卸载失败: %v", err)
-		}
+		postBridgeClearPayload(nil, payload) // android 单服务，忽略 br
 		return
 	}
 	for _, br := range snapshotJavaBridges() {
@@ -206,26 +209,22 @@ func sendBridgeClearAll() {
 	}
 }
 
-func postBridgeClear(br *javaBridgeClient) {
-	jarWireGen.Add(1)
+func marshalBridgeClear(fillClient bool) ([]byte, error) {
 	req := bridgeRequest{Method: "clear"}
-	fillBridgeClient(&req)
-	payload, err := json.Marshal(req)
-	if err != nil {
-		log.Printf("jar 卸载失败: %v", err)
-		return
+	if fillClient {
+		fillBridgeClient(&req)
 	}
-	postBridgeClearPayload(br, payload)
+	return json.Marshal(req)
 }
 
 func postBridgeClearPayload(br *javaBridgeClient, payload []byte) {
-	if br == nil {
-		return
-	}
 	if runtime.GOOS == "android" {
 		if _, err := androidPostJarShort(payload); err != nil {
 			log.Printf("jar 卸载失败: %v", err)
 		}
+		return
+	}
+	if br == nil {
 		return
 	}
 	base := br.currentBaseURL()

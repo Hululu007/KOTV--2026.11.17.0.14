@@ -402,16 +402,11 @@ func clearSharedJarSpiders() {
 //   - c:… / 其它：本机共享桶
 func javaBridgesForCancel(clientID string) []*javaBridgeClient {
 	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return snapshotJavaBridges()
+	}
 	userBridgesMu.Lock()
 	defer userBridgesMu.Unlock()
-	if clientID == "" {
-		out := make([]*javaBridgeClient, 0, 1+len(userBridges))
-		out = append(out, &javaBridge)
-		for _, b := range userBridges {
-			out = append(out, b)
-		}
-		return out
-	}
 	if uid := hostclient.UserIDFromScope(clientID); uid != "" {
 		if b := userBridges[uid]; b != nil {
 			return []*javaBridgeClient{b}
