@@ -77,8 +77,8 @@ Go Engine（单进程，:9978）
 | 类型 | 判定 | 实现 |
 |------|------|------|
 | CMS（内置） | 非 `.py`/`.js`/`csp_` | 引擎内置解析（type 0/1/4） |
-| JS | `api` 含 `.js`（非猫爪源包） | 内嵌 **QuickJS**（CGO），worker 池，同站可并行 |
-| Python | `api` 含 `.py` | 捆绑 `runtime/python` 进程池，同站可并行 |
+| JS | `api` 含 `.js`（非猫爪源包） | 内嵌 **QuickJS**（CGO）；本机/远端按 `RuntimeUserID` 分池，worker 继承 Dedicated 绑 JVM Function |
+| Python | `api` 含 `.py` | 捆绑 `runtime/python`；按 `RuntimeUserID` 分池，同站可并行 |
 | Node | `api` 以 `/spider/` 开头（来自猫爪 `/config`） | 捆绑 `runtime/node`（安卓 `libkotv_node.so` + `libnode.so` 同进 jniLibs）；本机共享桶、远端按 `RuntimeUserID` 独立桶，桶内一源包一进程 |
 | JAR | `api` 前缀 `csp_` | **Java bridge**（JVM），本机共享 / 远端每用户独立；桌面 HTTP 多路、可并发、按 Scope 软取消 |
 

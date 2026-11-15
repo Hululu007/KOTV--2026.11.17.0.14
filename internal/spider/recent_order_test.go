@@ -2,6 +2,8 @@ package spider
 
 import (
 	"testing"
+
+	"github.com/bobo/KOTV/internal/hostclient"
 )
 
 func TestSetRecent_JSBeforePyWhenBoth(t *testing.T) {
@@ -13,11 +15,11 @@ func TestSetRecent_JSBeforePyWhenBoth(t *testing.T) {
 		t.Fatalf("fixture must match both .js and .py: %q", api)
 	}
 	SetRecent("k1", api, "{}", "")
-	if recentJsKey == "" {
+	if recentJsKeyFor("") == "" {
 		t.Fatal("expected recent js key when api contains .js")
 	}
-	if recentPyKey != "" {
-		t.Fatalf("py recent must stay empty when js wins, got %q", recentPyKey)
+	if recentPyKeyFor("") != "" {
+		t.Fatalf("py recent must stay empty when js wins, got %q", recentPyKeyFor(""))
 	}
 }
 
@@ -95,9 +97,9 @@ func TestReleaseConfigScriptsClearsCurrentUserOnly(t *testing.T) {
 	jsPy["\x01py:http://example.com/a.py"] = newPyPool("a", "http://example.com/a.py", "", "")
 	jsPy["\x01js:http://example.com/a.js"] = newJsPool("a", "http://example.com/a.js", "", "")
 	jsPy["u2\x01py:http://example.com/b.py"] = newPyPool("b", "http://example.com/b.py", "", "")
-	recentPyKey = "\x01py:http://example.com/missing.py"
-	recentJsKey = "u2\x01js:http://example.com/b.js"
 	jsPyMu.Unlock()
+	recentPyByUser.Store("", "\x01py:http://example.com/missing.py")
+	recentJsByUser.Store("u2", "u2\x01js:http://example.com/b.js")
 
 	releaseConfigScripts()
 
@@ -112,11 +114,33 @@ func TestReleaseConfigScriptsClearsCurrentUserOnly(t *testing.T) {
 	if _, ok := jsPy["u2\x01py:http://example.com/b.py"]; !ok {
 		t.Fatal("切仓不应清掉其他用户")
 	}
-	if recentPyKey != "" {
+	if recentPyKeyFor("") != "" {
 		t.Fatal("当前用户的 recent 应清掉")
 	}
-	if recentJsKey != "u2\x01js:http://example.com/b.js" {
-		t.Fatalf("其他用户 recent 应留着, got %q", recentJsKey)
+	if recentJsKeyFor("u2") != "u2\x01js:http://example.com/b.js" {
+		t.Fatalf("其他用户 recent 应留着, got %q", recentJsKeyFor("u2"))
+	}
+}
+
+func TestRecentJsIsolatedByUser(t *testing.T) {
+	Clear()
+	t.Cleanup(Clear)
+	setRecentJs("", "http://example.com/shared.js", "", "")
+	done := hostclient.Bind(hostclient.Request{UserID: "u-a", Dedicated: true})
+	setRecentJs("", "http://example.com/a.js", "", "")
+	done()
+	done = hostclient.Bind(hostclient.Request{UserID: "u-b", Dedicated: true})
+	setRecentJs("", "http://example.com/b.js", "", "")
+	done()
+
+	if recentJsKeyFor("") == "" || recentJsKeyFor("u-a") == "" || recentJsKeyFor("u-b") == "" {
+		t.Fatal("三槽 recent 都应有值")
+	}
+	if recentJsKeyFor("u-a") == recentJsKeyFor("u-b") {
+		t.Fatal("不同用户 recent 不得互相覆盖")
+	}
+	if recentJsKeyFor("") == recentJsKeyFor("u-a") {
+		t.Fatal("共享与用户 recent 不得互相覆盖")
 	}
 }
 

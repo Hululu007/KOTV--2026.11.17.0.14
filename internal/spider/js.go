@@ -66,11 +66,12 @@ type jsSpider struct {
 	err    error
 	epoch  atomic.Uint64
 
+	ownerUID     string // 创建时钉死的 RuntimeUserID（空=本机共享）
 	activeEpoch  atomic.Uint64
 	deadline     atomic.Int64
 	inited       atomic.Bool
 	cat          atomic.Bool  // 源码含 __jsEvalReturn：CatVod 初始化包装
-	activeClient atomic.Value // string
+	activeClient atomic.Value // string ScopeID
 
 	timerMu sync.Mutex
 	timers  map[int32]context.CancelFunc
@@ -83,7 +84,8 @@ type jsReq struct {
 	args     []interface{}
 	resp     chan jsResp
 	epoch    uint64
-	clientID string
+	clientID string            // ScopeID，供软取消匹配
+	bind     hostclient.Request // 完整会话（含 Dedicated），worker 上 Bind
 }
 
 func (s *jsSpider) activeClientID() string {
@@ -132,15 +134,6 @@ type jsResp struct {
 	err error
 }
 
-func (s *jsSpider) alive() bool {
-	select {
-	case <-s.quitCh:
-		return false
-	default:
-		return true
-	}
-}
-
 func newJsSpider(key, api, ext, jar string) Spider {
 	jsPyMu.Lock()
 	ck := jsPyKey("js", api)
@@ -154,9 +147,7 @@ func newJsSpider(key, api, ext, jar string) Spider {
 		pool.retarget(key, ext, jar)
 		return pool
 	}
-	if js, ok := s.(*jsSpider); ok && js.alive() {
-		return js
-	}
+	// 池键下只存 *jsPool；异常类型则重建。
 	jsPyMu.Lock()
 	delete(jsPy, ck)
 	jsPyMu.Unlock()
@@ -196,8 +187,12 @@ func (s *jsSpider) runWorker() (err error) {
 		}
 	}()
 
-	// JsLoader → dex(jar) → createFun：worker 启动即 parseJar（Init+Proxy）。
-	jsLog("[js] worker start key=%s api=%s jar=%s", s.key, s.api, s.resolveJsJar())
+	// 启动期按 ownerUID 挂 JAR Function，落到对应用户 JVM（勿用 Enter 丢 Dedicated）。
+	bootDone := hostclient.Bind(hostclient.Request{
+		UserID:    s.ownerUID,
+		Dedicated: s.ownerUID != "",
+	})
+	jsLog("[js] worker start key=%s api=%s jar=%s owner=%q", s.key, s.api, s.resolveJsJar(), s.ownerUID)
 	if jar := s.resolveJsJar(); jar != "" {
 		if err := EnsureJar(jar); err != nil {
 			jsLog("[js] dex(jar) failed key=%s: %v", s.key, err)
@@ -206,6 +201,7 @@ func (s *jsSpider) runWorker() (err error) {
 			jsLog("[js] dex(jar) ok key=%s jar=%s", s.key, jar)
 		}
 	}
+	bootDone()
 
 	// Spider.createCtx：BytecodeModuleLoader + evaluateModule。
 	rt := qjs.NewRuntime()
@@ -313,7 +309,7 @@ func (s *jsSpider) runWorker() (err error) {
 				continue
 			}
 			s.activeClient.Store(req.clientID)
-			done := hostclient.Enter(req.clientID)
+			done := hostclient.Bind(req.bind)
 			s.activeEpoch.Store(req.epoch)
 			s.deadline.Store(time.Now().Add(jsCallTimeout).UnixNano())
 			key, ext := s.siteKeyExt()
@@ -738,7 +734,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 	console.Set("debug", logFn("[js-debug]"))
 	g.Set("console", console)
 
-	// local.get/set/delete — 全局 cache_rule_key，无 siteKey
+	// local.get/set/delete — Prefers 按 RuntimeUserID 分目录
 	local := ctx.NewObject()
 	local.Set("get", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		rule, key := "", ""
@@ -1204,7 +1200,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	} else {
 		// network interceptor：跟随重定向时仍记录 302→原 URL 映射
-		client.CheckRedirect = jsRedirects.Track
+		client.CheckRedirect = jsRedirectTrack
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1346,11 +1342,12 @@ func (s *jsSpider) invoke(method string, args ...interface{}) (string, error) {
 	resp := make(chan jsResp, 1)
 	epoch := s.epoch.Load()
 	cid := hostclient.ScopeID()
+	snap := hostclient.Snapshot()
 	start := time.Now()
 	select {
 	case <-s.quitCh:
 		return "{}", fmt.Errorf("spider 已销毁")
-	case s.reqCh <- jsReq{method: method, args: args, resp: resp, epoch: epoch, clientID: cid}:
+	case s.reqCh <- jsReq{method: method, args: args, resp: resp, epoch: epoch, clientID: cid, bind: snap}:
 	}
 	select {
 	case r := <-resp:

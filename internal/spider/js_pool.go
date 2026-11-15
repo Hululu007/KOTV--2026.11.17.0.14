@@ -2,9 +2,11 @@ package spider
 
 import (
 	"context"
+
+	"github.com/bobo/KOTV/internal/hostclient"
 )
 
-// jsPool 同站 QuickJS Runtime 池：每个 slot 独立 Runtime，多用户可并行打同一站。
+// jsPool 同站 QuickJS Runtime 池：每个 slot 独立 Runtime；跨租户靠 jsPyKey 分桶。
 type jsPool struct {
 	key, api, ext, jar string
 	scriptSlotPool[*jsSpider]
@@ -35,22 +37,15 @@ func (p *jsPool) retarget(key, ext, jar string) {
 
 func newJsSpiderWorker(key, api, ext, jar string) *jsSpider {
 	return &jsSpider{
-		key:    key,
-		api:    api,
-		ext:    ext,
-		jar:    jar,
-		reqCh:  make(chan jsReq, 8),
-		quitCh: make(chan struct{}),
-		timers: map[int32]context.CancelFunc{},
+		key:      key,
+		api:      api,
+		ext:      ext,
+		jar:      jar,
+		ownerUID: hostclient.RuntimeUserID(),
+		reqCh:    make(chan jsReq, 8),
+		quitCh:   make(chan struct{}),
+		timers:   map[int32]context.CancelFunc{},
 	}
-}
-
-func (p *jsPool) matchesClient(clientID string) bool {
-	return pooledMatchesClient(&p.scriptSlotPool, clientID)
-}
-
-func (p *jsPool) interrupt() {
-	pooledInterrupt(&p.scriptSlotPool)
 }
 
 // withStickySlot 同 slot 连续跑多段（如 home→homeVod），避免二次 acquire 冷启新 Runtime。

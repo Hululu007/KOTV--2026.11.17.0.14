@@ -38,10 +38,12 @@ const pyCallTimeout = 45 * time.Second
 var ErrScriptInterrupted = errors.New("脚本调用已中断")
 
 var (
-	jsPyMu      sync.Mutex
-	jsPy        = map[string]Spider{}
-	recentJsKey string
-	recentPyKey string
+	jsPyMu sync.Mutex
+	jsPy   = map[string]Spider{}
+
+	// recentJs/Py 按 RuntimeUserID 分槽（与 jarRecentByUser 同构）；空键=本机共享。
+	recentJsByUser sync.Map // RuntimeUserID → jsPyKey
+	recentPyByUser sync.Map
 )
 
 type pySpider struct {
@@ -176,46 +178,86 @@ func destroyScripts(prefix string, all bool, keep ...string) {
 		doomed = append(doomed, s)
 		delete(jsPy, k)
 	}
-	if all || (recentJsKey != "" && strings.HasPrefix(recentJsKey, prefix) && !kept(recentJsKey)) {
-		recentJsKey = ""
-	}
-	if all || (recentPyKey != "" && strings.HasPrefix(recentPyKey, prefix) && !kept(recentPyKey)) {
-		recentPyKey = ""
-	}
 	jsPyMu.Unlock()
+	clearRecentForPrefix(prefix, all, kept)
 	for _, s := range doomed {
 		s.Destroy()
 	}
 }
 
-func setRecentJs(key, api, ext, jar string) {
-	jsPyMu.Lock()
-	recentJsKey = jsPyKey("js", api)
-	jsPyMu.Unlock()
+func clearRecentForPrefix(prefix string, all bool, kept func(string) bool) {
+	clearOne := func(m *sync.Map) {
+		if all {
+			m.Range(func(k, _ any) bool {
+				m.Delete(k)
+				return true
+			})
+			return
+		}
+		uid := strings.TrimSuffix(prefix, "\x01")
+		if v, ok := m.Load(uid); ok {
+			key, _ := v.(string)
+			if key != "" && !kept(key) {
+				m.Delete(uid)
+			}
+		}
+	}
+	clearOne(&recentJsByUser)
+	clearOne(&recentPyByUser)
 }
 
-func setRecentPy(key, api, ext, jar string) {
-	jsPyMu.Lock()
-	recentPyKey = jsPyKey("py", api)
-	jsPyMu.Unlock()
+func setRecentJs(_, api, _, _ string) {
+	recentJsByUser.Store(hostclient.RuntimeUserID(), jsPyKey("js", api))
+}
+
+func setRecentPy(_, api, _, _ string) {
+	recentPyByUser.Store(hostclient.RuntimeUserID(), jsPyKey("py", api))
 }
 
 func recentJsSpider() Spider {
-	jsPyMu.Lock()
-	defer jsPyMu.Unlock()
-	if recentJsKey == "" {
+	v, ok := recentJsByUser.Load(hostclient.RuntimeUserID())
+	if !ok {
 		return nil
 	}
-	return jsPy[recentJsKey]
+	key, _ := v.(string)
+	if key == "" {
+		return nil
+	}
+	jsPyMu.Lock()
+	defer jsPyMu.Unlock()
+	return jsPy[key]
 }
 
 func recentPySpider() Spider {
-	jsPyMu.Lock()
-	defer jsPyMu.Unlock()
-	if recentPyKey == "" {
+	v, ok := recentPyByUser.Load(hostclient.RuntimeUserID())
+	if !ok {
 		return nil
 	}
-	return jsPy[recentPyKey]
+	key, _ := v.(string)
+	if key == "" {
+		return nil
+	}
+	jsPyMu.Lock()
+	defer jsPyMu.Unlock()
+	return jsPy[key]
+}
+
+func recentJsKeyFor(uid string) string {
+	v, ok := recentJsByUser.Load(uid)
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
+}
+
+func recentPyKeyFor(uid string) string {
+	v, ok := recentPyByUser.Load(uid)
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
 }
 
 // InterruptScriptSpiders 打断正在运行的全部 Python/JavaScript 调用。

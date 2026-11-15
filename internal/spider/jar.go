@@ -151,7 +151,7 @@ func clearRuntimeJars() {
 }
 
 func releaseConfigScripts() {
-	clearJSMemoryCaches()
+	// 只毁当前用户 Py/JS 池；模块字节缓存全局共享，留给 Clear/Reset 全清。
 	destroyScripts(hostclient.RuntimeUserID()+"\x01", false)
 }
 

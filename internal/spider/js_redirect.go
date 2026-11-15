@@ -6,31 +6,55 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/util"
 )
 
-// jsRedirects：302 Location（绝对 URL）→ 发起请求的原始 URL（JS 爬虫 insecure 客户端）。
-var jsRedirects = util.NewRedirectOrigins(512)
+// JS 302 回源表按 RuntimeUserID 分桶（空键=本机共享）。
+var (
+	jsRedirectsMu     sync.Mutex
+	jsRedirectsByUser = map[string]*util.RedirectOrigins{}
+)
 
-// ClearJSRedirectMap 清空 JS 侧 302 回源映射（清理缓存工具）。
+func jsRedirectsForCurrent() *util.RedirectOrigins {
+	uid := hostclient.RuntimeUserID()
+	jsRedirectsMu.Lock()
+	defer jsRedirectsMu.Unlock()
+	if m := jsRedirectsByUser[uid]; m != nil {
+		return m
+	}
+	m := util.NewRedirectOrigins(512)
+	jsRedirectsByUser[uid] = m
+	return m
+}
+
+func jsRedirectTrack(req *http.Request, via []*http.Request) error {
+	return jsRedirectsForCurrent().Track(req, via)
+}
+
+// ClearJSRedirectMap 清空全部用户的 JS 302 回源映射（清理缓存工具）。
 func ClearJSRedirectMap() {
-	jsRedirects.Clear()
+	jsRedirectsMu.Lock()
+	jsRedirectsByUser = map[string]*util.RedirectOrigins{}
+	jsRedirectsMu.Unlock()
 }
 
 func applyJSRedirectDance(reqURL string, resp *http.Response, body []byte) (code int, hdrs http.Header, out []byte) {
 	code = resp.StatusCode
 	hdrs = resp.Header.Clone()
 	out = body
+	m := jsRedirectsForCurrent()
 	if util.IsHTTPRedirect(code) {
 		if loc := resp.Header.Get("Location"); loc != "" {
-			jsRedirects.Remember(reqURL, loc)
+			m.Remember(reqURL, loc)
 		}
 		return code, hdrs, out
 	}
 	if code == 406 {
-		if origin, ok := jsRedirects.Lookup(reqURL); ok {
+		if origin, ok := m.Lookup(reqURL); ok {
 			h := make(http.Header)
 			h.Set("Location", origin)
 			return http.StatusFound, h, nil

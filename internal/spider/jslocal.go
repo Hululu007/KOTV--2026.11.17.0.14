@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/paths"
 )
 
-// Local：Prefers key = cache_{rule}_{key}（rule 空则 cache_{key}），全局共享、无 siteKey。
+// Local：Prefers key = cache_{rule}_{key}（rule 空则 cache_{key}）。
+// 落盘按 RuntimeUserID 分目录（空=shared），与 Node run/<uid>/ 同构。
 var jsLocalMu sync.Mutex
 
 // LocalPrefersKey — Cache.getKey / Local.getKey。
@@ -20,29 +22,20 @@ func LocalPrefersKey(rule, key string) string {
 	return "cache_" + rule + "_" + key
 }
 
-func jsLocalPrefersKey(rule, key string) string {
-	return LocalPrefersKey(rule, key)
+func jsLocalOwnerDir() string {
+	if uid := hostclient.RuntimeUserID(); uid != "" {
+		return uid
+	}
+	return "shared"
 }
 
 func jsLocalPath(rule, key string) string {
 	// Prefers 键名按原文语义；落盘用 base64url，避免非法文件名且不碰撞。
-	enc := base64.RawURLEncoding.EncodeToString([]byte(jsLocalPrefersKey(rule, key)))
-	return filepath.Join(paths.JsCache(), "local", enc+".dat")
+	enc := base64.RawURLEncoding.EncodeToString([]byte(LocalPrefersKey(rule, key)))
+	return filepath.Join(paths.JsCache(), "local", jsLocalOwnerDir(), enc+".dat")
 }
 
 func LocalGet(rule, key string) string {
-	return jsLocalGet(rule, key)
-}
-
-func LocalSet(rule, key, value string) {
-	jsLocalSet(rule, key, value)
-}
-
-func LocalDelete(rule, key string) {
-	jsLocalDelete(rule, key)
-}
-
-func jsLocalGet(rule, key string) string {
 	jsLocalMu.Lock()
 	defer jsLocalMu.Unlock()
 	b, err := os.ReadFile(jsLocalPath(rule, key))
@@ -52,7 +45,7 @@ func jsLocalGet(rule, key string) string {
 	return string(b)
 }
 
-func jsLocalSet(rule, key, value string) {
+func LocalSet(rule, key, value string) {
 	jsLocalMu.Lock()
 	defer jsLocalMu.Unlock()
 	path := jsLocalPath(rule, key)
@@ -60,8 +53,12 @@ func jsLocalSet(rule, key, value string) {
 	_ = os.WriteFile(path, []byte(value), 0o644)
 }
 
-func jsLocalDelete(rule, key string) {
+func LocalDelete(rule, key string) {
 	jsLocalMu.Lock()
 	defer jsLocalMu.Unlock()
 	_ = os.Remove(jsLocalPath(rule, key))
 }
+
+func jsLocalGet(rule, key string) string  { return LocalGet(rule, key) }
+func jsLocalSet(rule, key, value string)  { LocalSet(rule, key, value) }
+func jsLocalDelete(rule, key string)      { LocalDelete(rule, key) }
