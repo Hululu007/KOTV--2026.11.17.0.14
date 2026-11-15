@@ -145,6 +145,17 @@ func cancelJarCalls(clientID string) {
 	}
 }
 
+// cancelSharedJarCalls 只取消本机共享侧 JAR in-flight（非 u: 租户），不动远端用户。
+func cancelSharedJarCalls() {
+	jarInflightMu.Lock()
+	defer jarInflightMu.Unlock()
+	for _, g := range jarInflightQ {
+		if hostclient.UserIDFromScope(g.clientID) == "" {
+			g.cancel()
+		}
+	}
+}
+
 // clearNetConfigForUser 删掉该远端用户 Scope 下的点播网络/代理配置桶，避免离开后仍被新 JVM 重放。
 func clearNetConfigForUser(userID string) {
 	userID = strings.TrimSpace(userID)
@@ -386,8 +397,8 @@ func interruptJavaBridgeForClient(clientID string) {
 // restartSharedRuntime 硬重启本机共享 JVM/Py/JS/Node（不动远端用户桶，不删脚本磁盘缓存）。
 // 对外请用 HardRestartSharedRuntimes。
 func restartSharedRuntime() {
-	forgetJarRecent("")
-	cancelJarCalls("")
+	clearJarGoStateForRuntime("")
+	cancelSharedJarCalls()
 	// 杀共享 bridge，绝不碰 userBridges。
 	softCancelSharedBridgeOnly()
 	if runtime.GOOS == "android" {

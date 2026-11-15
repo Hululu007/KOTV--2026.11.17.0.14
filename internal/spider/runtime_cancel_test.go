@@ -22,6 +22,67 @@ func TestSoftCancelAll_DoesNotPanic(t *testing.T) {
 	SoftCancelAll()
 }
 
+func TestCancelSharedJarCalls_LeavesUserInflight(t *testing.T) {
+	sharedCtx, endShared := beginJarCall("c:local")
+	userCtx, endUser := beginJarCall("u:alice")
+	t.Cleanup(func() {
+		endShared()
+		endUser()
+	})
+	cancelSharedJarCalls()
+	select {
+	case <-sharedCtx.Done():
+	default:
+		t.Fatal("shared jar call should be cancelled")
+	}
+	select {
+	case <-userCtx.Done():
+		t.Fatal("user jar call must survive shared cancel")
+	default:
+	}
+}
+
+func TestForgetUserRuntimeState_Consolidated(t *testing.T) {
+	leave := hostclient.EnterSession("c-forget", "forget-u", true)
+	path := "/forget.jar"
+	key := jarRunKey(path)
+	parseJarNotified.Store(key, struct{}{})
+	jarPathByUser.Store("forget-u", path)
+	configBaseByClient.Store("u:forget-u", "http://ex/")
+	leave()
+	jsRedirectsMu.Lock()
+	jsRedirectsByUser["forget-u"] = nil // placeholder presence
+	jsRedirectsMu.Unlock()
+	netConfigMu.Lock()
+	if netConfigByClient == nil {
+		netConfigByClient = map[string][]byte{}
+	}
+	netConfigByClient["u:forget-u"] = []byte(`{}`)
+	netConfigMu.Unlock()
+	t.Cleanup(func() {
+		parseJarNotified.Delete(key)
+		clearJSRedirectsForUser("forget-u")
+		clearNetConfigForUser("forget-u")
+	})
+
+	forgetUserRuntimeState("forget-u")
+	if _, ok := parseJarNotified.Load(key); ok {
+		t.Fatal("jar go state should be cleared")
+	}
+	jsRedirectsMu.Lock()
+	_, redirOK := jsRedirectsByUser["forget-u"]
+	jsRedirectsMu.Unlock()
+	if redirOK {
+		t.Fatal("js redirects should be cleared")
+	}
+	netConfigMu.Lock()
+	_, netOK := netConfigByClient["u:forget-u"]
+	netConfigMu.Unlock()
+	if netOK {
+		t.Fatal("net config should be cleared")
+	}
+}
+
 func TestJavaBridgesForCancel_LocalVsRemote(t *testing.T) {
 	userBridgesMu.Lock()
 	saved := userBridges

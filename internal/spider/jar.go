@@ -336,6 +336,36 @@ func forgetJarRecent(userID string) {
 	jarRecentByUser.Delete(strings.TrimSpace(userID))
 }
 
+// clearJarGoStateForRuntime 清某运行时桶的 Go 侧 jar 就绪态（JVM 进程另杀/另启）。
+// userID 空=本机共享；非空=该远端用户。
+// 必须清 parseJarNotified/flights：否则新 JVM 会误判「已 parse」而跳过装载。
+func clearJarGoStateForRuntime(userID string) {
+	userID = strings.TrimSpace(userID)
+	forgetJarRecent(userID)
+	jarPathByUser.Delete(userID)
+	prefix := userID + "\x01"
+	purgePrefixed := func(m *sync.Map) {
+		m.Range(func(k, _ any) bool {
+			if s, ok := k.(string); ok && strings.HasPrefix(s, prefix) {
+				m.Delete(k)
+			}
+			return true
+		})
+	}
+	purgePrefixed(&parseJarNotified)
+	purgePrefixed(&parseJarFlights)
+	if userID == "" {
+		return
+	}
+	// 与 clearNetConfigForUser 同口径：按 Scope 归属清配置基址。
+	configBaseByClient.Range(func(k, _ any) bool {
+		if s, ok := k.(string); ok && hostclient.UserIDFromScope(s) == userID {
+			configBaseByClient.Delete(k)
+		}
+		return true
+	})
+}
+
 func dropJarRecent(path string) {
 	uid := hostclient.RuntimeUserID()
 	if cur, _ := jarRecentByUser.Load(uid); cur == path {

@@ -45,6 +45,17 @@ func HardRestartSharedRuntimes() {
 	runExtraHardShared()
 }
 
+// forgetUserRuntimeState 收拢：用户离开时清 Go 侧按用户分桶的可变态（进程另杀）。
+func forgetUserRuntimeState(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	clearJarGoStateForRuntime(userID)
+	clearJSRedirectsForUser(userID)
+	clearNetConfigForUser(userID)
+}
+
 // KillUserRuntime 杀掉指定用户的 JVM、Python、QuickJS、Node、Chromium（不动本机共享与其它用户）。
 func KillUserRuntime(userID string) {
 	userID = strings.TrimSpace(userID)
@@ -52,10 +63,7 @@ func KillUserRuntime(userID string) {
 		return
 	}
 	SoftCancelForClient("u:" + userID)
-	forgetJarRecent(userID)
-	jarPathByUser.Delete(userID)
-	clearJSRedirectsForUser(userID)
-	clearNetConfigForUser(userID)
+	forgetUserRuntimeState(userID)
 	destroyUserScripts(userID)
 	clearJarForUser(userID)
 	userBridgesMu.Lock()
@@ -86,8 +94,9 @@ func ShutdownSniffBrowsers() {
 	runExtraShutdown()
 }
 
-// ShutdownAllRuntimes 进程退出：硬清共享 + 销毁全部脚本/Node（含用户桶）+ 关 JVM + 全部 Chromium。
+// ShutdownAllRuntimes 进程退出：先软取消，再硬清共享 + 销毁全部脚本/Node（含用户桶）+ 关 JVM + 全部 Chromium。
 func ShutdownAllRuntimes() {
+	SoftCancelAll()
 	HardRestartSharedRuntimes()
 	ResetScriptSpiders()
 	ShutdownJavaBridge()

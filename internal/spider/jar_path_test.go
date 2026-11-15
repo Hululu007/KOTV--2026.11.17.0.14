@@ -130,3 +130,66 @@ func TestParseJarNotifiedSeparateByUser(t *testing.T) {
 		t.Fatalf("另一台 JVM 不应跳过，calls=%d", calls)
 	}
 }
+
+func TestClearJarGoStateForRuntime_PurgesParseNotified(t *testing.T) {
+	const path = "/kill-user.jar"
+	leave := hostclient.EnterSession("c-ku", "kill-u1", true)
+	key := jarRunKey(path)
+	parseJarNotified.Store(key, struct{}{})
+	jarPathByUser.Store("kill-u1", path)
+	rememberJarRecent(path)
+	configBaseByClient.Store("u:kill-u1", "http://example.com/")
+	leave()
+
+	// 共享侧残留不得被用户清理误删。
+	sharedKey := "\x01" + path
+	parseJarNotified.Store(sharedKey, struct{}{})
+	t.Cleanup(func() { parseJarNotified.Delete(sharedKey) })
+
+	clearJarGoStateForRuntime("kill-u1")
+	if _, ok := parseJarNotified.Load(key); ok {
+		t.Fatal("parseJarNotified should be cleared for killed user")
+	}
+	if _, ok := parseJarNotified.Load(sharedKey); !ok {
+		t.Fatal("shared parseJarNotified must survive user clear")
+	}
+	if _, ok := jarPathByUser.Load("kill-u1"); ok {
+		t.Fatal("jarPathByUser should be cleared")
+	}
+	if _, ok := jarRecentByUser.Load("kill-u1"); ok {
+		t.Fatal("jarRecent should be cleared")
+	}
+	if _, ok := configBaseByClient.Load("u:kill-u1"); ok {
+		t.Fatal("configBase should be cleared")
+	}
+}
+
+func TestClearJarGoStateForRuntime_SharedOnly(t *testing.T) {
+	const path = "/shared-restart.jar"
+	sharedKey := "\x01" + path
+	userKey := "keep-u\x01" + path
+	parseJarNotified.Store(sharedKey, struct{}{})
+	parseJarNotified.Store(userKey, struct{}{})
+	jarPathByUser.Store("", path)
+	jarPathByUser.Store("keep-u", path)
+	t.Cleanup(func() {
+		parseJarNotified.Delete(sharedKey)
+		parseJarNotified.Delete(userKey)
+		jarPathByUser.Delete("")
+		jarPathByUser.Delete("keep-u")
+	})
+
+	clearJarGoStateForRuntime("")
+	if _, ok := parseJarNotified.Load(sharedKey); ok {
+		t.Fatal("shared parseJarNotified should be cleared")
+	}
+	if _, ok := parseJarNotified.Load(userKey); !ok {
+		t.Fatal("user parseJarNotified must survive shared clear")
+	}
+	if _, ok := jarPathByUser.Load(""); ok {
+		t.Fatal("shared jar path should be cleared")
+	}
+	if _, ok := jarPathByUser.Load("keep-u"); !ok {
+		t.Fatal("user jar path must survive shared clear")
+	}
+}
