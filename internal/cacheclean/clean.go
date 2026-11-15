@@ -49,8 +49,12 @@ func Run(opt Options) Result {
 		res.Details[label] = fmt.Sprintf("%s (%s)", path, humanBytes(n))
 	}
 
-	if opt.Script {
+	// 清脚本或 JAR 前先软取消四引擎 in-flight（含仅勾 JAR、未勾脚本的情况）。
+	if opt.Script || opt.Jar {
 		spider.SoftCancelAll()
+	}
+
+	if opt.Script {
 		spider.ResetScriptSpiders()
 		// 全局共享包体
 		n, err := wipeDirKeepRoot(paths.JsCache())

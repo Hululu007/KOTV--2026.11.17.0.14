@@ -109,6 +109,8 @@ func SetRecent(key, api, ext, jar string) {
 }
 
 func Clear() {
+	// 先软取消全部进行中调用，再硬拆池/进程，避免与 in-flight HTTP 竞态。
+	SoftCancelAll()
 	clearJar()
 	clearJsPy()
 	stopAllNodeHosts()
