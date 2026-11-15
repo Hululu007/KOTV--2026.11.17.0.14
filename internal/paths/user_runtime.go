@@ -26,9 +26,14 @@ func UserRuntimeDir(userID string) string {
 	return ensure(filepath.Join(CacheRoot(), "run", RuntimeOwnerLabel(userID)))
 }
 
-// UserRuntimeRoot 全部用户可变态的父目录 cache/run（清理工具扫这里）。
+// UserRuntimeRoot 全部用户可变态的父目录 cache/run（需要落盘时 ensure）。
 func UserRuntimeRoot() string {
-	return ensure(filepath.Join(CacheRoot(), "run"))
+	return ensure(userRuntimeRootPath())
+}
+
+// userRuntimeRootPath cache/run 路径（不 create，供清理扫描）。
+func userRuntimeRootPath() string {
+	return filepath.Join(CacheRoot(), "run")
 }
 
 // UserJVMDir 该用户 JVM Prefers/cache/files 根（-Dkotv.cache.dir）。
@@ -62,9 +67,18 @@ func JsModuleCache() string {
 	return ensure(filepath.Join(JsCache(), "mod"))
 }
 
-// WipeUserRuntimeSubdirs 清理 cache/run/<各用户>/<names…>（保留 run 与用户目录本身）。
+// RemoveUserRuntimeDir 删除某远端用户的全部可变运行时目录。空 userID 拒绝（避免误删 shared）。
+func RemoveUserRuntimeDir(userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+	return os.RemoveAll(filepath.Join(userRuntimeRootPath(), RuntimeOwnerLabel(userID)))
+}
+
+// WipeUserRuntimeSubdirs 清理 cache/run/<各用户>/<names…>（保留 run 与用户目录本身；不 create run）。
 func WipeUserRuntimeSubdirs(names ...string) (freed int64, err error) {
-	root := UserRuntimeRoot()
+	root := userRuntimeRootPath()
 	entries, readErr := os.ReadDir(root)
 	if readErr != nil {
 		if os.IsNotExist(readErr) {
@@ -78,7 +92,7 @@ func WipeUserRuntimeSubdirs(names ...string) (freed int64, err error) {
 		}
 		owner := filepath.Join(root, e.Name())
 		for _, name := range names {
-			n, e2 := wipeDirKeepRoot(filepath.Join(owner, name))
+			n, e2 := wipeDirContents(filepath.Join(owner, name))
 			freed += n
 			if e2 != nil && err == nil {
 				err = e2
@@ -88,7 +102,8 @@ func WipeUserRuntimeSubdirs(names ...string) (freed int64, err error) {
 	return freed, err
 }
 
-func wipeDirKeepRoot(dir string) (int64, error) {
+// wipeDirContents 删除目录内全部子项，保留目录本身；目录不存在视为 0。
+func wipeDirContents(dir string) (int64, error) {
 	st, err := os.Stat(dir)
 	if err != nil {
 		if os.IsNotExist(err) {

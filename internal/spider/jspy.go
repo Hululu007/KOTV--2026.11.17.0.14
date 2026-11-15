@@ -41,7 +41,7 @@ var (
 	jsPyMu sync.Mutex
 	jsPy   = map[string]Spider{}
 
-	// recentJs/Py 按 RuntimeUserID 分槽（与 jarRecentByUser 同构）；空键=本机共享。
+	// recentJs/Py 按 RuntimeUserID 分槽；空键=本机共享。
 	recentJsByUser sync.Map // RuntimeUserID → jsPyKey
 	recentPyByUser sync.Map
 )
@@ -664,7 +664,7 @@ func (s *pySpider) interrupt() {
 		return
 	}
 	// 桌面：run/callLocked 持有 mu 等待 IPC；此处不可 Lock。
-	// 有进行中调用时 Kill 进程（与超时路径同构），callLocked 在 epoch 变化后 stopLocked。
+	// 有进行中调用时 Kill 进程（同超时路径），callLocked 在 epoch 变化后 stopLocked。
 	if strings.TrimSpace(s.activeClientID()) == "" {
 		return
 	}

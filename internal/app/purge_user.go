@@ -30,6 +30,9 @@ func (a *App) PurgeUserData(userID, username string) {
 		_ = a.DB.DeleteAuthTokensForUser(userID)
 	}
 	a.releaseUserRuntime(userID)
+	if err := paths.RemoveUserRuntimeDir(userID); err != nil {
+		log.Printf("purge user %s runtime dir: %v", userID, err)
+	}
 	paths.RemoveTVUserDirs(username)
 	// 旧版曾按账号 UUID 建 s_u_<id>；删用户时一并清掉。
 	if userID != username {

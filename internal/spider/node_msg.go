@@ -156,7 +156,7 @@ func HandleNodeMsg(body []byte) any {
 }
 
 // resolveNodePkg 按 api prefix 选包；prefix 空则取任一已起端口的包。
-// /msg 等无 Bind 回调时扫全部用户桶（与 findNodePkgByLocalPort 同构）。
+// /msg 等无 Bind 回调时扫全部用户桶（同 findNodePkgByLocalPort）。
 func resolveNodePkg(prefix string) *nodePkg {
 	prefix = strings.TrimSpace(prefix)
 	want := strings.TrimSuffix(prefix, "/")

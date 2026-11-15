@@ -48,7 +48,7 @@ const (
 )
 
 // NodeHost 管理猫爪 Node 源包：下载、启动、反代与消息回调。
-// 与 javaBridge / userBridges 同构：本机共享一份；远端租户按 RuntimeUserID 独立桶。
+// 本机共享一份；远端租户按 RuntimeUserID 独立桶（同 JVM / JS-Py 分桶）。
 type NodeHost struct {
 	ownerUID    string // RuntimeUserID；空串=本机共享
 	mu          sync.Mutex
@@ -102,7 +102,7 @@ func newNodeHost(ownerUID string) *NodeHost {
 	}
 }
 
-// nodeHostForUser 指定 RuntimeUserID 的 Node 桶；空串为本机共享（与 bridgeForUser 同构）。
+// nodeHostForUser 指定 RuntimeUserID 的 Node 桶；空串为本机共享。
 func nodeHostForUser(userID string) *NodeHost {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -118,7 +118,7 @@ func nodeHostForUser(userID string) *NodeHost {
 	return h
 }
 
-// nodeHostForCurrent 当前请求所属 Node 桶（与 bridgeForCurrent 同构）。
+// nodeHostForCurrent 当前请求所属 Node 桶。
 func nodeHostForCurrent() *NodeHost {
 	return nodeHostForUser(hostclient.RuntimeUserID())
 }
@@ -128,7 +128,7 @@ func DefaultNodeHost() *NodeHost {
 	return nodeHostForCurrent()
 }
 
-// destroyUserNodeHost 销毁指定远端用户的 Node 桶（与删 userBridges 同构）。
+// destroyUserNodeHost 销毁指定远端用户的 Node 桶。
 func destroyUserNodeHost(userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -143,7 +143,7 @@ func destroyUserNodeHost(userID string) {
 	}
 }
 
-// clearSharedNodeHost 清空本机共享 Node 桶（与 clearSharedJsPy 同构，不碰远端用户桶）。
+// clearSharedNodeHost 清空本机共享 Node 桶（不碰远端用户桶）。
 func clearSharedNodeHost() {
 	sharedNodeHost.ClearAll()
 }
@@ -263,7 +263,7 @@ func (h *NodeHost) Ensure(pkgURL string) (*nodePkg, error) {
 	h.mu.Lock()
 	pkg, ok := h.pkgs[id]
 	if !ok {
-		// 包文件全局共享 NodeCache/<id>/；可写 data 进 UserNodeDataDir（与 JVM/Py 同布局）。
+		// 包文件全局共享 NodeCache/<id>/；可写 data 进 UserNodeDataDir。
 		dir := filepath.Join(paths.NodeCache(), id)
 		dataDir := paths.UserNodeDataDir(h.ownerUID, id)
 		migrateLegacyNodeDataDir(h.ownerUID, id, dataDir)

@@ -61,16 +61,16 @@ func Run(opt Options) Result {
 		add("Node", paths.NodeCache(), n, err)
 		// 每用户可变态（js-local / node data / py work）
 		n, err = paths.WipeUserRuntimeSubdirs("js-local", "node", "py")
-		if n > 0 || err == nil {
-			add("脚本运行时", paths.UserRuntimeRoot(), n, err)
+		if n > 0 || err != nil {
+			add("脚本运行时", filepath.Join(paths.CacheRoot(), "run"), n, err)
 		}
-		// bridge 侧脚本落盘目录
+		// bridge 侧脚本落盘目录（可能不存在，有释放量或出错才记）
 		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "js"))
-		if n > 0 || err == nil {
+		if n > 0 || err != nil {
 			add("JS(bridge)", filepath.Join(paths.Root(), "cache", "js"), n, err)
 		}
 		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "py"))
-		if n > 0 || err == nil {
+		if n > 0 || err != nil {
 			add("Python(bridge)", filepath.Join(paths.Root(), "cache", "py"), n, err)
 		}
 	}
@@ -82,15 +82,15 @@ func Run(opt Options) Result {
 		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "jar"))
 		add("JAR(bridge)", filepath.Join(paths.Root(), "cache", "jar"), n, err)
 		n, err = paths.WipeUserRuntimeSubdirs("jvm")
-		if n > 0 || err == nil {
-			add("JVM运行时", paths.UserRuntimeRoot(), n, err)
+		if n > 0 || err != nil {
+			add("JVM运行时", filepath.Join(paths.CacheRoot(), "run"), n, err)
 		}
 		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "jpa"))
-		if n > 0 {
+		if n > 0 || err != nil {
 			add("JPA", filepath.Join(paths.Root(), "cache", "jpa"), n, err)
 		}
 		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "proxy"))
-		if n > 0 {
+		if n > 0 || err != nil {
 			add("代理溢写", filepath.Join(paths.Root(), "cache", "proxy"), n, err)
 		}
 	}
@@ -141,8 +141,8 @@ func Run(opt Options) Result {
 			}
 		}
 		n, err := paths.WipeUserRuntimeSubdirs("chromium")
-		if n > 0 || err == nil {
-			add("Chromium运行时", paths.UserRuntimeRoot(), n, err)
+		if n > 0 || err != nil {
+			add("Chromium运行时", filepath.Join(paths.CacheRoot(), "run"), n, err)
 		}
 	}
 
