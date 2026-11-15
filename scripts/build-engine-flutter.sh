@@ -7,10 +7,13 @@
 #   ./scripts/build-engine-flutter.sh android-arm
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=kotv-release-name.sh
+source "$ROOT/scripts/kotv-release-name.sh"
 OUT_DIR="$ROOT/flutter/assets/engine"
 mkdir -p "$OUT_DIR"
 TARGET="${1:-host}"
 NAME=kotv-engine
+VER_LD="$(kotv_engine_version_ldflags)"
 
 cd "$ROOT"
 
@@ -59,7 +62,7 @@ build_android_abi() {
   # anet（torrent 间接依赖）在 Go 1.23+ 仍用 //go:linkname 访问 net.zoneCache。
   # 引擎从 nativeLibraryDir 直接 exec，动态链接器不会搜可执行文件所在目录，
   # 即使 APK 里已有 libc++_shared.so 也加载不到。静态链入 libc++。
-  local ldflags="-s -w -checklinkname=0 -extld=${cxx} -extldflags=-static-libstdc++"
+  local ldflags="-s -w ${VER_LD} -checklinkname=0 -extld=${cxx} -extldflags=-static-libstdc++"
   echo "==> android $abi (GOARCH=$goarch${goarm:+ GOARM=$goarm})"
   if [[ -n "$goarm" ]]; then
     CGO_ENABLED=1 GOOS=android GOARCH="$goarch" GOARM="$goarm" CC="$cc" CXX="$cxx" \
@@ -79,7 +82,7 @@ build_android_abi() {
 
 case "$TARGET" in
   host)
-    go build -o "$OUT_DIR/$NAME" ./cmd/engine
+    go build -ldflags "-s -w ${VER_LD}" -o "$OUT_DIR/$NAME" ./cmd/engine
     chmod +x "$OUT_DIR/$NAME"
     echo "built $OUT_DIR/$NAME"
     ;;

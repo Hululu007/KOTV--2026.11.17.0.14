@@ -50,7 +50,8 @@ if [[ "${KOTV_WIN7:-}" == "1" ]]; then
 fi
 mkdir -p "$ENGINE_DIR"
 # 相对路径输出，避免 Git Bash 绝对路径让 go/Windows 写丢
-(cd "$ROOT" && go build -ldflags "-s -w -extldflags '${EXTLD}'" \
+VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
+(cd "$ROOT" && go build -ldflags "-s -w ${VER_LD} -extldflags '${EXTLD}'" \
   -o "dist/_win_engine/kotv-engine.exe" ./cmd/engine)
 [[ -f "$ENGINE_OUT" ]] || { echo "missing engine: $ENGINE_OUT" >&2; ls -la "$ENGINE_DIR" >&2; exit 1; }
 if [[ "${KOTV_WIN7:-}" == "1" ]] && command -v pwsh >/dev/null 2>&1; then

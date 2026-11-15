@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.2
+
+- 版本号收拢：`pubspec` / `update.CurrentVersion` / Flutter 回退常量同源为 `0.3.2`；各打包脚本统一经 `kotv_engine_version_ldflags` 注入，关于/检查更新/运行库与产物名一致。
+- 运行时隔离：JVM / Python / Node / QuickJS 按 `RuntimeUserID` 分桶；软取消与硬重启走统一门面，超时/放弃后回收忙进程，避免切集挂死互相串扰。
+- 软解保留 GPU Texture 输出；开播 failover：非 soft → soft → 换引擎。
+- 清理误导注释与重复调试残留；文案不再写「对齐/同 FongMi」类表述。
+
 ## v0.3.1
 
 - Win7 MPV：关直出与 Win10 同为 `hwdec=auto`（官方自选，无额外拒互通）；开直出仍 `dxva2`，不能直出时会话退回关直出（新建 D3D11 Player）。「硬解直出」仅 Win7 显示。撤回 ANGLE/FVP 的 DXGI HEVC 选卡。

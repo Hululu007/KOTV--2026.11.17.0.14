@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 统一发行名：KO影视-{version}-{arch}.{ext}
+# 版本单一源：KOTV_VERSION 优先，否则 flutter/pubspec.yaml 的 version 行。
 # 用法: kotv_release_version [pubspec路径]
 kotv_release_version() {
   local pubspec="${1:-}"
@@ -13,6 +14,16 @@ kotv_release_version() {
   local v
   v="$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "$pubspec" | head -1)"
   echo "${v:-0.0.0}"
+}
+
+# 编引擎时注入 update.CurrentVersion（与发行号同源）。可拼在已有 -ldflags 前。
+# 用法: kotv_engine_version_ldflags [version]
+kotv_engine_version_ldflags() {
+  local ver="${1:-}"
+  if [[ -z "$ver" ]]; then
+    ver="$(kotv_release_version)"
+  fi
+  echo "-X github.com/bobo/KOTV/internal/update.CurrentVersion=${ver}"
 }
 
 # 平台 → 发行 arch 标签（与 Android aarch64/armv7 命名一致）

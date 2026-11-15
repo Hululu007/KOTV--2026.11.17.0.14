@@ -6,10 +6,11 @@
 # 优先本机 musl-gcc（同 arch），否则 Docker golang:*-alpine。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=kotv-release-name.sh
+source "$ROOT/scripts/kotv-release-name.sh"
 OUT="${1:?usage: $0 <out-path> [amd64|arm64]}"
 ARCH="${2:-amd64}"
-VERSION="${KOTV_VERSION:-${VERSION:-0.0.0}}"
-VERSION="${VERSION#v}"
+VERSION="$(kotv_release_version)"
 
 case "$ARCH" in
   amd64|x86_64|linux-x64) GOARCH=amd64; DOCKER_PLATFORM=linux/amd64 ;;
@@ -24,7 +25,8 @@ TMP_REL="dist/.kotv-engine-static-$GOARCH"
 TMP_ABS="$ROOT/$TMP_REL"
 mkdir -p "$(dirname "$TMP_ABS")"
 
-LDFLAGS="-s -w -X github.com/bobo/KOTV/internal/update.CurrentVersion=${VERSION} -linkmode external -extldflags '-static'"
+VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
+LDFLAGS="-s -w ${VER_LD} -linkmode external -extldflags '-static'"
 IMAGE="${KOTV_STATIC_GO_IMAGE:-golang:1.27.2-alpine}"
 # Docker/CI 挂载仓库时 git 常不可用或 safe.directory 失败，关掉 VCS stamping
 BUILD_VCS="-buildvcs=false"

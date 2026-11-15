@@ -26,7 +26,8 @@ echo "==> build Go engine"
 export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
 ok_eng=0
 for attempt in 1 2 3; do
-  if (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w" -o "$ENGINE_OUT" ./cmd/engine); then
+  VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
+  if (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w ${VER_LD}" -o "$ENGINE_OUT" ./cmd/engine); then
     ok_eng=1
     break
   fi

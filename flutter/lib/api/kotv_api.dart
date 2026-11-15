@@ -32,7 +32,7 @@ String kotvEngineHealthProblem(Map<String, dynamic>? h) {
   return '';
 }
 
-/// 后端简介「平台 架构 · 版本」，如 android arm64 · 0.3.0。
+/// 后端简介「平台 架构 · 版本」，如 android arm64 · 0.3.2。
 String kotvEngineLabel(Map<String, dynamic> h) {
   final host = ['${h['platform'] ?? ''}', '${h['arch'] ?? ''}'].where((e) => e.isNotEmpty).join(' ');
   final version = '${h['version'] ?? ''}';

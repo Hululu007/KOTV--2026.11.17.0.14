@@ -76,7 +76,7 @@ func bridgeForCurrent() *javaBridgeClient {
 	return bridgeForUser(hostclient.RuntimeUserID())
 }
 
-// KillUserRuntime 杀掉指定用户的 JAR-JVM、Py/JS 池与 Node 桶（不动本机共享与其它用户）。
+// KillUserRuntime 杀掉指定用户的 JVM、Python、QuickJS 与 Node（不动本机共享与其它用户）。
 func KillUserRuntime(userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -115,7 +115,7 @@ func HostSpiderReady() (ok bool, errMsg string) {
 	return true, ""
 }
 
-// RestartCallerRuntime 卡死恢复时硬重启当前请求所属运行时（JVM / Py·JS / Node）。切仓不走这里。
+// RestartCallerRuntime 卡死恢复时硬重启当前请求所属运行时（JVM / Python / QuickJS / Node）。切仓不走这里。
 func RestartCallerRuntime() {
 	if uid := hostclient.RuntimeUserID(); uid != "" {
 		KillUserRuntime(uid)

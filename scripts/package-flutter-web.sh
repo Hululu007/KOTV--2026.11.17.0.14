@@ -79,10 +79,12 @@ if [[ "$GOOS" == "linux" ]]; then
   "$ROOT/scripts/build-engine-static-linux.sh" "$DIST/$BIN" "$GOARCH"
   ENGINE_NOTE="musl 全静态（不依赖宿主 glibc）"
 elif [[ "$GOOS" == "windows" ]]; then
-  (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w -X github.com/bobo/KOTV/internal/update.CurrentVersion=${VERSION}" -o "$DIST/$BIN" ./cmd/engine)
+  VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
+  (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w ${VER_LD}" -o "$DIST/$BIN" ./cmd/engine)
 else
   # macOS：无法真正全静态，接受系统库
-  (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w -X github.com/bobo/KOTV/internal/update.CurrentVersion=${VERSION}" -o "$DIST/$BIN" ./cmd/engine)
+  VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
+  (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w ${VER_LD}" -o "$DIST/$BIN" ./cmd/engine)
 fi
 chmod +x "$DIST/$BIN" 2>/dev/null || true
 

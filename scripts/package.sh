@@ -124,7 +124,8 @@ fi
 echo "generating spider qjsinc headers..."
 (cd "$ROOT/internal/spider" && go run gen_qjsinc.go)
 
-LDFLAGS="-s -w -X github.com/bobo/KOTV/internal/update.CurrentVersion=${VERSION}"
+VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
+LDFLAGS="-s -w ${VER_LD}"
 if [[ "$PLAT" == "windows-x64" ]]; then
   # 最终链接：静态 MinGW 运行时 + 强制静态 winpthread（crawshaw/QuickJS）+ Win7 子系统
   EXTLD="-static-libgcc -static-libstdc++ ${WIN_PTHREAD_LD:--Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic} -Wl,--subsystem,windows:6.01"

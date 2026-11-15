@@ -63,7 +63,8 @@ mkdir -p "$ROOT/runtime/bridge"
 cp -f "$ROOT/bridge/spider-bridge.jar" "$ROOT/runtime/bridge/spider-bridge.jar"
 
 echo "==> build Go engine (GOARCH=$GOARCH)"
-(cd "$ROOT" && CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go generate ./internal/spider/ && CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go build -o "$ROOT/flutter/assets/engine/kotv-engine" ./cmd/engine)
+VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
+(cd "$ROOT" && CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go generate ./internal/spider/ && CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go build -ldflags "-s -w ${VER_LD}" -o "$ROOT/flutter/assets/engine/kotv-engine" ./cmd/engine)
 chmod +x "$ROOT/flutter/assets/engine/kotv-engine"
 ENG_SZ="$(wc -c < "$ROOT/flutter/assets/engine/kotv-engine" | tr -d ' ')"
 ENG_SHA="$(shasum -a 256 "$ROOT/flutter/assets/engine/kotv-engine" | awk '{print $1}')"

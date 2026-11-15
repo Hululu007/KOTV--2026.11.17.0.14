@@ -15,9 +15,9 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 )
 
-// CurrentVersion 可由 CI 通过
-// -ldflags "-X github.com/bobo/KOTV/internal/update.CurrentVersion=1.2.3" 注入。
-var CurrentVersion = "0.3.1"
+// CurrentVersion 与 flutter/pubspec.yaml 同源；打包脚本用
+// kotv_engine_version_ldflags / -X …CurrentVersion= 注入，避免界面与产物名脱节。
+var CurrentVersion = "0.3.2"
 
 // Info 远程版本信息。
 type Info struct {

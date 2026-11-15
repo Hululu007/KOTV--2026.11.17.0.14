@@ -86,8 +86,11 @@ fi
 if [[ ! -f "$ENGINE_SRC" ]]; then
   echo "==> build Go engine (missing assets)"
   "$ROOT/scripts/build-engine-flutter.sh" || {
-    # build-engine-flutter 可能因 cwd 失败，再直接编
-    (cd "$ROOT" && go build -o "$ROOT/flutter/assets/engine/kotv-engine" ./cmd/engine)
+    # build-engine-flutter 可能因 cwd 失败，再直接编（同样注入版本）
+    # shellcheck source=kotv-release-name.sh
+    source "$ROOT/scripts/kotv-release-name.sh"
+    VER_LD="$(kotv_engine_version_ldflags)"
+    (cd "$ROOT" && go build -ldflags "-s -w ${VER_LD}" -o "$ROOT/flutter/assets/engine/kotv-engine" ./cmd/engine)
   }
   ENGINE_SRC="$ROOT/flutter/assets/engine/kotv-engine"
   [[ -f "$ENGINE_SRC" ]] || ENGINE_SRC="$ROOT/flutter/assets/engine/kotv-engine.exe"
