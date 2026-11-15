@@ -8,8 +8,8 @@ import (
 
 // 缓存分两类（勿混用）：
 //
-//  1. 内容寻址包体（全局共享，多用户只下一次）：
-//     JarCache / PyCache / JsCache（mod=QuickJS 模块，pkg=猫爪 Node 源包）
+//  1. 爬虫包体（全局共享，多用户只下一次；同级挂 CacheRoot）：
+//     cache/jar · cache/py · cache/js（含 mod=QuickJS 模块）· cache/node（猫爪源包）
 //  2. 可变运行时态（按 RuntimeUserID 隔离，空=shared）：
 //     UserRuntimeDir = cache/run/<uid|shared>/{jvm,py,chromium,node,js-local}
 //
@@ -57,7 +57,7 @@ func UserChromiumDir(userID string) string {
 	return ensure(filepath.Join(UserRuntimeDir(userID), "chromium"))
 }
 
-// UserNodeDataDir 该用户某 Node 源包的可写 dataDir（包体仍在 JsCache/pkg/<pkgId>/）。
+// UserNodeDataDir 该用户某 Node 源包的可写 dataDir（包体仍在 cache/node/<pkgId>/）。
 func UserNodeDataDir(userID, pkgID string) string {
 	pkgID = strings.TrimSpace(pkgID)
 	return ensure(filepath.Join(UserRuntimeDir(userID), "node", pkgID, "data"))
@@ -68,7 +68,7 @@ func UserJsLocalDir(userID string) string {
 	return ensure(filepath.Join(UserRuntimeDir(userID), "js-local"))
 }
 
-// JsModuleCache QuickJS 远程模块磁盘缓存（内容寻址；与 Node 包体同属 JsCache）。
+// JsModuleCache QuickJS 远程模块磁盘缓存（内容寻址，位于 cache/js/mod）。
 func JsModuleCache() string {
 	return ensure(filepath.Join(JsCache(), "mod"))
 }

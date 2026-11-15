@@ -131,13 +131,13 @@ func ResetScriptSpiders() {
 // Node 进程/索引由 stopAllNodeHosts 负责。
 func clearScriptCaches() {
 	clearJSMemoryCaches()
-	// Node 包体已在 JsCache/pkg/：先迁旧 cache/node，再整清 Js；勿再单独 RemoveAll。
-	_ = paths.NodeCache()
-	for _, dir := range []string{paths.JsCache(), paths.PyCache()} {
+	// 包体与 jar/py 同级：cache/{js,py,node}。
+	_ = paths.NodeCache() // 先把误嵌 js/pkg 迁回 cache/node
+	_ = os.RemoveAll(filepath.Join(paths.CacheRoot(), "js", "pkg"))
+	for _, dir := range []string{paths.JsCache(), paths.PyCache(), paths.NodeCache()} {
 		_ = os.RemoveAll(dir)
 		_ = os.MkdirAll(dir, 0o755)
 	}
-	_ = os.RemoveAll(filepath.Join(paths.CacheRoot(), "node"))
 	_, _ = paths.WipeUserRuntimeSubdirs("js-local", "node", "py")
 }
 

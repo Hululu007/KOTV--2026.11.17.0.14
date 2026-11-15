@@ -44,23 +44,40 @@ func TestUserRuntimeDirs(t *testing.T) {
 	}
 }
 
-func TestMigrateLegacyNodePkgCache(t *testing.T) {
+func TestNodeCache_SiblingOfJarPy(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KOTV_DATA_DIR", root)
-	// 重置 Once：换临时根后需能再迁（测试专用；生产进程只迁一次）。
-	migrateLegacyNodePkgOnce = sync.Once{}
+	migrateMisplacedNodePkgOnce = sync.Once{}
 
-	legacyDir := filepath.Join(root, "cache", "node", "abc123def456")
-	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+	got := NodeCache()
+	want := filepath.Join(root, "cache", "node")
+	if got != want {
+		t.Fatalf("NodeCache=%s want %s (应与 jar/py 同级)", got, want)
+	}
+	jar := JarCache()
+	py := PyCache()
+	js := JsCache()
+	if filepath.Dir(got) != filepath.Dir(jar) || filepath.Dir(got) != filepath.Dir(py) || filepath.Dir(got) != filepath.Dir(js) {
+		t.Fatalf("package caches must share CacheRoot: node=%s jar=%s py=%s js=%s", got, jar, py, js)
+	}
+}
+
+func TestMigrateMisplacedNodePkgCache(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KOTV_DATA_DIR", root)
+	migrateMisplacedNodePkgOnce = sync.Once{}
+
+	misDir := filepath.Join(root, "cache", "js", "pkg", "abc123def456")
+	if err := os.MkdirAll(misDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	marker := filepath.Join(legacyDir, "index.js")
+	marker := filepath.Join(misDir, "index.js")
 	if err := os.WriteFile(marker, []byte("ok"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	got := NodeCache()
-	want := filepath.Join(root, "cache", "js", "pkg")
+	want := filepath.Join(root, "cache", "node")
 	if got != want {
 		t.Fatalf("NodeCache=%s want %s", got, want)
 	}

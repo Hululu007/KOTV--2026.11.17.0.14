@@ -59,16 +59,12 @@ func PicCache() string { return ensure(filepath.Join(CacheRoot(), "pic")) }
 func LogDir() string   { return ensure(filepath.Join(Data(), "log")) }
 func JsCache() string { return ensure(filepath.Join(CacheRoot(), "js")) }
 
-// NodeCache 猫爪 Node 源包包体目录（index.js / index.config.js）。
-// 与 QuickJS 模块同属 JsCache（猫爪/CatVodOpen 内置配置也在 asset/js/ 下）：
-//
-//	cache/js/mod/<md5>.js     QuickJS 远程模块
-//	cache/js/pkg/<id>/…       猫爪 Node 源包
-//
-// 旧版 cache/node/ 在首次访问时迁入 pkg/。
+// NodeCache 猫爪 Node 源包包体（index.js / index.config.js）。
+// 与 jar / py / js 同级挂在 CacheRoot 下：cache/{jar,py,js,node}/。
+// 误放到 cache/js/pkg/ 的包体在首次访问时迁回此处。
 func NodeCache() string {
-	dst := ensure(filepath.Join(JsCache(), "pkg"))
-	migrateLegacyNodePkgCache(dst)
+	dst := ensure(filepath.Join(CacheRoot(), "node"))
+	migrateMisplacedNodePkgCache(dst)
 	return dst
 }
 func EpgCache() string  { return ensure(filepath.Join(CacheRoot(), "epg")) }
@@ -136,22 +132,22 @@ func ensure(p string) string {
 	return p
 }
 
-var migrateLegacyNodePkgOnce sync.Once
+var migrateMisplacedNodePkgOnce sync.Once
 
-// migrateLegacyNodePkgCache 把旧版 cache/node/* 迁到 cache/js/pkg/*（只迁尚未存在的项）。
-func migrateLegacyNodePkgCache(dst string) {
-	migrateLegacyNodePkgOnce.Do(func() {
-		legacy := filepath.Join(CacheRoot(), "node")
-		st, err := os.Stat(legacy)
+// migrateMisplacedNodePkgCache 把误嵌在 cache/js/pkg/* 的包体迁回 cache/node/*。
+func migrateMisplacedNodePkgCache(dst string) {
+	migrateMisplacedNodePkgOnce.Do(func() {
+		misplaced := filepath.Join(CacheRoot(), "js", "pkg")
+		st, err := os.Stat(misplaced)
 		if err != nil || !st.IsDir() {
 			return
 		}
-		ents, err := os.ReadDir(legacy)
+		ents, err := os.ReadDir(misplaced)
 		if err != nil {
 			return
 		}
 		for _, e := range ents {
-			src := filepath.Join(legacy, e.Name())
+			src := filepath.Join(misplaced, e.Name())
 			target := filepath.Join(dst, e.Name())
 			if _, err := os.Stat(target); err == nil {
 				continue
@@ -160,8 +156,8 @@ func migrateLegacyNodePkgCache(dst string) {
 				continue
 			}
 		}
-		if left, err := os.ReadDir(legacy); err == nil && len(left) == 0 {
-			_ = os.Remove(legacy)
+		if left, err := os.ReadDir(misplaced); err == nil && len(left) == 0 {
+			_ = os.Remove(misplaced)
 		}
 	})
 }
