@@ -37,6 +37,7 @@ func jarBridgeCallTimeout() time.Duration {
 }
 
 type javaBridgeClient struct {
+	ownerUID   string // RuntimeUserID；空=本机共享
 	mu         sync.Mutex
 	cmd        *exec.Cmd
 	baseURL    string // http://127.0.0.1:port
@@ -45,7 +46,7 @@ type javaBridgeClient struct {
 	epoch      atomic.Uint64
 }
 
-var javaBridge javaBridgeClient
+var javaBridge javaBridgeClient // ownerUID 空=共享
 
 // Android SpiderService 最近一次 /jar/call 是否成功。失败后下次进详情重新 parseJar。
 var androidJarReachable atomic.Bool
@@ -66,7 +67,7 @@ func bridgeForUser(userID string) *javaBridgeClient {
 	if b, ok := userBridges[userID]; ok {
 		return b
 	}
-	b := &javaBridgeClient{}
+	b := &javaBridgeClient{ownerUID: userID}
 	userBridges[userID] = b
 	return b
 }
@@ -230,34 +231,43 @@ func SetLocalProxyPort(port int) {
 }
 
 func currentNetConfig() [][]byte {
+	return currentNetConfigFor(hostclient.RuntimeUserID())
+}
+
+// currentNetConfigFor 只回放属于该运行时桶的网络配置，避免新 JVM 灌入其它租户的 headers/proxy。
+func currentNetConfigFor(ownerUID string) [][]byte {
+	ownerUID = strings.TrimSpace(ownerUID)
 	netConfigMu.Lock()
 	defer netConfigMu.Unlock()
 	var out [][]byte
 	seen := map[string]struct{}{}
-	if len(netConfigJSON) > 0 {
-		out = append(out, netConfigJSON)
-		seen[string(netConfigJSON)] = struct{}{}
-	}
-	for _, payload := range netConfigByClient {
+	add := func(payload []byte) {
 		if len(payload) == 0 {
-			continue
+			return
 		}
 		key := string(payload)
 		if _, ok := seen[key]; ok {
-			continue
+			return
 		}
 		seen[key] = struct{}{}
 		out = append(out, payload)
 	}
-	cid := hostclient.ScopeID()
-	if p := userProxyByClient[cid]; len(p) > 0 {
-		out = append(out, p)
-	} else if len(userProxyJSON) > 0 {
-		out = append(out, userProxyJSON)
+	if ownerUID == "" {
+		add(netConfigJSON)
+		add(userProxyJSON)
+	} else {
+		for cid, payload := range netConfigByClient {
+			if hostclient.UserIDFromScope(cid) == ownerUID || cid == "u:"+ownerUID {
+				add(payload)
+			}
+		}
+		for cid, payload := range userProxyByClient {
+			if hostclient.UserIDFromScope(cid) == ownerUID || cid == "u:"+ownerUID {
+				add(payload)
+			}
+		}
 	}
-	if len(localProxyJSON) > 0 {
-		out = append(out, localProxyJSON)
-	}
+	add(localProxyJSON)
 	return out
 }
 
@@ -548,9 +558,13 @@ func (w *javaBridgeClient) startLocked() error {
 	}
 
 	proxyPort := localproxy.Port()
+	// data.dir=应用根（TV 凭证仍按用户名分目录）；cache.dir=每用户 JVM 可变态（Prefers 等）。
+	dataDir := paths.Root()
+	cacheDir := paths.UserJVMDir(w.ownerUID)
 	cmd := exec.Command(java,
 		"-Djava.awt.headless=true",
-		fmt.Sprintf("-Dkotv.cache.dir=%s", paths.Root()),
+		fmt.Sprintf("-Dkotv.data.dir=%s", dataDir),
+		fmt.Sprintf("-Dkotv.cache.dir=%s", cacheDir),
 		fmt.Sprintf("-Dkotv.bridge.port=%d", port),
 		"-Djava.net.useSystemProxies=false",
 		"-DsocksProxyHost=",
@@ -574,7 +588,8 @@ func (w *javaBridgeClient) startLocked() error {
 	cmd.Dir = filepath.Dir(bridgeJar)
 	cmd.Env = append(filterProxyEnv(os.Environ()), fmt.Sprintf("KOTV_PROXY_PORT=%d", proxyPort))
 	_ = os.MkdirAll(paths.LogDir(), 0o755)
-	stderrPath := filepath.Join(paths.LogDir(), "java-bridge.err.log")
+	stderrName := "java-bridge-" + paths.RuntimeOwnerLabel(w.ownerUID) + ".err.log"
+	stderrPath := filepath.Join(paths.LogDir(), stderrName)
 	stderrFile, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err == nil {
 		cmd.Stderr = stderrFile
@@ -596,7 +611,7 @@ func (w *javaBridgeClient) startLocked() error {
 	w.baseURL = base
 	w.stderrFile = stderrFile
 	w.proc.Store(cmd.Process)
-	log.Printf("java bridge started pid=%d jar=%s url=%s", cmd.Process.Pid, bridgeJar, base)
+	log.Printf("java bridge started pid=%d owner=%q jar=%s url=%s cache=%s", cmd.Process.Pid, w.ownerUID, bridgeJar, base, cacheDir)
 
 	if err := waitBridgeHealthy(base, 15*time.Second); err != nil {
 		hint := readBridgeErrTail(stderrPath)
@@ -607,7 +622,7 @@ func (w *javaBridgeClient) startLocked() error {
 		return fmt.Errorf("等待 Java bridge HTTP 就绪失败: %w（详见 %s）", err, stderrPath)
 	}
 
-	for _, cfg := range currentNetConfig() {
+	for _, cfg := range currentNetConfigFor(w.ownerUID) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		_, err := postJarPathCtx(ctx, base, "/jar/call", cfg)
 		cancel()

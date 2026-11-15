@@ -109,6 +109,14 @@ func New() (*App, error) {
 	a.presence = clientsession.NewPresence(func(userID string) {
 		a.releaseUserRuntime(userID)
 	})
+	// Chromium 挂到统一取消/Kill 门面（避免 spider↔parse 循环依赖）。
+	spider.SetRuntimeExtraHooks(spider.RuntimeExtraHooks{
+		SoftCancelScope:   parse.CancelSniffsForScope,
+		SoftCancelAll:     parse.CancelAllSniffs,
+		KillUser:          parse.CancelUserSniffs,
+		HardRestartShared: parse.HardRestartSharedChromium,
+		Shutdown:          parse.CancelAllSniffs,
+	})
 
 	a.Server = server.New()
 	a.Server.SetContentAPI(a)
@@ -343,15 +351,14 @@ func (a *App) dropReposForUser(userID string) {
 	}
 }
 
-// releaseUserRuntime 释放该用户的会话仓、爬虫运行时与嗅探（不删库 / TV 目录）。
+// releaseUserRuntime 释放该用户的会话仓与全部运行时（JVM/Py/JS/Node/Chromium；不删库 / TV）。
 func (a *App) releaseUserRuntime(userID string) {
 	userID = strings.TrimSpace(userID)
 	if a == nil || userID == "" {
 		return
 	}
 	a.dropReposForUser(userID)
-	spider.KillUserRuntime(userID)
-	parse.CancelUserSniffs(userID)
+	spider.KillUserRuntime(userID) // 含 Chromium（RuntimeExtraHooks）
 	if a.sessions != nil {
 		a.sessions.RemoveByUser(userID)
 	}

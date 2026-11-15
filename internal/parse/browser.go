@@ -24,6 +24,7 @@ import (
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
+	"github.com/bobo/KOTV/internal/paths"
 	appruntime "github.com/bobo/KOTV/internal/runtime"
 	"github.com/bobo/KOTV/internal/util"
 )
@@ -46,62 +47,85 @@ const (
 	sniffUAIOS    = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
 )
 
-// 桌面共享一个 Chromium 进程；最多 2 个并发 tab，避免超级解析打出几十个 chrome。
-// 按 userID 登记进行中的 sniff cancel，供 KillUserRuntime / 心跳回收。
+// 桌面 Chromium 按 RuntimeUserID 分进程（空=本机共享）；每桶最多 2 个并发 tab。
+// cancel 同时按 userID / ScopeID 登记，供 KillUserRuntime 与 SoftCancel 回收。
 var (
-	sharedAllocOnce sync.Once
-	sharedAllocCtx  context.Context
-	sharedAllocErr  error
-	sniffSem        = make(chan struct{}, 2)
-
-	userSniffMu sync.Mutex
-	userSniffs  = map[string][]context.CancelFunc{} // userID -> cancels
+	chromeMu      sync.Mutex
+	chromeByUser  = map[string]*chromeBucket{} // key=RuntimeUserID（空=共享）
+	sniffTrackMu  sync.Mutex
+	userSniffs    = map[string][]context.CancelFunc{} // userID -> cancels（空键不登记用户桶）
+	scopeSniffs   = map[string][]context.CancelFunc{} // ScopeID -> cancels
 )
 
-// trackUserSniff 登记一次嗅探；返回 unregister。
-func trackUserSniff(userID string, cancel context.CancelFunc) func() {
-	userID = strings.TrimSpace(userID)
-	if userID == "" || cancel == nil {
+type chromeBucket struct {
+	allocCtx context.Context
+	cancel   context.CancelFunc
+	err      error
+	sem      chan struct{}
+}
+
+func sniffSemFor(uid string) chan struct{} {
+	chromeMu.Lock()
+	defer chromeMu.Unlock()
+	b := chromeByUser[uid]
+	if b == nil {
+		b = &chromeBucket{sem: make(chan struct{}, 2)}
+		chromeByUser[uid] = b
+	} else if b.sem == nil {
+		b.sem = make(chan struct{}, 2)
+	}
+	return b.sem
+}
+
+func trackSniff(userID, scopeID string, cancel context.CancelFunc) func() {
+	if cancel == nil {
 		return func() {}
 	}
-	userSniffMu.Lock()
-	userSniffs[userID] = append(userSniffs[userID], cancel)
-	idx := len(userSniffs[userID]) - 1
-	userSniffMu.Unlock()
+	userID = strings.TrimSpace(userID)
+	scopeID = strings.TrimSpace(scopeID)
+	var userIdx, scopeIdx = -1, -1
+	sniffTrackMu.Lock()
+	if userID != "" {
+		userSniffs[userID] = append(userSniffs[userID], cancel)
+		userIdx = len(userSniffs[userID]) - 1
+	}
+	if scopeID != "" {
+		scopeSniffs[scopeID] = append(scopeSniffs[scopeID], cancel)
+		scopeIdx = len(scopeSniffs[scopeID]) - 1
+	}
+	sniffTrackMu.Unlock()
 	return func() {
-		userSniffMu.Lock()
-		defer userSniffMu.Unlock()
-		list := userSniffs[userID]
-		if idx < 0 || idx >= len(list) {
-			return
-		}
-		// 置空保留下标，避免并发 unregister 乱序
-		list[idx] = nil
-		allNil := true
-		for _, c := range list {
-			if c != nil {
-				allNil = false
-				break
-			}
-		}
-		if allNil {
-			delete(userSniffs, userID)
-		} else {
-			userSniffs[userID] = list
-		}
+		sniffTrackMu.Lock()
+		defer sniffTrackMu.Unlock()
+		clearSniffSlot(userSniffs, userID, userIdx)
+		clearSniffSlot(scopeSniffs, scopeID, scopeIdx)
 	}
 }
 
-// CancelUserSniffs 取消该用户全部进行中的 Chromium 嗅探（心跳/登出时调用）。
-func CancelUserSniffs(userID string) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+func clearSniffSlot(m map[string][]context.CancelFunc, key string, idx int) {
+	if key == "" || idx < 0 {
 		return
 	}
-	userSniffMu.Lock()
-	list := userSniffs[userID]
-	delete(userSniffs, userID)
-	userSniffMu.Unlock()
+	list := m[key]
+	if idx >= len(list) {
+		return
+	}
+	list[idx] = nil
+	allNil := true
+	for _, c := range list {
+		if c != nil {
+			allNil = false
+			break
+		}
+	}
+	if allNil {
+		delete(m, key)
+	} else {
+		m[key] = list
+	}
+}
+
+func cancelSniffList(list []context.CancelFunc) {
 	for _, cancel := range list {
 		if cancel != nil {
 			cancel()
@@ -109,42 +133,125 @@ func CancelUserSniffs(userID string) {
 	}
 }
 
-func ensureSharedChromium() (context.Context, error) {
-	sharedAllocOnce.Do(func() {
-		chrome := appruntime.Chromium()
-		if chrome == "" {
-			sharedAllocErr = fmt.Errorf("未找到 Chromium：网页嗅探不可用（请检查 runtime/chromium）")
-			return
+// CancelUserSniffs 取消该用户全部进行中的 Chromium 嗅探并销毁其浏览器桶。
+func CancelUserSniffs(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	sniffTrackMu.Lock()
+	list := userSniffs[userID]
+	delete(userSniffs, userID)
+	sniffTrackMu.Unlock()
+	cancelSniffList(list)
+	destroyChromiumBucket(userID)
+}
+
+// CancelSniffsForScope 取消指定 Scope 的进行中嗅探（SoftCancel；不毁浏览器进程）。
+func CancelSniffsForScope(scopeID string) {
+	scopeID = strings.TrimSpace(scopeID)
+	if scopeID == "" {
+		return
+	}
+	sniffTrackMu.Lock()
+	list := scopeSniffs[scopeID]
+	delete(scopeSniffs, scopeID)
+	sniffTrackMu.Unlock()
+	cancelSniffList(list)
+}
+
+// CancelAllSniffs 取消全部嗅探并销毁所有 Chromium 桶。
+func CancelAllSniffs() {
+	sniffTrackMu.Lock()
+	users := userSniffs
+	scopes := scopeSniffs
+	userSniffs = map[string][]context.CancelFunc{}
+	scopeSniffs = map[string][]context.CancelFunc{}
+	sniffTrackMu.Unlock()
+	for _, list := range users {
+		cancelSniffList(list)
+	}
+	for _, list := range scopes {
+		cancelSniffList(list)
+	}
+	destroyAllChromiumBuckets()
+}
+
+// HardRestartSharedChromium 只销毁本机共享 Chromium 桶（不动远端用户桶）。
+func HardRestartSharedChromium() {
+	destroyChromiumBucket("")
+}
+
+func destroyChromiumBucket(userID string) {
+	chromeMu.Lock()
+	b := chromeByUser[userID]
+	delete(chromeByUser, userID)
+	chromeMu.Unlock()
+	if b != nil && b.cancel != nil {
+		b.cancel()
+	}
+}
+
+func destroyAllChromiumBuckets() {
+	chromeMu.Lock()
+	all := chromeByUser
+	chromeByUser = map[string]*chromeBucket{}
+	chromeMu.Unlock()
+	for _, b := range all {
+		if b != nil && b.cancel != nil {
+			b.cancel()
 		}
-		opts := append(chromedp.DefaultExecAllocatorOptions[:],
-			// headless-shell 对 headless=new 兼容差，易卡住无收尾日志。
-			chromedp.Flag("headless", "old"),
-			chromedp.Flag("disable-gpu", true),
-			chromedp.Flag("no-sandbox", true),
-			chromedp.Flag("disable-dev-shm-usage", true),
-			chromedp.Flag("mute-audio", true),
-			chromedp.Flag("hide-scrollbars", true),
-			chromedp.Flag("autoplay-policy", "no-user-gesture-required"),
-			chromedp.Flag("disable-blink-features", "AutomationControlled"),
-			chromedp.Flag("disable-infobars", true),
-			// 让跨站 iframe 网络事件落到同一 target，父页才能直接嗅到媒体。
-			chromedp.Flag("disable-features", "TranslateUI,BlinkGenPropertyTrees,IsolateOrigins,site-per-process"),
-			chromedp.ExecPath(chrome),
+	}
+}
+
+func ensureChromiumForUser(userID string) (context.Context, error) {
+	userID = strings.TrimSpace(userID)
+	chromeMu.Lock()
+	defer chromeMu.Unlock()
+	if b := chromeByUser[userID]; b != nil && b.allocCtx != nil {
+		return b.allocCtx, b.err
+	}
+	if b := chromeByUser[userID]; b != nil && b.err != nil && b.allocCtx == nil {
+		return nil, b.err
+	}
+	chrome := appruntime.Chromium()
+	if chrome == "" {
+		err := fmt.Errorf("未找到 Chromium：网页嗅探不可用（请检查 runtime/chromium）")
+		chromeByUser[userID] = &chromeBucket{err: err, sem: make(chan struct{}, 2)}
+		return nil, err
+	}
+	dataDir := paths.UserChromiumDir(userID)
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		// headless-shell 对 headless=new 兼容差，易卡住无收尾日志。
+		chromedp.Flag("headless", "old"),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("mute-audio", true),
+		chromedp.Flag("hide-scrollbars", true),
+		chromedp.Flag("autoplay-policy", "no-user-gesture-required"),
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.Flag("disable-infobars", true),
+		// 让跨站 iframe 网络事件落到同一 target，父页才能直接嗅到媒体。
+		chromedp.Flag("disable-features", "TranslateUI,BlinkGenPropertyTrees,IsolateOrigins,site-per-process"),
+		chromedp.UserDataDir(dataDir),
+		chromedp.ExecPath(chrome),
+	)
+	if runtime.GOOS == "windows" {
+		opts = append(opts,
+			chromedp.Flag("disable-software-rasterizer", true),
+			chromedp.Flag("disable-extensions", true),
+			chromedp.Flag("disable-background-networking", true),
+			chromedp.Flag("disable-background-timer-throttling", true),
+			chromedp.Flag("disable-renderer-backgrounding", true),
+			chromedp.WindowSize(800, 600),
+			chromedp.Flag("window-position", "-32000,-32000"),
 		)
-		if runtime.GOOS == "windows" {
-			opts = append(opts,
-				chromedp.Flag("disable-software-rasterizer", true),
-				chromedp.Flag("disable-extensions", true),
-				chromedp.Flag("disable-background-networking", true),
-				chromedp.Flag("disable-background-timer-throttling", true),
-				chromedp.Flag("disable-renderer-backgrounding", true),
-				chromedp.WindowSize(800, 600),
-				chromedp.Flag("window-position", "-32000,-32000"),
-			)
-		}
-		sharedAllocCtx, _ = chromedp.NewExecAllocator(context.Background(), opts...)
-	})
-	return sharedAllocCtx, sharedAllocErr
+	}
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	b := &chromeBucket{allocCtx: allocCtx, cancel: cancel, sem: make(chan struct{}, 2)}
+	chromeByUser[userID] = b
+	return allocCtx, nil
 }
 
 // BrowserSniff 用无头 Chromium 拦截网络请求嗅探媒体地址。
@@ -199,17 +306,19 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		return u, h, e
 	}
 
-	allocCtx, e := ensureSharedChromium()
+	ownerUID := hostclient.RuntimeUserID()
+	allocCtx, e := ensureChromiumForUser(ownerUID)
 	if e != nil {
 		parseLog("[sniff] chromium missing err=%v", e)
 		return "", nil, e
 	}
 
-	// 仅顶层占信号量；嵌套跟进不再抢，避免父子互相堵死。
+	// 仅顶层占该用户桶信号量；嵌套跟进不再抢，避免父子互相堵死。
 	if depth == 0 {
+		sem := sniffSemFor(ownerUID)
 		select {
-		case sniffSem <- struct{}{}:
-			defer func() { <-sniffSem }()
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
 		case <-time.After(timeout):
 			return "", nil, fmt.Errorf("网页嗅探排队超时")
 		}
@@ -219,7 +328,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	defer cancelTab()
 	ctx, cancelTimeout := context.WithTimeout(tabCtx, timeout)
 	defer cancelTimeout()
-	untrack := trackUserSniff(hostclient.RuntimeUserID(), func() {
+	untrack := trackSniff(ownerUID, hostclient.ScopeID(), func() {
 		cancelTab()
 		cancelTimeout()
 	})

@@ -49,7 +49,8 @@ var (
 type pySpider struct {
 	key, api, ext, jar string
 	scriptPath         string
-	sessionSlot        int // 进程池 slot，Android session 隔离用
+	ownerUID           string // 创建时 RuntimeUserID（空=本机共享）
+	sessionSlot        int    // 进程池 slot，Android session 隔离用
 
 	mu           sync.Mutex
 	cmd          *exec.Cmd
@@ -584,7 +585,9 @@ func (s *pySpider) startLocked(python, runner, script string) error {
 	}
 	s.stopLocked()
 	cmd := exec.Command(python, "-u", runner, script, s.key, s.ext, s.api, paths.PyCache())
-	// 缓存目录 + 捆绑 site-packages（Windows embed 常忽略仅含 cache 的 PYTHONPATH）
+	workDir := paths.UserPyWorkDir(s.ownerUID)
+	cmd.Dir = workDir
+	// 包体只读全局 PyCache；可写态进每用户 workDir。
 	pyPathParts := append([]string{paths.PyCache()}, pySitePackages(python)...)
 	cmd.Env = append(os.Environ(),
 		"PYTHONUNBUFFERED=1",
@@ -592,6 +595,7 @@ func (s *pySpider) startLocked(python, runner, script string) error {
 		"PYTHONIOENCODING=utf-8",
 		"PYTHONPATH="+strings.Join(pyPathParts, string(os.PathListSeparator)),
 		"KOTV_PY_CACHE="+paths.PyCache(),
+		"KOTV_PY_WORK="+workDir,
 		fmt.Sprintf("KOTV_PROXY_PORT=%d", localproxy.Port()),
 		"KOTV_PROXY_HOST="+pyProxyHost(),
 	)

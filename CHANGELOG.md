@@ -5,6 +5,7 @@
 - 版本号收拢：`pubspec` / `update.CurrentVersion` / Flutter 回退常量同源为 `0.3.2`；各打包脚本统一经 `kotv_engine_version_ldflags` 注入，关于/检查更新/运行库与产物名一致。
 - 运行时隔离：JVM / Python / Node / QuickJS 按 `RuntimeUserID` 分桶；软取消与硬重启走统一门面，超时/放弃后回收忙进程，避免切集挂死互相串扰。
 - 软解保留 GPU Texture 输出；开播 failover：非 soft → soft → 换引擎。
+- 运行时用户隔离补齐：Chromium 按用户独立 user-data-dir；JVM Prefers/cache 与 Python 工作目录进 `cache/run/<uid|shared>/`；取消/Kill 门面纳入嗅探。
 - 爬虫取消/关停门面收拢（SoftCancelAll / ShutdownAllRuntimes / releaseUserRuntime）；interrupt* 不导出；打包前核对版本字面量同源。
 
 ## v0.3.1

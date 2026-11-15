@@ -2,6 +2,8 @@ package spider
 
 import (
 	"strings"
+
+	"github.com/bobo/KOTV/internal/hostclient"
 )
 
 // pyPool 同站 Python 进程池：每个 slot 一个常驻 pySpider，多用户可并行打同一站。
@@ -13,8 +15,9 @@ type pyPool struct {
 func newPyPool(key, api, ext, jar string) *pyPool {
 	p := &pyPool{key: key, api: api, ext: ext, jar: jar}
 	p.max = scriptPoolSize()
+	owner := hostclient.RuntimeUserID()
 	p.spawn = func(index int) *pySpider {
-		return &pySpider{key: p.key, api: p.api, ext: p.ext, jar: p.jar, sessionSlot: index}
+		return &pySpider{key: p.key, api: p.api, ext: p.ext, jar: p.jar, ownerUID: owner, sessionSlot: index}
 	}
 	return p
 }

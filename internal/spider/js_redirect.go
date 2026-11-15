@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,16 @@ func jsRedirectTrack(req *http.Request, via []*http.Request) error {
 func ClearJSRedirectMap() {
 	jsRedirectsMu.Lock()
 	jsRedirectsByUser = map[string]*util.RedirectOrigins{}
+	jsRedirectsMu.Unlock()
+}
+
+func clearJSRedirectsForUser(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	jsRedirectsMu.Lock()
+	delete(jsRedirectsByUser, userID)
 	jsRedirectsMu.Unlock()
 }
 
