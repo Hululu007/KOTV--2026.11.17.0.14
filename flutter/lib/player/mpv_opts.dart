@@ -102,10 +102,10 @@ const kotvImageExts = '';
 /// | Vulkan | gpu-api=vulkan（设备支持时） | ❌（libmpv 渲染 API 由 media_kit 定为 OpenGL） |
 /// | 音频直通 | audio-spdif | ❌（不设 audio-spdif，音效照常写 af） |
 /// | AV3A | 原生 MPVLib（jniLibs） | 自带 FFmpeg+avs3a |
-/// 桌面/iOS media_kit：下面两样在创建 VideoController 时定死（同一 Player 再建控制器拿到的仍是旧的），
-/// 变了须换一个 Player：软解用 CPU 渲染、其它用 GPU 渲染；Win7 开硬解直出用 ANGLE 的 D3D9 后端，关掉用 D3D11。
+/// 桌面/iOS media_kit：软解只改 `hwdec=no`（渲染仍 GPU Texture），可同 Player `setProperty`。
+/// Win7 开/关硬解直出会换 ANGLE D3D9↔D3D11，须换 Player（见 [KotvMpvOpts.direct]）。
 bool kotvMediaKitNeedsNewPlayer(KotvMpvOpts from, KotvMpvOpts to) =>
-    !kotvIsAndroid() && (from.soft != to.soft || (kotvIsWindows7() && from.direct != to.direct));
+    !kotvIsAndroid() && kotvIsWindows7() && from.direct != to.direct;
 
 class KotvMpvOpts {
   const KotvMpvOpts({
@@ -328,6 +328,9 @@ class KotvMpvOpts {
   }
 
   /// Android 可切 gpu/gpu-next；桌面 media_kit 必须 libmpv（Flutter Texture）。
+  ///
+  /// 桌面/iOS：软解 = `hwdec=no`，[enableHardwareAcceleration] 恒 true（GPU Texture）。
+  /// 勿把 soft 绑成 CPU/`pixel_buffer` 渲染，否则与「自动回落软解」发白、撕裂不一致。
   VideoControllerConfiguration videoControllerConfiguration() {
     final hw = hwdecValue();
     if (kotvIsAndroid()) {
@@ -339,7 +342,7 @@ class KotvMpvOpts {
     }
     return VideoControllerConfiguration(
       hwdec: hw,
-      enableHardwareAcceleration: !soft,
+      enableHardwareAcceleration: true,
     );
   }
 
