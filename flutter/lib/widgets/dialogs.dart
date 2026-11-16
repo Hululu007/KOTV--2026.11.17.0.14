@@ -1312,12 +1312,12 @@ class _SourceListDialogState extends State<_SourceListDialog> {
           Expanded(
             child: ListView.separated(
               controller: _scroll,
-              itemCount: list.length + 1,
+              itemCount: list.length + (widget.addLabel != null ? 1 : 0),
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (_, i) {
-                if (i == list.length) {
+                if (widget.addLabel != null && i == list.length) {
                   return _RepoRow(
-                    label: widget.addLabel,
+                    label: widget.addLabel!,
                     autofocus: list.isEmpty,
                     onTap: () => Navigator.pop(context, const _SourceChoice('', '')),
                     onDelete: null,
@@ -1328,6 +1328,8 @@ class _SourceListDialogState extends State<_SourceListDialog> {
                 final isCurrent = r['current'] == true || url == current;
                 final name = '${r['name'] ?? url}';
                 final title = '${r['title'] ?? ''}'.trim();
+                final onEdit = widget.onEdit;
+                final onDelete = widget.onDelete;
                 return _RepoRow(
                   key: ValueKey('$url|$name'),
                   label: name,
@@ -1338,17 +1340,19 @@ class _SourceListDialogState extends State<_SourceListDialog> {
                       ? () {}
                       : () => Navigator.pop(
                           context, _SourceChoice(url, title)),
-                  onLongPress: () async {
-                    final edited =
-                        await widget.onEdit(url, '${r['title'] ?? ''}');
-                    if (edited == null || !mounted) return;
-                    _applyLocalEdit(url, edited.url, edited.name);
-                    await _reload();
-                  },
-                  onDelete: isCurrent
+                  onLongPress: onEdit == null
                       ? null
                       : () async {
-                          await widget.onDelete(url);
+                          final edited =
+                              await onEdit(url, '${r['title'] ?? ''}');
+                          if (edited == null || !mounted) return;
+                          _applyLocalEdit(url, edited.url, edited.name);
+                          await _reload();
+                        },
+                  onDelete: isCurrent || onDelete == null
+                      ? null
+                      : () async {
+                          await onDelete(url);
                           await _reload();
                         },
                 );
