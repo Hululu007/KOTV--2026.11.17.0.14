@@ -61,3 +61,34 @@ func TestGetHostIgnoresDataOwnerBind(t *testing.T) {
 		t.Fatalf("GetHost under Bind: got %q want %q", got, hostVOD)
 	}
 }
+
+// reloadConfig 用临时 Bind(Request{}) 读宿主桶；还原后仍见个人选中。
+func TestNestedHostBindForReloadSeesHostVOD(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "set.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	BindDB(db)
+	t.Cleanup(func() { BindDB(nil) })
+
+	hostVOD := "http://host.example/vod.json"
+	personal := "http://admin.example/personal.json"
+	Set(VOD, hostVOD)
+
+	defer hostclient.Bind(hostclient.Request{UserID: "u-admin", Dedicated: true})()
+	Set(VOD, personal)
+
+	leaveHost := hostclient.Bind(hostclient.Request{})
+	if got := Get(VOD); got != hostVOD {
+		leaveHost()
+		t.Fatalf("nested host Bind Get: got %q want %q", got, hostVOD)
+	}
+	leaveHost()
+	if got := Get(VOD); got != personal {
+		t.Fatalf("after restore Get: got %q want %q", got, personal)
+	}
+	if got := GetHost(VOD); got != hostVOD {
+		t.Fatalf("GetHost after restore: got %q want %q", got, hostVOD)
+	}
+}

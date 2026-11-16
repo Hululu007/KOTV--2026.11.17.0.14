@@ -397,7 +397,7 @@ func (a *App) dropReposForUser(userID string) {
 	}
 }
 
-// releaseUserRuntime 释放该用户的会话仓与全部运行时（JVM/Py/JS/Node/Chromium；不删库 / TV）。
+// releaseUserRuntime 释放该用户会话仓与运行时：KillUserRuntime（清 bridge 租户 + 杀其 Py/JS/Node/Chromium，不杀唯一 JVM）；不删库 / TV。
 func (a *App) releaseUserRuntime(userID string) {
 	userID = strings.TrimSpace(userID)
 	if a == nil || userID == "" {
@@ -685,6 +685,10 @@ func (a *App) LoadVodSource(source string) error {
 }
 
 func (a *App) reloadConfig(load func() error) error {
+	// 宿主 Config 重载必须见 owner=""（清缓存等可能在 Dedicated admin Bind 下调用）。
+	leaveHost := hostclient.Bind(hostclient.Request{})
+	defer leaveHost()
+
 	a.waitConfigLoaded()
 	util.SetProxy(settings.Get(settings.Proxy))
 	spider.SetUserProxy(settings.Get(settings.Proxy))

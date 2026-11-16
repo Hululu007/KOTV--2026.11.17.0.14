@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -9,10 +8,11 @@ import (
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/server"
 )
 
-// ErrNeedAdmin 远端普通用户试图新增共享仓/直播源或清共享缓存。
-var ErrNeedAdmin = errors.New("需要管理员")
+// ErrNeedAdmin 与 HTTP 层共用，便于 errors.Is。
+var ErrNeedAdmin = server.ErrNeedAdmin
 
 // currentRequestIsAdmin 当前请求用户是否为管理员（本机无 userId 视为本机管理）。
 func currentRequestIsAdmin() bool {

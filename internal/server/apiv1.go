@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -136,8 +137,7 @@ func rejectBadGateway(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
 	}
-	if err.Error() == "需要管理员" {
-		writeAPIError(w, http.StatusForbidden, err.Error())
+	if rejectNeedAdminErr(w, err) {
 		return true
 	}
 	writeAPIError(w, http.StatusBadGateway, err.Error())
@@ -148,8 +148,8 @@ func rejectNeedAdminErr(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
 	}
-	if err.Error() == "需要管理员" {
-		writeAPIError(w, http.StatusForbidden, err.Error())
+	if errors.Is(err, ErrNeedAdmin) {
+		writeAPIError(w, http.StatusForbidden, ErrNeedAdmin.Error())
 		return true
 	}
 	return false
