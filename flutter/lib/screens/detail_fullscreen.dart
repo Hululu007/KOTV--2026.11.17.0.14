@@ -951,8 +951,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _chromeKey.currentState?.openEpisodes();
       setState(() {});
     }
-    // 选集面板打开时不亮顶底栏。
-    if (_epOpen) return;
+    // 选集打开或换集沉浸中：不亮顶底栏（避免关面板/换集重建触发 hover 回弹）。
+    if (_epOpen || _episodeSwitchQuiet) return;
     _bumpChrome();
   }
 
