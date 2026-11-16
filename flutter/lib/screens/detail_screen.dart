@@ -1224,6 +1224,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _playbackLive = false;
     _advanceBusy = true;
     try {
+      // 换集过程 pause 不亮全屏底栏。
+      _fsPageKey.currentState?.beginEpisodeSwitchQuiet();
       // 无缝：playlist 已排好 → skipToNext，不经 [_playAt]/不拆 Player。
       if (_queuedNext?.idx == next && await _playback.skipToNext()) return;
       if (mounted) setState(() => _status = fromEnd ? '自动播放下一集…' : '播放下一集…');

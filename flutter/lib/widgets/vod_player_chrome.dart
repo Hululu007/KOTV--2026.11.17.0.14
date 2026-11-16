@@ -1040,8 +1040,15 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   }
 
   void closeEpisodes() {
+    if (!_epOpen) {
+      cancelScheduledCloseEpisodes();
+      return;
+    }
     cancelScheduledCloseEpisodes();
+    _setPointerHold(false);
     setState(() => _epOpen = false);
+    // 关面板（点选 / 关闭钮 / 返回 / 超时）统一通知父页沉浸，避免顶底栏回弹。
+    widget.onEpisodesAutoClosed?.call();
   }
 
   /// 离开选集面板 / 离开全屏窗口：与播控同一套隐藏间隔后关闭。
@@ -1050,8 +1057,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     if (!_epOpen) return;
     _epHideTimer = Timer(kotvPlayerOverlayHide, () {
       if (!mounted || !_epOpen) return;
-      setState(() => _epOpen = false);
-      widget.onEpisodesAutoClosed?.call();
+      closeEpisodes();
     });
   }
 

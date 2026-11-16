@@ -207,6 +207,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   Timer? _hintTimer;
   /// 指针停在顶底栏，或非桌面遥控焦点停在栏内。桌面鼠标离开后不因焦点停住隐藏。
   bool _chromeHold = false;
+  /// 换集过程中播放器会短暂停播；此时勿因 pause 亮栏。
+  bool _episodeSwitchQuiet = false;
   DateTime? _lastTapAt;
   bool? _playingForChrome;
   StreamSubscription<Duration>? _posSub;
@@ -339,14 +341,17 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   void _onPlaybackChanged() {
     _refreshForceLandscapeBtn();
     final playing = widget.playback.playing;
-    // 位置/缓冲会频繁 notify；只有播/停变化才动控件，否则 2 秒隐藏会被不停重置。
+    // 位置/缓冲会频繁 notify；只有播/停变化才动控件，否则隐藏计时会被不停重置。
     if (playing == _playingForChrome) return;
     _playingForChrome = playing;
     if (!playing) {
       _hideTimer?.cancel();
+      // 换集停播不亮栏；用户暂停才亮。
+      if (_episodeSwitchQuiet) return;
       _setChrome(show: true, hideCursor: false);
       return;
     }
+    if (_episodeSwitchQuiet) _episodeSwitchQuiet = false;
     if (_showChrome) _schedulePlayingHide();
   }
 
@@ -373,10 +378,17 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     });
   }
 
-  /// 换集确认后沉浸：关顶底栏，不重置显示计时。
+  /// 沉浸：关顶底栏（换集 / 关选集后共用）。
   void _hideChromeImmersive() {
     _hideTimer?.cancel();
+    _chromeHold = false;
     _setChrome(show: false, hideCursor: _hideCursorWhenIdle && widget.playback.playing);
+  }
+
+  /// 换集入口：先沉浸，并挡住换集过程中 pause→亮栏。
+  void beginEpisodeSwitchQuiet() {
+    _episodeSwitchQuiet = true;
+    _hideChromeImmersive();
   }
 
   void _startHoldSpeed() {
@@ -529,10 +541,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     }
     if (_epOpen) {
       _chromeKey.currentState?.closeEpisodes();
+      _hideChromeImmersive();
       setState(() {});
       return;
     }
-    _bumpChrome();
+    // 只开右侧选集，不亮顶底栏。
     _chromeKey.currentState?.openEpisodes();
     setState(() {});
   }
@@ -572,6 +585,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       }());
       return;
     }
+    beginEpisodeSwitchQuiet();
     widget.onNext?.call();
     final next = _epIdx + 1;
     if (next < widget.episodes.length) {
@@ -586,6 +600,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (_swipeAnim.isAnimating || _dragging) return false;
     final h = MediaQuery.sizeOf(context).height;
     if (h <= 0) return false;
+    beginEpisodeSwitchQuiet();
     final next = _epIdx + 1;
     final name = widget.episodes[next];
     _flashSwipeHint(name.isEmpty ? '下一集' : '下一集 · $name');
@@ -604,6 +619,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _flashSwipeHint('已是第一集');
       return;
     }
+    beginEpisodeSwitchQuiet();
     widget.onPrev?.call();
     final prev = _epIdx - 1;
     if (prev >= 0) {
@@ -612,9 +628,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   void _selectEp(int i) {
+    beginEpisodeSwitchQuiet();
     widget.onSelectEp?.call(i);
     setState(() => _epIdx = i);
-    _hideChromeImmersive();
   }
 
   bool get _canSwipeEps => !_epOpen && widget.episodes.length > 1;
@@ -948,9 +964,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _schedulePlayingHide();
   }
 
-  void _onEpisodesAutoClosed() {
+  void _onEpisodesClosed() {
     if (!mounted) return;
-    _schedulePlayingHide();
+    // 关右侧选集后保持沉浸，勿因先前 visible 回弹顶底栏。
+    _hideChromeImmersive();
   }
 
   Widget _buildVideo() {
@@ -1083,7 +1100,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       onExit: () => unawaited(_exitFullscreen()),
       onBump: _bumpChrome,
       onHoldChanged: _onChromeHoldChanged,
-      onEpisodesAutoClosed: _onEpisodesAutoClosed,
+      onEpisodesAutoClosed: _onEpisodesClosed,
       episodes: widget.episodes,
       epIdx: _epIdx,
       aspect: _aspect,
