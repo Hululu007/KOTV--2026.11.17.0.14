@@ -77,6 +77,11 @@ type jsSpider struct {
 	timers  map[int32]context.CancelFunc
 	timerID atomic.Int32
 	siteMu  sync.Mutex
+
+	httpMu     sync.Mutex
+	httpCancel context.CancelFunc // 当前 doJSRequest 可取消
+	waitMu     sync.Mutex
+	waits      []chan struct{} // invoke 等待 interrupt 立刻醒来
 }
 
 type jsReq struct {
@@ -187,7 +192,7 @@ func (s *jsSpider) runWorker() (err error) {
 		}
 	}()
 
-	// 启动期按 ownerUID 挂 JAR Function，落到对应用户 JVM（勿用 Enter 丢 Dedicated）。
+	// 启动期按 ownerUID Bind，JAR Function 进单 JVM 的对应用户租户（勿用 Enter 丢 Dedicated）。
 	bootDone := hostclient.Bind(hostclient.Request{
 		UserID:    s.ownerUID,
 		Dedicated: s.ownerUID != "",
@@ -914,7 +919,9 @@ func (s *jsSpider) jsReq(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qj
 		// 有 complete 时异步回调；Destroy 后不再 Schedule。
 		epoch := s.epoch.Load()
 		go func() {
-			result := doJSRequest(u, options)
+			ctx, end := s.beginHTTP()
+			result := doJSRequest(ctx, u, options)
+			end()
 			select {
 			case <-s.quitCh:
 				complete.Free()
@@ -947,7 +954,9 @@ func (s *jsSpider) jsReq(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qj
 		}()
 		return c.NewUndefined()
 	}
-	result := doJSRequest(u, options)
+	ctx, end := s.beginHTTP()
+	result := doJSRequest(ctx, u, options)
+	end()
 	return jsConnectResult(c, result)
 }
 
@@ -1129,7 +1138,7 @@ func buildJSPostBody(options *jsHTTPRequest) string {
 	return body
 }
 
-func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
+func doJSRequest(ctx context.Context, u string, options jsHTTPRequest) map[string]interface{} {
 	// Connect.error：code 为空字符串（脚本 if (!res.code) 才成立）
 	jsError := func() map[string]interface{} {
 		return map[string]interface{}{
@@ -1137,6 +1146,9 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 			"content": "",
 			"headers": map[string]interface{}{},
 		}
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	u = strings.TrimSpace(u)
 	// 脚本常带 Referer 却传相对 path（如 /play/xxx.html）；按 Referer/Origin 拼绝对地址。
@@ -1159,7 +1171,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	body := buildJSPostBody(&options)
 	u = util.ApplyStickyAuthQuery(u)
 	options.Headers = InjectVodHeaders(u, options.Headers)
-	req, err := http.NewRequest(options.Method, u, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, options.Method, u, strings.NewReader(body))
 	if err != nil {
 		return jsError()
 	}
@@ -1344,6 +1356,8 @@ func (s *jsSpider) invoke(method string, args ...interface{}) (string, error) {
 	cid := hostclient.ScopeID()
 	snap := hostclient.Snapshot()
 	start := time.Now()
+	wake := s.addWait()
+	defer s.removeWait(wake)
 	select {
 	case <-s.quitCh:
 		return "{}", fmt.Errorf("spider 已销毁")
@@ -1367,6 +1381,9 @@ func (s *jsSpider) invoke(method string, args ...interface{}) (string, error) {
 		}
 		jsLog("[js] invoke ok key=%s method=%s cost=%s out=%s", s.key, method, cost, jsPreview(r.out, 200))
 		return r.out, nil
+	case <-wake:
+		jsLog("[js] invoke interrupted(wake) key=%s method=%s cost=%s", s.key, method, time.Since(start).Truncate(time.Millisecond))
+		return "{}", ErrScriptInterrupted
 	case <-time.After(jsCallTimeout):
 		s.interrupt()
 		jsLog("[js] invoke timeout key=%s method=%s after=%s", s.key, method, jsCallTimeout)
@@ -1374,8 +1391,54 @@ func (s *jsSpider) invoke(method string, args ...interface{}) (string, error) {
 	}
 }
 
+func (s *jsSpider) beginHTTP() (context.Context, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.httpMu.Lock()
+	if s.httpCancel != nil {
+		s.httpCancel()
+	}
+	s.httpCancel = cancel
+	s.httpMu.Unlock()
+	return ctx, func() { cancel() }
+}
+
+func (s *jsSpider) addWait() chan struct{} {
+	ch := make(chan struct{})
+	s.waitMu.Lock()
+	s.waits = append(s.waits, ch)
+	s.waitMu.Unlock()
+	return ch
+}
+
+func (s *jsSpider) removeWait(ch chan struct{}) {
+	s.waitMu.Lock()
+	defer s.waitMu.Unlock()
+	for i, w := range s.waits {
+		if w == ch {
+			s.waits = append(s.waits[:i], s.waits[i+1:]...)
+			return
+		}
+	}
+}
+
 func (s *jsSpider) interrupt() {
 	s.epoch.Add(1)
+	s.clearTimers()
+	s.httpMu.Lock()
+	if s.httpCancel != nil {
+		s.httpCancel()
+	}
+	s.httpMu.Unlock()
+	s.waitMu.Lock()
+	for _, ch := range s.waits {
+		select {
+		case <-ch:
+		default:
+			close(ch)
+		}
+	}
+	s.waits = nil
+	s.waitMu.Unlock()
 }
 
 func (s *jsSpider) Init(ext string) error {

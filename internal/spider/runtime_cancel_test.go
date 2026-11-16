@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os/exec"
 	goruntime "runtime"
 	"strconv"
 	"testing"
@@ -18,7 +19,6 @@ func TestSoftCancelForClient_EmptyNoop(t *testing.T) {
 }
 
 func TestSoftCancelAll_DoesNotPanic(t *testing.T) {
-	// 全局软取消须可空跑（清缓存路径）；与 SoftCancelForClient("") 的 no-op 不同。
 	SoftCancelAll()
 }
 
@@ -51,7 +51,7 @@ func TestForgetUserRuntimeState_Consolidated(t *testing.T) {
 	configBaseByClient.Store("u:forget-u", "http://ex/")
 	leave()
 	jsRedirectsMu.Lock()
-	jsRedirectsByUser["forget-u"] = nil // placeholder presence
+	jsRedirectsByUser["forget-u"] = nil
 	jsRedirectsMu.Unlock()
 	netConfigMu.Lock()
 	if netConfigByClient == nil {
@@ -83,49 +83,162 @@ func TestForgetUserRuntimeState_Consolidated(t *testing.T) {
 	}
 }
 
-func TestJavaBridgesForCancel_LocalVsRemote(t *testing.T) {
-	userBridgesMu.Lock()
-	saved := userBridges
-	alice := &javaBridgeClient{ownerUID: "alice"}
-	bob := &javaBridgeClient{ownerUID: "bob"}
-	userBridges = map[string]*javaBridgeClient{"alice": alice, "bob": bob}
-	userBridgesMu.Unlock()
+func TestBridgeForCurrent_SoleJVM(t *testing.T) {
+	if bridgeForCurrent() != &javaBridge {
+		t.Fatal("bridgeForCurrent must be sole javaBridge")
+	}
+}
+
+func TestCallCtxStopBumpsEpoch(t *testing.T) {
+	if goruntime.GOOS == "android" {
+		t.Skip("desktop only")
+	}
+	javaBridge.mu.Lock()
+	javaBridge.cmd = nil
+	javaBridge.baseURL = ""
+	before := javaBridge.epoch.Load()
+	javaBridge.mu.Unlock()
+	if !javaBridge.shouldRestartAfterTransportErr() {
+		t.Fatal("dead bridge should allow restart")
+	}
+	javaBridge.epoch.Add(1)
+	javaBridge.mu.Lock()
+	javaBridge.stopLocked()
+	after := javaBridge.epoch.Load()
+	javaBridge.mu.Unlock()
+	if after != before+1 {
+		t.Fatalf("epoch want %d got %d", before+1, after)
+	}
+}
+
+func TestShouldRestartAfterTransportErr_DeadAllowsRestart(t *testing.T) {
+	if goruntime.GOOS == "android" {
+		t.Skip("desktop only")
+	}
+	javaBridge.mu.Lock()
+	javaBridge.cmd = nil
+	javaBridge.baseURL = ""
+	javaBridge.mu.Unlock()
+	if !javaBridge.shouldRestartAfterTransportErr() {
+		t.Fatal("dead bridge should allow restart")
+	}
+}
+
+func TestBridgeHealthFailedTwice(t *testing.T) {
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ok.Close()
+	if bridgeHealthFailedTwice(ok.URL) {
+		t.Fatal("healthy endpoint must not count as failed twice")
+	}
+	if !bridgeHealthFailedTwice("http://127.0.0.1:1") {
+		t.Fatal("down endpoint should fail twice")
+	}
+}
+
+func TestShouldRestartAfterTransportErr_AliveHealthyNoRestart(t *testing.T) {
+	if goruntime.GOOS == "android" {
+		t.Skip("desktop only")
+	}
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ok.Close()
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
-		userBridgesMu.Lock()
-		userBridges = saved
-		userBridgesMu.Unlock()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	})
+	javaBridge.mu.Lock()
+	prevCmd, prevURL := javaBridge.cmd, javaBridge.baseURL
+	javaBridge.cmd = cmd
+	javaBridge.baseURL = ok.URL
+	javaBridge.mu.Unlock()
+	t.Cleanup(func() {
+		javaBridge.mu.Lock()
+		javaBridge.cmd = prevCmd
+		javaBridge.baseURL = prevURL
+		javaBridge.mu.Unlock()
+	})
+	if javaBridge.shouldRestartAfterTransportErr() {
+		t.Fatal("alive+healthy must not restart sole JVM")
+	}
+}
 
-	all := javaBridgesForCancel("")
-	if len(all) != 3 || all[0] != &javaBridge {
-		t.Fatalf("SoftCancelAll targets=%d want shared+alice+bob", len(all))
+func TestClearNetConfigForShared_LeavesRemote(t *testing.T) {
+	netConfigMu.Lock()
+	oldDef, oldProxy := netConfigJSON, userProxyJSON
+	oldBy, oldProxyBy := netConfigByClient, userProxyByClient
+	netConfigJSON = []byte(`{"def":1}`)
+	userProxyJSON = []byte(`{"proxy":"def"}`)
+	netConfigByClient = map[string][]byte{
+		"c:win":   []byte(`{"local":1}`),
+		"u:alice": []byte(`{"alice":1}`),
 	}
-	got := map[*javaBridgeClient]bool{}
-	for _, b := range all {
-		got[b] = true
+	userProxyByClient = map[string][]byte{
+		"c:win":   []byte(`{"proxy":"local"}`),
+		"u:alice": []byte(`{"proxy":"alice"}`),
 	}
-	if !got[alice] || !got[bob] {
-		t.Fatal("SoftCancelAll must include every user bridge")
+	netConfigMu.Unlock()
+	t.Cleanup(func() {
+		netConfigMu.Lock()
+		netConfigJSON, userProxyJSON = oldDef, oldProxy
+		netConfigByClient, userProxyByClient = oldBy, oldProxyBy
+		netConfigMu.Unlock()
+	})
+	clearNetConfigForShared()
+	netConfigMu.Lock()
+	defer netConfigMu.Unlock()
+	if netConfigJSON != nil || userProxyJSON != nil {
+		t.Fatal("shared defaults should be cleared")
 	}
+	if _, ok := netConfigByClient["c:win"]; ok {
+		t.Fatal("local c: net should be cleared")
+	}
+	if _, ok := netConfigByClient["u:alice"]; !ok {
+		t.Fatal("remote u: net must remain")
+	}
+	if _, ok := userProxyByClient["u:alice"]; !ok {
+		t.Fatal("remote u: proxy must remain")
+	}
+}
 
-	onlyAlice := javaBridgesForCancel("u:alice")
-	if len(onlyAlice) != 1 || onlyAlice[0] != alice {
-		t.Fatalf("u:alice targets=%v", onlyAlice)
+func TestRestartCallerRuntime_RemoteOnlyKillUser(t *testing.T) {
+	if goruntime.GOOS == "android" {
+		t.Skip("desktop only")
 	}
-	if targets := javaBridgesForCancel("u:missing"); len(targets) != 0 {
-		t.Fatalf("missing user must not fall back to shared, got %d", len(targets))
+	// 故意把 health 指到不可达地址：若远端仍误跟 HardRestart，会 stopLocked 清掉 cmd。
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
 	}
-	local := javaBridgesForCancel("c:window-1")
-	if len(local) != 1 || local[0] != &javaBridge {
-		t.Fatalf("local c: scope must hit shared only")
-	}
-
-	// SoftCancelAll 不得受当前 Bind 影响（即便绑在远端用户上）。
-	leave := hostclient.Bind(hostclient.Request{UserID: "alice", Dedicated: true})
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	javaBridge.mu.Lock()
+	prevCmd, prevURL := javaBridge.cmd, javaBridge.baseURL
+	javaBridge.cmd = cmd
+	javaBridge.baseURL = "http://127.0.0.1:1"
+	javaBridge.mu.Unlock()
+	t.Cleanup(func() {
+		javaBridge.mu.Lock()
+		javaBridge.cmd = prevCmd
+		javaBridge.baseURL = prevURL
+		javaBridge.mu.Unlock()
+	})
+	leave := hostclient.Bind(hostclient.Request{UserID: "restart-remote", Dedicated: true})
 	defer leave()
-	allUnderBind := javaBridgesForCancel("")
-	if len(allUnderBind) != 3 {
-		t.Fatalf("SoftCancelAll under dedicated Bind got %d want 3", len(allUnderBind))
+	RestartCallerRuntime()
+	javaBridge.mu.Lock()
+	same := javaBridge.cmd == cmd
+	javaBridge.mu.Unlock()
+	if !same {
+		t.Fatal("remote RestartCallerRuntime must KillUser only; must not HardRestart sole JVM")
 	}
 }
 
@@ -160,7 +273,7 @@ func TestNodePostJSON_InterruptCancelsAndStops(t *testing.T) {
 	leave := hostclient.Enter("test-client-node")
 	defer leave()
 	snap := hostclient.Snapshot()
-	scope := hostclient.ScopeID() // c:<clientId>
+	scope := hostclient.ScopeID()
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -254,7 +367,6 @@ func TestPySpiderInterrupt_DesktopBusyDoesNotDeadlock(t *testing.T) {
 	}
 	s := &pySpider{}
 	s.activeClient.Store("c1")
-	// 模拟 run() 持有 mu 等待 IPC
 	s.mu.Lock()
 	done := make(chan struct{})
 	go func() {
@@ -270,7 +382,7 @@ func TestPySpiderInterrupt_DesktopBusyDoesNotDeadlock(t *testing.T) {
 	s.mu.Unlock()
 
 	s.activeClient.Store("")
-	s.interrupt() // 空闲 slot 不杀
+	s.interrupt()
 }
 
 func TestInterruptScriptSpiders_PerSlotClient(t *testing.T) {

@@ -32,7 +32,6 @@ configurations {
 dependencies {
     implementation "com.squareup.okhttp3:okhttp:5.5.0"
     implementation "com.squareup.okhttp3:okhttp-dnsoverhttps:5.5.0"
-    implementation "com.squareup.okhttp3:logging-interceptor:5.5.0"
     // WebSocket 会调用 ByteString.base64$default。3.17 没有这个方法，界面消息发不出去。
     implementation "com.squareup.okio:okio:3.18.1"
     implementation "org.brotli:dec:0.1.2"
@@ -62,10 +61,20 @@ dependencies {
     implementation "com.github.luben:zstd-jni:1.5.7-4"
     implementation "org.slf4j:slf4j-simple:2.0.13"
     implementation "wang.harlon.quickjs:wrapper-java:3.2.3"
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
 }
 
 dependencyLocking {
     lockAllConfigurations()
+}
+
+// 测试依赖不进生产锁文件。
+configurations.matching { it.name.toLowerCase().contains("test") }.configureEach {
+    resolutionStrategy.deactivateDependencyLocking()
+}
+
+tasks.named("test", Test).configure {
+    useJUnitPlatform()
 }
 
 tasks.register("extractSardineAndroid", Copy) {

@@ -48,7 +48,7 @@ const (
 )
 
 // NodeHost 管理猫爪 Node 源包：下载、启动、反代与消息回调。
-// 本机共享一份；远端租户按 RuntimeUserID 独立桶（同 JVM / JS-Py 分桶）。
+// 本机共享一份；远端租户按 RuntimeUserID 独立桶（JAR 为单 JVM 内租户；JS/Py 另池）。
 type NodeHost struct {
 	ownerUID    string // RuntimeUserID；空串=本机共享
 	mu          sync.Mutex

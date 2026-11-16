@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -464,13 +463,7 @@ func WithNativeLibDirEnv(env []string, bin string) []string {
 }
 
 func probeAndroidSpider() string {
-	client := &http.Client{Timeout: 800 * time.Millisecond}
-	resp, err := client.Get(localproxy.DefaultBridgeBaseURL() + "/health")
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !localproxy.BridgeHealthy(localproxy.DefaultBridgeBaseURL(), 800*time.Millisecond) {
 		return ""
 	}
 	return fmt.Sprintf("android-bridge(:%d)", localproxy.DefaultBridgePort)

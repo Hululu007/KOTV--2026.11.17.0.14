@@ -14,10 +14,11 @@ import (
 //     安卓：KOTV_CACHE_DIR=Context.getCacheDir() → CacheRoot 与 Path 同根
 //  2. 可变运行时态（按 RuntimeUserID 隔离，空=shared）：
 //     CacheRoot/run/<uid|shared>/{jvm,py,chromium,node,js-local}
-//     桌面 JVM Prefers/files → kotv.user.dir=UserJVMDir（不得再当 Path.jar 根）
+//     桌面 JVM Prefers/files → kotv.user.runtime.root=CacheRoot/run，
+//     bridge 内按 Util.tenantKey() 落到 run/<uid|shared>/jvm/{prefs,files}
 //
 // 进程是否也按用户拆开（与落盘配合）：
-//   - JVM：远端每用户一进程（Prefers/spider 实例在 bridge 内未按 user 隔离）
+//   - JVM：桌面/安卓均为单 bridge；租户可变态在 bridge 内分桶
 //   - Python / Node：每用户独立进程与 workDir/dataDir
 //   - QuickJS：同引擎进程内分槽（jsPyKey 含 RuntimeUserID），无第二 OS 进程
 //   - 嗅探浏览器：每用户独立进程 + user-data-dir（二进制可能是 chrome-headless-shell / chrome.exe 等；Android 为 WebView）
@@ -45,7 +46,8 @@ func userRuntimeRootPath() string {
 	return filepath.Join(CacheRoot(), "run")
 }
 
-// UserJVMDir 该用户 JVM Prefers/files 根（-Dkotv.user.dir；包体不走这里）。
+// UserJVMDir 该用户 JVM Prefers/files 根（包体不走这里）。
+// 单 JVM 下由 bridge 按 tenantKey 解析；KillUser 可整目录擦除。
 func UserJVMDir(userID string) string {
 	return ensure(filepath.Join(UserRuntimeDir(userID), "jvm"))
 }

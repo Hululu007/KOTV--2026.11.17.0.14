@@ -48,6 +48,10 @@ public class Path {
         return Init.context().getCacheDir();
     }
 
+    /**
+     * 桌面 stub：{@link android.content.Context#getFilesDir()} 已按 {@code Util.tenantKey()}
+     * 落到 {@code run/&lt;tenant&gt;/jvm/files}。安卓真机见 kotv-bridge 的 {@code kotv_tenant/}。
+     */
     public static File files() {
         return Init.context().getFilesDir();
     }

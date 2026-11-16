@@ -5,14 +5,16 @@ import com.github.catvod.bean.Header;
 import com.github.catvod.bean.Proxy;
 
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * 按 ScopeID（优先 userId）隔离点播配置里的 headers / proxy / hosts / doh。
- * 空 key 为默认桶（本机单用户兼容）。
+ * 按 ScopeID（clientId，形如 u:&lt;uid&gt; / c:&lt;id&gt;）隔离点播 headers / proxy / hosts / doh。
+ * 空 key 为默认桶（本机 shared 兼容）。
+ * 无绑定线程只回落默认桶，禁止跨租户 lastActive 兜底。
  */
 public final class NetProfiles {
 
@@ -25,39 +27,22 @@ public final class NetProfiles {
 
     private static final ConcurrentHashMap<String, Profile> BY_CLIENT = new ConcurrentHashMap<>();
 
-    /**
-     * 最近活跃的非空 Scope。jar 常自起线程/线程池发请求，ThreadLocal clientId 丢失后
-     * 若落到空默认桶会把 headers/hosts/doh 全丢（全局一份配置时不存在此问题）；
-     * 单前端场景用最近活跃桶兜底即等价。
-     */
-    private static volatile String lastActive = "";
-
     private NetProfiles() {}
 
     public static String key(String clientId) {
         return clientId == null ? "" : clientId.trim();
     }
 
-    /** SpiderBridge 每次调用绑定 clientId 时记录，供无绑定线程兜底。 */
+    /** SpiderBridge 绑定 clientId 时调用（诊断/扩展点；get 不再靠跨租户兜底）。 */
     public static void touch(String clientId) {
-        String k = key(clientId);
-        if (!k.isEmpty()) lastActive = k;
+        key(clientId);
     }
 
     public static Profile get(String clientId) {
         String k = key(clientId);
         Profile p = BY_CLIENT.get(k);
         if (p != null) return p;
-        if (!k.isEmpty()) {
-            p = BY_CLIENT.get("");
-            if (p != null) return p;
-        } else {
-            String la = lastActive;
-            if (!la.isEmpty()) {
-                p = BY_CLIENT.get(la);
-                if (p != null) return p;
-            }
-        }
+        // 无绑定或未知 Scope：只回落默认桶，禁止串到其它用户。
         return BY_CLIENT.computeIfAbsent("", x -> new Profile());
     }
 
@@ -79,6 +64,30 @@ public final class NetProfiles {
         p.hosts.clear();
         if (hosts != null && !hosts.isEmpty()) p.hosts.putAll(hosts);
         p.doh = doh;
+    }
+
+    public static void remove(String clientId) {
+        BY_CLIENT.remove(key(clientId));
+    }
+
+    /** 清某租户：shared→默认桶；远端→裸 id 与 u:&lt;id&gt;。 */
+    public static void removeTenant(String tenant) {
+        if (tenant == null || tenant.isEmpty()) tenant = "shared";
+        String t = tenant.trim();
+        if ("shared".equals(t)) {
+            BY_CLIENT.remove("");
+            return;
+        }
+        BY_CLIENT.remove(t);
+        BY_CLIENT.remove("u:" + t);
+        String prefix = "u:" + t;
+        for (Iterator<String> it = BY_CLIENT.keySet().iterator(); it.hasNext();) {
+            String cid = it.next();
+            if (cid != null && cid.startsWith(prefix) && cid.length() > prefix.length()) {
+                char n = cid.charAt(prefix.length());
+                if (n == ':' || n == '/') it.remove();
+            }
+        }
     }
 
     public static void clearAll() {

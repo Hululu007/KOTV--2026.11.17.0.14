@@ -114,14 +114,24 @@ func (s *SiteService) HomeLoadEpoch() uint64 {
 	return s.loadEpoch.Load()
 }
 
-// SoftCancelPending 软取消当前 Scope 的 JVM / Python / QuickJS / Node 进行中请求。
+// SoftCancelPending 软取消当前 Scope 进行中请求（JAR 不杀唯一 JVM）。
 func (s *SiteService) SoftCancelPending() {
 	spider.SoftCancelForClient(hostclient.ScopeID())
 }
 
-// CancelPendingContent 硬重启当前所属运行时（JVM / Python / QuickJS / Node；离开详情/卡死恢复）。
+// CancelPendingContent 卡死恢复：SoftCancel→清本租户；仅 bridge 不健康时 HardRestart。
+// 本机 hard 清 shared 后立刻 EnsureRootJar，避免 CSP 空 jar 站再也无法用。
 func (s *SiteService) CancelPendingContent() {
 	spider.RestartCallerRuntime()
+	if hostclient.DedicatedRuntime() || s == nil || s.cfg == nil {
+		return
+	}
+	api := s.cfg.API()
+	sp := strings.TrimSpace(api.Spider)
+	if sp == "" {
+		return
+	}
+	_ = spider.EnsureRootJar(sp, api.URL)
 }
 
 func (s *SiteService) HomeContent() (model.Result, error) {
@@ -226,7 +236,9 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		}
 		// type2：非 spider 分支，JSON 解析（FromType≠0→JSON）。
 		var body string
-		body, err = util.HTTPGetParamsInsecure(site.API, map[string]string(site.Header), nil)
+		ctx, end := spider.BeginScopeHTTP(hostclient.ScopeID())
+		body, err = util.HTTPGetParamsInsecureCtx(ctx, site.API, map[string]string(site.Header), nil)
+		end()
 		if err != nil {
 			return failed(err)
 		}
@@ -887,7 +899,9 @@ func (s *SiteService) Action(site model.Site, action string) (string, error) {
 		if action == "" || !strings.HasPrefix(strings.ToLower(action), "http") {
 			return "{}", nil
 		}
-		body, gerr := util.HTTPGetParamsInsecure(action, nil, nil)
+		ctx, end := spider.BeginScopeHTTP(hostclient.ScopeID())
+		body, gerr := util.HTTPGetParamsInsecureCtx(ctx, action, nil, nil)
+		end()
 		if gerr != nil || strings.TrimSpace(body) == "" {
 			return "{}", nil
 		}

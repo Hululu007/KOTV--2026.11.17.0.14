@@ -40,8 +40,8 @@ import java.util.regex.Pattern;
 public class Util {
     /**
      * 当前 JAR 调用所属的 Flutter clientId / Scope（由 SpiderBridge 从请求注入）。
-     * InheritableThreadLocal：jar 里 new Thread 的子线程继承 scope；
-     * 线程池内丢失的场景由 NetProfiles.lastActive 兜底。
+     * InheritableThreadLocal：jar 里 new Thread 的子线程继承 scope。
+     * 线程池须靠 bindCallScope；NetProfiles 无绑定时只回落默认桶，禁止跨租户兜底。
      */
     private static final ThreadLocal<String> CLIENT_ID_TL = new InheritableThreadLocal<>();
     /** 远端鉴权用户 id（稳定 UUID）；界面消息 / Scope 路由用，不进 cookie 目录名。 */
@@ -262,6 +262,18 @@ public class Util {
     public static String userId() {
         String s = USER_ID_TL.get();
         return s == null ? "" : s;
+    }
+
+    /**
+     * 单 bridge 多用户可变态分桶键：远端裸 userId；本机空 uid → {@code shared}。
+     * Prefers / spiders / recentJar 等一律走此键，勿再散落拼装。
+     */
+    public static String tenantKey() {
+        String uid = userId().trim();
+        if (uid.isEmpty()) return "shared";
+        if (uid.startsWith("u:") && uid.length() > 2) return uid.substring(2).trim();
+        if (uid.startsWith("c:")) return "shared"; // 本机 Scope 误写入 userId 时仍归共享桶
+        return uid;
     }
 
     /** 绑定远端登录名（裸用户名）；仅 cookie 目录用。 */

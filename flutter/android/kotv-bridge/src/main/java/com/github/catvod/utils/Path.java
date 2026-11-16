@@ -60,12 +60,25 @@ public class Path {
         return c.getCacheDir();
     }
 
+    /**
+     * 站点可写 files：按 {@link Util#tenantKey()} 分子目录，与桌面
+     * {@code run/&lt;tenant&gt;/jvm/files} 同构，避免单 SpiderService 多用户串文件。
+     * 凭证仍走 {@link #tv()}。
+     */
     public static File files() {
         android.content.Context c = Init.context();
         if (c == null) {
             throw new IllegalStateException("Init.context is null; App must call Init.set");
         }
-        return c.getFilesDir();
+        File root = c.getFilesDir();
+        String tenant;
+        try {
+            tenant = Util.tenantKey();
+        } catch (Throwable ignored) {
+            tenant = "shared";
+        }
+        if (tenant == null || tenant.isEmpty()) tenant = "shared";
+        return mkdir(new File(new File(root, "kotv_tenant"), tenant));
     }
 
     public static String rootPath() {

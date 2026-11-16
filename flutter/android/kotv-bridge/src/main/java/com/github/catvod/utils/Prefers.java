@@ -3,13 +3,10 @@ package com.github.catvod.utils;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import androidx.preference.PreferenceManager;
-
 import com.github.catvod.Init;
 
 /**
- * App CL 宿主 Prefers（迅雷 AAR + 站点父优先都会命中本类）。
- * API /bridge，避免瘦 shim 盖住 bridge 实现后缺方法。
+ * App CL 宿主 Prefers：按 {@link Util#tenantKey()} 分文件，单 SpiderService 多用户不串凭证。
  */
 public class Prefers {
 
@@ -18,7 +15,8 @@ public class Prefers {
         if (ctx == null) {
             throw new IllegalStateException("Init.context is null; App must call Init.set");
         }
-        return PreferenceManager.getDefaultSharedPreferences(ctx);
+        String name = "kotv_" + Util.tenantKey() + "_preferences";
+        return ctx.getSharedPreferences(name, Context.MODE_PRIVATE);
     }
 
     public static String getString(String key) {

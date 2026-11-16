@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -32,7 +33,7 @@ String kotvEngineHealthProblem(Map<String, dynamic>? h) {
   return '';
 }
 
-/// 后端简介「平台 架构 · 版本」，如 android arm64 · 0.3.2。
+/// 后端简介「平台 架构 · 版本」，如 android arm64 · 0.3.3。
 String kotvEngineLabel(Map<String, dynamic> h) {
   final host = ['${h['platform'] ?? ''}', '${h['arch'] ?? ''}'].where((e) => e.isNotEmpty).join(' ');
   final version = '${h['version'] ?? ''}';
@@ -298,15 +299,21 @@ class KotvApi {
 
   Future<Map<String, dynamic>> getConfig() => _get('/api/v1/config');
 
-  Future<Map<String, dynamic>> loadConfig(String source) =>
-      _post('/api/v1/config', {'source': source});
+  /// 换仓前先 soft 取消旧 Scope in-flight，避免卡满 120s 才切得动。
+  Future<Map<String, dynamic>> loadConfig(String source) async {
+    unawaited(cancelPending(hard: false, thunder: false));
+    return _post('/api/v1/config', {'source': source});
+  }
 
   /// 重新请求当前 http(s) 仓库，并重新检查 jar 与 js/py。
   Future<Map<String, dynamic>> refreshConfig() =>
       _post('/api/v1/config/refresh', {});
 
-  Future<Map<String, dynamic>> setHome(String siteKey) =>
-      _post('/api/v1/sites', {'home': siteKey});
+  /// 换站前先 soft 取消旧首页/分类 in-flight。
+  Future<Map<String, dynamic>> setHome(String siteKey) async {
+    unawaited(cancelPending(hard: false, thunder: false));
+    return _post('/api/v1/sites', {'home': siteKey});
+  }
 
   Future<Map<String, dynamic>> toggleSite({
     required String field,
@@ -615,8 +622,8 @@ class KotvApi {
       _post('/library', body, timeout: const Duration(seconds: 30));
 
   /// 打断进行中的详情/分类等爬虫请求。
-  /// [hard] false：取消当前会话 Java / Python·JS / Node 进行中调用（放弃后回收运行时）；
-  /// true：硬杀所属 JVM / Py·JS / Node。换集默认 soft。
+  /// [hard] false：软取消当前 Scope（不杀唯一 JVM）；换集/离开/搜索默认 soft。
+  /// true：显式卡死恢复（清本租户态；仅 bridge 不健康时才 HardRestart）。不自动升档。
   /// [thunder] 停磁力 Fetch / 专用源；默认 false（离开详情不停；磁力起播显式 true）。
   Future<Map<String, dynamic>> cancelPending({bool hard = false, bool thunder = false}) async {
     try {

@@ -109,6 +109,10 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if rejectUnlessPost(w, r) {
 		return
 	}
+	// 作废 token 前先释放该用户运行时（与 session/leave 同口径，幂等）。
+	if api := s.content(); api != nil && authUserFrom(r.Context()) != nil {
+		_ = api.APISessionLeave()
+	}
 	auth.Logout(auth.BearerFromHeader(r.Header.Get("Authorization")))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

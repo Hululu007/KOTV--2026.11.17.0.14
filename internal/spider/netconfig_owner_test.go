@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestCurrentNetConfigFor_FiltersByOwner(t *testing.T) {
+func TestCurrentAllNetConfig_IncludesEveryScope(t *testing.T) {
 	netConfigMu.Lock()
 	oldDef := netConfigJSON
 	oldBy := netConfigByClient
@@ -34,28 +34,18 @@ func TestCurrentNetConfigFor_FiltersByOwner(t *testing.T) {
 		netConfigMu.Unlock()
 	})
 
-	shared := currentNetConfigFor("")
+	all := currentAllNetConfig()
 	got := map[string]bool{}
-	for _, b := range shared {
+	for _, b := range all {
 		got[string(b)] = true
 	}
-	if !got[`{"def":1}`] || !got[`{"proxy":"def"}`] || !got[`{"localProxy":1}`] || !got[`{"local":1}`] {
-		t.Fatalf("shared missing defaults/local c: : %v", got)
-	}
-	if got[`{"alice":1}`] || got[`{"bob":1}`] {
-		t.Fatalf("shared must not include tenant net: %v", got)
-	}
-
-	alice := currentNetConfigFor("alice")
-	got = map[string]bool{}
-	for _, b := range alice {
-		got[string(b)] = true
-	}
-	if !got[`{"alice":1}`] || !got[`{"proxy":"alice"}`] || !got[`{"localProxy":1}`] {
-		t.Fatalf("alice missing own net: %v", got)
-	}
-	if got[`{"bob":1}`] || got[`{"proxy":"bob"}`] || got[`{"def":1}`] {
-		t.Fatalf("alice must not get others: %v", got)
+	for _, want := range []string{
+		`{"def":1}`, `{"proxy":"def"}`, `{"localProxy":1}`, `{"local":1}`,
+		`{"alice":1}`, `{"bob":1}`, `{"proxy":"alice"}`, `{"proxy":"bob"}`,
+	} {
+		if !got[want] {
+			t.Fatalf("single JVM replay missing %s: %v", want, got)
+		}
 	}
 }
 

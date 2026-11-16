@@ -58,7 +58,12 @@ public class SpiderBridge {
     /** 这次卸载之后才发出的请求才能再装 jar。更早的请求即使晚到也不装。 */
     private static final AtomicLong acceptedJarGen = new AtomicLong();
     private static final ThreadLocal<Long> callJarGen = new ThreadLocal<>();
-    private static volatile String recentJar;
+    /** 每租户最近 jar 路径（tenantKey → path）；loaders 仍按路径全局共享。 */
+    private static final ConcurrentHashMap<String, String> recentJarByTenant = new ConcurrentHashMap<>();
+    /** 用户设置代理：按 clientId（与 NetProfiles 同维），禁止全局覆盖。 */
+    private static final ConcurrentHashMap<String, java.net.Proxy> userProxyByClient = new ConcurrentHashMap<>();
+    /** SoftCancel：仅 interrupt 该 clientId 正在跑的 /jar/call 线程（parseJar 已轮询 interrupted）。 */
+    private static final ConcurrentHashMap<String, java.util.Set<Thread>> callThreadsByClient = new ConcurrentHashMap<>();
 
     /** 同 jar 的 pdfh/pdfa/pd/pdfl 共用；invoke 时 synchronized，避免 Cache 并发写。 */
     private static final class JsParseSession {
@@ -224,7 +229,7 @@ public class SpiderBridge {
                         return newFixedLengthResponse(NanoHTTPD.Response.Status.OK, "application/json; charset=utf-8", "{\"ok\":true}");
                     }
                     if ("/jar/interrupt".equals(uri)) {
-                        clear();
+                        clearAll();
                         try {
                             com.github.catvod.net.OkHttp.cancelAll();
                         } catch (Throwable ignored) {
@@ -265,6 +270,12 @@ public class SpiderBridge {
             } catch (Throwable ignored) {
             }
         }
+        softCancelClient(cid);
+    }
+
+    /** OkHttp cancel + 仅 interrupt 该 clientId 的 call 线程（空 cid=全部）。 */
+    private static void softCancelClient(String cid) {
+        if (cid == null) cid = "";
         try {
             if (cid.isEmpty()) {
                 com.github.catvod.net.OkHttp.cancelAll();
@@ -272,6 +283,45 @@ public class SpiderBridge {
                 com.github.catvod.net.OkHttp.cancel(cid);
             }
         } catch (Throwable ignored) {
+        }
+        interruptCallThreads(cid);
+    }
+
+    private static void registerCallThread(String clientId, Thread t) {
+        if (t == null) return;
+        String cid = clientId == null ? "" : clientId;
+        callThreadsByClient.computeIfAbsent(cid, k -> java.util.concurrent.ConcurrentHashMap.newKeySet()).add(t);
+    }
+
+    private static void unregisterCallThread(String clientId, Thread t) {
+        if (t == null) return;
+        String cid = clientId == null ? "" : clientId;
+        java.util.Set<Thread> set = callThreadsByClient.get(cid);
+        if (set == null) return;
+        set.remove(t);
+        if (set.isEmpty()) callThreadsByClient.remove(cid, set);
+    }
+
+    private static void interruptCallThreads(String clientId) {
+        if (clientId == null || clientId.isEmpty()) {
+            for (java.util.Set<Thread> set : callThreadsByClient.values()) {
+                if (set == null) continue;
+                for (Thread t : set) {
+                    try {
+                        t.interrupt();
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+            return;
+        }
+        java.util.Set<Thread> set = callThreadsByClient.get(clientId);
+        if (set == null) return;
+        for (Thread t : set) {
+            try {
+                t.interrupt();
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -364,140 +414,158 @@ public class SpiderBridge {
                 }
             }
             bindCallScope(clientId, userId, username, remoteUi);
-            String method = req.get("method").getAsString();
-            long callGen = Long.MAX_VALUE;
-            if (req.has("jarGen") && !req.get("jarGen").isJsonNull()) {
-                callGen = req.get("jarGen").getAsLong();
-            }
-            if ("clear".equals(method)) {
-                acceptJarGen(callGen);
-            }
-            callJarGen.set(callGen);
-            if ("selfCheck".equals(method)) {
-                return selfCheck();
-            }
-            JsonObject argsObj = req.has("args") && !req.get("args").isJsonNull()
-                    ? req.getAsJsonObject("args") : new JsonObject();
-            if ("proxyGlobal".equals(method)) {
-                Map<String, String> params = GSON.fromJson(argsObj.get("params"), Map.class);
-                return encodeProxyResponse(invokeJarProxy(params));
-            }
-            if ("clear".equals(method)) {
-                clear();
-                return "{}";
-            }
-            // 打断卡住的 OkHttp 调用（换源/关停时）。
-            if ("cancelAll".equals(method)) {
-                try {
-                    com.github.catvod.net.OkHttp.cancelAll();
-                } catch (Throwable ignored) {
-                }
-                return "{}";
-            }
-            // 按 Flutter clientId 软取消 OkHttp（多前端并发时不杀 JVM）。
-            if ("cancelClient".equals(method)) {
-                String cid = "";
-                if (argsObj.has("clientId") && !argsObj.get("clientId").isJsonNull()) {
-                    cid = argsObj.get("clientId").getAsString();
-                } else if (req.has("clientId") && !req.get("clientId").isJsonNull()) {
-                    cid = req.get("clientId").getAsString();
-                }
-                if (cid == null) cid = "";
-                try {
-                    if (cid.isEmpty()) {
-                        com.github.catvod.net.OkHttp.cancelAll();
-                    } else {
-                        com.github.catvod.net.OkHttp.cancel(cid);
-                    }
-                } catch (Throwable ignored) {
-                }
-                return "{}";
-            }
-            if ("setRecent".equals(method)) {
-                String jar = jarArg(argsObj, req);
-                if (!jar.isEmpty()) parseJar(jar, true);
-                return "{}";
-            }
-            // 只确保 ClassLoader+Init+Proxy。recent 在锁内设置，卸掉后不再写回。
-            if ("parseJar".equals(method)) {
-                String jar = jarArg(argsObj, req);
-                if (!jar.isEmpty()) {
-                    boolean recent = argsObj.has("recent") && !argsObj.get("recent").isJsonNull()
-                            && argsObj.get("recent").getAsBoolean();
-                    parseJar(jar, recent);
-                }
-                return "{}";
-            }
-            // 缓存刷新后按路径重载：丢弃该 jar 的爬虫/ClassLoader 再重新 parseJar，
-            // 否则磁盘换了新包、内存里仍是旧类（需整包 clear 才生效）。
-            if ("reloadJar".equals(method)) {
-                String jar = jarArg(argsObj, req);
-                if (!jar.isEmpty() && !jarGenStale()) {
-                    boolean keepRecent = jar.equals(recentJar);
-                    unloadJar(jar);
-                    parseJar(jar, keepRecent);
-                }
-                return "{}";
-            }
-            if ("configNet".equals(method)) {
-                applyNetConfig(argsObj);
-                return "{}";
-            }
-            if ("configProxy".equals(method)) {
-                setUserProxy(argsObj.has("url") && !argsObj.get("url").isJsonNull()
-                        ? argsObj.get("url").getAsString() : "");
-                return "{}";
-            }
-            if ("configLocalProxy".equals(method)) {
-                int p = argsObj.has("port") && !argsObj.get("port").isJsonNull()
-                        ? argsObj.get("port").getAsInt() : 0;
-                applyLocalProxyPort(p);
-                return "{}";
-            }
-            if ("javaInvoke".equals(method)) {
-                return JavaInvoke.handle(argsObj);
-            }
-            // JarLoader.jsonExt / jsonExtMix：只用 recent ClassLoader，不走 getSpider。
-            if ("jsonExt".equals(method)) {
-                String parseKey = argsObj.get("parseKey").getAsString();
-                LinkedHashMap<String, String> jxs = GSON.fromJson(argsObj.get("jxs"), LinkedHashMap.class);
-                String url = argsObj.get("url").getAsString();
-                return emptyToObject(invokeJsonExt(parseKey, jxs, url));
-            }
-            if ("jsonExtMix".equals(method)) {
-                String parseKey = argsObj.get("parseKey").getAsString();
-                String name = argsObj.get("name").getAsString();
-                String flag = argsObj.get("flag").getAsString();
-                LinkedHashMap<String, HashMap<String, String>> jxs =
-                        GSON.fromJson(argsObj.get("jxs"), LinkedHashMap.class);
-                String url = argsObj.get("url").getAsString();
-                return emptyToObject(invokeJsonExtMix(parseKey, name, flag, jxs, url));
-            }
-            // JsLoader.createFun：从 jar ClassLoader 调 pdfh/pdfa/pd/pdfl（Go QJS 经 RPC）。
-            if ("jsParse".equals(method)) {
-                return invokeJsParse(argsObj);
-            }
-            String key = req.get("key").getAsString();
-            String api = req.get("api").getAsString();
-            String ext = req.has("ext") ? req.get("ext").getAsString() : "";
-            String jar = req.get("jar").getAsString();
-            String spiderMethod = method;
+            Thread callThread = Thread.currentThread();
+            registerCallThread(clientId, callThread);
             try {
-            Spider spider = getSpider(key, api, ext, jar);
-                adoptRecentIfEmpty(jar);
-                return nonempty(invoke(spider, spiderMethod, argsObj, jar));
-        } catch (Throwable t) {
-            t.printStackTrace(System.err);
-            JsonObject err = new JsonObject();
-            err.addProperty("error", t.toString());
-            return GSON.toJson(err);
-        }
+                String method = req.get("method").getAsString();
+                long callGen = Long.MAX_VALUE;
+                if (req.has("jarGen") && !req.get("jarGen").isJsonNull()) {
+                    callGen = req.get("jarGen").getAsLong();
+                }
+                if ("clear".equals(method)) {
+                    acceptJarGen(callGen);
+                }
+                callJarGen.set(callGen);
+                if ("selfCheck".equals(method)) {
+                    return selfCheck();
+                }
+                JsonObject argsObj = req.has("args") && !req.get("args").isJsonNull()
+                        ? req.getAsJsonObject("args") : new JsonObject();
+                if ("proxyGlobal".equals(method)) {
+                    Map<String, String> params = GSON.fromJson(argsObj.get("params"), Map.class);
+                    return encodeProxyResponse(invokeJarProxy(params));
+                }
+                if ("clear".equals(method)) {
+                    // 无 userId → clearAll（清缓存/HardRestart）；有 userId → clearTenant（bind 后的 tenantKey）。
+                    String clearUid = userId == null ? "" : userId.trim();
+                    if (clearUid.isEmpty()) {
+                        clearAll();
+                    } else {
+                        clearTenant(com.github.catvod.utils.Util.tenantKey());
+                    }
+                    return "{}";
+                }
+                if ("clearTenant".equals(method)) {
+                    String t = argsObj.has("userId") && !argsObj.get("userId").isJsonNull()
+                            ? argsObj.get("userId").getAsString() : userId;
+                    if (t == null) t = "";
+                    t = t.trim();
+                    if (t.startsWith("u:") && t.length() > 2) t = t.substring(2).trim();
+                    if (t.isEmpty()) t = "shared";
+                    clearTenant(t);
+                    return "{}";
+                }
+                // 打断卡住的 OkHttp 调用（换源/关停时）。
+                if ("cancelAll".equals(method)) {
+                    try {
+                        com.github.catvod.net.OkHttp.cancelAll();
+                    } catch (Throwable ignored) {
+                    }
+                    return "{}";
+                }
+                // 按 Flutter clientId 软取消 OkHttp + interrupt 该 Scope 的 call 线程。
+                if ("cancelClient".equals(method)) {
+                    String cid = "";
+                    if (argsObj.has("clientId") && !argsObj.get("clientId").isJsonNull()) {
+                        cid = argsObj.get("clientId").getAsString();
+                    } else if (req.has("clientId") && !req.get("clientId").isJsonNull()) {
+                        cid = req.get("clientId").getAsString();
+                    }
+                    if (cid == null) cid = "";
+                    softCancelClient(cid);
+                    return "{}";
+                }
+                if ("setRecent".equals(method)) {
+                    String jar = jarArg(argsObj, req);
+                    if (!jar.isEmpty()) parseJar(jar, true);
+                    return "{}";
+                }
+                // 只确保 ClassLoader+Init+Proxy。recent 在锁内设置，卸掉后不再写回。
+                if ("parseJar".equals(method)) {
+                    String jar = jarArg(argsObj, req);
+                    if (!jar.isEmpty()) {
+                        boolean recent = argsObj.has("recent") && !argsObj.get("recent").isJsonNull()
+                                && argsObj.get("recent").getAsBoolean();
+                        parseJar(jar, recent);
+                    }
+                    return "{}";
+                }
+                // 缓存刷新后按路径重载：丢弃该 jar 的爬虫/ClassLoader 再重新 parseJar，
+                // 否则磁盘换了新包、内存里仍是旧类（需整包 clear 才生效）。
+                if ("reloadJar".equals(method)) {
+                    String jar = jarArg(argsObj, req);
+                    if (!jar.isEmpty() && !jarGenStale()) {
+                        boolean keepRecent = jar.equals(recentJar());
+                        unloadJar(jar);
+                        parseJar(jar, keepRecent);
+                    }
+                    return "{}";
+                }
+                if ("configNet".equals(method)) {
+                    applyNetConfig(argsObj);
+                    return "{}";
+                }
+                if ("configProxy".equals(method)) {
+                    setUserProxy(argsObj.has("url") && !argsObj.get("url").isJsonNull()
+                            ? argsObj.get("url").getAsString() : "");
+                    return "{}";
+                }
+                if ("configLocalProxy".equals(method)) {
+                    int p = argsObj.has("port") && !argsObj.get("port").isJsonNull()
+                            ? argsObj.get("port").getAsInt() : 0;
+                    applyLocalProxyPort(p);
+                    return "{}";
+                }
+                if ("javaInvoke".equals(method)) {
+                    return JavaInvoke.handle(argsObj);
+                }
+                // JarLoader.jsonExt / jsonExtMix：只用 recent ClassLoader，不走 getSpider。
+                if ("jsonExt".equals(method)) {
+                    String parseKey = argsObj.get("parseKey").getAsString();
+                    LinkedHashMap<String, String> jxs = GSON.fromJson(argsObj.get("jxs"), LinkedHashMap.class);
+                    String url = argsObj.get("url").getAsString();
+                    return emptyToObject(invokeJsonExt(parseKey, jxs, url));
+                }
+                if ("jsonExtMix".equals(method)) {
+                    String parseKey = argsObj.get("parseKey").getAsString();
+                    String name = argsObj.get("name").getAsString();
+                    String flag = argsObj.get("flag").getAsString();
+                    LinkedHashMap<String, HashMap<String, String>> jxs =
+                            GSON.fromJson(argsObj.get("jxs"), LinkedHashMap.class);
+                    String url = argsObj.get("url").getAsString();
+                    return emptyToObject(invokeJsonExtMix(parseKey, name, flag, jxs, url));
+                }
+                // JsLoader.createFun：从 jar ClassLoader 调 pdfh/pdfa/pd/pdfl（Go QJS 经 RPC）。
+                if ("jsParse".equals(method)) {
+                    return invokeJsParse(argsObj);
+                }
+                String key = req.get("key").getAsString();
+                String api = req.get("api").getAsString();
+                String ext = req.has("ext") ? req.get("ext").getAsString() : "";
+                String jar = req.get("jar").getAsString();
+                String spiderMethod = method;
+                try {
+                    Spider spider = getSpider(key, api, ext, jar);
+                    adoptRecentIfEmpty(jar);
+                    return nonempty(invoke(spider, spiderMethod, argsObj, jar));
+                } catch (Throwable t) {
+                    t.printStackTrace(System.err);
+                    JsonObject err = new JsonObject();
+                    err.addProperty("error", t.toString());
+                    return GSON.toJson(err);
+                }
+            } finally {
+                unregisterCallThread(clientId, callThread);
+                Thread.interrupted();
+            }
         } catch (Throwable t) {
             t.printStackTrace(System.err);
             JsonObject err = new JsonObject();
             err.addProperty("error", t.toString());
             return GSON.toJson(err);
         } finally {
+            // 清 SoftCancel 留下的 interrupt 标志，避免污染同线程后续请求。
+            Thread.interrupted();
             callJarGen.remove();
             clearCallScope(remoteUi);
         }
@@ -542,9 +610,7 @@ public class SpiderBridge {
         return raw;
     }
 
- /** 避免继承系统 SOCKS/HTTP 代理导致 NoRouteToHost。 */
- /** 用户在 KOTV 设置里配置的全局代理；随设置变更由 configProxy 命令更新，供 OkProxySelector 回落使用。 */
-    private static volatile java.net.Proxy userProxy;
+    /** 避免继承系统 SOCKS/HTTP 代理导致 NoRouteToHost。 */
     private static volatile boolean systemProxyInstalled;
 
     private static void disableSystemProxies() {
@@ -559,13 +625,13 @@ public class SpiderBridge {
             System.clearProperty(k);
             System.setProperty(k, "");
         }
- // 只安装一次默认选择器，OkProxySelector 构造时捕获它并读取 userProxy 动态字段。
+        // 只安装一次默认选择器；回落代理按当前 clientId 读 userProxyByClient。
         if (systemProxyInstalled) return;
         systemProxyInstalled = true;
         java.net.ProxySelector.setDefault(new java.net.ProxySelector() {
             @Override
             public List<java.net.Proxy> select(java.net.URI uri) {
-                java.net.Proxy p = userProxy;
+                java.net.Proxy p = currentUserProxy();
                 if (p != null && uri != null && uri.getHost() != null
                         && !"127.0.0.1".equals(uri.getHost()) && !"localhost".equals(uri.getHost())) {
                     return Collections.singletonList(p);
@@ -579,11 +645,19 @@ public class SpiderBridge {
         });
     }
 
- /** 用户代理设置：JAR 未命中配置 proxy 规则时走用户代理。 */
+    private static java.net.Proxy currentUserProxy() {
+        String cid = com.github.catvod.utils.Util.clientId();
+        if (cid == null) cid = "";
+        return userProxyByClient.get(cid);
+    }
+
+    /** 用户代理设置：JAR 未命中配置 proxy 规则时走用户代理（按当前 clientId）。 */
     private static void setUserProxy(String spec) {
+        String cid = com.github.catvod.utils.Util.clientId();
+        if (cid == null) cid = "";
         spec = spec == null ? "" : spec.trim();
         if (spec.isEmpty()) {
-            userProxy = null;
+            userProxyByClient.remove(cid);
             return;
         }
         try {
@@ -599,16 +673,28 @@ public class SpiderBridge {
                 host = hostPort.substring(0, colon);
                 port = Integer.parseInt(hostPort.substring(colon + 1));
             }
-            userProxy = new java.net.Proxy(type, new java.net.InetSocketAddress(host, port));
+            userProxyByClient.put(cid, new java.net.Proxy(type, new java.net.InetSocketAddress(host, port)));
         } catch (Throwable e) {
             System.err.println("setUserProxy failed: " + e);
-            userProxy = null;
+            userProxyByClient.remove(cid);
         }
     }
 
+    private static String recentJar() {
+        return recentJarByTenant.get(com.github.catvod.utils.Util.tenantKey());
+    }
+
+    private static void setRecentJar(String jarPath) {
+        if (jarPath == null || jarPath.isEmpty()) {
+            recentJarByTenant.remove(com.github.catvod.utils.Util.tenantKey());
+            return;
+        }
+        recentJarByTenant.put(com.github.catvod.utils.Util.tenantKey(), jarPath);
+    }
+
     private static Spider getSpider(String key, String api, String ext, String jarPath) throws Exception {
-        // spKey = md5(jar) + siteKey；JarLoader.getSpider。
-        String spKey = md5Hex(jarPath) + key;
+        // spKey = tenant + md5(jar) + siteKey；同 jar 多租户各有实例。
+        String spKey = com.github.catvod.utils.Util.tenantKey() + "\0" + md5Hex(jarPath) + key;
         Spider cached = spiders.get(spKey);
         if (cached != null && !(cached instanceof SpiderNull)) {
             ClassLoader existing = loaders.get(jarPath);
@@ -663,11 +749,12 @@ public class SpiderBridge {
             }
     }
 
-    /** recent 为空且该 jar 已装入时记上，进程重启后的第一次调用仍能给 proxy 用。已有 recent 不覆盖。 */
+    /** 当前租户 recent 为空且该 jar 已装入时记上。已有 recent 不覆盖。 */
     private static void adoptRecentIfEmpty(String jarPath) {
         if (jarPath == null || jarPath.isEmpty()) return;
-        if (recentJar != null && !recentJar.isEmpty()) return;
-        if (loaders.containsKey(jarPath)) recentJar = jarPath;
+        String cur = recentJar();
+        if (cur != null && !cur.isEmpty()) return;
+        if (loaders.containsKey(jarPath)) setRecentJar(jarPath);
     }
 
     /** {@code csp_Nostr} → {@code com.github.catvod.spider.Nostr}，按 {@code api.split("csp_")[1]} 取类名。 */
@@ -729,10 +816,10 @@ public class SpiderBridge {
         synchronized (lock) {
             if (Thread.interrupted()) return;
             if (jarGenStale()) return;
-            if (onlyIfRecent && !jarPath.equals(recentJar)) return;
+            if (onlyIfRecent && !jarPath.equals(recentJar())) return;
             if (epoch != jarEpoch.getOrDefault(jarPath, 0L)) return;
             if (loaders.containsKey(jarPath)) {
-                if (recent) recentJar = jarPath;
+                if (recent) setRecentJar(jarPath);
                 return;
             }
             ClassLoader loader = null;
@@ -755,13 +842,13 @@ public class SpiderBridge {
                 } finally {
                     Thread.currentThread().setContextClassLoader(prev);
                 }
-                if (Thread.interrupted() || jarGenStale() || (onlyIfRecent && !jarPath.equals(recentJar))
+                if (Thread.interrupted() || jarGenStale() || (onlyIfRecent && !jarPath.equals(recentJar()))
                         || epoch != jarEpoch.getOrDefault(jarPath, 0L)) {
                     closeLoader(loader);
                     return;
                 }
                 loaders.put(jarPath, loader);
-                if (recent) recentJar = jarPath;
+                if (recent) setRecentJar(jarPath);
             } catch (Exception e) {
                 closeLoader(loader);
                 System.err.println("parseJar failed: " + jarPath + ": " + e);
@@ -1340,7 +1427,7 @@ public class SpiderBridge {
     }
 
     private static Object invokeJarProxy(Map<String, String> params) {
-        String recent = recentJar;
+        String recent = recentJar();
         if (recent != null) {
             Object result = invokeProxyMethod(proxyMethods.get(recent), params);
             if (result != null) return result;
@@ -1410,7 +1497,8 @@ public class SpiderBridge {
         return result;
     }
 
-    private static void clear() {
+    /** 全清：所有租户 spiders + ClassLoader + 全局网络态（清缓存 / interrupt / HardRestart）。 */
+    private static void clearAll() {
         Set<String> paths = new HashSet<>(jarLocks.keySet());
         paths.addAll(loaders.keySet());
         for (String path : paths) {
@@ -1430,23 +1518,82 @@ public class SpiderBridge {
         spiders.clear();
         proxyMethods.clear();
         jsParseSessions.clear();
-        recentJar = null;
+        recentJarByTenant.clear();
+        userProxyByClient.clear();
         for (ClassLoader loader : new ArrayList<>(loaders.values())) {
             closeLoader(loader);
         }
         loaders.clear();
         jarLocks.clear();
         JavaInvoke.reset();
+        evictStubPreferences(null);
         try {
-            com.github.catvod.net.OkHttp.get().clear();
+            com.github.catvod.net.OkHttp.get().clearAllNetworks();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 只清某一租户的 spiders / recent / proxy / NetProfiles / Prefers / OkHttp 鉴权记忆；不动共享 ClassLoader。 */
+    private static void clearTenant(String tenant) {
+        if (tenant == null || tenant.isEmpty()) tenant = "shared";
+        String prefix = tenant + "\0";
+        for (java.util.Iterator<Map.Entry<String, Spider>> it = spiders.entrySet().iterator(); it.hasNext();) {
+            Map.Entry<String, Spider> entry = it.next();
+            if (!entry.getKey().startsWith(prefix)) continue;
+            try {
+                entry.getValue().destroy();
+            } catch (Throwable error) {
+                System.err.println("spider destroy failed: " + error);
+            }
+            it.remove();
+        }
+        recentJarByTenant.remove(tenant);
+        for (java.util.Iterator<Map.Entry<String, java.net.Proxy>> it = userProxyByClient.entrySet().iterator(); it.hasNext();) {
+            String cid = it.next().getKey();
+            if (cid == null) continue;
+            if (cid.equals(tenant) || cid.equals("u:" + tenant)) {
+                it.remove();
+            } else if (cid.startsWith("u:" + tenant) && cid.length() > ("u:" + tenant).length()) {
+                char n = cid.charAt(("u:" + tenant).length());
+                if (n == ':' || n == '/') it.remove();
+            }
+        }
+        try {
+            com.github.catvod.net.NetProfiles.removeTenant(tenant);
+        } catch (Throwable ignored) {
+        }
+        evictStubPreferences(tenant);
+        try {
+            com.github.catvod.net.OkHttp.requestInterceptor().clearTenant(tenant);
+            com.github.catvod.net.OkHttp.authInterceptor().clearTenant(tenant);
+            com.github.catvod.net.OkHttp.responseInterceptor().clearTenant(tenant);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * 桌面 stub Context 才有 Prefers 内存缓存；真实 Android Context 无此 API。
+     * 反射调用以免 kotv-bridge 对 SDK Context 编译失败；ART 上 no-op（落盘由 Go 擦租户目录）。
+     * tenantOrNull=null → 全清；非空 → 只清该租户。
+     */
+    private static void evictStubPreferences(String tenantOrNull) {
+        if (isArtVm()) return;
+        try {
+            if (tenantOrNull == null) {
+                android.content.Context.class.getMethod("evictAllPreferences").invoke(null);
+            } else {
+                android.content.Context.class.getMethod("evictTenantPreferences", String.class)
+                        .invoke(null, tenantOrNull);
+            }
         } catch (Throwable ignored) {
         }
     }
 
     static List<ClassLoader> extraLoaders() {
         List<ClassLoader> out = new ArrayList<>();
-        if (recentJar != null) {
-            ClassLoader loader = loaders.get(recentJar);
+        String recent = recentJar();
+        if (recent != null) {
+            ClassLoader loader = loaders.get(recent);
             if (loader != null) out.add(loader);
         }
         for (ClassLoader loader : loaders.values()) {
@@ -1465,7 +1612,7 @@ public class SpiderBridge {
         return jar == null ? "" : jar;
     }
 
-    /** 按路径卸载单个 jar：destroy 其爬虫、关闭 loader。recent 指着这条路径时清掉。 */
+    /** 按路径卸载单个 jar：destroy 各租户下该 jar 的爬虫、关闭 loader。 */
     private static void unloadJar(String jarPath) {
         if (jarPath == null || jarPath.isEmpty()) return;
         Object lock = jarLocks.computeIfAbsent(jarPath, k -> new Object());
@@ -1475,14 +1622,19 @@ public class SpiderBridge {
             removed = loaders.remove(jarPath);
             proxyMethods.remove(jarPath);
             jsParseSessions.remove(jarPath);
-            if (jarPath.equals(recentJar)) recentJar = null;
+            for (java.util.Iterator<Map.Entry<String, String>> it = recentJarByTenant.entrySet().iterator(); it.hasNext();) {
+                if (jarPath.equals(it.next().getValue())) it.remove();
+            }
         }
         closeLoader(removed);
-        // spKey = md5(jar) + siteKey，见 getSpider。
-        String prefix = md5Hex(jarPath);
+        // spKey = tenant + "\0" + md5(jar) + siteKey
+        String jarMd5 = md5Hex(jarPath);
         for (java.util.Iterator<Map.Entry<String, Spider>> it = spiders.entrySet().iterator(); it.hasNext();) {
             Map.Entry<String, Spider> entry = it.next();
-            if (!entry.getKey().startsWith(prefix)) continue;
+            String k = entry.getKey();
+            int sep = k.indexOf('\0');
+            String rest = sep >= 0 ? k.substring(sep + 1) : k;
+            if (!rest.startsWith(jarMd5)) continue;
             try {
                 entry.getValue().destroy();
             } catch (Throwable error) {
@@ -1797,9 +1949,9 @@ public class SpiderBridge {
         }
     }
 
-    /** JarLoader.requireRecentLoader：Mix/Json 只从 recent jar 反射。 */
+    /** JarLoader.requireRecentLoader：Mix/Json 只从当前租户 recent jar 反射。 */
     private static ClassLoader requireRecentLoader() {
-        String recent = recentJar;
+        String recent = recentJar();
         if (recent == null || recent.isEmpty()) {
             throw new IllegalStateException("No jar loaded for recent");
         }
@@ -1809,7 +1961,7 @@ public class SpiderBridge {
             throw new IllegalStateException("No jar loaded for recent key: " + recent, e);
         }
         ClassLoader loader = loaders.get(recent);
-        if (loader == null || !recent.equals(recentJar)) {
+        if (loader == null || !recent.equals(recentJar())) {
             throw new IllegalStateException("No jar loaded for recent key: " + recent);
         }
         return loader;
@@ -1841,7 +1993,7 @@ public class SpiderBridge {
             }
             ClassLoader loader = (!jar.isEmpty() && loaders.containsKey(jar))
                     ? loaders.get(jar) : requireRecentLoader();
-            String cacheKey = !jar.isEmpty() ? jar : (recentJar != null ? recentJar : "");
+            String cacheKey = !jar.isEmpty() ? jar : (recentJar() != null ? recentJar() : "");
             if (cacheKey.isEmpty()) {
                 for (Map.Entry<String, ClassLoader> e : loaders.entrySet()) {
                     if (e.getValue() == loader) {

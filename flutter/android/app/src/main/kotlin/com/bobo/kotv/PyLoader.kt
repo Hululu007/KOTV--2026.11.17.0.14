@@ -10,7 +10,7 @@ import org.json.JSONObject
  *
  * 桌面 pyrunner 常驻，init 后的 host/session 会保留。
  * Android 若每次冷 exec，会出现相对 URL 无 scheme、headers 拼进 URL 等错误。
- * 这里在解释器里缓存 session（按 siteKey），跨 /py/call 复用同一 Spider 实例。
+ * 这里在解释器里缓存 session（按 userId#siteKey#slot），跨 /py/call 复用同一 Spider 实例。
  */
 object PyLoader {
 
@@ -59,12 +59,16 @@ __kotv_out = kotv_py_dispatch(__kotv_req)
     }
   }
 
-  fun clearSessions() {
+  /** 空 [userId] 视为 "shared"；只清该用户桶，不误伤其它租户。 */
+  fun clearSessions(userId: String = "") {
     if (!Python.isStarted()) return
     try {
       val py = Python.getInstance()
       ensureBridge(py)
-      py.builtins.callAttr("exec", "kotv_py_clear()", py.getModule("__main__").get("__dict__"))
+      val main = py.getModule("__main__")
+      val uid = userId.trim().ifEmpty { "shared" }
+      main.put("__kotv_clear_uid", uid)
+      py.builtins.callAttr("exec", "kotv_py_clear_user(__kotv_clear_uid)", main.get("__dict__"))
     } catch (_: Throwable) {
     }
   }
@@ -79,14 +83,19 @@ import importlib.util, json, os, sys, traceback, types
 
 _KOTV_PY_SESSIONS = {}
 
-def kotv_py_clear():
-    for sess in list(_KOTV_PY_SESSIONS.values()):
-        try:
-            if sess.get("inited"):
-                sess["mod"].invoke("destroy", {})
-        except Exception:
-            pass
-    _KOTV_PY_SESSIONS.clear()
+def _kotv_py_destroy_sess(sess):
+    try:
+        if sess.get("inited"):
+            sess["mod"].invoke("destroy", {})
+    except Exception:
+        pass
+
+def kotv_py_clear_user(user_id):
+    uid = (user_id or "").strip() or "shared"
+    prefix = uid + "#"
+    for k in list(_KOTV_PY_SESSIONS.keys()):
+        if k.startswith(prefix):
+            _kotv_py_destroy_sess(_KOTV_PY_SESSIONS.pop(k, {}))
 
 def _kotv_load_session(runner_path, script_path, key, ext, api, cache_root, proxy_port, proxy_host):
     os.environ["KOTV_PROXY_PORT"] = str(proxy_port)
@@ -135,7 +144,8 @@ def kotv_py_dispatch(req_json):
         args = req.get("args") or {}
 
         slot = int(req.get("slot") or 0)
-        sess_key = "%s#%d" % (key, slot)
+        uid = str(req.get("userId") or "").strip() or "shared"
+        sess_key = "%s#%s#%d" % (uid, key, slot)
 
         sess = _KOTV_PY_SESSIONS.get(sess_key)
         if (

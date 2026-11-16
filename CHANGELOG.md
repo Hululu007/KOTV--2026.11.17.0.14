@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.3
+
+- 单桥韧性收拢：SoftCancel / KillUser / HardRestart 门面；切源可打断（loadConfig/setHome soft cancel、JS/Scope HTTP 可取消、按 clientId interrupt `/jar/call` 线程）；HardRestart 后 bump jar 就绪态并水合。
+- 租户隔离：Android HardRestart `/jar/interrupt` 只清 `shared` Chaquopy（与 Go `clearSharedJsPy` 同口径），空 userId 视为 shared，不误伤远端用户桶。
+- 资源复用：Go→桥 HTTP（含 health/probe）共用 `localproxy.BridgeClient` Transport；jar 包体仍 `cache_flight` / 公共 `JarPath`。
+- 清理：去掉死 `interruptJar` / `shortTimeoutClient` / logging-interceptor；桌面 Prefers 驱逐改反射，kotv-bridge 可编。
+- 版本号同源升至 `0.3.3`（pubspec `0.3.3+40`）。
+
 ## v0.3.2
 
 - 版本号收拢：`pubspec` / `update.CurrentVersion` / Flutter 回退常量同源为 `0.3.2`；各打包脚本统一经 `kotv_engine_version_ldflags` 注入，关于/检查更新/运行库与产物名一致。

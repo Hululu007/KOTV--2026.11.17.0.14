@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"crypto/md5"
 	"crypto/tls"
 	"encoding/hex"
@@ -256,12 +257,22 @@ func HTTPGetInsecure(rawURL string, headers map[string]string) (string, error) {
 
 // HTTPGetBytesInsecure 同 HTTPGetBytes，但不校验证书；≥400 仍报错（jar/Py 二进制下载）。
 func HTTPGetBytesInsecure(rawURL string, headers map[string]string) ([]byte, error) {
-	return httpGetParamsBytesInsecure(rawURL, headers, nil, false)
+	return HTTPGetBytesInsecureCtx(context.Background(), rawURL, headers)
+}
+
+// HTTPGetBytesInsecureCtx 可取消的 insecure 二进制 GET（SoftCancel / 切源世代）。
+func HTTPGetBytesInsecureCtx(ctx context.Context, rawURL string, headers map[string]string) ([]byte, error) {
+	return httpGetParamsBytesInsecureCtx(ctx, rawURL, headers, nil, false)
 }
 
 // HTTPGetParamsInsecure 同 HTTPGetParams，但不校验证书；读 body 不看 status（CMS）。
 func HTTPGetParamsInsecure(rawURL string, headers map[string]string, params map[string]string) (string, error) {
-	b, err := HTTPGetParamsBytesInsecure(rawURL, headers, params)
+	return HTTPGetParamsInsecureCtx(context.Background(), rawURL, headers, params)
+}
+
+// HTTPGetParamsInsecureCtx 可取消的 CMS GET。
+func HTTPGetParamsInsecureCtx(ctx context.Context, rawURL string, headers map[string]string, params map[string]string) (string, error) {
+	b, err := HTTPGetParamsBytesInsecureCtx(ctx, rawURL, headers, params)
 	if err != nil {
 		return "", err
 	}
@@ -270,10 +281,19 @@ func HTTPGetParamsInsecure(rawURL string, headers map[string]string, params map[
 
 // HTTPGetParamsBytesInsecure 同 HTTPGetParamsBytes，但不校验证书；读 body 不看 status（CMS）。
 func HTTPGetParamsBytesInsecure(rawURL string, headers map[string]string, params map[string]string) ([]byte, error) {
-	return httpGetParamsBytesInsecure(rawURL, headers, params, true)
+	return HTTPGetParamsBytesInsecureCtx(context.Background(), rawURL, headers, params)
+}
+
+// HTTPGetParamsBytesInsecureCtx 可取消的 CMS 字节 GET。
+func HTTPGetParamsBytesInsecureCtx(ctx context.Context, rawURL string, headers map[string]string, params map[string]string) ([]byte, error) {
+	return httpGetParamsBytesInsecureCtx(ctx, rawURL, headers, params, true)
 }
 
 func httpGetParamsBytesInsecure(rawURL string, headers map[string]string, params map[string]string, allowErrorStatus bool) ([]byte, error) {
+	return httpGetParamsBytesInsecureCtx(context.Background(), rawURL, headers, params, allowErrorStatus)
+}
+
+func httpGetParamsBytesInsecureCtx(ctx context.Context, rawURL string, headers map[string]string, params map[string]string, allowErrorStatus bool) ([]byte, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if local, ok := FileURLPath(rawURL); ok {
 		return os.ReadFile(local)
@@ -293,7 +313,10 @@ func httpGetParamsBytesInsecure(rawURL string, headers map[string]string, params
 	}
 	rawURL = ApplyStickyAuthQuery(rawURL)
 	rawURL, headers = applyVodNet(rawURL, headers)
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}

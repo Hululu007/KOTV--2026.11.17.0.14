@@ -16,7 +16,6 @@ com.google.j2objc:j2objc-annotations:3.0.0=compileClasspath,testCompileClasspath
 com.googlecode.juniversalchardet:juniversalchardet:1.0.3=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.hierynomus:asn-one:0.6.0=runtimeClasspath,testRuntimeClasspath
 com.hierynomus:smbj:0.14.0=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
-com.squareup.okhttp3:logging-interceptor:5.5.0=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.squareup.okhttp3:okhttp-dnsoverhttps:5.5.0=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.squareup.okhttp3:okhttp-jvm:5.5.0=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.squareup.okhttp3:okhttp:5.5.0=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath

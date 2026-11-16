@@ -1936,6 +1936,47 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _checkSpider() => showSpiderCheckDialog(context, ref);
 
+  /// 显式卡死恢复：hard cancel（远端只 KillUser；本机清 shared，桥不健康才 HardRestart）。
+  Future<void> _recoverStuck() async {
+    final pal = KotvPalette.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: pal.dialogBg,
+        title: Text('卡死恢复？', style: TextStyle(color: pal.fg)),
+        content: Text(
+          '将打断当前会话爬虫并清本租户运行态。\n不会自动杀唯一 JVM（仅桥已挂才核重启）。\n日常离开/换集请用软取消，勿频繁点此项。',
+          style: TextStyle(color: pal.muted),
+        ),
+        actions: [
+          KotvFocusAction(
+              label: '取消',
+              color: pal.muted,
+              onPressed: () => Navigator.pop(ctx, false)),
+          KotvFocusAction(
+            label: '恢复',
+            color: pal.fg,
+            fontWeight: FontWeight.w700,
+            autofocus: true,
+            onPressed: () => Navigator.pop(ctx, true),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _status = '正在卡死恢复…');
+    try {
+      await ref.read(apiProvider).cancelPending(hard: true, thunder: false);
+      if (!mounted) return;
+      setState(() => _status = '卡死恢复已提交');
+      showAppNews(context, '卡死恢复已提交\n请重试当前页面');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '卡死恢复失败: $e');
+      showAppNews(context, '卡死恢复失败\n$e');
+    }
+  }
+
   Future<void> _clearCache() async {
     final choice = await pickChoice(context,
         title: '清理缓存',
@@ -2902,6 +2943,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(label: '数据备份', onTap: _backupExport),
                         KotvSettingsCell(label: '恢复备份', onTap: _backupImport),
                         KotvSettingsCell(label: '清理缓存', onTap: _clearCache),
+                        KotvSettingsCell(label: '卡死恢复', onTap: _recoverStuck),
                         if (!Platform.isIOS)
                           KotvSettingsCell(label: '检测爬虫', onTap: _checkSpider),
                         KotvSettingsCell(

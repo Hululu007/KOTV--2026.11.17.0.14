@@ -15,6 +15,7 @@ import okhttp3.Response;
 
 public class AuthInterceptor implements Interceptor {
 
+    /** 键：tenantKey + "\\0" + host */
     private final ConcurrentHashMap<String, String> userMap;
 
     public AuthInterceptor() {
@@ -25,6 +26,11 @@ public class AuthInterceptor implements Interceptor {
         userMap.clear();
     }
 
+    /** 只清某一租户的 userInfo 记忆（KillUser / clearTenant）。 */
+    public void clearTenant(String tenant) {
+        RequestInterceptor.purgeTenantPrefix(userMap, tenant);
+    }
+
     @NonNull
     @Override
     public Response intercept(Chain chain) throws IOException {
@@ -33,7 +39,7 @@ public class AuthInterceptor implements Interceptor {
         if (response.code() != 401) return response;
         String host = request.url().host();
         String user = request.url().uri().getUserInfo();
-        if (user == null) user = userMap.get(host);
+        if (user == null) user = userMap.get(RequestInterceptor.tenantHostKey(host));
         if (user == null) return response;
         response.close();
         String header = response.header(HttpHeaders.WWW_AUTHENTICATE);
@@ -48,7 +54,7 @@ public class AuthInterceptor implements Interceptor {
     private Request check(Request request) {
         URI uri = request.url().uri();
         if (uri.getUserInfo() == null) return request;
-        userMap.put(request.url().host(), uri.getUserInfo());
+        userMap.put(RequestInterceptor.tenantHostKey(request.url().host()), uri.getUserInfo());
         return request.newBuilder().header(HttpHeaders.AUTHORIZATION, Auth.basic(uri.getUserInfo())).build();
     }
 }

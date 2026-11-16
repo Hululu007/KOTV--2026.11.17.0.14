@@ -26,6 +26,7 @@ import okio.Okio;
 
 public class ResponseInterceptor implements Interceptor {
 
+    /** 键：tenantKey + "\\0" + url */
     private final ConcurrentHashMap<String, String> redirectMap;
 
     public ResponseInterceptor() {
@@ -56,6 +57,11 @@ public class ResponseInterceptor implements Interceptor {
         NetProfiles.clearAll();
     }
 
+    /** 只清某一租户的 302 记忆（KillUser / clearTenant）。 */
+    public void clearTenant(String tenant) {
+        RequestInterceptor.purgeTenantPrefix(redirectMap, tenant);
+    }
+
     @NonNull
     @Override
     public Response intercept(@NonNull Chain chain) throws IOException {
@@ -63,8 +69,11 @@ public class ResponseInterceptor implements Interceptor {
         Response response = chain.proceed(request);
         String encoding = response.header(HttpHeaders.CONTENT_ENCODING);
         if ("deflate".equalsIgnoreCase(encoding)) return deflate(response);
-        if (response.code() == 406 && redirectMap.containsKey(request.url().toString())) return redirect(request, response);
-        if (response.code() == 302 && response.header(HttpHeaders.LOCATION) != null) redirectMap.put(response.header(HttpHeaders.LOCATION), request.url().toString());
+        String urlKey = RequestInterceptor.tenantHostKey(request.url().toString());
+        if (response.code() == 406 && redirectMap.containsKey(urlKey)) return redirect(request, response, urlKey);
+        if (response.code() == 302 && response.header(HttpHeaders.LOCATION) != null) {
+            redirectMap.put(RequestInterceptor.tenantHostKey(response.header(HttpHeaders.LOCATION)), request.url().toString());
+        }
         return response;
     }
 
@@ -76,8 +85,8 @@ public class ResponseInterceptor implements Interceptor {
         return builder.build();
     }
 
-    private Response redirect(Request request, Response response) {
-        return new Response.Builder().request(request).protocol(response.protocol()).code(302).message("Found").header(HttpHeaders.LOCATION, redirectMap.get(request.url().toString())).build();
+    private Response redirect(Request request, Response response, String urlKey) {
+        return new Response.Builder().request(request).protocol(response.protocol()).code(302).message("Found").header(HttpHeaders.LOCATION, redirectMap.get(urlKey)).build();
     }
 
     private Response deflate(Response response) {

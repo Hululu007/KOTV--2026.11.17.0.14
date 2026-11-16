@@ -3,7 +3,8 @@
 //
 // userId：鉴权 UUID（Scope / DB owner / 独立引擎桶）。
 // username：登录名（Path.tv 的 /TV/s_u_<用户名>/、下载人读子目录）。
-// 脚本文件（JAR/Py/JS 下载缓存）全局共享；仅「远端租户」请求使用独立 JVM/Py/JS 引擎。
+// 脚本文件（JAR/Py/JS 下载缓存）全局共享。
+// 远端租户：JAR 单 JVM 内按 user 分桶；Py/JS/Node/Chromium 仍按用户分进程/池。
 package hostclient
 
 import (
@@ -20,7 +21,7 @@ type binding struct {
 	Platform   string
 	PublicBase string // 非本机请求：scheme://host[:port]，供代理 URL 改写
 	AuthToken  string // 登录令牌；供 Node OPENWEB 远端 URL 附带 ?token=
-	Dedicated  bool   // 远端租户：独立引擎；本机/未开鉴权：共享引擎
+	Dedicated  bool   // 远端租户：独立 Py/JS/Node/Chromium；JAR 同进程分租户
 }
 
 var byG sync.Map // goroutine id -> binding
@@ -269,7 +270,8 @@ func DataOwner() string {
 	return strings.TrimSpace(CurrentUserID())
 }
 
-// DedicatedRuntime 当前请求是否走独立 JVM/Py/JS/Node/Chromium（远端租户）；Go 引擎始终只有一个。
+// DedicatedRuntime 当前请求是否走独立 Py/JS/Node/Chromium（远端租户）。
+// JAR 为单 JVM 内租户隔离；Go 引擎始终只有一个。
 func DedicatedRuntime() bool {
 	return RuntimeUserID() != ""
 }

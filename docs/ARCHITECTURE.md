@@ -63,8 +63,8 @@ Go Engine（单进程，:9978）
 - **共享**：多仓/单仓列表与脚本磁盘缓存、用户设置全局代理（`settings.Proxy`）、遥控 push/弹幕偏广播。
 - **按 Scope 独立**：当前选中的源 / 首页 / 直播、媒体态（播放进度/标题）、遥控队列（control/search）。
 - **站点 cookie 落盘**（`Path.tv`）：本机 → `/TV/`（安卓外置存储同名）；远端 → `/TV/s_u_<用户名>/`（登录名，不跟账号 UUID）。会话隔离仍用 `u:<userId>`。目录名只经 `Util.tvDirName` / `paths.TVDirName`。并发子任务用 `Bind(Snapshot())` 带上 username。不建 `s_c_*`；全部清理删 `s_c_*` 与旧 `s_u_<uuid>`（`paths.IsLegacyTVDir`）。安卓清理：Go 扫 `filesDir/KOTV`；宿主另清 `cacheDir` 爬虫/Exo/mpv-cache，全部时扫外置遗留 TV 桶。
-- **运行时**：本机共享一套 JVM/Py/JS；远端每用户独立一套。Go 引擎始终只有一个；远端隔离的是爬虫运行时，不是多套引擎。
-- **取消/卡死**：`cancelPending` / 换源 → 硬杀所属 JVM/Py/JS（独立进程，互不影响）；单次调用自带超时（JAR 120s / JS·Py 45s）。
+- **运行时**：JAR 桌面/安卓均为单 bridge（租户隔离在 bridge 内）；Py/JS/Node/Chromium 远端仍按用户分桶。Go 引擎始终只有一个。
+- **取消/卡死**：`SoftCancelForClient` 按 Scope 打断 in-flight（JAR 不杀唯一 JVM）；显式 `hard` → `RestartCallerRuntime`（SoftCancel→清本租户，**仅** bridge 不健康才 `HardRestartSharedRuntimes`）；`KillUserRuntime` 清该用户 bridge 态并杀其 Py/JS/Node/Chromium；单次调用自带超时（JAR 120s / JS·Py 45s）。取消接口不自动升 hard。
 - **鉴权**：
   - **Web**：同源本站入口，固定连本页后端（不配远程引擎）；打开页必须登录（与 `remoteAuth` 无关）。
   - **PC/安卓本机**：免登录即全功能。
@@ -80,11 +80,11 @@ Go Engine（单进程，:9978）
 | JS | `api` 含 `.js`（非猫爪源包） | 内嵌 **QuickJS**（CGO）；本机/远端按 `RuntimeUserID` 分池，worker 继承 Dedicated 绑 JVM Function |
 | Python | `api` 含 `.py` | 捆绑 `runtime/python`；按 `RuntimeUserID` 分池，同站可并行 |
 | Node | `api` 以 `/spider/` 开头（来自猫爪 `/config`） | 捆绑 `runtime/node`（安卓 `libkotv_node.so` + `libnode.so` 同进 jniLibs）；本机共享桶、远端按 `RuntimeUserID` 独立桶，桶内一源包一进程 |
-| JAR | `api` 前缀 `csp_` | **Java bridge**（JVM）：本机一台共享；远端每用户一台。单 JVM 可装多 jar；多租户不能共 JVM（Prefers / spiders / recentJar 未按 user 隔离） |
+| JAR | `api` 前缀 `csp_` | **Java bridge**（JVM）：桌面/安卓均为单进程；`Util.tenantKey()` 分桶 spiders / Prefers / recentJar / userProxy；loaders 按 jar 路径全局共享 |
 
 - `getClientId()` 返回当前 ScopeID，`postMsg` 据此路由回正确前端。
-- 取消/重启门面（`runtime_cancel.go`）：`SoftCancelForClient`（按 Scope）、`SoftCancelAll`（清缓存，只断 in-flight）、`HardRestartSharedRuntimes` / `KillUserRuntime` / `RestartCallerRuntime`、`ShutdownAllRuntimes`（进程退出）。覆盖 JVM / Python / QuickJS / Node / 桌面嗅探浏览器；底层 interrupt* 与嗅探钩子不导出。
-- 缓存两分法：爬虫包体公共无 uid——`CacheRoot/{jar,py,js,node}`（桌面 `kotv.cache.dir=CacheRoot`；安卓 `KOTV_CACHE_DIR=getCacheDir()` 与 `Path.jar/js/py` 同根）。可变态落 `CacheRoot/run/<uid|shared>/…`（桌面 Prefers 经 `kotv.user.dir`）。进程/池仍按 `RuntimeUserID` 分桶；本机空 uid 共用 `shared`。
+- 取消/重启门面（`runtime_cancel.go`）：`SoftCancelForClient`（按 Scope，不杀 JVM）、`SoftCancelAll`（清缓存，只断 in-flight）、`RestartCallerRuntime`（递进恢复）、`HardRestartSharedRuntimes`（核重启唯一 JVM，影响全体租户）、`KillUserRuntime`、`ShutdownAllRuntimes`。覆盖 JVM / Python / QuickJS / Node / 桌面嗅探浏览器；底层 interrupt* 与嗅探钩子不导出。
+- 缓存两分法：爬虫包体公共无 uid——`CacheRoot/{jar,py,js,node}`（桌面 `kotv.cache.dir=CacheRoot`；安卓 `KOTV_CACHE_DIR=getCacheDir()` 与 `Path.jar/js/py` 同根）。可变态落 `CacheRoot/run/<uid|shared>/…`（桌面 JVM 注 `kotv.user.runtime.root=CacheRoot/run`，bridge 按 tenant 落到 `…/jvm/{prefs,files}`）。Py/Node/Chromium 进程仍按 `RuntimeUserID` 分桶；本机空 uid 共用 `shared`。
 - 换源时 `ResetScriptSpiders()` 销毁 JS/Python/Node 爬虫，避免旧进程状态污染新站；设置页「清理缓存」经 `SoftCancelAll` 后清 JAR 磁盘 + JS/Py/Node 内存与落盘目录。
 - 配置地址以 `index.js` / `index.js.md5` 结尾时视为猫爪源包：下载校验后起 Node，`GET /config` 取 `video.sites`（忽略 read/comic/music/pan）；播放/弹幕改写为 `/node/<pkg>/…`。OPENWEB（`node_openweb.go`）：本机原样；远端 `/node/<pkg>/…?token=`（无媒体钥匙）并按调用方定向投递；路径首段登记根别名，`node_root_auth.go` 种 Cookie，页内绝对路径 API 反代 ActivePkg。Flutter 原样打开下发 URL。`messageToDart` → 本机 `/msg`。
 
@@ -97,11 +97,20 @@ Go Engine（单进程，:9978）
 | 怎么编 | `bridge/build.sh` → `spider-bridge.jar`（含 `android/` stub） | Gradle 模块 `:kotv-bridge`（真实 Android SDK） |
 | 加载宿主 | 捆绑 JRE + `URLClassLoader` 父优先；`--serve` HTTP `:9979` | 编进 **App ClassLoader**；`JarLoader` 直调 `SpiderBridge` |
 | 站点 jar | 只吃 PC JVM `.class` 瘦包 | **同时**吃 CatVodSpider dex jar（`DexClassLoader(file, Path.jar(), Path.jar(), App)`）和 PC 瘦包（先 D8） |
-| OkHttp | bridge **5.4.0**；请求自动 tag `clientId` | App `force` **5.4.0** |
+| OkHttp | bridge **5.5.0**；请求自动 tag `clientId` | App `force` **5.5.0** |
 
 - **dex 包**（`custom_spider.jar`）：jar 内仅 `com.github.catvod.{js,spider}` + `classes.dex`；外部符号须落在 CatVodSpider `jar/checkJar.ps1` 的 `$allowed`（如 `crawler/`、`android/`、`okhttp3/`、`com/whl/quickjs/`），由宿主 `:catvod`/`:kotv-bridge` 提供。R8 可能把站点依赖 merge 进 `spider.merge.*`，**不是**「jar 里完全没有 okhttp 字节码」。
 - **PC JVM 瘦包**（CatVodSpider 的 pc 线等）：在同一宿主契约下，打包时 **额外** exclude bridge 宿主同名类 + 不打 okhttp/sardine fat（父 CL 用 bridge）；Android 侧再 D8。验收见 `verifyUniversalJar`，**不能**用 dex 包的 exclude 文案描述 PC 线。
 - 站点约定 `com.github.catvod.spider.*`；配置 `csp_ClassName`。
+- 多用户：桌面只启一台 `--serve`；安卓共用 `SpiderService`。可变态键 `Util.tenantKey()`（空 uid→`shared`）；切仓/`clearRuntimeJars` 只 `clearTenant`，`clearAll` 仅清缓存磁盘与 HardRestart。安卓 `Path.files()` 落 `files/kotv_tenant/<tenant>/`；桌面 stub 经 Context 落到 `run/<tenant>/jvm/files`。
+- `KillUserRuntime` → RPC `clearTenant`（含 NetProfiles/Prefers/OkHttp 鉴权·跳转记忆）+ 擦 `UserJVMDir`，不杀 JVM。单次 JAR 传输失败不杀桥；进程死或**连续两次** `/health` 失败才重建。远端 hard 恢复只 KillUser，不跟 HardRestart。
+- 离线释放：`session/leave` 与 `auth/logout` 即时 `releaseUserRuntime`；前端切回本机前先 `sessionLeave`。强杀未 Leave 时靠 Presence（30s Ping / **90s** 超时）兜底。
+- 再登录水合：Dedicated 会话 `bootstrapSession` 末尾 `rehydrateSessionSpider`（`SetConfigBase`/`SetNetConfig`/`EnsureRootJar` 写根路径）；主机换仓 `followHostSessions` / 清缓存 `restoreSessionSources` 均 Dedicated Bind 后再水合。
+- `LoadJar` 只清当前租户 Go 侧 jar 就绪态 + 本 URL 无 md5 标记；`clearJar` 才全局 bump。包体仍共用 `JarPath`。Go→桥 HTTP（含 health/probe）共用 `localproxy.BridgeClient` Transport（超时靠 ctx）。
+- 安卓 Py：`sess_key=userId#site#slot`；`/py/interrupt` 按 `userId` 清（空=`shared`），不误伤其它租户。HardRestart 的 `/jar/interrupt` 只清 `shared` Chaquopy（与 Go `clearSharedJsPy` 同口径），不动远端用户桶。
+- `unloadJar`/`reloadJar` 按 jar 路径卸共享 ClassLoader，并 destroy **全体租户**下该 jar 的 spider 实例（包体共用；不按用户复制 CL）。
+- SoftCancel 只断 in-flight，不清租户 Spider；卡死靠**显式** `hard:true`（设置「卡死恢复」）/ `KillUserRuntime` / `clearTenant`（取消不自动升 hard）。
+- 切源/切站：`loadConfig`/`setHome` 前 soft cancel；JS HTTP 与下载/CMS 可取消；SoftCancel 可 interrupt 该 clientId 的 `/jar/call` 线程；HardRestart 后全局 bump Go jar 就绪态并水合。
 - `libquickjs-android-wrapper.so` 仅进 APK，桌面 JRE 不绑这套 JNI。
 
 ## 运行时捆绑

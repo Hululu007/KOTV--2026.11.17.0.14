@@ -61,7 +61,7 @@ func clearAllJarPaths() {
 var (
 	jarRefreshGen     atomic.Uint64
 	jarNoMD5Refreshed sync.Map // downloadURL -> gen
-	// 同一用户、同一路径的 parseJar 去重。用户各有一台 JVM，不能按路径全局跳过。
+	// 同一租户、同一路径的 parseJar 去重（单 bridge；键含 RuntimeUserID，不能按路径全局跳过）。
 	parseJarNotified sync.Map // jarRunKey -> struct{}
 	parseJarFlights  sync.Map // jarRunKey -> *parseJarFlight
 	jarRecentByUser  sync.Map // RuntimeUserID -> 已设为 recent 的本地路径
@@ -100,9 +100,8 @@ func clearJarForUser(userID string) {
 	dropJarSpiders(userID+"\x01", false)
 }
 
-// ApplyConfigJars 切仓成功后：清掉当前 JVM 里已加载的全部 jar，再装新仓库的根 jar。不杀 JVM。
+// ApplyConfigJars 切仓成功后：清当前租户 bridge 态，再装新仓库根 jar。不杀 JVM、不 clearAll。
 func ApplyConfigJars(nextURL, nextRoot string) error {
-	// 刷新/换源可能未先 SoftCancelPending；先打断当前 Scope，再卸 ClassLoader。
 	if sid := hostclient.ScopeID(); sid != "" {
 		SoftCancelForClient(sid)
 	}
@@ -152,7 +151,12 @@ func clearRuntimeJars() {
 	uid := hostclient.RuntimeUserID()
 	dropJarSpiders(uid+"\x01", false)
 	setCurrentJarPath("")
-	sendBridgeClear()
+	// 单桥：只清当前租户（本机空 uid → shared），禁止 clearAll 误卸全体 ClassLoader。
+	tenant := uid
+	if tenant == "" {
+		tenant = "shared"
+	}
+	clearBridgeTenant(tenant)
 }
 
 func releaseConfigScripts() {
@@ -167,7 +171,7 @@ func clearJar() {
 	configBase = ""
 	jarMu.Unlock()
 	bumpJarRefreshGen()
-	// 全局清 jar：共享 + 全部远端用户 JVM 都要卸 ClassLoader（不能只打当前 Bind 桶）。
+	// 清磁盘缓存：唯一 bridge 上 clearAll（卸全体 ClassLoader）。
 	sendBridgeClearAll()
 }
 
@@ -185,51 +189,58 @@ func dropJarSpiders(prefix string, all bool) {
 	}
 }
 
-func sendBridgeClear() {
-	forgetJarRecent(hostclient.RuntimeUserID())
-	jarWireGen.Add(1)
-	payload, err := marshalBridgeClear(true)
-	if err != nil {
-		log.Printf("jar 卸载失败: %v", err)
-		return
-	}
-	postBridgeClearPayload(bridgeForCurrent(), payload)
-}
-
-// sendBridgeClearAll 向共享与全部用户 JVM 下发 clear（Clear / ClearJarDisk）。
+// sendBridgeClearAll 向唯一 bridge 下发无 userId 的 clear → Java clearAll（卸 ClassLoader）。
 func sendBridgeClearAll() {
 	jarWireGen.Add(1)
-	payload, err := marshalBridgeClear(false)
+	payload, err := json.Marshal(bridgeRequest{Method: "clear"})
 	if err != nil {
 		log.Printf("jar 卸载失败: %v", err)
 		return
 	}
-	if runtime.GOOS == "android" {
-		postBridgeClearPayload(nil, payload) // android 单服务，忽略 br
-		return
-	}
-	for _, br := range snapshotJavaBridges() {
-		postBridgeClearPayload(br, payload)
-	}
+	postBridgeRPC(payload)
 }
 
-func marshalBridgeClear(fillClient bool) ([]byte, error) {
-	req := bridgeRequest{Method: "clear"}
-	if fillClient {
-		fillBridgeClient(&req)
+// clearBridgeTenant 单 JVM：RPC 只清该租户 spiders/recent/proxy/NetProfiles，不卸 ClassLoader、不杀进程。
+// userID 空串视为 "shared"（本机共享桶）。
+func clearBridgeTenant(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		userID = "shared"
 	}
-	return json.Marshal(req)
+	forgetJarRecent(userID)
+	if userID == "shared" {
+		forgetJarRecent("")
+	}
+	jarWireGen.Add(1)
+	req := bridgeRequest{
+		Method: "clearTenant",
+		UserID: userID,
+		Args: map[string]interface{}{
+			"userId": userID,
+		},
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		log.Printf("jar clearTenant 序列化失败: %v", err)
+		return
+	}
+	postBridgeRPC(payload)
+}
+
+// postBridgeRPC 安卓 SpiderService / 桌面唯一 javaBridge 的短超时 /jar/call。
+func postBridgeRPC(payload []byte) {
+	postBridgeClearPayload(&javaBridge, payload)
 }
 
 func postBridgeClearPayload(br *javaBridgeClient, payload []byte) {
 	if runtime.GOOS == "android" {
 		if _, err := androidPostJarShort(payload); err != nil {
-			log.Printf("jar 卸载失败: %v", err)
+			log.Printf("jar bridge rpc: %v", err)
 		}
 		return
 	}
 	if br == nil {
-		return
+		br = &javaBridge
 	}
 	base := br.currentBaseURL()
 	if base == "" {
@@ -242,6 +253,7 @@ func postBridgeClearPayload(br *javaBridgeClient, payload []byte) {
 	}
 }
 
+// bumpJarRefreshGen 全局清 jar 就绪态（仅 clearJar / 清磁盘缓存）。单用户 LoadJar 用 bumpJarRefreshForCaller。
 func bumpJarRefreshGen() {
 	jarRefreshGen.Add(1)
 	jarNoMD5Refreshed.Range(func(k, _ any) bool {
@@ -257,6 +269,11 @@ func bumpJarRefreshGen() {
 		return true
 	})
 	forgetAllJarRecent()
+}
+
+// bumpJarRefreshForCaller 只清当前租户 Go 侧 jar 就绪态，不逼其它租户重 parse / 重下无关 URL。
+func bumpJarRefreshForCaller() {
+	clearJarGoStateForRuntime(hostclient.RuntimeUserID())
 }
 
 type parseJarFlight struct {
@@ -338,7 +355,7 @@ func forgetJarRecent(userID string) {
 
 // clearJarGoStateForRuntime 清某运行时桶的 Go 侧 jar 就绪态（JVM 进程另杀/另启）。
 // userID 空=本机共享；非空=该远端用户。
-// 必须清 parseJarNotified/flights：否则新 JVM 会误判「已 parse」而跳过装载。
+// 必须清 parseJarNotified/flights：否则重建后会误判「已 parse」而跳过装载。
 func clearJarGoStateForRuntime(userID string) {
 	userID = strings.TrimSpace(userID)
 	forgetJarRecent(userID)
@@ -469,7 +486,10 @@ func notifyParseJar(jarPath string, recent bool) error {
 var callParseJar = callParseJarBridge
 
 func callParseJarBridge(payload []byte) error {
-	ctx, cancel := context.WithTimeout(context.Background(), parseJarBridgeTimeout)
+	cid := hostclient.ScopeID()
+	ctx, end := beginJarCall(cid)
+	defer end()
+	ctx, cancel := context.WithTimeout(ctx, parseJarBridgeTimeout)
 	defer cancel()
 	if runtime.GOOS == "android" {
 		if _, err := androidPostJarCtx(ctx, payload); err != nil {
@@ -478,12 +498,7 @@ func callParseJarBridge(payload []byte) error {
 		}
 		return nil
 	}
-	cid := hostclient.ScopeID()
-	ctx2, end := beginJarCall(cid)
-	defer end()
-	ctx2, cancel2 := context.WithTimeout(ctx2, parseJarBridgeTimeout)
-	defer cancel2()
-	if _, err := bridgeForCurrent().callCtx(ctx2, payload); err != nil {
+	if _, err := bridgeForCurrent().callCtx(ctx, payload); err != nil {
 		log.Printf("parseJar bridge: %v", err)
 		return err
 	}
@@ -513,8 +528,27 @@ func EnsureJar(spec string, configBaseArg ...string) error {
 	if err != nil {
 		return err
 	}
-	notifyParseJar(dest, false)
-	return nil
+	return notifyParseJar(dest, false)
+}
+
+// EnsureRootJar 下载并 parse 根 spider.jar，写入当前租户 jar 路径指针（供 CSP 空 jar 站 resolve）。
+// 不 bump 刷新世代；失败返回错误，不杀唯一 JVM。
+func EnsureRootJar(spec string, configBaseArg ...string) error {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil
+	}
+	base := ConfigBase()
+	if len(configBaseArg) > 0 && strings.TrimSpace(configBaseArg[0]) != "" {
+		base = strings.TrimSpace(configBaseArg[0])
+		SetConfigBase(base)
+	}
+	dest, err := cacheJar(spec, base, false)
+	if err != nil {
+		return err
+	}
+	setCurrentJarPath(dest)
+	return notifyParseJar(dest, true)
 }
 
 // LoadJar 下载并缓存根 spider.jar。configBase 用于解析相对路径（如 spider.jar;md5;xxx）。
@@ -523,7 +557,7 @@ func LoadJar(spec string, configBaseArg ...string) error {
 	if spec == "" {
 		return nil
 	}
-	bumpJarRefreshGen()
+	bumpJarRefreshForCaller()
 	base := ConfigBase()
 	if len(configBaseArg) > 0 && strings.TrimSpace(configBaseArg[0]) != "" {
 		base = strings.TrimSpace(configBaseArg[0])
@@ -631,7 +665,9 @@ func writeJarFile(rawURL, dest string) error {
 	if localPath, ok := localFilePath(rawURL); ok {
 		b, err = os.ReadFile(localPath)
 	} else {
-		b, err = util.HTTPGetBytesInsecure(rawURL, nil)
+		ctx, end := BeginScopeHTTP(hostclient.ScopeID())
+		b, err = util.HTTPGetBytesInsecureCtx(ctx, rawURL, nil)
+		end()
 	}
 	if err != nil {
 		return err
@@ -741,12 +777,16 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	// 按 jar 地址哈希缓存，不用配置里的 md5 当文件名。
 	dest := paths.JarPath(util.MD5(downloadURL))
 	gen := jarRefreshGen.Load()
+	// 根 LoadJar：只失效本 URL 的无 md5 命中标记，不扫全局其它地址。
+	if allowOverride && expectMD5 == "" {
+		jarNoMD5Refreshed.Delete(downloadURL)
+	}
 	hadCache := false
 	oldSum := ""
 	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
 		hadCache = true
 		if expectMD5 == "" {
-			// 无 md5：仅本世代首次强制刷新（LoadJar/clear 后）；同世代业务 call 直接用磁盘包。
+			// 无 md5：仅本世代首次刷新（LoadJar 删条目 / clear 全局 bump 后）；同世代业务 call 用磁盘包。
 			if v, ok := jarNoMD5Refreshed.Load(downloadURL); ok {
 				if g, _ := v.(uint64); g == gen {
 					return dest, nil

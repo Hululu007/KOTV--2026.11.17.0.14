@@ -78,9 +78,17 @@ Future<String> kotvSavedRemoteEngineAddress(WidgetRef ref) async {
 }
 
 Future<void> kotvUseLocalEngine(WidgetRef ref) async {
+  // 仍指向远端时先 leave，避免只清本地 token 后靠 Presence ~90s 才释放租户态。
+  final launcher = ref.read(engineLauncherProvider);
+  final remote = launcher.baseUrl.trim();
+  if (remote.isNotEmpty && !kotvIsLocalEngineBaseUrl(remote)) {
+    try {
+      await KotvApi(baseUrl: remote).sessionLeave();
+    } catch (_) {}
+  }
   await KotvClientStore.clearEngine();
   await kotvClearAuthToken();
-  ref.read(engineLauncherProvider).applyBaseUrl('');
+  launcher.applyBaseUrl('');
   ref.invalidate(engineStatusProvider);
 }
 

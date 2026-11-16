@@ -143,8 +143,9 @@ class SpiderService private constructor(
         }
 
         "/jar/interrupt" -> {
+          // HardRestart：卸全体 CL；Py 只清 shared（与 Go clearSharedJsPy 同口径，不动远端用户桶）。
           JarLoader.clear()
-          PyLoader.clearSessions()
+          PyLoader.clearSessions("shared")
           json(Status.OK, JSONObject().put("ok", true).toString())
         }
 
@@ -166,7 +167,13 @@ class SpiderService private constructor(
         }
 
         "/py/interrupt" -> {
-          PyLoader.clearSessions()
+          // 空 userId → shared；只清该用户桶（SoftCancel / HardRestart 不误伤其它租户）。
+          val uid = try {
+            if (body.isBlank()) "" else JSONObject(body).optString("userId", "")
+          } catch (_: Throwable) {
+            ""
+          }
+          PyLoader.clearSessions(uid)
           json(Status.OK, JSONObject().put("ok", true).toString())
         }
 

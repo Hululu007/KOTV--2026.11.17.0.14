@@ -111,11 +111,14 @@ func New() (*App, error) {
 	})
 	// Chromium 挂到统一取消/Kill 门面（避免 spider↔parse 循环依赖）。
 	spider.SetRuntimeExtraHooks(spider.RuntimeExtraHooks{
-		SoftCancelScope:   parse.CancelSniffsForScope,
-		SoftCancelAll:     parse.SoftCancelAllSniffs,
-		KillUser:          parse.CancelUserSniffs,
-		HardRestartShared: parse.HardRestartSharedChromium,
-		Shutdown:          parse.ShutdownAllChromium,
+		SoftCancelScope: parse.CancelSniffsForScope,
+		SoftCancelAll:   parse.SoftCancelAllSniffs,
+		KillUser:        parse.CancelUserSniffs,
+		HardRestartShared: func() {
+			parse.HardRestartSharedChromium()
+			a.rehydrateAllAfterHardRestart()
+		},
+		Shutdown: parse.ShutdownAllChromium,
 	})
 
 	a.Server = server.New()
@@ -365,7 +368,7 @@ func (a *App) releaseUserRuntime(userID string) {
 }
 
 // bootstrapSession 远端会话首次进入时恢复该用户上次选的点播源与首页站（scope 下 settings 已按用户分开）。
-// 用户没选过就跟随主机。
+// 用户没选过就跟随主机。末尾再水合 bridge 侧 net/jar（KillUser 后跟主机路径不会走 LoadFromSource）。
 func (a *App) bootstrapSession(sess *clientsession.Session) {
 	if sess == nil || sess.Bootstrapped {
 		return
@@ -382,6 +385,54 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 		if site := sess.Cfg.GetSite(homeKey); site != nil {
 			sess.Cfg.SetHome(*site)
 		}
+	}
+	a.rehydrateSessionSpider(sess)
+}
+
+// rehydrateAllAfterHardRestart clearAll 卸全体 CL 后：本机 + 在线 Dedicated 会话再写根 jar。
+func (a *App) rehydrateAllAfterHardRestart() {
+	if a == nil {
+		return
+	}
+	if a.Config != nil {
+		api := a.Config.API()
+		if sp := strings.TrimSpace(api.Spider); sp != "" {
+			if err := spider.EnsureRootJar(sp, api.URL); err != nil {
+				log.Printf("hard restart rehydrate shared jar: %v", err)
+			}
+		}
+	}
+	if a.sessions == nil {
+		return
+	}
+	a.sessions.ForEach(func(sess *clientsession.Session) {
+		if sess == nil {
+			return
+		}
+		leave := bindSessionScope(sess)
+		a.rehydrateSessionSpider(sess)
+		leave()
+	})
+}
+
+// rehydrateSessionSpider 在当前 Bind 下按会话配置重放 ConfigBase/NetConfig/EnsureJar。
+// 失败只记日志，不杀唯一 JVM。
+func (a *App) rehydrateSessionSpider(sess *clientsession.Session) {
+	if sess == nil || sess.Cfg == nil {
+		return
+	}
+	api := sess.Cfg.API()
+	base := strings.TrimSpace(api.URL)
+	if base != "" {
+		spider.SetConfigBase(base)
+	}
+	spider.SetNetConfig(api.Headers, api.Proxy, api.Hosts, nil)
+	sp := strings.TrimSpace(api.Spider)
+	if sp == "" {
+		return
+	}
+	if err := spider.EnsureRootJar(sp, base); err != nil {
+		log.Printf("session %s: rehydrate jar: %v", sess.ClientID, err)
 	}
 }
 
@@ -601,9 +652,26 @@ func (a *App) followHostSessions() {
 		return
 	}
 	a.sessions.ForEach(func(sess *clientsession.Session) {
-		if sess != nil && sess.FollowHost {
-			a.useHostConfig(sess)
+		if sess == nil || !sess.FollowHost {
+			return
 		}
+		leave := bindSessionScope(sess)
+		a.useHostConfig(sess)
+		a.rehydrateSessionSpider(sess)
+		leave()
+	})
+}
+
+// bindSessionScope 把 goroutine 绑到该远端会话的 Dedicated 身份（LoadJar/Net 写对用户桶）。
+func bindSessionScope(sess *clientsession.Session) func() {
+	if sess == nil {
+		return func() {}
+	}
+	uid := hostclient.UserIDFromScope(sess.ClientID)
+	return hostclient.Bind(hostclient.Request{
+		ClientID:  sess.ClientID,
+		UserID:    uid,
+		Dedicated: uid != "",
 	})
 }
 
@@ -641,6 +709,7 @@ func (a *App) snapshotSessionSources() []sessionSourceSnap {
 }
 
 // restoreSessionSources 按清理前记下的会话源重新拉取。http(s) 不走库内 JSON。
+// 每个会话在 Dedicated Bind 下重载，避免 LoadJar 写到 shared 桶。
 func (a *App) restoreSessionSources(snaps []sessionSourceSnap) error {
 	var errs []string
 	for _, s := range snaps {
@@ -648,7 +717,10 @@ func (a *App) restoreSessionSources(snaps []sessionSourceSnap) error {
 			errs = append(errs, "会话配置未就绪")
 			continue
 		}
-		if err := s.sess.Cfg.ReloadFresh(s.src); err != nil {
+		leave := bindSessionScope(s.sess)
+		err := s.sess.Cfg.ReloadFresh(s.src)
+		if err != nil {
+			leave()
 			errs = append(errs, err.Error())
 			continue
 		}
@@ -666,6 +738,8 @@ func (a *App) restoreSessionSources(snaps []sessionSourceSnap) error {
 		if s.sess.Sites != nil {
 			s.sess.Sites.InvalidateHomeOnly()
 		}
+		a.rehydrateSessionSpider(s.sess)
+		leave()
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))

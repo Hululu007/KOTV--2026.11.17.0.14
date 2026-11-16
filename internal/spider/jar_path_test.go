@@ -129,7 +129,7 @@ func TestParseJarNotifiedSeparateByUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	if calls != 2 {
-		t.Fatalf("另一台 JVM 不应跳过，calls=%d", calls)
+		t.Fatalf("其它租户不应跳过 parse，calls=%d", calls)
 	}
 }
 
@@ -163,6 +163,42 @@ func TestClearJarGoStateForRuntime_PurgesParseNotified(t *testing.T) {
 	}
 	if _, ok := configBaseByClient.Load("u:kill-u1"); ok {
 		t.Fatal("configBase should be cleared")
+	}
+}
+
+func TestBumpJarRefreshForCaller_LeavesOtherTenant(t *testing.T) {
+	const path = "/bump-caller.jar"
+	leaveA := hostclient.EnterSession("c-a", "bump-a", true)
+	keyA := jarRunKey(path)
+	parseJarNotified.Store(keyA, struct{}{})
+	leaveA()
+	leaveB := hostclient.EnterSession("c-b", "bump-b", true)
+	keyB := jarRunKey(path)
+	parseJarNotified.Store(keyB, struct{}{})
+	t.Cleanup(func() {
+		parseJarNotified.Delete(keyA)
+		parseJarNotified.Delete(keyB)
+		leaveB()
+	})
+	url := "https://example.com/bump-only.jar"
+	jarNoMD5Refreshed.Store(url, jarRefreshGen.Load())
+	otherURL := "https://example.com/other.jar"
+	jarNoMD5Refreshed.Store(otherURL, jarRefreshGen.Load())
+	t.Cleanup(func() {
+		jarNoMD5Refreshed.Delete(url)
+		jarNoMD5Refreshed.Delete(otherURL)
+	})
+
+	bumpJarRefreshForCaller()
+	if _, ok := parseJarNotified.Load(keyB); ok {
+		t.Fatal("caller tenant parseJarNotified should clear")
+	}
+	if _, ok := parseJarNotified.Load(keyA); !ok {
+		t.Fatal("other tenant parseJarNotified must survive LoadJar bump")
+	}
+	// 无 md5 全局条目：LoadJar 只删当前 URL，bumpForCaller 本身不动 jarNoMD5Refreshed。
+	if _, ok := jarNoMD5Refreshed.Load(otherURL); !ok {
+		t.Fatal("unrelated no-md5 URL must survive caller bump")
 	}
 }
 

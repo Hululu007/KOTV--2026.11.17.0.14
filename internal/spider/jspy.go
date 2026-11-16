@@ -3,6 +3,7 @@ package spider
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -642,16 +643,22 @@ func (s *pySpider) interrupt() {
 	if goruntime.GOOS == "android" {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		// 清 Chaquopy 进程内 session，避免换源后复用旧 Spider
-		client := &http.Client{Timeout: 2 * time.Second}
-		req, err := http.NewRequest(http.MethodPost, localproxy.DefaultBridgeBaseURL()+"/py/interrupt", bytes.NewReader([]byte("{}")))
+		// 按 ownerUID 清 Chaquopy session（空→shared；SoftCancelAll 会扫到各用户桶）。
+		uid := strings.TrimSpace(s.ownerUID)
+		if uid == "" {
+			uid = "shared"
+		}
+		body, _ := json.Marshal(map[string]string{"userId": uid})
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, localproxy.DefaultBridgeBaseURL()+"/py/interrupt", bytes.NewReader(body))
 		if err == nil {
-			resp, err := client.Do(req)
+			resp, err := bridgeHTTPClient().Do(req)
 			if err == nil {
 				_, _ = io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 			}
 		}
+		cancel()
 		s.inited = false
 		return
 	}
@@ -733,13 +740,14 @@ func (s *pySpider) androidCallPythonLocked(method string, args map[string]interf
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequest(http.MethodPost, base+"/py/call", bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), pyCallTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/py/call", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	client := &http.Client{Timeout: pyCallTimeout}
-	resp, err := client.Do(req)
+	resp, err := bridgeHTTPClient().Do(req)
 	if err != nil {
 		return "", err
 	}

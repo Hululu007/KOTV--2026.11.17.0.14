@@ -5,15 +5,15 @@ import (
 	"sync"
 
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/paths"
 )
 
 // 爬虫运行时取消 / 重启门面（JVM · Python · QuickJS · Node · Chromium）。
 // 包外请只走本文件导出符号；底层 interrupt* 与嗅探钩子不导出。
 
 // SoftCancelForClient 取消指定 Scope 下全部引擎进行中的调用。
-// 立刻结束 Go 侧等待；被放弃的单元随后回收
-//（JAR callCtx → stopLocked、Py/JS 忙 slot Kill、Node 对应用户桶 pkg Stop、Chromium tab）。
-// clientID 为空时 no-op（避免误伤全部会话）。
+// Go ctx + OkHttp cancel(clientId)；JAR 不杀唯一 JVM、不清租户 Spider。
+// 卡死需 hard / KillUserRuntime / clearTenant。clientID 为空时 no-op。
 func SoftCancelForClient(clientID string) {
 	if clientID == "" {
 		return
@@ -21,7 +21,7 @@ func SoftCancelForClient(clientID string) {
 	softCancelEngines(clientID)
 }
 
-// SoftCancelAll 打断全部 Scope 的进行中调用（清缓存等全局操作；不毁 Chromium 进程）。
+// SoftCancelAll 打断全部 Scope 的进行中调用（清缓存等全局操作；不毁 Chromium 进程、不杀 JVM）。
 // 与 SoftCancelForClient("") 的 no-op 不同。
 func SoftCancelAll() {
 	softCancelEngines("")
@@ -29,6 +29,7 @@ func SoftCancelAll() {
 
 func softCancelEngines(clientID string) {
 	interruptJavaBridgeForClient(clientID)
+	cancelScopeHTTP(clientID)
 	interruptScriptSpidersForClient(clientID) // Python + QuickJS
 	interruptNodeForClient(clientID)
 	if clientID == "" {
@@ -38,14 +39,14 @@ func softCancelEngines(clientID string) {
 	}
 }
 
-// HardRestartSharedRuntimes 硬重启本机共享爬虫运行时：JVM、Python、QuickJS、共享 Node、共享 Chromium。
-// 不动远端各用户独立运行时，不删脚本磁盘缓存。
+// HardRestartSharedRuntimes 核重启唯一 JVM + 本机共享 Py/JS/Node/Chromium。
+// 影响全体 JAR 租户；不动远端用户的 Py/Node/Chromium 桶，不删脚本磁盘缓存。
 func HardRestartSharedRuntimes() {
 	restartSharedRuntime()
 	runExtraHardShared()
 }
 
-// forgetUserRuntimeState 收拢：用户离开时清 Go 侧按用户分桶的可变态（进程另杀）。
+// forgetUserRuntimeState 收拢：用户离开时清 Go 侧按用户分桶的可变态。
 func forgetUserRuntimeState(userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -56,7 +57,8 @@ func forgetUserRuntimeState(userID string) {
 	clearNetConfigForUser(userID)
 }
 
-// KillUserRuntime 杀掉指定用户的 JVM、Python、QuickJS、Node、Chromium（不动本机共享与其它用户）。
+// KillUserRuntime 清指定用户在单 JVM 内的 bridge 租户态 + 删 UserJVMDir，并杀掉其 Py/JS/Node/Chromium。
+// 不动唯一 JVM 进程与其它用户。
 func KillUserRuntime(userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -66,27 +68,41 @@ func KillUserRuntime(userID string) {
 	forgetUserRuntimeState(userID)
 	destroyUserScripts(userID)
 	clearJarForUser(userID)
-	userBridgesMu.Lock()
-	b := userBridges[userID]
-	delete(userBridges, userID)
-	userBridgesMu.Unlock()
-	if b != nil {
-		b.epoch.Add(1)
-		b.mu.Lock()
-		b.stopLocked()
-		b.mu.Unlock()
-	}
+	clearBridgeTenant(userID)
+	_, _ = paths.WipeDirRemove(paths.UserJVMDir(userID))
 	destroyUserNodeHost(userID)
 	runExtraKillUser(userID)
 }
 
-// RestartCallerRuntime 卡死恢复时硬重启当前请求所属运行时。切仓不走这里。
+// RestartCallerRuntime 卡死恢复。切仓不走这里。
+// 远端：仅 KillUserRuntime（不跟 HardRestart；桥挂由后续 ensureStarted/callCtx 按需重建）。
+// 本机：SoftCancel → 清 shared 租户态；仅 bridge 不健康时才 HardRestart。
 func RestartCallerRuntime() {
 	if uid := hostclient.RuntimeUserID(); uid != "" {
 		KillUserRuntime(uid)
 		return
 	}
-	HardRestartSharedRuntimes()
+	sid := hostclient.ScopeID()
+	if sid != "" {
+		SoftCancelForClient(sid)
+	} else {
+		SoftCancelAll()
+	}
+	clearSharedCallerState()
+	if !javaBridgeHealthy() {
+		HardRestartSharedRuntimes()
+	}
+}
+
+// clearSharedCallerState 本机 shared：清 bridge 租户态 + Go net 桶 + 共享 Py/JS/Node（不动远端、不杀 JVM）。
+func clearSharedCallerState() {
+	clearJarGoStateForRuntime("")
+	clearBridgeTenant("shared")
+	clearNetConfigForShared()
+	_, _ = paths.WipeDirRemove(paths.UserJVMDir(""))
+	clearSharedJsPy()
+	clearSharedJarSpiders()
+	clearSharedNodeHost()
 }
 
 // ShutdownSniffBrowsers 关掉全部嗅探 Chromium（清缓存擦盘前；不碰 JVM/脚本）。

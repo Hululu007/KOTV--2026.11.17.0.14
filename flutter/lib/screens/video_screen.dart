@@ -238,13 +238,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     bool refreshRepo = false,
     bool refreshConfig = false,
   }) {
-    final prev = _reloadFlight;
+    // 不 await 旧 flight：世代作废 + SoftCancel 丢弃旧结果，避免串行等满超时。
     final run = () async {
-      if (prev != null) {
-        try {
-          await prev;
-        } catch (_) {}
-      }
       await _reloadBody(
         clearContent: clearContent,
         refreshRepo: refreshRepo,

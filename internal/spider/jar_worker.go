@@ -28,7 +28,7 @@ import (
 // ErrJavaBridgeInterrupted 表示调用被换源/关闭主动打断，不应再重试同一请求。
 var ErrJavaBridgeInterrupted = errors.New("JAR 调用已中断")
 
-// 桌面：独立 java -jar --serve（HTTP 多路）；超时后 Kill 并允许重建。
+// 桌面：唯一 java -jar --serve（HTTP 多路）。软取消/超时只结束本次调用，不杀进程。
 // 整次 jar 调用墙钟（含多次 OkHttp）；Android/桌面同为 120s。
 const javaBridgeCallTimeout = 120 * time.Second
 
@@ -37,7 +37,6 @@ func jarBridgeCallTimeout() time.Duration {
 }
 
 type javaBridgeClient struct {
-	ownerUID   string // RuntimeUserID；空=本机共享
 	mu         sync.Mutex
 	cmd        *exec.Cmd
 	baseURL    string // http://127.0.0.1:port
@@ -46,52 +45,22 @@ type javaBridgeClient struct {
 	epoch      atomic.Uint64
 }
 
-var javaBridge javaBridgeClient // ownerUID 空=共享
+// 桌面/安卓均为单 JVM：租户隔离在 bridge（tenantKey / Prefers / spiders / proxy）。
+// 包体公共：kotv.cache.dir=CacheRoot；可变态 kotv.user.runtime.root=CacheRoot/run。
+var javaBridge javaBridgeClient
 
 // Android SpiderService 最近一次 /jar/call 是否成功。失败后下次进详情重新 parseJar。
 var androidJarReachable atomic.Bool
 
-// 远端已登录用户：每人独立 JVM；空 userId 走共享 javaBridge（本机多窗口共用一台）。
-// 同一 JVM 已可装多份 jar（loaders 按路径）；不能把多租户塞进同一 JVM：
-// bridge 内 spiders 键=md5(jar)+siteKey、recentJar、Prefers（kotv.user.dir）均未按 userId 分桶，
-// 共用会串爬虫实例 / Prefers / recent 代理解析。要省进程须先在 bridge 按 user 隔离这些态。
-// 包体仍公共：kotv.cache.dir=CacheRoot，与 Go cache/{jar,py,js} 一致。
-var (
-	userBridgesMu sync.Mutex
-	userBridges   = map[string]*javaBridgeClient{}
-)
-
-func bridgeForUser(userID string) *javaBridgeClient {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return &javaBridge
-	}
-	userBridgesMu.Lock()
-	defer userBridgesMu.Unlock()
-	if b, ok := userBridges[userID]; ok {
-		return b
-	}
-	b := &javaBridgeClient{ownerUID: userID}
-	userBridges[userID] = b
-	return b
-}
-
 func bridgeForCurrent() *javaBridgeClient {
-	// 脚本（jar 文件）全局共享；仅 RuntimeUserID 非空时用独立 JVM。
-	return bridgeForUser(hostclient.RuntimeUserID())
+	return &javaBridge
 }
 
 // HostSpiderReady 远端主机爬虫面是否可用（安卓=本机 9979；桌面=捆绑 runtime 可用即可）。
 func HostSpiderReady() (ok bool, errMsg string) {
 	if runtime.GOOS == "android" {
-		client := &http.Client{Timeout: 800 * time.Millisecond}
-		resp, err := client.Get(localproxy.DefaultBridgeBaseURL() + "/health")
-		if err != nil {
+		if !localproxy.BridgeHealthy(localproxy.DefaultBridgeBaseURL(), 800*time.Millisecond) {
 			return false, fmt.Sprintf("安卓 SpiderService(:%d) 不可达：请保持 App/前台服务运行", localproxy.DefaultBridgePort)
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			return false, fmt.Sprintf("安卓 SpiderService 异常: HTTP %d", resp.StatusCode)
 		}
 		return true, ""
 	}
@@ -157,7 +126,45 @@ func cancelSharedJarCalls() {
 	}
 }
 
-// clearNetConfigForUser 删掉该远端用户 Scope 下的点播网络/代理配置桶，避免离开后仍被新 JVM 重放。
+// Scope 可取消 HTTP（jar 下载 / CMS）：SoftCancel 时 abort，避免等满 30s 墙钟。
+type scopeHTTPFlight struct {
+	id       uint64
+	clientID string
+	cancel   context.CancelFunc
+}
+
+var (
+	scopeHTTPMu  sync.Mutex
+	scopeHTTPQ   = map[uint64]*scopeHTTPFlight{}
+	scopeHTTPSeq atomic.Uint64
+)
+
+// BeginScopeHTTP 登记可取消下载/CMS 请求；结束时调用返回的 end。
+func BeginScopeHTTP(clientID string) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	id := scopeHTTPSeq.Add(1)
+	scopeHTTPMu.Lock()
+	scopeHTTPQ[id] = &scopeHTTPFlight{id: id, clientID: clientID, cancel: cancel}
+	scopeHTTPMu.Unlock()
+	return ctx, func() {
+		cancel()
+		scopeHTTPMu.Lock()
+		delete(scopeHTTPQ, id)
+		scopeHTTPMu.Unlock()
+	}
+}
+
+func cancelScopeHTTP(clientID string) {
+	scopeHTTPMu.Lock()
+	defer scopeHTTPMu.Unlock()
+	for _, f := range scopeHTTPQ {
+		if clientID == "" || f.clientID == clientID {
+			f.cancel()
+		}
+	}
+}
+
+// clearNetConfigForUser 删掉该远端用户 Scope 下的点播网络/代理配置桶，避免离开后仍被重放。
 func clearNetConfigForUser(userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -177,6 +184,26 @@ func clearNetConfigForUser(userID string) {
 	}
 	purge(netConfigByClient)
 	purge(userProxyByClient)
+}
+
+// clearNetConfigForShared 清本机共享桶：默认 payload + 非 u: Scope（与 clearTenant("shared") / NetProfiles 同口径）。
+func clearNetConfigForShared() {
+	netConfigMu.Lock()
+	defer netConfigMu.Unlock()
+	netConfigJSON = nil
+	userProxyJSON = nil
+	purgeLocal := func(m map[string][]byte) {
+		if m == nil {
+			return
+		}
+		for cid := range m {
+			if hostclient.UserIDFromScope(cid) == "" {
+				delete(m, cid)
+			}
+		}
+	}
+	purgeLocal(netConfigByClient)
+	purgeLocal(userProxyByClient)
 }
 
 // SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp（按当前 ScopeID）。
@@ -267,13 +294,8 @@ func SetLocalProxyPort(port int) {
 	pushBridgeIfAlive(payload)
 }
 
-func currentNetConfig() [][]byte {
-	return currentNetConfigFor(hostclient.RuntimeUserID())
-}
-
-// currentNetConfigFor 只回放属于该运行时桶的网络配置，避免新 JVM 灌入其它租户的 headers/proxy。
-func currentNetConfigFor(ownerUID string) [][]byte {
-	ownerUID = strings.TrimSpace(ownerUID)
+// currentAllNetConfig 单 JVM 启动时回放全部 Scope 的网络配置（bridge 内按 clientId 分桶）。
+func currentAllNetConfig() [][]byte {
 	netConfigMu.Lock()
 	defer netConfigMu.Unlock()
 	var out [][]byte
@@ -289,27 +311,13 @@ func currentNetConfigFor(ownerUID string) [][]byte {
 		seen[key] = struct{}{}
 		out = append(out, payload)
 	}
-	scopeOwned := func(cid string) bool {
-		uid := hostclient.UserIDFromScope(cid)
-		if ownerUID == "" {
-			// 本机共享 JVM：默认桶 + 本机 c: 窗口；不含远端 u: 租户。
-			return uid == ""
-		}
-		return uid == ownerUID
+	add(netConfigJSON)
+	add(userProxyJSON)
+	for _, payload := range netConfigByClient {
+		add(payload)
 	}
-	if ownerUID == "" {
-		add(netConfigJSON)
-		add(userProxyJSON)
-	}
-	for cid, payload := range netConfigByClient {
-		if scopeOwned(cid) {
-			add(payload)
-		}
-	}
-	for cid, payload := range userProxyByClient {
-		if scopeOwned(cid) {
-			add(payload)
-		}
+	for _, payload := range userProxyByClient {
+		add(payload)
 	}
 	add(localProxyJSON)
 	return out
@@ -388,29 +396,31 @@ func callJavaBridge(payload []byte) (string, error) {
 	return bridgeForCurrent().callCtx(ctx, payload)
 }
 
-// interruptJavaBridgeForClient 取消进行中的 JAR HTTP（OkHttp + Go 客户端）。
-// 不直接杀 JVM；被取消的 callCtx 返回时会 stopLocked 回收共享/用户 bridge。
+// interruptJavaBridgeForClient 取消进行中的 JAR HTTP（OkHttp 按 clientId + Go 侧 call ctx）。
+// 单 JVM：不杀进程。
 func interruptJavaBridgeForClient(clientID string) {
 	cancelJarCalls(clientID)
 	softCancelJavaBridge(clientID)
 }
 
-// restartSharedRuntime 硬重启本机共享 JVM/Py/JS/Node（不动远端用户桶，不删脚本磁盘缓存）。
+// restartSharedRuntime 核重启唯一 JVM + 本机共享 Py/JS/Node（影响全体 JAR 租户；不动远端 Py/Node/Chromium 桶）。
 // 对外请用 HardRestartSharedRuntimes。
+// clearAll 卸全体 CL 后须全局作废 Go jar 就绪态，否则远端 parseJarNotified 误跳过。
 func restartSharedRuntime() {
-	clearJarGoStateForRuntime("")
+	bumpJarRefreshGen() // 全体租户 notified/recent/无 md5 标记
 	cancelSharedJarCalls()
-	// 杀共享 bridge，绝不碰 userBridges。
-	softCancelSharedBridgeOnly()
+	softCancelJavaBridge("")
 	if runtime.GOOS == "android" {
-		client := &http.Client{Timeout: 2 * time.Second}
-		req, err := http.NewRequest(http.MethodPost, localproxy.DefaultBridgeBaseURL()+"/jar/interrupt", bytes.NewReader([]byte("{}")))
+		// /jar/interrupt → clearAll（HardRestart 语义）；SoftCancel 走 /jar/cancel。
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, localproxy.DefaultBridgeBaseURL()+"/jar/interrupt", bytes.NewReader([]byte("{}")))
 		if err == nil {
 			req.Header.Set("Content-Type", "application/json")
-			if resp, err := client.Do(req); err == nil {
+			if resp, err := bridgeHTTPClient().Do(req); err == nil {
 				_ = resp.Body.Close()
 			}
 		}
+		cancel()
 	} else {
 		javaBridge.epoch.Add(1)
 		javaBridge.mu.Lock()
@@ -422,77 +432,30 @@ func restartSharedRuntime() {
 	clearSharedNodeHost()
 }
 
-func softCancelSharedBridgeOnly() {
-	postJavaBridgeCancel([]*javaBridgeClient{&javaBridge}, "")
-}
-
 func clearSharedJarSpiders() {
 	dropJarSpiders("\x01", false)
 }
 
-// javaBridgesForCancel 选 SoftCancel 应通知的 JVM：
-//   - clientID 空（SoftCancelAll）：共享 + 全部用户桶（与当前 Bind 无关）
-//   - u:<uid>：仅该用户桶（尚未创建则空，绝不回落共享）
-//   - c:… / 其它：本机共享桶
-func javaBridgesForCancel(clientID string) []*javaBridgeClient {
-	clientID = strings.TrimSpace(clientID)
-	if clientID == "" {
-		return snapshotJavaBridges()
-	}
-	userBridgesMu.Lock()
-	defer userBridgesMu.Unlock()
-	if uid := hostclient.UserIDFromScope(clientID); uid != "" {
-		if b := userBridges[uid]; b != nil {
-			return []*javaBridgeClient{b}
-		}
-		return nil
-	}
-	return []*javaBridgeClient{&javaBridge}
-}
-
 func softCancelJavaBridge(clientID string) {
-	postJavaBridgeCancel(javaBridgesForCancel(clientID), clientID)
-}
-
-func postJavaBridgeCancel(targets []*javaBridgeClient, clientID string) {
-	body, _ := json.Marshal(map[string]string{"clientId": clientID})
-	payload, _ := json.Marshal(map[string]interface{}{
-		"method":   "cancelClient",
-		"args":     map[string]string{"clientId": clientID},
-		"clientId": clientID,
-	})
 	if runtime.GOOS == "android" {
+		payload, _ := json.Marshal(map[string]interface{}{
+			"method":   "cancelClient",
+			"args":     map[string]string{"clientId": clientID},
+			"clientId": clientID,
+		})
 		_, _ = androidPostJarShort(payload)
 		return
 	}
-	for _, br := range targets {
-		if br == nil {
-			continue
-		}
-		base := br.currentBaseURL()
-		if base == "" {
-			continue
-		}
-		_ = postJarPath(base, "/jar/cancel", body, 2*time.Second)
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_, _ = br.httpPostCtx(ctx, payload)
-		cancel()
+	base := javaBridge.currentBaseURL()
+	if base == "" {
+		return
 	}
+	// 桌面只走 /jar/cancel → applyCancel（与 cancelClient 同语义，避免双发）。
+	body, _ := json.Marshal(map[string]string{"clientId": clientID})
+	_ = postJarPath(base, "/jar/cancel", body, 2*time.Second)
 }
 
-// snapshotJavaBridges 共享 + 全部用户 JVM（只读快照）。
-func snapshotJavaBridges() []*javaBridgeClient {
-	userBridgesMu.Lock()
-	defer userBridgesMu.Unlock()
-	out := make([]*javaBridgeClient, 0, 1+len(userBridges))
-	out = append(out, &javaBridge)
-	for _, b := range userBridges {
-		out = append(out, b)
-	}
-	return out
-}
-
-// ShutdownJavaBridge 引擎退出时杀掉共享与所有用户 JVM。
+// ShutdownJavaBridge 引擎退出时关掉唯一桌面 JVM。
 func ShutdownJavaBridge() {
 	if runtime.GOOS == "android" {
 		return
@@ -501,19 +464,6 @@ func ShutdownJavaBridge() {
 	javaBridge.mu.Lock()
 	javaBridge.stopLocked()
 	javaBridge.mu.Unlock()
-	userBridgesMu.Lock()
-	all := make([]*javaBridgeClient, 0, len(userBridges))
-	for id, b := range userBridges {
-		all = append(all, b)
-		delete(userBridges, id)
-	}
-	userBridgesMu.Unlock()
-	for _, b := range all {
-		b.epoch.Add(1)
-		b.mu.Lock()
-		b.stopLocked()
-		b.mu.Unlock()
-	}
 }
 
 func (w *javaBridgeClient) currentBaseURL() string {
@@ -554,21 +504,63 @@ func (w *javaBridgeClient) callCtx(ctx context.Context, payload []byte) (string,
 		}
 		transportErr = err
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			// 超时或软取消放弃：回收 JVM，下次 ensureStarted 重建（与传输失败同路）。
-			w.mu.Lock()
-			w.stopLocked()
-			w.mu.Unlock()
+			// 软取消/超时只结束本次调用；OkHttp 已按 clientId 取消，不杀进程。
 			return "", ErrJavaBridgeInterrupted
 		}
 		if w.epoch.Load() != startEpoch {
 			return "", ErrJavaBridgeInterrupted
 		}
-		// 传输失败：停掉并重试一次（重建 JVM）。
+		// 单桥：仅进程已死或连续两次 /health 失败才重建；单次传输失败不杀全体租户的 JVM。
+		if !w.shouldRestartAfterTransportErr() {
+			return "", fmt.Errorf("Java bridge 调用失败: %w", transportErr)
+		}
+		w.epoch.Add(1)
 		w.mu.Lock()
 		w.stopLocked()
 		w.mu.Unlock()
 	}
 	return "", fmt.Errorf("Java bridge 异常退出，自动重启后仍不可用: %w", transportErr)
+}
+
+// shouldRestartAfterTransportErr 是否值得杀进程重建。
+// 进程已死 → 重建；进程仍活 → 须连续两次 /health 失败（避免瞬时抖动拖死全租户）。
+func (w *javaBridgeClient) shouldRestartAfterTransportErr() bool {
+	w.mu.Lock()
+	alive := w.aliveLocked()
+	base := w.baseURL
+	w.mu.Unlock()
+	if !alive || base == "" {
+		return true
+	}
+	return bridgeHealthFailedTwice(base)
+}
+
+// javaBridgeHealthy 唯一 bridge 是否可服务（与 transport 重启共用判定）。
+func javaBridgeHealthy() bool {
+	if runtime.GOOS == "android" {
+		return !bridgeHealthFailedTwice(localproxy.DefaultBridgeBaseURL())
+	}
+	javaBridge.mu.Lock()
+	alive := javaBridge.aliveLocked()
+	base := javaBridge.baseURL
+	javaBridge.mu.Unlock()
+	if !alive || base == "" {
+		return false
+	}
+	return !bridgeHealthFailedTwice(base)
+}
+
+func probeBridgeOK(base string) bool {
+	return localproxy.BridgeHealthy(base, 500*time.Millisecond)
+}
+
+// bridgeHealthFailedTwice 连续两次 health 失败才判不通（中间短间隔）。
+func bridgeHealthFailedTwice(base string) bool {
+	if probeBridgeOK(base) {
+		return false
+	}
+	time.Sleep(100 * time.Millisecond)
+	return !probeBridgeOK(base)
 }
 
 func (w *javaBridgeClient) ensureStarted() error {
@@ -612,15 +604,15 @@ func (w *javaBridgeClient) startLocked() error {
 	}
 
 	proxyPort := localproxy.Port()
-	// data.dir=应用根（TV 凭证）；cache.dir=公共包体根 Path.jar/js/py；user.dir=每用户 Prefers/files。
+	// data.dir=应用根（TV 凭证）；cache.dir=公共包体；user.runtime.root=run/（bridge 按 tenant 分桶）。
 	dataDir := paths.Root()
 	cacheDir := paths.CacheRoot()
-	userDir := paths.UserJVMDir(w.ownerUID)
+	runtimeRoot := paths.UserRuntimeRoot()
 	cmd := exec.Command(java,
 		"-Djava.awt.headless=true",
 		fmt.Sprintf("-Dkotv.data.dir=%s", dataDir),
 		fmt.Sprintf("-Dkotv.cache.dir=%s", cacheDir),
-		fmt.Sprintf("-Dkotv.user.dir=%s", userDir),
+		fmt.Sprintf("-Dkotv.user.runtime.root=%s", runtimeRoot),
 		fmt.Sprintf("-Dkotv.bridge.port=%d", port),
 		"-Djava.net.useSystemProxies=false",
 		"-DsocksProxyHost=",
@@ -644,8 +636,7 @@ func (w *javaBridgeClient) startLocked() error {
 	cmd.Dir = filepath.Dir(bridgeJar)
 	cmd.Env = append(filterProxyEnv(os.Environ()), fmt.Sprintf("KOTV_PROXY_PORT=%d", proxyPort))
 	_ = os.MkdirAll(paths.LogDir(), 0o755)
-	stderrName := "java-bridge-" + paths.RuntimeOwnerLabel(w.ownerUID) + ".err.log"
-	stderrPath := filepath.Join(paths.LogDir(), stderrName)
+	stderrPath := filepath.Join(paths.LogDir(), "java-bridge.err.log")
 	stderrFile, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err == nil {
 		cmd.Stderr = stderrFile
@@ -667,7 +658,7 @@ func (w *javaBridgeClient) startLocked() error {
 	w.baseURL = base
 	w.stderrFile = stderrFile
 	w.proc.Store(cmd.Process)
-	log.Printf("java bridge started pid=%d owner=%q jar=%s url=%s cache=%s", cmd.Process.Pid, w.ownerUID, bridgeJar, base, cacheDir)
+	log.Printf("java bridge started pid=%d jar=%s url=%s cache=%s runtimeRoot=%s", cmd.Process.Pid, bridgeJar, base, cacheDir, runtimeRoot)
 
 	if err := waitBridgeHealthy(base, 15*time.Second); err != nil {
 		hint := readBridgeErrTail(stderrPath)
@@ -678,7 +669,7 @@ func (w *javaBridgeClient) startLocked() error {
 		return fmt.Errorf("等待 Java bridge HTTP 就绪失败: %w（详见 %s）", err, stderrPath)
 	}
 
-	for _, cfg := range currentNetConfigFor(w.ownerUID) {
+	for _, cfg := range currentAllNetConfig() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		_, err := postJarPathCtx(ctx, base, "/jar/call", cfg)
 		cancel()
@@ -709,19 +700,12 @@ func pickFreeLocalPort() (int, error) {
 
 func waitBridgeHealthy(base string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 500 * time.Millisecond}
 	var last error
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(base + "/health")
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode < 400 {
-				return nil
-			}
-			last = fmt.Errorf("http %d", resp.StatusCode)
-		} else {
-			last = err
+		if localproxy.BridgeHealthy(base, 500*time.Millisecond) {
+			return nil
 		}
+		last = fmt.Errorf("bridge health failed")
 		time.Sleep(100 * time.Millisecond)
 	}
 	if last == nil {
@@ -790,13 +774,7 @@ func trimCString(s string) string {
 
 func pushBridgeIfAlive(payload []byte) {
 	if runtime.GOOS == "android" {
-		client := &http.Client{Timeout: 300 * time.Millisecond}
-		resp, err := client.Get(localproxy.DefaultBridgeBaseURL() + "/health")
-		if err != nil {
-			return
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 400 {
+		if !localproxy.BridgeHealthy(localproxy.DefaultBridgeBaseURL(), 300*time.Millisecond) {
 			return
 		}
 		_, _ = androidCallJavaBridgeShort(payload)
@@ -814,31 +792,10 @@ func primeAndroidNetConfigOnce() error {
 		netConfigMu.Unlock()
 		return nil
 	}
-	// 必须包含当前 Scope 的配置：多用户/多客户端时 headers/hosts/doh 按 Scope 分桶，
-	// 只重放默认桶会导致当前会话的 Referer/UA/DoH 丢失，站点请求被反爬拦成空页。
-	cid := hostclient.ScopeID()
-	cfgs := make([][]byte, 0, 3)
-	push := func(b []byte) {
-		if len(b) == 0 {
-			return
-		}
-		for _, seen := range cfgs {
-			if string(seen) == string(b) {
-				return
-			}
-		}
-		cfgs = append(cfgs, append([]byte(nil), b...))
-	}
-	push(netConfigJSON)
-	if cid != "" && netConfigByClient != nil {
-		push(netConfigByClient[cid])
-	}
-	push(userProxyJSON)
-	push(localProxyJSON)
 	netPrimed = true
 	netConfigMu.Unlock()
-
-	for _, cfg := range cfgs {
+	// 单 bridge：回放全部 Scope 的 headers/proxy（bridge 内按 clientId 分桶）。
+	for _, cfg := range currentAllNetConfig() {
 		if _, err := androidCallJavaBridge(cfg); err != nil {
 			netConfigMu.Lock()
 			netPrimed = false
@@ -891,8 +848,7 @@ func postJarPathCtx(ctx context.Context, base, path string, payload []byte) (str
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	client := &http.Client{Timeout: jarBridgeCallTimeout()}
-	resp, err := client.Do(req)
+	resp, err := bridgeHTTPClient().Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -907,4 +863,9 @@ func postJarPathCtx(ctx context.Context, base, path string, payload []byte) (str
 		return "", fmt.Errorf("jar call empty response")
 	}
 	return s, nil
+}
+
+// bridgeHTTPClient 委托 localproxy 共用 Transport（与 health 探测同一连接池）。
+func bridgeHTTPClient() *http.Client {
+	return localproxy.BridgeClient()
 }

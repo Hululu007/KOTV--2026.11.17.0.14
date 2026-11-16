@@ -2,14 +2,18 @@ package com.github.catvod.utils;
 
 import android.content.SharedPreferences;
 
-import androidx.preference.PreferenceManager;
-
 import com.github.catvod.Init;
 
+/**
+ * 站点 Prefers：按 {@link Util#tenantKey()} 分桶（单 bridge 多用户不串凭证）。
+ */
 public class Prefers {
 
     public static SharedPreferences getPrefers() {
-        return PreferenceManager.getDefaultSharedPreferences(Init.context());
+        // Desktop stub Context.getSharedPreferences 已按 tenant 分目录；
+        // 名里再带 tenant，安卓宿主同名策略一致。
+        String name = "kotv_" + Util.tenantKey() + "_preferences";
+        return Init.context().getSharedPreferences(name, android.content.Context.MODE_PRIVATE);
     }
 
     public static String getString(String key) {

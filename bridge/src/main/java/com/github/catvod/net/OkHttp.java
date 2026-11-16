@@ -25,7 +25,6 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
-import okhttp3.logging.HttpLoggingInterceptor;
 
 public class OkHttp {
 
@@ -159,10 +158,6 @@ public class OkHttp {
 
     public static OkResult get(String url, Map<String, String> params, Map<String, String> header) {
         return new OkRequest(GET, url, params, header).execute(client());
-    }
-
-    public static OkHttpClient shortTimeoutClient() {
-        return client().newBuilder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).writeTimeout(5, TimeUnit.SECONDS).build();
     }
 
     public static String getLocation(String url, Map<String, String> header) throws java.io.IOException {
@@ -309,9 +304,7 @@ public class OkHttp {
         if (ssl != null) {
             builder.sslSocketFactory(ssl.getSocketFactory(), trustAllCertificates());
         }
-        HttpLoggingInterceptor logging = new HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY);
         builder.proxyAuthenticator(authenticator());
-        //builder.addNetworkInterceptor(logging);
         builder.proxySelector(selector());
         return builder;
     }
@@ -351,6 +344,17 @@ public class OkHttp {
         authInterceptor().clear();
         requestInterceptor().clear();
         responseInterceptor().clear();
+    }
+
+    /** HardRestart / clearAll：取消全部 Call 并清空全体 Scope 网络配置桶。 */
+    public void clearAllNetworks() {
+        cancelAll();
+        dns().clearAll();
+        selector().clearAll();
+        authInterceptor().clear();
+        requestInterceptor().clear();
+        responseInterceptor().clearAll();
+        NetProfiles.clearAll();
     }
 
     private static class Loader {

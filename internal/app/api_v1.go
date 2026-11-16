@@ -447,7 +447,7 @@ func (a *App) APIBtProgress() map[string]any {
 
 // APICancelPending 打断进行中的爬虫/磁力。
 // opts:
-//   - hard: true 硬杀当前所属 JVM/Py·JS/Node；false 取消当前 Scope 进行中请求（放弃后回收运行时单元）
+//   - hard: false 软取消当前 Scope（不杀唯一 JVM）；true 递进恢复：SoftCancel→清本租户态，仅 bridge 不健康时才 HardRestart
 //   - thunder: true 时 Stop 磁力 Fetch / 专用源；默认 false（离开详情不停；磁力起播路径显式传 true）
 func (a *App) APICancelPending(opts map[string]any) map[string]any {
 	_, sites, _ := a.scope()

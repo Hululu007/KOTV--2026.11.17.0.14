@@ -153,13 +153,6 @@ class MainActivity : FlutterActivity() {
               ),
             )
           }
-          "interruptJar" -> {
-            try {
-              JarLoader.clear()
-            } catch (_: Throwable) {
-            }
-            result.success(true)
-          }
           else -> result.notImplemented()
         }
       }
