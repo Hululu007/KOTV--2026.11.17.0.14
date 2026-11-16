@@ -136,8 +136,23 @@ func rejectBadGateway(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
 	}
+	if err.Error() == "需要管理员" {
+		writeAPIError(w, http.StatusForbidden, err.Error())
+		return true
+	}
 	writeAPIError(w, http.StatusBadGateway, err.Error())
 	return true
+}
+
+func rejectNeedAdminErr(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	if err.Error() == "需要管理员" {
+		writeAPIError(w, http.StatusForbidden, err.Error())
+		return true
+	}
+	return false
 }
 
 func rejectInternal(w http.ResponseWriter, err error) bool {
@@ -205,6 +220,9 @@ func (s *Server) handleAPIv1Config(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := api.APILoadConfig(src); err != nil {
+			if rejectNeedAdminErr(w, err) {
+				return
+			}
 			writeAPIError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -774,6 +792,9 @@ func (s *Server) handleAPIv1Settings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := api.APISetSettings(kv); err != nil {
+			if rejectNeedAdminErr(w, err) {
+				return
+			}
 			writeAPIError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -943,6 +964,9 @@ func (s *Server) handleAPIv1Tools(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := api.APITools(body.Action, body.Params)
 	if err != nil {
+		if rejectNeedAdminErr(w, err) {
+			return
+		}
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}

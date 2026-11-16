@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import '../providers.dart';
+import '../api/kotv_role.dart';
 import '../api/kotv_settings_cache.dart';
 import '../screens/detail_screen.dart';
 import '../screens/file_browser_screen.dart';
@@ -903,6 +904,8 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
 /// 已保存的直播源列表。返回 true 表示已切换或新加，调用方应刷新。
 Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
   final api = ref.read(apiProvider);
+  final canManage = await kotvCanManageShared(
+      api, ref.read(engineLauncherProvider).baseUrl);
   Map<String, dynamic> data;
   try {
     data = await api.liveSources();
@@ -918,24 +921,28 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
     builder: (ctx) => _SourceListDialog(
       key: const ValueKey('live-source-list'),
       title: '直播源',
-      hint: '点选切换；长按改名；右侧删除可移除',
+      hint: canManage ? '点选切换；长按改名；右侧删除可移除' : '点选切换已有直播源',
       listKey: 'configs',
       currentKey: 'live',
       initial: data,
       fetch: api.liveSources,
-      addLabel: '＋ 添加直播源',
+      addLabel: canManage ? '＋ 添加直播源' : null,
       vodStyle: false,
-      onEdit: (url, title) =>
-          showEditLiveDialog(ctx, ref, url: url, title: title),
-      onDelete: (url) async {
-        await _prepareLeavePlayback();
-        await api.deleteLive(url);
-      },
+      onEdit: canManage
+          ? (url, title) => showEditLiveDialog(ctx, ref, url: url, title: title)
+          : null,
+      onDelete: canManage
+          ? (url) async {
+              await _prepareLeavePlayback();
+              await api.deleteLive(url);
+            }
+          : null,
     ),
   );
   if (!context.mounted) return false;
   if (selected == null) return false;
   if (selected.url.isEmpty) {
+    if (!canManage) return false;
     await showAddLiveDialog(context, ref);
     return true;
   }
@@ -947,6 +954,8 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
 /// 多仓/线路切换。返回 true 表示已成功切换并应刷新首页。
 Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
   final api = ref.read(apiProvider);
+  final canManage = await kotvCanManageShared(
+      api, ref.read(engineLauncherProvider).baseUrl);
   Map<String, dynamic> data;
   try {
     data = await api.listRepos();
@@ -964,27 +973,31 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
     builder: (ctx) => _SourceListDialog(
       key: const ValueKey('repo-source-list'),
       title: '线路选择',
-      hint: '点选切换；长按改名；右侧删除可移除',
+      hint: canManage ? '点选切换；长按改名；右侧删除可移除' : '点选切换已有线路',
       listKey: 'repos',
       currentKey: 'current',
       initial: data,
       fetch: api.listRepos,
-      addLabel: '＋ 添加线路',
+      addLabel: canManage ? '＋ 添加线路' : null,
       vodStyle: true,
       fallbackCurrent: current,
       keepAtStart: true,
-      onEdit: (url, title) =>
-          showEditVodDialog(ctx, ref, url: url, title: title),
-      onDelete: (url) async {
-        await _prepareLeavePlayback();
-        await api.deleteRepo(url);
-      },
+      onEdit: canManage
+          ? (url, title) => showEditVodDialog(ctx, ref, url: url, title: title)
+          : null,
+      onDelete: canManage
+          ? (url) async {
+              await _prepareLeavePlayback();
+              await api.deleteRepo(url);
+            }
+          : null,
     ),
   );
 
   if (!context.mounted) return false;
   if (selected == null) return false;
   if (selected.url.isEmpty) {
+    if (!canManage) return false;
     return showAddVodDialog(context, ref);
   }
 
@@ -1162,10 +1175,10 @@ class _SourceListDialog extends StatefulWidget {
     required this.currentKey,
     required this.initial,
     required this.fetch,
-    required this.addLabel,
     required this.vodStyle,
-    required this.onEdit,
-    required this.onDelete,
+    this.addLabel,
+    this.onEdit,
+    this.onDelete,
     this.fallbackCurrent = '',
     this.keepAtStart = false,
   });
@@ -1176,13 +1189,13 @@ class _SourceListDialog extends StatefulWidget {
   final String currentKey;
   final Map<String, dynamic> initial;
   final Future<Map<String, dynamic>> Function() fetch;
-  final String addLabel;
+  final String? addLabel;
   final bool vodStyle;
   final String fallbackCurrent;
   final bool keepAtStart;
-  final Future<({String url, String name})?> Function(String url, String title)
+  final Future<({String url, String name})?> Function(String url, String title)?
       onEdit;
-  final Future<void> Function(String url) onDelete;
+  final Future<void> Function(String url)? onDelete;
 
   @override
   State<_SourceListDialog> createState() => _SourceListDialogState();

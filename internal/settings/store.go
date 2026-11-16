@@ -180,7 +180,15 @@ var (
 	mu      sync.RWMutex
 	data    = defaultFile()
 	storeDB *database.DB
+	// builtinDefaults 冻结代码缺省，不被宿主 Set/Load 覆盖；远端 Get 缺键用此表。
+	builtinDefaults = map[string]string{}
 )
+
+func init() {
+	for _, it := range data.List {
+		builtinDefaults[it.ID] = it.Value
+	}
+}
 
 // BindDB 设置持久化到 SQLite（须在 Load 前调用）。
 func BindDB(db *database.DB) { storeDB = db }
@@ -536,12 +544,16 @@ func Load() error {
 }
 
 func ensureSettingLocked(t Type, label, def string) {
+	id := string(t)
+	if _, ok := builtinDefaults[id]; !ok {
+		builtinDefaults[id] = def
+	}
 	for _, it := range data.List {
-		if it.ID == string(t) {
+		if it.ID == id {
 			return
 		}
 	}
-	data.List = append(data.List, item{ID: string(t), Label: label, Value: def})
+	data.List = append(data.List, item{ID: id, Label: label, Value: def})
 }
 
 func dropSettingLocked(id string) {
@@ -612,10 +624,8 @@ func Get(t Type) string {
 func defaultValue(id string) string {
 	mu.RLock()
 	defer mu.RUnlock()
-	for _, it := range data.List {
-		if it.ID == id {
-			return it.Value
-		}
+	if v, ok := builtinDefaults[id]; ok {
+		return v
 	}
 	return ""
 }

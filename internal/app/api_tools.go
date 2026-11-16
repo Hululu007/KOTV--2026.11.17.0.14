@@ -173,6 +173,9 @@ func (a *App) toolAssrtDownload(url, name, size string) (map[string]any, error) 
 }
 
 func (a *App) toolClearCache(params map[string]any) (map[string]any, error) {
+	if hostclient.DedicatedRuntime() && !currentRequestIsAdmin() {
+		return nil, fmt.Errorf("%w", ErrNeedAdmin)
+	}
 	opt := cacheclean.Options{
 		Script: boolParam(params, "script", true),
 		Jar:    boolParam(params, "jar", true),

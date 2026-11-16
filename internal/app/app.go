@@ -512,17 +512,23 @@ func (a *App) savedLiveSources() []model.Live {
 	current := strings.TrimSpace(settings.Get(settings.LIVE))
 	if current != "" {
 		if _, ok := seen[current]; !ok {
-			a.persistLiveSource(current)
+			// 列表展示个人当前源；远端非管理员不借此写入共享表。
+			if !(hostclient.DedicatedRuntime() && !currentRequestIsAdmin()) {
+				_, _ = a.persistLiveSource(current)
+			}
 			out = append([]model.Live{{Name: "", URL: current}}, out...)
 		}
 	}
 	return out
 }
 
-func (a *App) persistLiveSource(raw string) string {
+func (a *App) persistLiveSource(raw string) (string, error) {
 	url := config.NormalizeSource(strings.TrimSpace(raw))
 	if url == "" || a.DB == nil {
-		return url
+		return url, nil
+	}
+	if err := a.errUnlessSharedSourceAllowed(database.ConfigTypeLive, url); err != nil {
+		return "", err
 	}
 	if _, err := a.DB.UpsertConfig(&database.Config{
 		Type: database.ConfigTypeLive,
@@ -535,7 +541,7 @@ func (a *App) persistLiveSource(raw string) string {
 			sess.NoteLive(url)
 		}
 	}
-	return url
+	return url, nil
 }
 
 // syncLive 只同步当前 Scope 的 Live。远端 Bind 下禁止 SyncFromConfig 本机 a.Live（会把远端 LIVE 选择写进本机内存）。
@@ -659,7 +665,10 @@ func (a *App) applyRemoteSetting(name, value string) {
 	case "", "vod":
 		settings.Set(settings.VOD, value)
 	case "live":
-		url := a.persistLiveSource(value)
+		url, err := a.persistLiveSource(value)
+		if err != nil {
+			return
+		}
 		settings.Set(settings.LIVE, url)
 	default:
 		settings.Set(settings.Type(name), value)

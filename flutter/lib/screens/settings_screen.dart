@@ -11,6 +11,7 @@ import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_store.dart';
 import '../api/kotv_api.dart';
 import '../api/kotv_engine_url.dart';
+import '../api/kotv_role.dart';
 import '../engine/engine_launcher.dart';
 import '../player/kotv_playback.dart';
 import '../player/external_player.dart';
@@ -71,6 +72,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _deviceIp = '';
   bool _loading = true;
   bool _busy = false;
+  /// 本机或远端管理员：可添加/编辑共享源、下载、配对、清缓存等。
+  bool _canManageShared = true;
 
   /// 安卓：设备支持 Vulkan≥1.2 时才显示开关。
   bool _androidVulkanOk = false;
@@ -133,6 +136,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (kotvIsAndroid()) {
         _androidVulkanOk = await NativeMpvPlayback.isVulkanAvailable();
       }
+      final base = ref.read(engineLauncherProvider).baseUrl;
+      _canManageShared =
+          await kotvCanManageShared(ref.read(apiProvider), base);
     } catch (e) {
       _status = '$e';
     }
@@ -2466,14 +2472,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             return desc.isEmpty ? '未配置' : desc;
                           }(),
                           onTap: () async {
-                            await showAddVodDialog(context, ref);
+                            if (_canManageShared) {
+                              await showAddVodDialog(context, ref);
+                            } else {
+                              final switched =
+                                  await showRepoPicker(context, ref);
+                              if (switched) {
+                                setState(() => _status = '线路已切换');
+                              }
+                            }
                             await _reload();
                           },
-                          onLongPress: () async {
-                            await showEditVodDialog(context, ref);
-                            await _reload();
-                            setState(() => _status = '点播源已更新');
-                          },
+                          onLongPress: _canManageShared
+                              ? () async {
+                                  await showEditVodDialog(context, ref);
+                                  await _reload();
+                                  setState(() => _status = '点播源已更新');
+                                }
+                              : null,
                         ),
                         KotvSettingsCell(
                           label: '直播源',
@@ -2484,15 +2500,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             return desc.isEmpty ? '未配置' : desc;
                           }(),
                           onTap: () async {
-                            await showAddLiveDialog(context, ref);
-                            await _reload();
-                            setState(() => _status = '直播源已保存');
+                            if (_canManageShared) {
+                              await showAddLiveDialog(context, ref);
+                              await _reload();
+                              setState(() => _status = '直播源已保存');
+                            } else {
+                              await showLivePicker(context, ref);
+                              await _reload();
+                              setState(() => _status = '直播源已切换');
+                            }
                           },
-                          onLongPress: () async {
-                            await showEditLiveDialog(context, ref);
-                            await _reload();
-                            setState(() => _status = '直播源已更新');
-                          },
+                          onLongPress: _canManageShared
+                              ? () async {
+                                  await showEditLiveDialog(context, ref);
+                                  await _reload();
+                                  setState(() => _status = '直播源已更新');
+                                }
+                              : null,
                         ),
                         KotvSettingsCell(
                           label: '线路选择',
@@ -2834,11 +2858,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     const KotvSettingsSectionTitle('功能'),
                     KotvSettingsCard(children: [
                       KotvSettingsGrid(children: [
-                        KotvSettingsCell(
-                          label: '下载设置',
-                          value: DownloadSettings.dirLabel(g('downloadDir')),
-                          onTap: () => unawaited(_openDownloadSheet()),
-                        ),
+                        if (_canManageShared)
+                          KotvSettingsCell(
+                            label: '下载设置',
+                            value: DownloadSettings.dirLabel(g('downloadDir')),
+                            onTap: () => unawaited(_openDownloadSheet()),
+                          ),
                         KotvSettingsCell(
                             label: '广告过滤', value: adLabel, onTap: _pickAd),
                         KotvSettingsCell(
@@ -2853,13 +2878,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               'incognito', incognito ? 'false' : 'true',
                               msg: incognito ? '无痕已关闭' : '无痕已开启'),
                         ),
-                        KotvSettingsCell(
-                          label: '投屏接收',
-                          value: dmr ? '开启' : '关闭',
-                          onTap: () => _set(
-                              'dlnaRenderer', dmr ? 'false' : 'true',
-                              msg: dmr ? '已关闭 DLNA 被投端' : '已开启 DLNA 被投端'),
-                        ),
+                        if (_canManageShared)
+                          KotvSettingsCell(
+                            label: '投屏接收',
+                            value: dmr ? '开启' : '关闭',
+                            onTap: () => _set(
+                                'dlnaRenderer', dmr ? 'false' : 'true',
+                                msg: dmr ? '已关闭 DLNA 被投端' : '已开启 DLNA 被投端'),
+                          ),
                         KotvSettingsCell(
                           label: '播放缺省 UA',
                           value: g('ua').isEmpty
@@ -2881,16 +2907,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           onTap: () => showAppNews(context,
                               '同一局域网内浏览器打开\nhttp://$lanHintIp:$_port/\n（Web 包有 webapp 时为客户端；否则为遥控。遥控固定 /remote/）'),
                         ),
-                        KotvSettingsCell(
-                          label: '用户管理',
-                          value: '管理员',
-                          onTap: () {
-                            Navigator.of(context).push(
-                              kotvDetailRoute(
-                                  builder: (_) => const UserAdminScreen()),
-                            );
-                          },
-                        ),
+                        if (_canManageShared)
+                          KotvSettingsCell(
+                            label: '用户管理',
+                            value: '管理员',
+                            onTap: () {
+                              Navigator.of(context).push(
+                                kotvDetailRoute(
+                                    builder: (_) => const UserAdminScreen()),
+                              );
+                            },
+                          ),
                       ]),
                     ]),
                     const KotvSettingsSectionTitle('界面'),
@@ -2919,11 +2946,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     const KotvSettingsSectionTitle('隐私与同步'),
                     KotvSettingsCard(children: [
                       KotvSettingsGrid(columns: 4, children: [
-                        KotvSettingsCell(
-                            label: '配对码',
-                            value: _pairCode.isEmpty ? '查看' : _pairCode,
-                            onTap: _showPair),
-                        KotvSettingsCell(label: '重置配对码', onTap: _resetPair),
+                        if (_canManageShared) ...[
+                          KotvSettingsCell(
+                              label: '配对码',
+                              value: _pairCode.isEmpty ? '查看' : _pairCode,
+                              onTap: _showPair),
+                          KotvSettingsCell(
+                              label: '重置配对码', onTap: _resetPair),
+                        ],
                         KotvSettingsCell(
                             label: '发送历史', onTap: () => _syncSend('history')),
                         KotvSettingsCell(
@@ -2933,16 +2963,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     const KotvSettingsSectionTitle('更多'),
                     KotvSettingsCard(children: [
                       KotvSettingsGrid(columns: 4, children: [
-                        KotvSettingsCell(
-                          label: '更新地址',
-                          value:
-                              g('updateUrl').isEmpty ? '未配置' : g('updateUrl'),
-                          onTap: () => _prompt('更新地址', 'version.json URL',
-                              g('updateUrl'), (v) => _set('updateUrl', v)),
-                        ),
+                        if (_canManageShared)
+                          KotvSettingsCell(
+                            label: '更新地址',
+                            value: g('updateUrl').isEmpty
+                                ? '未配置'
+                                : g('updateUrl'),
+                            onTap: () => _prompt('更新地址', 'version.json URL',
+                                g('updateUrl'), (v) => _set('updateUrl', v)),
+                          ),
                         KotvSettingsCell(label: '数据备份', onTap: _backupExport),
                         KotvSettingsCell(label: '恢复备份', onTap: _backupImport),
-                        KotvSettingsCell(label: '清理缓存', onTap: _clearCache),
+                        if (_canManageShared)
+                          KotvSettingsCell(
+                              label: '清理缓存', onTap: _clearCache),
                         KotvSettingsCell(label: '卡死恢复', onTap: _recoverStuck),
                         if (!Platform.isIOS)
                           KotvSettingsCell(label: '检测爬虫', onTap: _checkSpider),

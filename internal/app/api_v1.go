@@ -128,6 +128,9 @@ func (a *App) APIGetConfig() map[string]any {
 func (a *App) APILoadConfig(source string) error {
 	// 等启动那次加载结束，否则它晚完成会盖掉这次换的源。
 	a.waitConfigLoaded()
+	if err := a.errUnlessSharedSourceAllowed(database.ConfigTypeSite, source); err != nil {
+		return err
+	}
 	cfg, sites, sess := a.scope()
 	sites.DropContentCache()
 	sites.SoftCancelPending()
@@ -1491,7 +1494,11 @@ func (a *App) APISetSettings(kv map[string]string) error {
 		}
 		t := settings.Type(k)
 		if t == settings.LIVE {
-			v = a.persistLiveSource(v)
+			persisted, err := a.persistLiveSource(v)
+			if err != nil {
+				return err
+			}
+			v = persisted
 			needLive = true
 		}
 		settings.Set(t, v)
@@ -1612,7 +1619,11 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 	lv := a.scopeLive()
 	url = strings.TrimSpace(url)
 	if url != "" {
-		url = a.persistLiveSource(url)
+		persisted, err := a.persistLiveSource(url)
+		if err != nil {
+			return nil, err
+		}
+		url = persisted
 		settings.Set(settings.LIVE, url)
 		_ = settings.Save()
 		a.syncLive()
