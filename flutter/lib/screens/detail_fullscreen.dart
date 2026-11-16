@@ -795,14 +795,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       if (isDown &&
           (kotvIsEnterKey(key) ||
               kotvIsMediaPlayPause(key) ||
-              kotvIsUpKey(key) ||
-              kotvIsDownKey(key) ||
-              kotvIsLeftKey(key) ||
-              kotvIsRightKey(key))) {
-        final primary = FocusManager.instance.primaryFocus;
-        if ((kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) &&
-            (primary == null || primary == node)) {
-          _chromeKey.currentState?.focusPlayControl();
+              kotvIsDpadNavKey(key))) {
+        if (kotvPrimaryIsEmptyOr(node)) {
+          _chromeKey.currentState?.restoreRemoteFocus();
           _bumpChrome();
           return KeyEventResult.handled;
         }
@@ -856,7 +851,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _showChromeAndFocusPlay() {
     _bumpChrome();
-    _chromeKey.currentState?.focusPlayControl();
+    _chromeKey.currentState?.restoreRemoteFocus();
   }
 
   void _onHover(PointerHoverEvent e, BoxConstraints c) {

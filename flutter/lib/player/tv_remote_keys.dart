@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 
 /// 遥控键判定（点播/直播共用）。
@@ -79,3 +80,15 @@ int? kotvDigitFromKey(LogicalKeyboardKey key) {
   }
   return null;
 }
+
+/// 当前 primary 为空，或仍停在页面根 [root]（根无 TvFocus 环）。
+bool kotvPrimaryIsEmptyOr(FocusNode? root) {
+  final primary = FocusManager.instance.primaryFocus;
+  return primary == null || (root != null && identical(primary, root));
+}
+
+bool kotvIsDpadNavKey(LogicalKeyboardKey key) =>
+    kotvIsUpKey(key) ||
+    kotvIsDownKey(key) ||
+    kotvIsLeftKey(key) ||
+    kotvIsRightKey(key);

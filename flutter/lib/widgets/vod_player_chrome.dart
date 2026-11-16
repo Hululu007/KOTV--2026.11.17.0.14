@@ -14,6 +14,7 @@ import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_win7_direct.dart';
 import '../player/player_normalize.dart';
+import '../player/tv_remote_focus.dart';
 import '../player/tv_remote_keys.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
@@ -348,16 +349,50 @@ class VodInlineControls extends StatefulWidget {
   final Future<void> Function(String key, String value)? onPersistSetting;
 
   @override
-  State<VodInlineControls> createState() => _VodInlineControlsState();
+  State<VodInlineControls> createState() => VodInlineControlsState();
 }
 
-class _VodInlineControlsState extends State<VodInlineControls> {
+class VodInlineControlsState extends State<VodInlineControls> {
   final FocusNode _seekFocus = FocusNode(debugLabel: 'vod_inline_seek');
+  final FocusNode _playFocus = FocusNode(debugLabel: 'vod_inline_play');
+  final KotvRemoteFocusMemory _remoteFocus = KotvRemoteFocusMemory();
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addListener(_rememberRemoteFocus);
+  }
 
   @override
   void dispose() {
+    FocusManager.instance.removeListener(_rememberRemoteFocus);
     _seekFocus.dispose();
+    _playFocus.dispose();
+    _remoteFocus.clear();
     super.dispose();
+  }
+
+  void _rememberRemoteFocus() {
+    if (!mounted) return;
+    final primary = FocusManager.instance.primaryFocus;
+    final ctx = primary?.context;
+    if (ctx == null || !ctx.mounted) return;
+    if (ctx.findAncestorWidgetOfExactType<VodInlineChromeScope>() == null) {
+      return;
+    }
+    _remoteFocus.remember(primary);
+  }
+
+  /// 亮底栏后强制焦点落到播停（盒子上 autofocus 常输给根 Focus）。
+  void focusPlayControl() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _playFocus.requestFocus();
+    });
+  }
+
+  void restoreRemoteFocus() {
+    _remoteFocus.restore(fallback: focusPlayControl);
   }
 
   @override
@@ -393,6 +428,7 @@ class _VodInlineControlsState extends State<VodInlineControls> {
                               tip: player.playing ? '暂停' : '播放',
                               size: iconSize,
                               autofocus: widget.autofocusPlay,
+                              focusNode: _playFocus,
                               onTap: () => player.playOrPause(),
                             ),
                             _IconAct(
@@ -810,6 +846,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   final FocusNode _seekFocus = FocusNode(debugLabel: 'vod_fs_seek');
   final KotvFocusBag _epNodes = KotvFocusBag();
   final KotvFocusBag _iconNodes = KotvFocusBag();
+  final KotvRemoteFocusMemory _remoteFocus = KotvRemoteFocusMemory();
   static const double _epItemExtent = 48;
   bool _pointerHoldingChrome = false;
   bool _focusHoldingChrome = false;
@@ -832,6 +869,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final primary = FocusManager.instance.primaryFocus;
     final ctx = primary?.context;
     final hold = ctx != null && ctx.findAncestorStateOfType<VodFullscreenChromeState>() == this;
+    if (hold) _remoteFocus.remember(primary);
     if (_focusHoldingChrome == hold) {
       if (hold) widget.onBump();
       return;
@@ -958,6 +996,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     _seekFocus.dispose();
     _epNodes.dispose();
     _iconNodes.dispose();
+    _remoteFocus.clear();
     super.dispose();
   }
 
@@ -969,6 +1008,17 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       if (!mounted || _epOpen) return;
       _playFocus.requestFocus();
     });
+  }
+
+  /// 栏开且焦点丢失：优先上次 TvFocus，否则播停。
+  void restoreRemoteFocus() {
+    if (_epOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusEpisodeList();
+      });
+      return;
+    }
+    _remoteFocus.restore(fallback: focusPlayControl);
   }
 
   void _focusEpisodeList() {

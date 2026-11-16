@@ -9,7 +9,7 @@ import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
 
-/// 播控右侧音量：默认只显示扬声器；获焦/悬停展开滑条；激活后左右键调音并落盘。
+/// 播控右侧音量：默认只显示扬声器；悬停或 OK 展开滑条；遥控获焦只高亮图标。
 class KotvVolumeControl extends StatefulWidget {
   const KotvVolumeControl({
     super.key,
@@ -53,11 +53,10 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> with KotvKeyHighl
     super.dispose();
   }
 
-  /// 只管展开/收起；高亮走 [FocusableActionDetector.onShowFocusHighlight]（触控不留常亮框）。
+  /// 获焦不自动展开（遥控移到喇叭只高亮）；失焦后收起。悬停 / OK 才展开。
   void _onFocusChanged() {
     if (_focus.hasFocus) {
       _collapseTimer?.cancel();
-      if (!_expanded) setState(() => _expanded = true);
       widget.onEngage?.call();
     } else if (!_hovering) {
       _scheduleCollapse();

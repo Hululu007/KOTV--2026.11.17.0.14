@@ -239,6 +239,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   final ValueNotifier<double> _fsSwipeDy = ValueNotifier<double>(0);
   /// 详情内嵌：菜单键弹出后播停键自动获焦。
   bool _chromeRemoteFocus = false;
+  final GlobalKey<VodInlineControlsState> _inlineChromeKey =
+      GlobalKey<VodInlineControlsState>();
   int _epPage = 0;
   bool _reversed = false;
   /// 起播续播 seek（毫秒）；仅当目标集 remarks/flag 与历史一致时并入 startAt。
@@ -3601,6 +3603,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Widget _inlineChrome() {
     return VodInlineControls(
+      key: _inlineChromeKey,
       player: _playback,
       miniActive: _miniDesktop,
       autofocusPlay: _chromeRemoteFocus,
@@ -3793,9 +3796,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
 
     // —— 底栏未获焦 ——
-    // 菜单/上下 → 亮底栏；左右 → seek（勿再用左右「调菜单」）。
+    // 菜单/上下 → 亮底栏并拉焦；左右 → seek（勿再用左右「调菜单」）。
     if (isDown && (kotvIsMenuKey(key) || kotvIsUpKey(key) || kotvIsDownKey(key))) {
       setState(() => _chromeRemoteFocus = true);
+      _inlineChromeKey.currentState?.restoreRemoteFocus();
       return KeyEventResult.handled;
     }
     if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {

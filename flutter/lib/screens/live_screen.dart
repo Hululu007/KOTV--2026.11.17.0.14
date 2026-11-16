@@ -31,6 +31,7 @@ import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
 import '../player/danmaku_layer.dart';
 import '../player/playback_failover.dart';
+import '../player/tv_remote_focus.dart';
 import '../player/tv_remote_keys.dart';
 import '../providers.dart';
 import '../api/kotv_settings_cache.dart';
@@ -134,6 +135,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   final KotvFocusBag _chFocus = KotvFocusBag();
   final KotvFocusBag _progFocus = KotvFocusBag();
   final FocusNode _epgTabFocus = FocusNode(debugLabel: 'live_epg_tab');
+  final KotvRemoteFocusMemory _remoteFocus = KotvRemoteFocusMemory();
   final KotvJumpController _epgScroll = KotvJumpController();
   // 竖屏与全屏面板不会同时出现，分类、频道、节目单各共用一个控制器。
   final KotvJumpController _groupScroll = KotvJumpController();
@@ -455,9 +457,46 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   bool _pickingPlayer = false;
 
   @override
+  void _onLiveGlobalFocus() {
+    if (!mounted || !_liveUiOpen) return;
+    final primary = FocusManager.instance.primaryFocus;
+    if (primary == null || identical(primary, _focus)) return;
+    _remoteFocus.remember(primary);
+  }
+
+  void _restoreLiveRemoteFocus() {
+    _bumpLiveChrome();
+    if (_catchup && _catchupChrome) {
+      _remoteFocus.restore(fallback: () {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _catchupChrome) _playFocus.requestFocus();
+        });
+      });
+      return;
+    }
+    if (_rightOpen) {
+      _remoteFocus.restore(fallback: () {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _rightOpen) _rightFocus.requestFocus();
+        });
+      });
+      return;
+    }
+    if (_leftOpen) {
+      _remoteFocus.restore(fallback: () {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _leftOpen) _focusChannelList();
+        });
+      });
+      return;
+    }
+    _showLiveChromeAndFocusPlay();
+  }
+
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    FocusManager.instance.addListener(_onLiveGlobalFocus);
     _active = this;
     liveScreenHandleBack = _handleLiveBack;
     kotvRegisterQuitHook(_prepareQuit);
@@ -499,6 +538,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   void dispose() {
     _playSerial++;
     WidgetsBinding.instance.removeObserver(this);
+    FocusManager.instance.removeListener(_onLiveGlobalFocus);
     _detachRemoteHandlers();
     if (_active == this) _active = null;
     kotvUnregisterQuitHook(_prepareQuit);
@@ -517,6 +557,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _cursorHideTimer?.cancel();
     _unwireLivePlaybackErrors();
     _unwireLivePlaybackEnded();
+    _remoteFocus.clear();
     _focus.dispose();
     _playFocus.dispose();
     _rightFocus.dispose();
@@ -3378,17 +3419,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       }
       if (kotvIsEnterKey(key) ||
           kotvIsMediaPlayPause(key) ||
-          kotvIsUpKey(key) ||
-          kotvIsDownKey(key) ||
-          kotvIsLeftKey(key) ||
-          kotvIsRightKey(key)) {
+          kotvIsDpadNavKey(key)) {
         if (!isDown) return KeyEventResult.ignored;
-        final primary = FocusManager.instance.primaryFocus;
-        if ((kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) &&
-            (primary == null || primary == node) &&
-            !_leftOpen &&
-            !_rightOpen) {
-          _showLiveChromeAndFocusPlay();
+        if (kotvPrimaryIsEmptyOr(node)) {
+          _restoreLiveRemoteFocus();
           return KeyEventResult.handled;
         }
         _bumpLiveChrome();
