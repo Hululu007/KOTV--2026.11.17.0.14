@@ -1207,6 +1207,20 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return _playback.skipToNext();
   }
 
+  /// 无缝优先：skip / 已切入则返回 true（调用方勿再 [_playAt]）；队列已丢才返回 false 走硬切。
+  Future<bool> _preferSeamlessOrAlreadyAdvanced(int nextIdx) async {
+    if (await _trySeamlessSkip(nextIdx)) return true;
+    // await 期间 playlist 自然前进时 queuedStart 会把 _epIdx 推到 next，并清掉 _queuedNext。
+    if (_epIdx == nextIdx) return true;
+    if (_queuedNext == null) {
+      // 引擎已 consume 排队项但详情尚未记账：再让出一拍给 queuedStart，避免硬切拆掉无缝。
+      await Future<void>.delayed(Duration.zero);
+      if (!mounted) return true;
+      if (_epIdx == nextIdx) return true;
+    }
+    return false;
+  }
+
   /// playbackEnded / onTimeChanged→nextEpisode / 控件下一集：每集只前进一次。
   /// [fromEnd] 为真时要求已 READY 且本世代未消耗；控件/手势下一集传 false。
   /// 全屏上滑已先做动画时由 [DetailFullscreenPage] 调 [onNext]，此处不再二次 animate。
@@ -1233,9 +1247,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       // 换集过程 pause 不亮全屏底栏。
       _fsPageKey.currentState?.beginEpisodeSwitchQuiet();
       // 无缝：playlist 已排好 → skipToNext，不经 [_playAt]、不拆 Player。
-      if (await _trySeamlessSkip(next)) return;
-      // await 期间引擎可能已自然切入（queuedStart 已把 _epIdx 推到 next），勿再硬切毁掉无缝。
-      if (_epIdx == next) return;
+      if (await _preferSeamlessOrAlreadyAdvanced(next)) return;
       if (mounted) setState(() => _status = fromEnd ? '自动播放下一集…' : '播放下一集…');
       // 仅自动连播需要抖音式动画；手势/按钮已在全屏页内播过，勿再 animate。
       if (_immersiveFullscreen && fromEnd) {
@@ -2003,7 +2015,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final q = _queuedNext;
     final d = _detail;
     if (!mounted || q == null || q.key != key || d == null || q.idx >= _eps.length) return;
-    // 无缝切入：先沉浸挡亮栏；并消费本世代，避免 completed/片尾再走硬切 [_playAt] 毁掉无缝。
+    // 无缝切入：先沉浸挡亮栏。旧集片尾靠 _playbackLive=false 挡住 completed/硬切；
+    // 勿把 _endConsumedGen 接到新 playGen，否则本集再也无法自动连播。
     _fsPageKey.currentState?.beginEpisodeSwitchQuiet();
     _queuedNext = null;
     _nextPlayCache.remove(q.key);
@@ -2013,7 +2026,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     final ep = _eps[q.idx];
     _playGen++;
-    _endConsumedGen = _playGen;
     final serial = ++_playAtSerial;
     _playbackLive = false;
     _sessionStartedAt = DateTime.now();
