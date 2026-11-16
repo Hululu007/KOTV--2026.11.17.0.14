@@ -246,17 +246,24 @@ Future<void> _openVodItemBody(
   }
   final wantSource = item.configSource.trim();
   if (wantSource.isNotEmpty) {
+    final api = ref.read(apiProvider);
     try {
-      final api = ref.read(apiProvider);
       final cfg = await api.getConfig();
       final cur = '${cfg['source'] ?? ''}'.trim();
       if (cur != wantSource) {
         await kotvStopBackgroundPlayback();
-        await api.loadConfig(wantSource).timeout(const Duration(seconds: 45));
-        ref.invalidate(configProvider);
-        ref.invalidate(settingsProvider);
+        if (!context.mounted) return;
+        ref.read(uiBusyProvider.notifier).state = '正在切源…';
+        try {
+          await api.loadConfig(wantSource).timeout(const Duration(seconds: 45));
+          ref.invalidate(configProvider);
+          ref.invalidate(settingsProvider);
+        } finally {
+          ref.read(uiBusyProvider.notifier).state = null;
+        }
       }
     } catch (e) {
+      ref.read(uiBusyProvider.notifier).state = null;
       if (!context.mounted) return;
       if (kotvMessageNeedsLogin(e)) {
         final ok = await kotvPresentLoginIfNeeded(context, ref);
@@ -287,6 +294,8 @@ Future<void> _openVodItemBody(
     );
     return;
   }
+  // 同源：让出首页/分类 in-flight，不挡 push（与切源 soft cancel 同口径）。
+  unawaited(ref.read(apiProvider).cancelPending(hard: false, thunder: false));
   await kotvStopBackgroundPlayback();
   if (!context.mounted) return;
   release();

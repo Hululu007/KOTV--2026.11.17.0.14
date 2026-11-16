@@ -148,9 +148,11 @@ class DetailScreen extends ConsumerStatefulWidget {
 
   /// 换源/切 Tab：放开 PopScope，并 await 硬停（含桌面 MPV dispose），避免卸树后仍占 AO/出声。
   /// 并发调用会挂到同一 Completer，禁止「提前 return 后立刻卸树」。
+  /// 若界面已离开（_active==null）而硬停仍在跑：立刻返回，不挡历史/再开详情。
   static Future<void> prepareLeave() async {
     final inFlight = _DetailScreenState._leaveDone;
     if (inFlight != null) {
+      if (_DetailScreenState._active == null) return;
       try {
         await inFlight.future.timeout(const Duration(seconds: 5));
       } catch (_) {}
