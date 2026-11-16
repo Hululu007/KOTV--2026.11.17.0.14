@@ -707,6 +707,10 @@ func (s *Server) handleAPIv1Repos(w http.ResponseWriter, r *http.Request) {
 		newURL := strings.TrimSpace(body.URL)
 		switch strings.ToLower(strings.TrimSpace(body.Action)) {
 		case "edit", "rename":
+			// 共享仓列表：删改需管理员；普通远端只选仓（loadConfig / setting.vod）。
+			if rejectUnlessAdmin(w, r) {
+				return
+			}
 			if err := api.APIEditRepo(oldURL, newURL, body.Name); err != nil {
 				writeAPIError(w, http.StatusBadRequest, err.Error())
 				return
@@ -716,6 +720,9 @@ func (s *Server) handleAPIv1Repos(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusBadRequest, "unknown action")
 		}
 	case http.MethodDelete:
+		if rejectUnlessAdmin(w, r) {
+			return
+		}
 		url := strings.TrimSpace(r.URL.Query().Get("url"))
 		if r.Body != nil {
 			var body struct {
@@ -831,12 +838,19 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, out)
 	case "delete":
+		// 共享直播列表：删改需管理员；普通远端只设 setting.live / load。
+		if rejectUnlessAdmin(w, r) {
+			return
+		}
 		if err := api.APIDeleteLive(body.URL); err != nil {
 			writeAPIError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "edit", "rename":
+		if rejectUnlessAdmin(w, r) {
+			return
+		}
 		oldURL := strings.TrimSpace(body.OldURL)
 		if oldURL == "" {
 			oldURL = strings.TrimSpace(body.URL)

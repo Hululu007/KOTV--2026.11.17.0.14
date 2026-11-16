@@ -158,6 +158,15 @@ func isAdmin(r *http.Request, user *auth.User) bool {
 	return isLoopbackRequest(r) || (user != nil && user.Role == auth.RoleAdmin)
 }
 
+// rejectUnlessAdmin 共享仓/直播列表删改用；非管理员写 403 并返回 true。
+func rejectUnlessAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if isAdmin(r, authUserFrom(r.Context())) {
+		return false
+	}
+	writeAPIError(w, http.StatusForbidden, "需要管理员")
+	return true
+}
+
 // protocolMismatch 非本机的 /api/v1 请求协议号与后端不一致。
 func protocolMismatch(r *http.Request) bool {
 	if isLoopbackRequest(r) || !strings.HasPrefix(r.URL.Path, "/api/v1/") || r.URL.Path == "/api/v1/health" {

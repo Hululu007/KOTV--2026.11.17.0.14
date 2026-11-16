@@ -105,6 +105,7 @@ Go Engine（单进程，:9978）
 - 多用户：桌面只启一台 `--serve`；安卓共用 `SpiderService`。可变态键 `Util.tenantKey()`（空 uid→`shared`）；切仓/`clearRuntimeJars` 只 `clearTenant`，`clearAll` 仅清缓存磁盘与 HardRestart。安卓 `Path.files()` 落 `files/kotv_tenant/<tenant>/`；桌面 stub 经 Context 落到 `run/<tenant>/jvm/files`。
 - `KillUserRuntime` → RPC `clearTenant`（含 NetProfiles/Prefers/OkHttp 鉴权·跳转记忆）+ 擦 `UserJVMDir`，不杀 JVM。单次 JAR 传输失败不杀桥；进程死或**连续两次** `/health` 失败才重建。远端 hard 恢复只 KillUser，不跟 HardRestart。
 - 离线释放：`session/leave` 与 `auth/logout` 即时 `releaseUserRuntime`；前端切回本机前先 `sessionLeave`。强杀未 Leave 时靠 Presence（30s Ping / **90s** 超时）兜底。
+- 远端用户数据：历史/收藏/续播/直播收藏与上次频道、`vod`/`home`/`live` 选择按 `DataOwner` 分桶；仓库与直播**列表**共享，选中只记个人；`liveLoad` DTO 缓存按 Scope；共享仓/直播源删改需管理员；会话新增 live 随 leave 清理（对齐点播仓 NoteRepo）。
 - 再登录水合：Dedicated 会话 `bootstrapSession` 末尾 `rehydrateSessionSpider`（`SetConfigBase`/`SetNetConfig`/`EnsureRootJar` 写根路径）；主机换仓 `followHostSessions` / 清缓存 `restoreSessionSources` 均 Dedicated Bind 后再水合。
 - `LoadJar` 只清当前租户 Go 侧 jar 就绪态 + 本 URL 无 md5 标记；`clearJar` 才全局 bump。包体仍共用 `JarPath`。Go→桥 HTTP（含 health/probe）共用 `localproxy.BridgeClient` Transport（超时靠 ctx）。
 - 安卓 Py：`sess_key=userId#site#slot`；`/py/interrupt` 按 `userId` 清（空=`shared`），不误伤其它租户。HardRestart 的 `/jar/interrupt` 只清 `shared` Chaquopy（与 Go `clearSharedJsPy` 同口径），不动远端用户桶。

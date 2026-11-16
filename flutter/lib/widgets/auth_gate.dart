@@ -41,7 +41,11 @@ Future<bool> kotvShowSignIn(
     allowRegister: register,
     allowCancel: allowCancel,
   );
-  if (ok) ref.invalidate(engineStatusProvider);
+  if (ok) {
+    KotvSettingsCache.clear();
+    ref.invalidate(settingsProvider);
+    ref.invalidate(engineStatusProvider);
+  }
   return ok;
 }
 
@@ -221,6 +225,8 @@ Future<bool> showRemoteLoginDialog(
               await client.register(u, pw);
             }
             await client.login(u, pw);
+            // 换账号后丢掉上一用户的 settings 内存缓存。
+            KotvSettingsCache.clear();
             if (ctx.mounted) Navigator.pop(ctx, true);
           } catch (e) {
             if (ctx.mounted) showAppNews(ctx, '$e');

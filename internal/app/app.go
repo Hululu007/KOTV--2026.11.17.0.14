@@ -66,7 +66,7 @@ type App struct {
 	castSearching bool
 	castErr       string
 
-	// APILiveLoad 序列化缓存：按直播源 URL 键复用已建 DTO。
+	// APILiveLoad 序列化缓存：按 Scope+URL 键复用 DTO（含媒体钥匙，不可跨用户命中）。
 	liveLoadMu        sync.Mutex
 	liveLoadCachedKey string
 	liveLoadCached    map[string]any
@@ -181,6 +181,7 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 	sess = a.sessions.GetOrCreate(cid, func() *clientsession.Session {
 		s := &clientsession.Session{ClientID: cid}
 		s.SetRepoBaseline(a.siteRepoURLs())
+		s.SetLiveBaseline(a.liveSourceURLs())
 		a.useHostConfig(s)
 		return s
 	})
@@ -302,6 +303,24 @@ func (a *App) siteRepoURLs() map[string]struct{} {
 	return out
 }
 
+func (a *App) liveSourceURLs() map[string]struct{} {
+	out := map[string]struct{}{}
+	if a == nil || a.DB == nil {
+		return out
+	}
+	cfgs, err := a.DB.ListConfigs(int64(database.ConfigTypeLive))
+	if err != nil {
+		return out
+	}
+	for _, c := range cfgs {
+		u := strings.TrimSpace(c.URL)
+		if u != "" {
+			out[u] = struct{}{}
+		}
+	}
+	return out
+}
+
 func sessionOwnedByUser(s *clientsession.Session, userID string) bool {
 	if s == nil || userID == "" {
 		return false
@@ -338,6 +357,34 @@ func (a *App) dropSessionRepos(sess *clientsession.Session) {
 	}
 }
 
+// dropSessionLives 对齐 dropSessionRepos：清本会话新增且无人占用的直播源行。
+func (a *App) dropSessionLives(sess *clientsession.Session) {
+	if a == nil || sess == nil || a.DB == nil || !strings.HasPrefix(sess.ClientID, "u:") {
+		return
+	}
+	added := sess.AddedLives()
+	if len(added) == 0 {
+		return
+	}
+	held := map[string]struct{}{}
+	if a.sessions != nil {
+		a.sessions.ForEach(func(other *clientsession.Session) {
+			if other == nil || other.ClientID == sess.ClientID {
+				return
+			}
+			for u := range other.AddedLives() {
+				held[u] = struct{}{}
+			}
+		})
+	}
+	keep := strings.TrimSpace(settings.Get(settings.LIVE))
+	for _, u := range clientsession.URLsAddedBySession(added, keep, held) {
+		if err := a.DB.DeleteConfigByURL(u, database.ConfigTypeLive); err != nil {
+			log.Printf("session %s: drop live %s: %v", sess.ClientID, u, err)
+		}
+	}
+}
+
 func (a *App) dropReposForUser(userID string) {
 	userID = strings.TrimSpace(userID)
 	if a == nil || userID == "" || a.sessions == nil {
@@ -351,6 +398,7 @@ func (a *App) dropReposForUser(userID string) {
 	})
 	for _, s := range list {
 		a.dropSessionRepos(s)
+		a.dropSessionLives(s)
 	}
 }
 
@@ -482,15 +530,18 @@ func (a *App) persistLiveSource(raw string) string {
 	}); err != nil {
 		log.Printf("persist live source %s: %v", url, err)
 	}
+	if hostclient.DedicatedRuntime() {
+		if _, _, sess := a.scope(); sess != nil {
+			sess.NoteLive(url)
+		}
+	}
 	return url
 }
 
+// syncLive 只同步当前 Scope 的 Live。远端 Bind 下禁止 SyncFromConfig 本机 a.Live（会把远端 LIVE 选择写进本机内存）。
 func (a *App) syncLive() {
 	if lv := a.scopeLive(); lv != nil {
 		lv.SyncFromConfig()
-	}
-	if a.Live != nil && a.scopeLive() != a.Live {
-		a.Live.SyncFromConfig()
 	}
 }
 

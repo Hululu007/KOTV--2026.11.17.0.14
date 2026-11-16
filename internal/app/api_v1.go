@@ -479,7 +479,9 @@ func (a *App) APISessionLeave() map[string]any {
 	sid := hostclient.ScopeID()
 	uid := hostclient.CurrentUserID()
 	if sid != "" {
-		a.dropSessionRepos(a.sessions.Peek(sid))
+		sess := a.sessions.Peek(sid)
+		a.dropSessionRepos(sess)
+		a.dropSessionLives(sess)
 		a.sessions.Remove(sid)
 	}
 	if a.presence != nil && uid != "" {
@@ -1637,16 +1639,17 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 		}
 		liveSrc = srcs[index]
 	}
-	cacheKey := strings.TrimSpace(liveSrc.URL)
-	if cacheKey == "" {
-		cacheKey = strings.TrimSpace(liveSrc.Name)
+	srcKey := strings.TrimSpace(liveSrc.URL)
+	if srcKey == "" {
+		srcKey = strings.TrimSpace(liveSrc.Name)
 	}
+	cacheKey := liveLoadScopeCacheKey(hostclient.ScopeID(), srcKey)
 	if force {
 		a.liveLoadMu.Lock()
 		a.liveLoadCachedKey = ""
 		a.liveLoadCached = nil
 		a.liveLoadMu.Unlock()
-	} else if cacheKey != "" {
+	} else if srcKey != "" {
 		// 命中可复用序列化 DTO，但仍须对本 Scope Load，否则 Current() 空、play/epg 会报未加载。
 		a.liveLoadMu.Lock()
 		cached := a.liveLoadCached

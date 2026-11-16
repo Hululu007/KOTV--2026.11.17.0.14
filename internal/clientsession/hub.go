@@ -30,6 +30,10 @@ type Session struct {
 	repoAtStart map[string]struct{}
 	addedRepos  map[string]struct{}
 
+	liveMu      sync.Mutex
+	liveAtStart map[string]struct{}
+	addedLives  map[string]struct{}
+
 	mediaMu    sync.RWMutex
 	mediaState string
 	mediaTitle string
