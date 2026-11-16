@@ -202,7 +202,7 @@ macOS 另产出:
 Windows 运行时（Win7 尽力兼容）：
   JRE = 全平台 Liberica 21；Win amd64 另加 api-ms-win-core-path（Win7 SP1+）
   Python = adang1345/PythonVista embed
-  Chromium = x64: 109（snapshot 回退）；ARM64: Win_Arm64 最新（CFT 无 win-arm64 时）
+  嗅探浏览器 = x64: Win7 REWORK → runtime/chromium/chrome.exe；ARM64: CFT headless-shell 或 Win_Arm64 snapshot
   FFmpeg = Gyan 7.0
   页内 MPV = 原生通道（mpv-2.dll / libmpv 与 fvp 同目录，不进 runtime/）
   页内 FVP = Flutter fvp/libmdk（备选）

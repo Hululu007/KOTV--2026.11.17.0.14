@@ -218,9 +218,10 @@ func RequireNode() (string, error) {
 	return bin, nil
 }
 
-// Chromium 返回嗅探用浏览器可执行文件路径（目录名 chromium，二进制因平台而异）：
-//   macOS/Linux 捆绑多为 chrome-headless-shell；Windows Win7 包为 chrome.exe；
+// Chromium 返回嗅探用浏览器可执行文件（runtime 目录名仍叫 chromium；进程名随二进制）：
+//   macOS/Linux x64 捆绑多为 chrome-headless-shell；Windows x64 为 chrome.exe（Win7 REWORK）；
 //   亦可为 CFT 的 chrome / Google Chrome for Testing；都没有则回落系统 Chrome/Chromium/Edge。
+//   Android 不走此函数（WebView 嗅探）。linux-arm64 通常无捆绑，仅系统回落。
 func Chromium() string {
 	cands := underRoots(
 		filepath.Join("chromium", "chrome-headless-shell"),
@@ -229,8 +230,6 @@ func Chromium() string {
 		filepath.Join("chromium", "chrome"),
 		filepath.Join("chromium", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"),
 		filepath.Join("chromium", "Chromium.app", "Contents", "MacOS", "Chromium"),
-		filepath.Join("chrome", "chrome"),
-		filepath.Join("chrome", "chrome.exe"),
 	)
 	if p := firstExisting(cands...); p != "" {
 		return p

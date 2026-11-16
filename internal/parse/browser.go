@@ -154,13 +154,13 @@ func SoftCancelAllSniffs() {
 	cancelSniffList(takeAllSniffs())
 }
 
-// ShutdownAllChromium 取消全部嗅探并销毁所有 Chromium 桶（引擎退出 / 清缓存擦盘前）。
+// ShutdownAllChromium 取消全部嗅探并销毁所有桌面嗅探浏览器桶（引擎退出 / 清缓存擦盘前）。
 func ShutdownAllChromium() {
 	SoftCancelAllSniffs()
 	destroyAllChromiumBuckets()
 }
 
-// HardRestartSharedChromium 取消本机（非 u:）嗅探 tab，并销毁共享 Chromium 桶（不动远端用户桶）。
+// HardRestartSharedChromium 取消本机（非 u:）嗅探 tab，并销毁共享浏览器桶（不动远端用户桶）。
 func HardRestartSharedChromium() {
 	cancelSniffList(takeSharedScopeSniffs())
 	destroyChromiumBucket("")
@@ -364,9 +364,9 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		cancelTimeout()
 	})
 	defer untrack()
-	// chromedp 偶发不响应 ctx 取消：再加硬超时强杀 tab。
+	// chromedp 偶发忽略主超时 ctx：再预约一次同路径的 tab/timeout cancel（仍是取消上下文，不杀浏览器进程）。
 	hardTimer := time.AfterFunc(timeout+3*time.Second, func() {
-		parseLog("[sniff] hard-cancel depth=%d after=%s", depth, timeout+3*time.Second)
+		parseLog("[sniff] late-cancel depth=%d after=%s", depth, timeout+3*time.Second)
 		cancelTab()
 		cancelTimeout()
 	})

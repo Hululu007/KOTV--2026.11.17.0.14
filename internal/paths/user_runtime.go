@@ -20,7 +20,7 @@ import (
 //   - JVM：远端每用户一进程（Prefers/spider 实例在 bridge 内未按 user 隔离）
 //   - Python / Node：每用户独立进程与 workDir/dataDir
 //   - QuickJS：同引擎进程内分槽（jsPyKey 含 RuntimeUserID），无第二 OS 进程
-//   - 嗅探浏览器：每用户独立进程 + user-data-dir（Android 为 WebView，不走本目录）
+//   - 嗅探浏览器：每用户独立进程 + user-data-dir（二进制可能是 chrome-headless-shell / chrome.exe 等；Android 为 WebView）
 
 // RuntimeOwnerLabel 运行时落盘子目录名：远端用户用 uid，本机共享用 shared。
 func RuntimeOwnerLabel(userID string) string {
@@ -55,7 +55,7 @@ func UserPyWorkDir(userID string) string {
 	return ensure(filepath.Join(UserRuntimeDir(userID), "py"))
 }
 
-// UserChromiumDir Chromium user-data-dir。
+// UserChromiumDir 桌面嗅探浏览器的 user-data-dir（目录名 chromium；进程见 runtime.Chromium）。
 func UserChromiumDir(userID string) string {
 	return ensure(filepath.Join(UserRuntimeDir(userID), "chromium"))
 }

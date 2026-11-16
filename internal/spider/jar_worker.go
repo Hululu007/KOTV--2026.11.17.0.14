@@ -51,11 +51,11 @@ var javaBridge javaBridgeClient // ownerUID 空=共享
 // Android SpiderService 最近一次 /jar/call 是否成功。失败后下次进详情重新 parseJar。
 var androidJarReachable atomic.Bool
 
-// 远端已登录用户：每人独立 JVM；空 userId 走共享 javaBridge（本机）。
-// 不能把多租户塞进同一 JVM：bridge 内 Prefers（kotv.user.dir）、spiders 缓存键、
-// recentJar 均未按 userId 隔离；共用会串 Prefers / 爬虫实例 / proxy 解析。
-// 包体仍公共：kotv.cache.dir=CacheRoot，Path.jar/js/py 与 Go 侧 cache/{jar,py,js} 一致。
-// 同一 JVM 内已可装多份 jar（loaders 按路径）；缺的是「多用户」隔离，不是「多 jar」。
+// 远端已登录用户：每人独立 JVM；空 userId 走共享 javaBridge（本机多窗口共用一台）。
+// 同一 JVM 已可装多份 jar（loaders 按路径）；不能把多租户塞进同一 JVM：
+// bridge 内 spiders 键=md5(jar)+siteKey、recentJar、Prefers（kotv.user.dir）均未按 userId 分桶，
+// 共用会串爬虫实例 / Prefers / recent 代理解析。要省进程须先在 bridge 按 user 隔离这些态。
+// 包体仍公共：kotv.cache.dir=CacheRoot，与 Go cache/{jar,py,js} 一致。
 var (
 	userBridgesMu sync.Mutex
 	userBridges   = map[string]*javaBridgeClient{}

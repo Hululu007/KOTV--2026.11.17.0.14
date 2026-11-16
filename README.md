@@ -1,6 +1,6 @@
 # KOTV（KO影视）
 
-跨端影视聚合客户端：**Flutter UI + Go 引擎**。引擎加载 CatVod / 猫影视兼容的站点配置，内置 CMS 解析并支持 JS / Python / JAR / Node（猫爪）四类爬虫；发行包捆绑 JRE / Python / Node / Chromium / FFmpeg 运行时，QuickJS 通过 CGO 编译进主程序。
+跨端影视聚合客户端：**Flutter UI + Go 引擎**。引擎加载 CatVod / 猫影视兼容的站点配置，内置 CMS 解析并支持 JS / Python / JAR / Node（猫爪）四类爬虫；桌面发行包捆绑 JRE / Python / Node / 嗅探浏览器（`runtime/chromium`，二进制因平台为 headless-shell 或 `chrome.exe` 等）/ FFmpeg，QuickJS 经 CGO 编进主程序；Android 嗅探走 WebView。
 
 > 仓库模块：`github.com/bobo/KOTV`。引擎无 UI，HTTP 端口 `:9978`（API 在 `/api/v1`，嗅探代理在 `/proxy/*`）。
 
