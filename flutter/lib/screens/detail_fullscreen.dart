@@ -978,7 +978,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _chromeKey.currentState?.openEpisodes();
       setState(() {});
     }
-    // 沉浸锁 / 选集开着：_bumpChrome 内也会挡；此处早退少 setState。
+    // 沉浸锁 / 选集开着由 _bumpChrome 统一挡住，避免关面板后 hover 回弹。
     _bumpChrome();
   }
 
