@@ -48,7 +48,10 @@ func setGoNetConfig(headersJSON, hostsJSON []byte) {
 		vodHostByOwner[owner] = hosts
 	}
 	vodNetMu.Unlock()
-	util.ClearHTTPAuth()
+	// 粘性 auth 为进程全局表；远端换源勿整表 wipe，避免串清其它租户。
+	if hostclient.RuntimeUserID() == "" {
+		util.ClearHTTPAuth()
+	}
 }
 
 // clearGoNetConfigForUser 清远端用户的 Go 侧 headers/hosts 桶。

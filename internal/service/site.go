@@ -120,10 +120,10 @@ func (s *SiteService) SoftCancelPending() {
 }
 
 // CancelPendingContent 卡死恢复：SoftCancel→清本租户；仅 bridge 不健康时 HardRestart。
-// 本机 hard 清 shared 后立刻 EnsureRootJar，避免 CSP 空 jar 站再也无法用。
+// 清 jar 路径指针后立刻 EnsureRootJar（本机与远端 Dedicated 同口径），避免 CSP 空 jar 站再也无法用。
 func (s *SiteService) CancelPendingContent() {
 	spider.RestartCallerRuntime()
-	if hostclient.DedicatedRuntime() || s == nil || s.cfg == nil {
+	if s == nil || s.cfg == nil {
 		return
 	}
 	api := s.cfg.API()

@@ -81,6 +81,9 @@ int? kotvDigitFromKey(LogicalKeyboardKey key) {
   return null;
 }
 
+/// 播控 / 选集 / 直播叠层统一自动隐藏间隔。
+const Duration kotvPlayerOverlayHide = Duration(seconds: 5);
+
 /// 当前 primary 为空，或仍停在页面根 [root]（根无 TvFocus 环）。
 bool kotvPrimaryIsEmptyOr(FocusNode? root) {
   final primary = FocusManager.instance.primaryFocus;

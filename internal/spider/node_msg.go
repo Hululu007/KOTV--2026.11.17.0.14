@@ -18,34 +18,52 @@ type NodePlayInfo struct {
 
 var (
 	playInfoMu       sync.RWMutex
-	currentPlayInfo  NodePlayInfo
+	playInfoByOwner  = map[string]NodePlayInfo{} // RuntimeUserID；空串=本机
 	playInfoProvider func() NodePlayInfo
 )
 
-// SetPlayInfoProvider 由 App 注册，返回当前播放 title/episodeName/flag。
+// SetPlayInfoProvider 由 App 注册，返回本机播放 title/episodeName/flag。
 func SetPlayInfoProvider(fn func() NodePlayInfo) {
 	playInfoMu.Lock()
 	playInfoProvider = fn
 	playInfoMu.Unlock()
 }
 
-// SetCurrentPlayInfo 点播起播时记下三项。
+// SetCurrentPlayInfo 点播起播时记下三项（按 RuntimeUserID 分桶）。
 func SetCurrentPlayInfo(title, episodeName, flag string) {
-	playInfoMu.Lock()
-	currentPlayInfo = NodePlayInfo{
+	owner := hostclient.RuntimeUserID()
+	info := NodePlayInfo{
 		Title:       strings.TrimSpace(title),
 		EpisodeName: strings.TrimSpace(episodeName),
 		Flag:        strings.TrimSpace(flag),
 	}
+	playInfoMu.Lock()
+	if info.Title == "" && info.EpisodeName == "" && info.Flag == "" {
+		delete(playInfoByOwner, owner)
+	} else {
+		playInfoByOwner[owner] = info
+	}
+	playInfoMu.Unlock()
+}
+
+func clearPlayInfoForUser(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	playInfoMu.Lock()
+	delete(playInfoByOwner, userID)
 	playInfoMu.Unlock()
 }
 
 func currentNodePlayInfo() NodePlayInfo {
+	owner := hostclient.RuntimeUserID()
 	playInfoMu.RLock()
 	fn := playInfoProvider
-	cached := currentPlayInfo
+	cached := playInfoByOwner[owner]
 	playInfoMu.RUnlock()
-	if fn != nil {
+	// 本机可走 App 实时 provider；远端只用分桶缓存，避免串宿主播放信息。
+	if owner == "" && fn != nil {
 		if info := fn(); info.Title != "" || info.EpisodeName != "" || info.Flag != "" {
 			return info
 		}
@@ -101,7 +119,6 @@ func HandleNodeMsg(body []byte) any {
 		return map[string]any{"ok": true}
 
 	case "getPlayInfo":
-		// 引擎进程内一份全局 playInfo；多远端客户端未隔离。
 		info := currentNodePlayInfo()
 		return map[string]any{
 			"title":       info.Title,

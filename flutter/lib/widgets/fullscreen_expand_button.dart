@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
+import '../player/tv_remote_keys.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
 
@@ -31,10 +33,14 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
   final LayerLink _link = LayerLink();
   OverlayEntry? _entry;
   bool _open = false;
+  final FocusNode _windowFocus = FocusNode(debugLabel: 'fs_expand_window');
+  final FocusNode _displayFocus = FocusNode(debugLabel: 'fs_expand_display');
 
   @override
   void dispose() {
     _removeOverlay();
+    _windowFocus.dispose();
+    _displayFocus.dispose();
     super.dispose();
   }
 
@@ -58,6 +64,24 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
   bool get _offerDisplayChoice =>
       widget.offerDisplayChoice ?? (kotvIsDesktop() || kIsWeb);
 
+  KeyEventResult _onMenuKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (kotvIsBackKey(key)) {
+      _close();
+      return KeyEventResult.handled;
+    }
+    if (kotvIsUpKey(key) || kotvIsDownKey(key)) {
+      if (identical(FocusManager.instance.primaryFocus, _windowFocus)) {
+        _displayFocus.requestFocus();
+      } else {
+        _windowFocus.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   void _onTap() {
     if (!_offerDisplayChoice) {
       widget.onSelect(KotvDesktopFullscreenKind.window);
@@ -75,95 +99,108 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
     _open = true;
     _entry = OverlayEntry(
       builder: (ctx) {
-        return Stack(
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: _close,
-              ),
-            ),
-            CompositedTransformFollower(
-              link: _link,
-              showWhenUnlinked: false,
-              targetAnchor: Alignment.topCenter,
-              followerAnchor: Alignment.bottomCenter,
-              offset: const Offset(0, -8),
-              child: Material(
-                color: Colors.transparent,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: const Color(0xF214101C),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withOpacity(0.14)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.45),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
+        return FocusScope(
+          child: Focus(
+            autofocus: false,
+            onKeyEvent: _onMenuKey,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _close,
                   ),
-                  child: IntrinsicWidth(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _item(
-                          icon: Icons.crop_din_rounded,
-                          label: '铺满当前窗口',
-                          kind: KotvDesktopFullscreenKind.window,
+                ),
+                CompositedTransformFollower(
+                  link: _link,
+                  showWhenUnlinked: false,
+                  targetAnchor: Alignment.topCenter,
+                  followerAnchor: Alignment.bottomCenter,
+                  offset: const Offset(0, -8),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xF214101C),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white.withOpacity(0.14)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.45),
+                            blurRadius: 18,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: IntrinsicWidth(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _item(
+                              focusNode: _windowFocus,
+                              icon: Icons.crop_din_rounded,
+                              label: '铺满当前窗口',
+                              kind: KotvDesktopFullscreenKind.window,
+                            ),
+                            Container(height: 1, color: Colors.white.withOpacity(0.08)),
+                            _item(
+                              focusNode: _displayFocus,
+                              icon: Icons.fullscreen_rounded,
+                              label: '占满整块屏幕',
+                              kind: KotvDesktopFullscreenKind.display,
+                            ),
+                          ],
                         ),
-                        Container(height: 1, color: Colors.white.withOpacity(0.08)),
-                        _item(
-                          icon: Icons.fullscreen_rounded,
-                          label: '占满整块屏幕',
-                          kind: KotvDesktopFullscreenKind.display,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         );
       },
     );
     overlay.insert(_entry!);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_open) _windowFocus.requestFocus();
+    });
   }
 
   Widget _item({
+    required FocusNode focusNode,
     required IconData icon,
     required String label,
     required KotvDesktopFullscreenKind kind,
   }) {
     final ui = LayoutScale.grow(context);
     return TvFocus(
+      focusNode: focusNode,
       onPressed: () => _pick(kind),
       borderRadius: 12 * ui,
       child: InkWell(
-      onTap: () => _pick(kind),
-      canRequestFocus: false,
-      borderRadius: BorderRadius.circular(12 * ui),
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 14 * ui, vertical: 11 * ui),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 18 * ui, color: Colors.white.withOpacity(0.92)),
-            SizedBox(width: 10 * ui),
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.95),
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+        onTap: () => _pick(kind),
+        canRequestFocus: false,
+        borderRadius: BorderRadius.circular(12 * ui),
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 14 * ui, vertical: 11 * ui),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18 * ui, color: Colors.white.withOpacity(0.92)),
+              SizedBox(width: 10 * ui),
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.95),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
       ),
     );
   }

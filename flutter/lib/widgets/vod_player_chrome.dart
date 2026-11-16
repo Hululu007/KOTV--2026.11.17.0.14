@@ -871,12 +871,13 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final hold = ctx != null && ctx.findAncestorStateOfType<VodFullscreenChromeState>() == this;
     if (hold) _remoteFocus.remember(primary);
     if (_focusHoldingChrome == hold) {
-      if (hold) widget.onBump();
+      // 选集面板打开时不 bump 顶底栏。
+      if (hold && !_epOpen) widget.onBump();
       return;
     }
     _focusHoldingChrome = hold;
     _emitHold();
-    if (hold) widget.onBump();
+    if (hold && !_epOpen) widget.onBump();
   }
 
   /// 顶/底栏：滑动、悬停都重新计时；进入时暂停自动隐藏。
@@ -1043,11 +1044,11 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     setState(() => _epOpen = false);
   }
 
-  /// 离开选集面板 / 离开全屏窗口：同一套 8 秒后关闭。
+  /// 离开选集面板 / 离开全屏窗口：与播控同一套隐藏间隔后关闭。
   void scheduleCloseEpisodes() {
     _epHideTimer?.cancel();
     if (!_epOpen) return;
-    _epHideTimer = Timer(const Duration(seconds: 8), () {
+    _epHideTimer = Timer(kotvPlayerOverlayHide, () {
       if (!mounted || !_epOpen) return;
       setState(() => _epOpen = false);
       widget.onEpisodesAutoClosed?.call();

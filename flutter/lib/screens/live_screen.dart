@@ -60,7 +60,7 @@ import 'shell.dart';
 const _liveKeepSep = '\$\$\$';
 const _liveFavGroupName = '收藏';
 /// 频道栏 / 信息条 / 控件自动隐藏（5s）。
-const _liveOverlayHide = Duration(seconds: 5);
+const _liveOverlayHide = kotvPlayerOverlayHide;
 const _liveIdleStatus = '确定键打开频道列表 · 菜单键打开底栏 · 点击右侧换源/设置';
 /// 回看快进快退步长（10s）。
 const _liveCatchupSeekStep = Duration(seconds: 10);

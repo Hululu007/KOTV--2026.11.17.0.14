@@ -57,6 +57,7 @@ func forgetUserRuntimeState(userID string) {
 	clearJarGoStateForRuntime(userID)
 	clearJSRedirectsForUser(userID)
 	clearNetConfigForUser(userID)
+	clearPlayInfoForUser(userID)
 }
 
 // KillUserRuntime 清指定用户在单 JVM 内的 bridge 租户态 + 删 UserJVMDir，并杀掉其 Py/JS/Node/Chromium。

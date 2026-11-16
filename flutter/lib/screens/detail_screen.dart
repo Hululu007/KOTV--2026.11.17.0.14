@@ -3768,6 +3768,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       unawaited(_playback.seek(next.isNegative ? Duration.zero : next));
     }
 
+    // 焦点仍在选集/线路等页面控件上：方向键交给遍历，勿抢左右做 seek。
+    final primary = FocusManager.instance.primaryFocus;
+    final onPageUi = primary != null &&
+        !identical(primary, node) &&
+        !VodInlineChromeScope.focusIsInside();
+    if (onPageUi && !_chromeRemoteFocus) {
+      return KeyEventResult.ignored;
+    }
+
     // 焦点已经在底栏（停止、进度条等）：上下左右交给控件遍历。
     // 左右 seek 只在焦点不在底栏时做，避免停在停止上按向下被吃掉或改进度。
     if (_chromeRemoteFocus || VodInlineChromeScope.focusIsInside()) {

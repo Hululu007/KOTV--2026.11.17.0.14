@@ -238,10 +238,26 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     return widget.vodName.isNotEmpty ? widget.vodName : widget.title;
   }
 
+  bool _onGlobalBackKey(KeyEvent event) {
+    if (event is! KeyDownEvent || !kotvIsBackKey(event.logicalKey)) return false;
+    if (!mounted) return false;
+    // 栏/选集仍开时交给页内 Focus.onKeyEvent，避免抢走 Overlay 菜单的 ESC。
+    if (_showChrome || _epOpen) return false;
+    // 栏隐后 primary 可能离开页内 Focus；仍用同一套返回分层。
+    final back = detailImmersiveBack;
+    if (back != null) {
+      unawaited(back());
+      return true;
+    }
+    unawaited(_exitFullscreen());
+    return true;
+  }
+
   @override
   void initState() {
     super.initState();
     detailFullscreenDismissLayer = _dismissOneLayer;
+    HardwareKeyboard.instance.addHandler(_onGlobalBackKey);
     _swipeAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 280))
       ..addListener(() {
         final t = _swipeTween;
@@ -304,6 +320,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onGlobalBackKey);
     if (detailFullscreenDismissLayer == _dismissOneLayer) {
       detailFullscreenDismissLayer = null;
     }
@@ -350,10 +367,16 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _hideTimer?.cancel();
     if (!widget.playback.playing || _chromeHold || _epOpen) return;
     // 桌面指针离开顶底栏后开始计时。非桌面焦点停在栏内时 onHold 拦住。
-    _hideTimer = Timer(const Duration(seconds: 5), () {
+    _hideTimer = Timer(kotvPlayerOverlayHide, () {
       if (!mounted || !widget.playback.playing || _epOpen || _chromeHold) return;
       _setChrome(show: false, hideCursor: _hideCursorWhenIdle);
     });
+  }
+
+  /// 换集确认后沉浸：关顶底栏，不重置显示计时。
+  void _hideChromeImmersive() {
+    _hideTimer?.cancel();
+    _setChrome(show: false, hideCursor: _hideCursorWhenIdle && widget.playback.playing);
   }
 
   void _startHoldSpeed() {
@@ -591,6 +614,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   void _selectEp(int i) {
     widget.onSelectEp?.call(i);
     setState(() => _epIdx = i);
+    _hideChromeImmersive();
   }
 
   bool get _canSwipeEps => !_epOpen && widget.episodes.length > 1;
@@ -901,7 +925,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   void _onHover(PointerHoverEvent e, BoxConstraints c) {
-    // 仅从窗外进入时取消离窗定时器；窗内移动（含离开选集到画面）不取消面板 onExit 的 8s。
+    // 仅从窗外进入时取消离窗定时器；窗内移动不取消面板 onExit 的隐藏计时。
     if (!_pointerIn) {
       _pointerIn = true;
       _chromeKey.currentState?.cancelScheduledCloseEpisodes();
@@ -911,6 +935,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _chromeKey.currentState?.openEpisodes();
       setState(() {});
     }
+    // 选集面板打开时不亮顶底栏。
+    if (_epOpen) return;
     _bumpChrome();
   }
 
