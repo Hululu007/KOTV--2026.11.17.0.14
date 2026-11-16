@@ -98,12 +98,9 @@ class DetailFullscreenPage extends StatefulWidget {
     this.desktopFullscreen = KotvDesktopFullscreenKind.window,
     this.externalVideo = false,
     this.swipeOffset,
-    this.hasQueuedNext = false,
   });
 
   final KotvPlayback playback;
-  /// 详情已 queueNext 下一集：片尾过渡 pause 勿亮顶底栏（与 [beginEpisodeSwitchQuiet] 同一套沉浸锁）。
-  final bool hasQueuedNext;
   /// 详情页传入的同一块 PlatformView/Texture（原位全屏，不重绑 Surface）。
   final Widget videoChild;
   /// 桌面：画面由外层 Positioned 宿主绘制，本页只叠控件，避免卸树重建 Texture。
@@ -351,12 +348,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _playingForChrome = playing;
     if (!playing) {
       _hideTimer?.cancel();
+      // 换集/关选集沉浸锁：pause 不亮栏；用户暂停仍亮。
       if (_epOpen || _chromeStayImmersive) return;
-      // 已排队下一集：片尾过渡 pause 视为换集，勿当作用户暂停亮栏。
-      if (widget.hasQueuedNext) {
-        beginEpisodeSwitchQuiet();
-        return;
-      }
       _setChrome(show: true, hideCursor: false);
       return;
     }

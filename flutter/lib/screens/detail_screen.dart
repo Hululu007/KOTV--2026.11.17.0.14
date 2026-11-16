@@ -1201,24 +1201,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 已 queueNext 到 [nextIdx] 时走引擎 skipToNext；成功后由 [_onQueuedEpisodeStarted] 记账，不经 [_playAt]。
-  Future<bool> _trySeamlessSkip(int nextIdx) async {
-    if (_queuedNext?.idx != nextIdx) return false;
-    return _playback.skipToNext();
-  }
-
-  /// 无缝优先：skip / 已切入则返回 true（调用方勿再 [_playAt]）；队列已丢才返回 false 走硬切。
-  Future<bool> _preferSeamlessOrAlreadyAdvanced(int nextIdx) async {
-    if (await _trySeamlessSkip(nextIdx)) return true;
-    // await 期间 playlist 自然前进时 queuedStart 会把 _epIdx 推到 next，并清掉 _queuedNext。
+  /// 无缝切到 [nextIdx]：已记账 / skipToNext 成功则 true（由 queuedStart 补账，勿 [_playAt]）。
+  Future<bool> _takeSeamlessNext(int nextIdx) async {
     if (_epIdx == nextIdx) return true;
-    if (_queuedNext == null) {
-      // 引擎已 consume 排队项但详情尚未记账：再让出一拍给 queuedStart，避免硬切拆掉无缝。
-      await Future<void>.delayed(Duration.zero);
-      if (!mounted) return true;
-      if (_epIdx == nextIdx) return true;
-    }
-    return false;
+    if (_queuedNext?.idx != nextIdx) return false;
+    if (!await _playback.skipToNext()) return _epIdx == nextIdx;
+    // skip 已下令切入；enterQueued 可能同步或稍后经 playlist 回调，勿再硬切拆 Player。
+    return true;
   }
 
   /// playbackEnded / onTimeChanged→nextEpisode / 控件下一集：每集只前进一次。
@@ -1244,18 +1233,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _playbackLive = false;
     _advanceBusy = true;
     try {
-      // 换集过程 pause 不亮全屏底栏。
       _fsPageKey.currentState?.beginEpisodeSwitchQuiet();
-      // 无缝：playlist 已排好 → skipToNext，不经 [_playAt]、不拆 Player。
-      if (await _preferSeamlessOrAlreadyAdvanced(next)) return;
+      if (await _takeSeamlessNext(next)) return;
       if (mounted) setState(() => _status = fromEnd ? '自动播放下一集…' : '播放下一集…');
       // 仅自动连播需要抖音式动画；手势/按钮已在全屏页内播过，勿再 animate。
       if (_immersiveFullscreen && fromEnd) {
         await _fsPageKey.currentState?.animateAutoNext();
       }
       if (!mounted) return;
-      // 动画期间同样可能已被无缝切入。
-      if (_epIdx == next) return;
+      if (await _takeSeamlessNext(next)) return;
       await _playAt(next);
     } finally {
       _advanceBusy = false;
@@ -1349,7 +1335,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _nextPreloadRequested = false;
     if (on && _queuedNext != null) {
       _queuedNext = null;
-      _syncFullscreen();
       await _playback.clearNext();
     }
     try {
@@ -1998,8 +1983,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         );
         if (!queued || stale()) return;
         _queuedNext = (key: key, idx: nextIdx, playUrl: playUrl, headers: rawHeaders, data: Map<String, dynamic>.from(data));
-        // 全屏 hasQueuedNext：片尾 pause 据此保持沉浸，勿等下次无关 setState。
-        _syncFullscreen();
       } catch (_) {}
     }());
   }
@@ -2015,8 +1998,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final q = _queuedNext;
     final d = _detail;
     if (!mounted || q == null || q.key != key || d == null || q.idx >= _eps.length) return;
-    // 无缝切入：先沉浸挡亮栏。旧集片尾靠 _playbackLive=false 挡住 completed/硬切；
-    // 勿把 _endConsumedGen 接到新 playGen，否则本集再也无法自动连播。
+    // 沉浸挡亮栏；_playbackLive=false 挡住旧集 completed。新集是新 playGen，勿写 endConsumed。
     _fsPageKey.currentState?.beginEpisodeSwitchQuiet();
     _queuedNext = null;
     _nextPlayCache.remove(q.key);
@@ -3230,7 +3212,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             ? const SizedBox.shrink()
             : _buildSharedVideo(fit: _aspect.fit),
         playback: _playback,
-        hasQueuedNext: _queuedNext != null,
         vodName: d.name,
         title: title,
         episodes: eps.map((e) => e.name).toList(),
