@@ -1201,6 +1201,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
+  /// 已 queueNext 到 [nextIdx] 时走引擎 skipToNext；成功后由 [_onQueuedEpisodeStarted] 记账，不经 [_playAt]。
+  Future<bool> _trySeamlessSkip(int nextIdx) async {
+    if (_queuedNext?.idx != nextIdx) return false;
+    return _playback.skipToNext();
+  }
+
   /// playbackEnded / onTimeChanged→nextEpisode / 控件下一集：每集只前进一次。
   /// [fromEnd] 为真时要求已 READY 且本世代未消耗；控件/手势下一集传 false。
   /// 全屏上滑已先做动画时由 [DetailFullscreenPage] 调 [onNext]，此处不再二次 animate。
@@ -1226,14 +1232,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     try {
       // 换集过程 pause 不亮全屏底栏。
       _fsPageKey.currentState?.beginEpisodeSwitchQuiet();
-      // 无缝：playlist 已排好 → skipToNext，不经 [_playAt]/不拆 Player。
-      if (_queuedNext?.idx == next && await _playback.skipToNext()) return;
+      // 无缝：playlist 已排好 → skipToNext，不经 [_playAt]、不拆 Player。
+      if (await _trySeamlessSkip(next)) return;
+      // await 期间引擎可能已自然切入（queuedStart 已把 _epIdx 推到 next），勿再硬切毁掉无缝。
+      if (_epIdx == next) return;
       if (mounted) setState(() => _status = fromEnd ? '自动播放下一集…' : '播放下一集…');
       // 仅自动连播需要抖音式动画；手势/按钮已在全屏页内播过，勿再 animate。
       if (_immersiveFullscreen && fromEnd) {
         await _fsPageKey.currentState?.animateAutoNext();
       }
       if (!mounted) return;
+      // 动画期间同样可能已被无缝切入。
+      if (_epIdx == next) return;
       await _playAt(next);
     } finally {
       _advanceBusy = false;
@@ -1327,6 +1337,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _nextPreloadRequested = false;
     if (on && _queuedNext != null) {
       _queuedNext = null;
+      _syncFullscreen();
       await _playback.clearNext();
     }
     try {
@@ -1975,6 +1986,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         );
         if (!queued || stale()) return;
         _queuedNext = (key: key, idx: nextIdx, playUrl: playUrl, headers: rawHeaders, data: Map<String, dynamic>.from(data));
+        // 全屏 hasQueuedNext：片尾 pause 据此保持沉浸，勿等下次无关 setState。
+        _syncFullscreen();
       } catch (_) {}
     }());
   }
@@ -1990,6 +2003,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final q = _queuedNext;
     final d = _detail;
     if (!mounted || q == null || q.key != key || d == null || q.idx >= _eps.length) return;
+    // 无缝切入：先沉浸挡亮栏；并消费本世代，避免 completed/片尾再走硬切 [_playAt] 毁掉无缝。
+    _fsPageKey.currentState?.beginEpisodeSwitchQuiet();
     _queuedNext = null;
     _nextPlayCache.remove(q.key);
     final prevName = _currentEpisodeName() ?? '';
@@ -1998,6 +2013,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     final ep = _eps[q.idx];
     _playGen++;
+    _endConsumedGen = _playGen;
     final serial = ++_playAtSerial;
     _playbackLive = false;
     _sessionStartedAt = DateTime.now();
@@ -3202,6 +3218,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             ? const SizedBox.shrink()
             : _buildSharedVideo(fit: _aspect.fit),
         playback: _playback,
+        hasQueuedNext: _queuedNext != null,
         vodName: d.name,
         title: title,
         episodes: eps.map((e) => e.name).toList(),

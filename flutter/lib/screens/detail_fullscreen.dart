@@ -98,9 +98,12 @@ class DetailFullscreenPage extends StatefulWidget {
     this.desktopFullscreen = KotvDesktopFullscreenKind.window,
     this.externalVideo = false,
     this.swipeOffset,
+    this.hasQueuedNext = false,
   });
 
   final KotvPlayback playback;
+  /// 详情已 queueNext 下一集：片尾过渡 pause 勿亮顶底栏（与 [beginEpisodeSwitchQuiet] 同一套沉浸锁）。
+  final bool hasQueuedNext;
   /// 详情页传入的同一块 PlatformView/Texture（原位全屏，不重绑 Surface）。
   final Widget videoChild;
   /// 桌面：画面由外层 Positioned 宿主绘制，本页只叠控件，避免卸树重建 Texture。
@@ -207,8 +210,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   Timer? _hintTimer;
   /// 指针停在顶底栏，或非桌面遥控焦点停在栏内。桌面鼠标离开后不因焦点停住隐藏。
   bool _chromeHold = false;
-  /// 换集过程中播放器会短暂停播；此时勿因 pause 亮栏。
-  bool _episodeSwitchQuiet = false;
+  /// 非用户意图时保持沉浸（换集过渡 / 关选集后）；挡住 pause、hover、hold 亮栏。
+  bool _chromeStayImmersive = false;
+  /// 为 true 时，恢复 playing 后解除 [_chromeStayImmersive]（换集）；关选集后为 false，须用户点出。
+  bool _clearImmersiveOnPlay = false;
   DateTime? _lastTapAt;
   bool? _playingForChrome;
   StreamSubscription<Duration>? _posSub;
@@ -346,12 +351,21 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _playingForChrome = playing;
     if (!playing) {
       _hideTimer?.cancel();
-      // 换集停播不亮栏；用户暂停才亮。
-      if (_episodeSwitchQuiet) return;
+      if (_epOpen || _chromeStayImmersive) return;
+      // 已排队下一集：片尾过渡 pause 视为换集，勿当作用户暂停亮栏。
+      if (widget.hasQueuedNext) {
+        beginEpisodeSwitchQuiet();
+        return;
+      }
       _setChrome(show: true, hideCursor: false);
       return;
     }
-    if (_episodeSwitchQuiet) _episodeSwitchQuiet = false;
+    if (_chromeStayImmersive && _clearImmersiveOnPlay) {
+      _chromeStayImmersive = false;
+      _clearImmersiveOnPlay = false;
+      if (_showChrome) _hideChromeImmersive();
+      return;
+    }
     if (_showChrome) _schedulePlayingHide();
   }
 
@@ -385,11 +399,16 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _setChrome(show: false, hideCursor: _hideCursorWhenIdle && widget.playback.playing);
   }
 
-  /// 换集入口：先沉浸，并挡住换集过程中 pause→亮栏。
-  void beginEpisodeSwitchQuiet() {
-    _episodeSwitchQuiet = true;
+  /// 保持沉浸并挡住非用户意图的亮栏。
+  /// [untilPlay]：换集过渡在恢复播放后解除；关选集后为 false，须点画面/遥控才亮。
+  void _stayChromeImmersive({required bool untilPlay}) {
+    _chromeStayImmersive = true;
+    _clearImmersiveOnPlay = untilPlay;
     _hideChromeImmersive();
   }
+
+  /// 换集入口（详情 [_advanceToNextEpisode] / 无缝 queuedStart / 手势切集）：挡住 pause→亮栏。
+  void beginEpisodeSwitchQuiet() => _stayChromeImmersive(untilPlay: true);
 
   void _startHoldSpeed() {
     if (_holdingSpeed) return;
@@ -411,7 +430,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (mounted) setState(() => _holdSpeedHint = null);
   }
 
-  void _bumpChrome() {
+  /// 亮顶底栏。非 [intentional] 时尊重沉浸锁（hover / 栏内 bump / hold）。
+  void _bumpChrome({bool intentional = false}) {
+    if (_epOpen) return;
+    if (_chromeStayImmersive && !intentional) return;
+    _chromeStayImmersive = false;
+    _clearImmersiveOnPlay = false;
     _setChrome(show: true, hideCursor: false);
     _schedulePlayingHide();
   }
@@ -421,7 +445,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _chromeHold = hold;
     if (hold) {
       _hideTimer?.cancel();
-      _setChrome(show: true, hideCursor: false);
+      // 沉浸锁期间焦点/指针停在栏位也不亮栏（换集重建易误触 hold）。
+      if (!_chromeStayImmersive && !_epOpen) {
+        _setChrome(show: true, hideCursor: false);
+      }
     } else {
       _schedulePlayingHide();
     }
@@ -456,7 +483,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _setChrome(show: false, hideCursor: _hideCursorWhenIdle && widget.playback.playing);
       return;
     }
-    _bumpChrome();
+    _bumpChrome(intentional: true);
   }
 
   void _refreshForceLandscapeBtn() {
@@ -485,7 +512,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     });
     await kotvForceLandscape();
     await kotvEnterSystemFullscreenAfterLayout(widget.desktopFullscreen);
-    _bumpChrome();
+    _bumpChrome(intentional: true);
   }
 
   Future<void> _lockPortraitMode() async {
@@ -495,7 +522,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     await kotvEnterSystemFullscreenAfterLayout(widget.desktopFullscreen);
     if (!mounted) return;
     _refreshForceLandscapeBtn();
-    _bumpChrome();
+    _bumpChrome(intentional: true);
   }
 
   /// 横屏后顶栏用「竖屏」切回；竖屏时不显示顶栏「横屏」（改走「全屏观看」）。
@@ -868,12 +895,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       }
       if (!_epOpen && kotvIsMediaRewind(key)) {
         _seekByRemote(const Duration(seconds: -10));
-        _bumpChrome();
+        _bumpChrome(intentional: true);
         return KeyEventResult.handled;
       }
       if (!_epOpen && kotvIsMediaFastForward(key)) {
         _seekByRemote(const Duration(seconds: 10));
-        _bumpChrome();
+        _bumpChrome(intentional: true);
         return KeyEventResult.handled;
       }
       if (isDown &&
@@ -882,10 +909,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
               kotvIsDpadNavKey(key))) {
         if (kotvPrimaryIsEmptyOr(node)) {
           _chromeKey.currentState?.restoreRemoteFocus();
-          _bumpChrome();
+          _bumpChrome(intentional: true);
           return KeyEventResult.handled;
         }
-        _bumpChrome();
+        _bumpChrome(intentional: true);
         return KeyEventResult.ignored;
       }
       return KeyEventResult.ignored;
@@ -936,7 +963,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   void _showChromeAndFocusPlay() {
-    _bumpChrome();
+    _bumpChrome(intentional: true);
     _chromeKey.currentState?.restoreRemoteFocus();
   }
 
@@ -951,8 +978,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _chromeKey.currentState?.openEpisodes();
       setState(() {});
     }
-    // 选集打开或换集沉浸中：不亮顶底栏（避免关面板/换集重建触发 hover 回弹）。
-    if (_epOpen || _episodeSwitchQuiet) return;
+    // 沉浸锁 / 选集开着：_bumpChrome 内也会挡；此处早退少 setState。
     _bumpChrome();
   }
 
@@ -966,8 +992,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _onEpisodesClosed() {
     if (!mounted) return;
-    // 关右侧选集后保持沉浸，勿因先前 visible 回弹顶底栏。
-    _hideChromeImmersive();
+    // 关右侧选集后保持沉浸；hover 不可立刻回弹，须点画面/遥控才亮。
+    _stayChromeImmersive(untilPlay: false);
   }
 
   Widget _buildVideo() {
