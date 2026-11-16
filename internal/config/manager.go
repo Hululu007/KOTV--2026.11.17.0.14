@@ -25,12 +25,13 @@ import (
 
 // Manager 管理点播配置，点播配置管理。
 type Manager struct {
-	mu          sync.RWMutex
-	api         model.Api
-	home        model.Site
-	db          *database.DB
-	ephemeral   bool // 会话克隆：parseConfig 不写 settings.VOD（本机 c: 由 App 同步）
-	onRepoWrite func(string)
+	mu               sync.RWMutex
+	api              model.Api
+	home             model.Site
+	db               *database.DB
+	ephemeral        bool // 会话克隆：parseConfig 不写 settings.VOD（本机 c: 由 App 同步）
+	onRepoWrite      func(string)
+	sharedUpsertGate func(typ int64, url string) error // 远端非管理员禁止新增共享仓/直播行
 }
 
 var defaultMgr *Manager
@@ -89,6 +90,30 @@ func (m *Manager) SetRepoWriteHook(fn func(string)) {
 	m.mu.Unlock()
 }
 
+// SetSharedUpsertGate 共享 config 表 Upsert 前闸门（nil=不限制）。会话 Clone 继承宿主 gate。
+func (m *Manager) SetSharedUpsertGate(fn func(typ int64, url string) error) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.sharedUpsertGate = fn
+	m.mu.Unlock()
+}
+
+func (m *Manager) allowSharedUpsert(typ int64, url string) error {
+	if m == nil {
+		return nil
+	}
+	url = strings.TrimSpace(url)
+	m.mu.RLock()
+	fn := m.sharedUpsertGate
+	m.mu.RUnlock()
+	if fn == nil || url == "" {
+		return nil
+	}
+	return fn(typ, url)
+}
+
 func (m *Manager) noteWrittenRepo(url string) {
 	url = strings.TrimSpace(url)
 	if m == nil || url == "" {
@@ -127,10 +152,11 @@ func (m *Manager) CloneEphemeral() *Manager {
 		api.Doh = append(json.RawMessage(nil), m.api.Doh...)
 	}
 	return &Manager{
-		api:       api,
-		home:      m.home,
-		db:        m.db,
-		ephemeral: true,
+		api:              api,
+		home:             m.home,
+		db:               m.db,
+		ephemeral:        true,
+		sharedUpsertGate: m.sharedUpsertGate,
 	}
 }
 
@@ -697,6 +723,9 @@ func (m *Manager) parseConfig(cfg *database.Config, isJSON bool, loadJar bool) e
 
 	// 源行与站点始终写入共享库（含会话模式）；ephemeral 只隔离「当前选中源」的内存态，不阻碍持久化。
 	if m.db != nil {
+		if err := m.allowSharedUpsert(database.ConfigTypeSite, cfg.URL); err != nil {
+			return err
+		}
 		cfgID, err := m.db.UpsertConfig(cfg)
 		if err != nil {
 			return err
@@ -750,6 +779,16 @@ func ParseDepotIndex(raw string) []model.Depot {
 func (m *Manager) loadDepotIndex(index *database.Config, depots []model.Depot, loadJar bool) error {
 	if len(depots) == 0 {
 		return fmt.Errorf("仓库索引 urls 为空")
+	}
+	// 展开索引=新增共享子仓：任一子 URL 未过闸门则整次失败，避免半写入。
+	for _, d := range depots {
+		url := strings.TrimSpace(d.URL)
+		if url == "" {
+			continue
+		}
+		if err := m.allowSharedUpsert(database.ConfigTypeSite, url); err != nil {
+			return err
+		}
 	}
 	depotURLs := make(map[string]struct{}, len(depots))
 	for _, d := range depots {
@@ -1071,7 +1110,10 @@ func (m *Manager) initLiveFromVod(cfg *database.Config, api *model.Api) {
 	}
 	name := strings.TrimSpace(cfg.Name)
 	if m.db != nil {
-		if _, err := m.db.UpsertConfig(&database.Config{
+		// 远端非管理员：跳过共享直播表 Upsert，仍可下方写入个人 LIVE 选中。
+		if err := m.allowSharedUpsert(database.ConfigTypeLive, vodURL); err != nil {
+			log.Printf("skip shared live upsert %s: %v", vodURL, err)
+		} else if _, err := m.db.UpsertConfig(&database.Config{
 			Type: database.ConfigTypeLive,
 			URL:  vodURL,
 			Name: name,

@@ -1493,6 +1493,11 @@ func (a *App) APISetSettings(kv map[string]string) error {
 			continue
 		}
 		t := settings.Type(k)
+		if t == settings.VOD {
+			if err := a.errUnlessSharedSourceAllowed(database.ConfigTypeSite, v); err != nil {
+				return err
+			}
+		}
 		if t == settings.LIVE {
 			persisted, err := a.persistLiveSource(v)
 			if err != nil {

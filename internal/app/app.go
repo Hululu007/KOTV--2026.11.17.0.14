@@ -106,6 +106,9 @@ func New() (*App, error) {
 		CurrentScreen: "video",
 		mediaState:    "idle",
 	}
+	cfg.SetSharedUpsertGate(func(typ int64, url string) error {
+		return a.errUnlessSharedSourceAllowed(typ, url)
+	})
 	a.presence = clientsession.NewPresence(func(userID string) {
 		a.releaseUserRuntime(userID)
 	})
@@ -257,6 +260,14 @@ func (a *App) useHostConfig(sess *clientsession.Session) {
 
 // loadSessionSource 会话加载用户自己的点播源。失败时主机配置可用就退回主机的，否则记下错误。
 func (a *App) loadSessionSource(sess *clientsession.Session, src string) {
+	if err := a.errUnlessSharedSourceAllowed(database.ConfigTypeSite, src); err != nil {
+		if ready, _ := a.configState(); ready {
+			a.useHostConfig(sess)
+			return
+		}
+		sess.Ready, sess.ErrMsg = false, err.Error()
+		return
+	}
 	if err := sess.Cfg.LoadFromSource(src); err != nil {
 		if ready, _ := a.configState(); ready {
 			a.useHostConfig(sess)
@@ -285,12 +296,12 @@ func bindSessionConfig(sess *clientsession.Session, cfg *config.Manager) {
 	cfg.SetRepoWriteHook(sess.NoteRepo)
 }
 
-func (a *App) siteRepoURLs() map[string]struct{} {
+func (a *App) configURLs(typ int64) map[string]struct{} {
 	out := map[string]struct{}{}
 	if a == nil || a.DB == nil {
 		return out
 	}
-	cfgs, err := a.DB.ListConfigs(int64(database.ConfigTypeSite))
+	cfgs, err := a.DB.ListConfigs(typ)
 	if err != nil {
 		return out
 	}
@@ -303,22 +314,12 @@ func (a *App) siteRepoURLs() map[string]struct{} {
 	return out
 }
 
+func (a *App) siteRepoURLs() map[string]struct{} {
+	return a.configURLs(int64(database.ConfigTypeSite))
+}
+
 func (a *App) liveSourceURLs() map[string]struct{} {
-	out := map[string]struct{}{}
-	if a == nil || a.DB == nil {
-		return out
-	}
-	cfgs, err := a.DB.ListConfigs(int64(database.ConfigTypeLive))
-	if err != nil {
-		return out
-	}
-	for _, c := range cfgs {
-		u := strings.TrimSpace(c.URL)
-		if u != "" {
-			out[u] = struct{}{}
-		}
-	}
-	return out
+	return a.configURLs(int64(database.ConfigTypeLive))
 }
 
 func sessionOwnedByUser(s *clientsession.Session, userID string) bool {
@@ -329,12 +330,21 @@ func sessionOwnedByUser(s *clientsession.Session, userID string) bool {
 	return id == "u:"+userID || id == userID || strings.HasSuffix(id, ":"+userID)
 }
 
-// dropSessionRepos 删掉远端会话新写入、且不是本机当前 settings.VOD 的仓库行。本机会话留下。
-func (a *App) dropSessionRepos(sess *clientsession.Session) {
+// dropSessionConfigs 删掉远端会话新写入、且不是宿主当前选中、也未被其它会话占用的共享源行。
+func (a *App) dropSessionConfigs(sess *clientsession.Session, typ int64) {
 	if a == nil || sess == nil || a.DB == nil || !strings.HasPrefix(sess.ClientID, "u:") {
 		return
 	}
-	added := sess.AddedRepos()
+	var added map[string]struct{}
+	var keep string
+	switch typ {
+	case database.ConfigTypeLive:
+		added = sess.AddedLives()
+		keep = strings.TrimSpace(settings.GetHost(settings.LIVE))
+	default:
+		added = sess.AddedRepos()
+		keep = strings.TrimSpace(settings.GetHost(settings.VOD))
+	}
 	if len(added) == 0 {
 		return
 	}
@@ -344,45 +354,30 @@ func (a *App) dropSessionRepos(sess *clientsession.Session) {
 			if other == nil || other.ClientID == sess.ClientID {
 				return
 			}
-			for u := range other.AddedRepos() {
+			var otherAdded map[string]struct{}
+			if typ == database.ConfigTypeLive {
+				otherAdded = other.AddedLives()
+			} else {
+				otherAdded = other.AddedRepos()
+			}
+			for u := range otherAdded {
 				held[u] = struct{}{}
 			}
 		})
 	}
-	keep := strings.TrimSpace(settings.Get(settings.VOD))
 	for _, u := range clientsession.URLsAddedBySession(added, keep, held) {
-		if err := a.DB.DeleteConfigByURL(u, database.ConfigTypeSite); err != nil {
-			log.Printf("session %s: drop repo %s: %v", sess.ClientID, u, err)
+		if err := a.DB.DeleteConfigByURL(u, typ); err != nil {
+			log.Printf("session %s: drop config typ=%d %s: %v", sess.ClientID, typ, u, err)
 		}
 	}
 }
 
-// dropSessionLives 对齐 dropSessionRepos：清本会话新增且无人占用的直播源行。
+func (a *App) dropSessionRepos(sess *clientsession.Session) {
+	a.dropSessionConfigs(sess, database.ConfigTypeSite)
+}
+
 func (a *App) dropSessionLives(sess *clientsession.Session) {
-	if a == nil || sess == nil || a.DB == nil || !strings.HasPrefix(sess.ClientID, "u:") {
-		return
-	}
-	added := sess.AddedLives()
-	if len(added) == 0 {
-		return
-	}
-	held := map[string]struct{}{}
-	if a.sessions != nil {
-		a.sessions.ForEach(func(other *clientsession.Session) {
-			if other == nil || other.ClientID == sess.ClientID {
-				return
-			}
-			for u := range other.AddedLives() {
-				held[u] = struct{}{}
-			}
-		})
-	}
-	keep := strings.TrimSpace(settings.Get(settings.LIVE))
-	for _, u := range clientsession.URLsAddedBySession(added, keep, held) {
-		if err := a.DB.DeleteConfigByURL(u, database.ConfigTypeLive); err != nil {
-			log.Printf("session %s: drop live %s: %v", sess.ClientID, u, err)
-		}
-	}
+	a.dropSessionConfigs(sess, database.ConfigTypeLive)
 }
 
 func (a *App) dropReposForUser(userID string) {
@@ -423,7 +418,10 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 	}
 	sess.Bootstrapped = true
 	if src := strings.TrimSpace(settings.Get(settings.VOD)); src != "" {
-		if src == sess.Source {
+		if err := a.errUnlessSharedSourceAllowed(database.ConfigTypeSite, src); err != nil {
+			// 个人 vod 指向未共享的新地址：跟宿主，避免 LoadFromSource Upsert 污染列表。
+			a.useHostConfig(sess)
+		} else if src == sess.Source {
 			sess.FollowHost = false
 		} else {
 			a.loadSessionSource(sess, src)

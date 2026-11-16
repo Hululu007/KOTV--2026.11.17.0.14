@@ -402,6 +402,9 @@ func (a *App) toolSyncSend(host, pair, syncType string) (map[string]any, error) 
 }
 
 func (a *App) toolBackupExport(params map[string]any) (map[string]any, error) {
+	if hostclient.DedicatedRuntime() && !currentRequestIsAdmin() {
+		return nil, fmt.Errorf("%w", ErrNeedAdmin)
+	}
 	path := strParam(params, "path")
 	if path == "" {
 		return nil, fmt.Errorf("请指定备份路径")
@@ -417,6 +420,9 @@ func (a *App) toolBackupExport(params map[string]any) (map[string]any, error) {
 }
 
 func (a *App) toolBackupImport(path string) (map[string]any, error) {
+	if hostclient.DedicatedRuntime() && !currentRequestIsAdmin() {
+		return nil, fmt.Errorf("%w", ErrNeedAdmin)
+	}
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, fmt.Errorf("请指定备份文件")

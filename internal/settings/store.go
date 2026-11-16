@@ -621,6 +621,25 @@ func Get(t Type) string {
 	return ""
 }
 
+// GetHost 强制读宿主桶（owner=""），不受当前 DataOwner Bind 影响。
+// 会话 leave 清理共享源时用来保留「本机当前」选中。
+func GetHost(t Type) string {
+	id := string(t)
+	if storeDB != nil {
+		if v, ok, err := storeDB.GetSetting("", id); err == nil && ok {
+			return v
+		}
+	}
+	mu.RLock()
+	defer mu.RUnlock()
+	for _, it := range data.List {
+		if it.ID == id {
+			return it.Value
+		}
+	}
+	return ""
+}
+
 func defaultValue(id string) string {
 	mu.RLock()
 	defer mu.RUnlock()

@@ -2972,11 +2972,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             onTap: () => _prompt('更新地址', 'version.json URL',
                                 g('updateUrl'), (v) => _set('updateUrl', v)),
                           ),
-                        KotvSettingsCell(label: '数据备份', onTap: _backupExport),
-                        KotvSettingsCell(label: '恢复备份', onTap: _backupImport),
-                        if (_canManageShared)
+                        if (_canManageShared) ...[
+                          KotvSettingsCell(
+                              label: '数据备份', onTap: _backupExport),
+                          KotvSettingsCell(
+                              label: '恢复备份', onTap: _backupImport),
                           KotvSettingsCell(
                               label: '清理缓存', onTap: _clearCache),
+                        ],
                         KotvSettingsCell(label: '卡死恢复', onTap: _recoverStuck),
                         if (!Platform.isIOS)
                           KotvSettingsCell(label: '检测爬虫', onTap: _checkSpider),
