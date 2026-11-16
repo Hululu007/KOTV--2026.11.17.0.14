@@ -1059,6 +1059,11 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     _epHideTimer = null;
   }
 
+  /// 指针离开全屏窗口时清 pointer hold，避免栏被永远拦住。
+  void releasePointerHold() {
+    _setPointerHold(false);
+  }
+
   /// 列表内边距在 itemExtent 之前，第 i 集的起点是 padding + i * extent。
   void _placeEpisode(int i) {
     const padTop = 8.0;
@@ -2549,7 +2554,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                     children: [
                                       _IconAct(icon: Icons.skip_previous, tip: '上一集', size: land ? 32.0 : 40.0, scrollIntoView: true, focusNode: _iconNodes.of('prev'), onTap: () {
                                         widget.onPrev?.call();
-                                        widget.onBump();
                                       }),
                                       _IconAct(
                                         icon: widget.player.playing ? Icons.pause : Icons.play_arrow,
@@ -2564,7 +2568,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       ),
                                       _IconAct(icon: Icons.skip_next, tip: '下一集', size: land ? 32.0 : 40.0, scrollIntoView: true, focusNode: _iconNodes.of('next'), onTap: () {
                                         widget.onNext?.call();
-                                        widget.onBump();
                                       }),
                                       _IconAct(
                                         icon: Icons.fast_forward,
@@ -2744,9 +2747,12 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             child: MouseRegion(
               onEnter: (_) {
                 cancelScheduledCloseEpisodes();
-                widget.onBump();
+                _setPointerHold(true);
               },
-              onExit: (_) => scheduleCloseEpisodes(),
+              onExit: (_) {
+                _setPointerHold(false);
+                scheduleCloseEpisodes();
+              },
               child: Material(
                 // PC 全屏视频很亮时 0x99 半透明会把字「吃」成细条，加不透明底。
                 color: const Color(0xF0120A1C),
@@ -2810,7 +2816,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                   borderRadius: 8,
                                   onPressed: () {
                                     widget.onSelectEp?.call(i);
-                                    widget.onBump();
                                     closeEpisodes();
                                   },
                                   child: Material(

@@ -227,6 +227,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   bool _forcedLandscape = false;
   bool _showForceLandscape = false;
 
+  /// 栏隐时左右键快进/快退：按下累加预览，抬键提交。
+  Duration? _seekPreviewBase;
+  Duration _seekPreviewDelta = Duration.zero;
+
   String get _title {
     if (_epIdx >= 0 && _epIdx < widget.episodes.length) {
       return '${widget.vodName} · ${widget.episodes[_epIdx]}';
@@ -550,7 +554,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (next < widget.episodes.length) {
       setState(() => _epIdx = next);
     }
-    _bumpChrome();
   }
 
   /// 播完自动下一集：与上滑手势同一套跟手/吸附动画（抖音式）。
@@ -583,13 +586,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (prev >= 0) {
       setState(() => _epIdx = prev);
     }
-    _bumpChrome();
   }
 
   void _selectEp(int i) {
     widget.onSelectEp?.call(i);
     setState(() => _epIdx = i);
-    _bumpChrome();
   }
 
   bool get _canSwipeEps => !_epOpen && widget.episodes.length > 1;
@@ -756,11 +757,54 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     widget.playback.seek(next.isNegative ? Duration.zero : next);
   }
 
+  static const _seekStep = Duration(seconds: 10);
+
+  Duration get _seekPreviewTarget {
+    final base = _seekPreviewBase ?? widget.playback.position;
+    final dur = widget.playback.duration;
+    var t = base + _seekPreviewDelta;
+    if (t.isNegative) t = Duration.zero;
+    if (boundedMediaDuration(dur) && t > dur) t = dur;
+    return t;
+  }
+
+  void _nudgeSeekPreview(Duration step) {
+    _seekPreviewBase ??= widget.playback.position;
+    setState(() => _seekPreviewDelta += step);
+  }
+
+  void _commitSeekPreview() {
+    if (_seekPreviewBase == null) return;
+    final target = _seekPreviewTarget;
+    _seekPreviewBase = null;
+    _seekPreviewDelta = Duration.zero;
+    if (mounted) setState(() {});
+    widget.playback.seek(target);
+  }
+
+  void _cancelSeekPreview() {
+    if (_seekPreviewBase == null) return;
+    _seekPreviewBase = null;
+    _seekPreviewDelta = Duration.zero;
+    if (mounted) setState(() {});
+  }
+
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     final isDown = event is KeyDownEvent;
     final isRepeat = event is KeyRepeatEvent;
-    if (!isDown && !isRepeat) return KeyEventResult.ignored;
+    final isUp = event is KeyUpEvent;
     final key = event.logicalKey;
+
+    // 栏隐左右键：抬键提交预览 seek。
+    if (isUp && !_showChrome && !_epOpen && (kotvIsLeftKey(key) || kotvIsRightKey(key) || kotvIsMediaRewind(key) || kotvIsMediaFastForward(key))) {
+      if (_seekPreviewBase != null) {
+        _commitSeekPreview();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    if (!isDown && !isRepeat) return KeyEventResult.ignored;
 
     if (isDown && kotvIsBackKey(key)) {
       final back = detailImmersiveBack;
@@ -831,18 +875,20 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       return KeyEventResult.handled;
     }
     if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
-      _seekByRemote(const Duration(seconds: -10));
+      _nudgeSeekPreview(-_seekStep);
       return KeyEventResult.handled;
     }
     if (kotvIsRightKey(key) || kotvIsMediaFastForward(key)) {
-      _seekByRemote(const Duration(seconds: 10));
+      _nudgeSeekPreview(_seekStep);
       return KeyEventResult.handled;
     }
     if (isDown && kotvIsUpKey(key)) {
+      _cancelSeekPreview();
       _showChromeAndFocusPlay();
       return KeyEventResult.handled;
     }
     if (isDown && kotvIsDownKey(key)) {
+      _cancelSeekPreview();
       _showChromeAndFocusPlay();
       return KeyEventResult.handled;
     }
@@ -870,7 +916,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _onPointerExit() {
     _pointerIn = false;
-    // 与离开选集面板相同：8 秒后关选集（此前离窗只藏底栏且被 _epOpen 拦住）。
+    // 离窗：清栏上 hold，再计时关选集与底栏。
+    _chromeKey.currentState?.releasePointerHold();
     _chromeKey.currentState?.scheduleCloseEpisodes();
     _schedulePlayingHide();
   }
@@ -1194,7 +1241,41 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                   if (_showForceLandscape && !_dragging && _dragDy.abs() < 4)
                     _forceLandscapeChip(c),
                   _fullscreenChrome(),
-                  if (_swipeHint != null)
+                  if (_seekPreviewBase != null)
+                    IgnorePointer(
+                      child: Center(
+                        child: Container(
+                          padding: EdgeInsets.symmetric(horizontal: 22 * ui, vertical: 14 * ui),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.72),
+                            borderRadius: BorderRadius.circular(16 * ui),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _seekPreviewDelta >= Duration.zero
+                                    ? Icons.fast_forward_rounded
+                                    : Icons.fast_rewind_rounded,
+                                color: Colors.white,
+                                size: 28 * ui,
+                              ),
+                              SizedBox(width: 12 * ui),
+                              Text(
+                                '${fmtBoundedPlayerTime(_seekPreviewTarget)} / ${fmtBoundedPlayerTime(widget.playback.duration)}',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18 * ui,
+                                  fontWeight: FontWeight.w700,
+                                  fontFeatures: const [FontFeature.tabularFigures()],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    )
+                  else if (_swipeHint != null)
                     IgnorePointer(
                       child: Center(
                         child: AnimatedOpacity(

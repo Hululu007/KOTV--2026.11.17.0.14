@@ -171,7 +171,6 @@ func clearNetConfigForUser(userID string) {
 		return
 	}
 	netConfigMu.Lock()
-	defer netConfigMu.Unlock()
 	purge := func(m map[string][]byte) {
 		if m == nil {
 			return
@@ -184,12 +183,13 @@ func clearNetConfigForUser(userID string) {
 	}
 	purge(netConfigByClient)
 	purge(userProxyByClient)
+	netConfigMu.Unlock()
+	clearGoNetConfigForUser(userID)
 }
 
 // clearNetConfigForShared 清本机共享桶：默认 payload + 非 u: Scope（与 clearTenant("shared") / NetProfiles 同口径）。
 func clearNetConfigForShared() {
 	netConfigMu.Lock()
-	defer netConfigMu.Unlock()
 	netConfigJSON = nil
 	userProxyJSON = nil
 	purgeLocal := func(m map[string][]byte) {
@@ -204,6 +204,8 @@ func clearNetConfigForShared() {
 	}
 	purgeLocal(netConfigByClient)
 	purgeLocal(userProxyByClient)
+	netConfigMu.Unlock()
+	clearGoNetConfigForShared()
 }
 
 // SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp（按当前 ScopeID）。

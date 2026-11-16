@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/util"
 )
 
@@ -15,25 +16,59 @@ func init() {
 }
 
 // 点播配置 headers/hosts 的 Go 侧表（jar 仍走 bridge SetNetConfig）。
+// 按 RuntimeUserID 分桶（空串=本机共享），避免多租户互相覆盖。
 type vodHeaderRule struct {
 	host    string
 	headers map[string]string
 }
 
 var (
-	vodNetMu    sync.RWMutex
-	vodHdrRules []vodHeaderRule
-	vodHostMap  map[string]string // pattern -> target hostname
+	vodNetMu       sync.RWMutex
+	vodHdrByOwner  = map[string][]vodHeaderRule{}
+	vodHostByOwner = map[string]map[string]string{} // owner -> pattern -> target hostname
 )
+
+func vodNetOwner() string {
+	return hostclient.RuntimeUserID()
+}
 
 func setGoNetConfig(headersJSON, hostsJSON []byte) {
 	rules := parseVodHeaderRules(headersJSON)
 	hosts := parseVodHosts(hostsJSON)
+	owner := vodNetOwner()
 	vodNetMu.Lock()
-	vodHdrRules = rules
-	vodHostMap = hosts
+	if len(rules) == 0 {
+		delete(vodHdrByOwner, owner)
+	} else {
+		vodHdrByOwner[owner] = rules
+	}
+	if len(hosts) == 0 {
+		delete(vodHostByOwner, owner)
+	} else {
+		vodHostByOwner[owner] = hosts
+	}
 	vodNetMu.Unlock()
 	util.ClearHTTPAuth()
+}
+
+// clearGoNetConfigForUser 清远端用户的 Go 侧 headers/hosts 桶。
+func clearGoNetConfigForUser(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	vodNetMu.Lock()
+	delete(vodHdrByOwner, userID)
+	delete(vodHostByOwner, userID)
+	vodNetMu.Unlock()
+}
+
+// clearGoNetConfigForShared 清本机共享桶（owner 空串）。
+func clearGoNetConfigForShared() {
+	vodNetMu.Lock()
+	delete(vodHdrByOwner, "")
+	delete(vodHostByOwner, "")
+	vodNetMu.Unlock()
 }
 
 func parseVodHeaderRules(raw []byte) []vodHeaderRule {
@@ -109,7 +144,9 @@ func ResolveVodHost(hostname string) string {
 	if hostname == "" {
 		return hostname
 	}
+	owner := vodNetOwner()
 	vodNetMu.RLock()
+	vodHostMap := vodHostByOwner[owner]
 	defer vodNetMu.RUnlock()
 	if len(vodHostMap) == 0 {
 		return hostname
@@ -158,8 +195,9 @@ func InjectVodHeaders(rawURL string, headers map[string]string) map[string]strin
 	if host == "" {
 		return headers
 	}
+	owner := vodNetOwner()
 	vodNetMu.RLock()
-	rules := vodHdrRules
+	rules := vodHdrByOwner[owner]
 	vodNetMu.RUnlock()
 	if len(rules) == 0 {
 		return headers

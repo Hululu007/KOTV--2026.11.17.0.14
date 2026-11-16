@@ -448,6 +448,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   Timer? _cursorHideTimer;
   MouseCursor _mouseCursor = SystemMouseCursors.basic;
   bool _pointerAtBottom = false;
+  /// 指针停在左频道栏 / 右设置栏内（悬停不计时隐藏）。
+  bool _pointerInLeftPanel = false;
+  bool _pointerInRightPanel = false;
   RemoteBridge? _boundRemote;
   KotvPlayback? _errorWiredPb;
   VoidCallback? _playbackErrorListener;
@@ -2756,17 +2759,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   void _scheduleHideOverlays() {
+    // 指针仍在频道栏 / 设置栏 / 底栏上：不计时隐藏。
+    if (_pointerInLeftPanel || _pointerInRightPanel || _pointerAtBottom) {
+      _cancelHideOverlays();
+      return;
+    }
     _hideTimer?.cancel();
     _hideTimer = Timer(_liveOverlayHide, () {
-      if (mounted) {
-        setState(() {
-          _leftOpen = false;
-          _rightOpen = false;
-          _epgOpen = false;
-          _chromeVisible = false;
-          _channelInfoVisible = false;
-        });
-      }
+      if (!mounted) return;
+      if (_pointerInLeftPanel || _pointerInRightPanel || _pointerAtBottom) return;
+      setState(() {
+        _leftOpen = false;
+        _rightOpen = false;
+        _epgOpen = false;
+        _chromeVisible = false;
+        _channelInfoVisible = false;
+      });
     });
   }
 
@@ -3007,7 +3015,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         _rightOpen = false;
         _chromeVisible = false;
       });
-      _scheduleHideOverlays();
+      // 指针仍在频道栏内时不计时；离栏 / 离窗再 schedule。
+      if (!_pointerInLeftPanel) _scheduleHideOverlays();
       if (_programs.isEmpty) {
         unawaited(_loadEpg());
       } else {
@@ -3015,7 +3024,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       }
       return;
     }
-    unawaited(_playChannel(i));
+    // 列表内点台保持频道栏打开，避免一点就收起。
+    unawaited(_playChannel(i, showList: true));
   }
 
   /// 点中间：关菜单，或像抖音一样点画面播/停（左右仍是频道/设置）。
@@ -3128,7 +3138,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   void _onLivePointerExit() {
     _edgeZone = -1;
     _pointerAtBottom = false;
+    _pointerInLeftPanel = false;
+    _pointerInRightPanel = false;
     _scheduleHideMouse();
+    _scheduleHideOverlays();
   }
 
   void _selectEpgDay(int i, {bool resetHide = false}) {
@@ -3730,8 +3743,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             top: 0,
                             bottom: 0,
                             child: MouseRegion(
-                              onEnter: (_) => _cancelHideOverlays(),
-                              onExit: (_) => _scheduleHideOverlays(),
+                              onEnter: (_) {
+                                _pointerInLeftPanel = true;
+                                _cancelHideOverlays();
+                              },
+                              onExit: (_) {
+                                _pointerInLeftPanel = false;
+                                _scheduleHideOverlays();
+                              },
                               child: Material(
                                 color: KotvPalette.of(context).dialogBg,
                                 child: Builder(builder: (context) {
@@ -4006,8 +4025,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             top: 0,
                             bottom: 0,
                             child: MouseRegion(
-                              onEnter: (_) => _cancelHideOverlays(),
-                              onExit: (_) => _scheduleHideOverlays(),
+                              onEnter: (_) {
+                                _pointerInRightPanel = true;
+                                _cancelHideOverlays();
+                              },
+                              onExit: (_) {
+                                _pointerInRightPanel = false;
+                                _scheduleHideOverlays();
+                              },
                               child: Material(
                                 color: KotvPalette.of(context).dialogBg,
                                 child: Builder(builder: (context) {

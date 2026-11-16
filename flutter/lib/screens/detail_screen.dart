@@ -3791,6 +3791,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         }
         return KeyEventResult.ignored;
       }
+      // 焦点丢了：方向键先恢复栏内上次焦点，避免只能靠 OK。
+      if (isDown && kotvIsDpadNavKey(key) && kotvPrimaryIsEmptyOr(node)) {
+        _inlineChromeKey.currentState?.restoreRemoteFocus();
+        return KeyEventResult.handled;
+      }
       // 上下左右：底栏 / 剧集 TvFocus 横移纵移
       return KeyEventResult.ignored;
     }
